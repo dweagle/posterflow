@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage } from '../api/client'
+import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -48,6 +48,46 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showClientId, setShowClientId] = useState(false)
   const [showClientSecret, setShowClientSecret] = useState(false)
   const [showRefreshToken, setShowRefreshToken] = useState(false)
+
+  const MASKED_VALUE = '***masked***'
+
+  const handleToggleClientSecretVisibility = async () => {
+    const willShow = !showClientSecret
+    if (willShow && formData.google_client_secret === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'google_client_secret' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Client Secret available to reveal', 'error')
+          return
+        }
+        setFormData((prev) => ({ ...prev, google_client_secret: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Client Secret'), 'error')
+        return
+      }
+    }
+    setShowClientSecret((prev) => !prev)
+  }
+
+  const handleToggleRefreshTokenVisibility = async () => {
+    const willShow = !showRefreshToken
+    if (willShow && formData.google_refresh_token === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'google_token' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Refresh Token available to reveal', 'error')
+          return
+        }
+        setFormData((prev) => ({ ...prev, google_refresh_token: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Refresh Token'), 'error')
+        return
+      }
+    }
+    setShowRefreshToken((prev) => !prev)
+  }
   const [showPlexTokens, setShowPlexTokens] = useState<Record<number, boolean>>({})
   const [showSonarrKeys, setShowSonarrKeys] = useState<Record<number, boolean>>({})
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
@@ -613,7 +653,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   <button
                     type="button"
                     className="toggle-visibility"
-                    onClick={() => setShowClientSecret(!showClientSecret)}
+                    onClick={handleToggleClientSecretVisibility}
                     title={showClientSecret ? "Hide" : "Show"}
                   >
                     {showClientSecret ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -635,7 +675,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   <button
                     type="button"
                     className="toggle-visibility"
-                    onClick={() => setShowRefreshToken(!showRefreshToken)}
+                    onClick={handleToggleRefreshTokenVisibility}
                     title={showRefreshToken ? "Hide" : "Show"}
                   >
                     {showRefreshToken ? <EyeOff size={18} /> : <Eye size={18} />}
