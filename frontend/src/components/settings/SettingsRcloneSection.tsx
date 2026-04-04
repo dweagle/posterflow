@@ -15,9 +15,9 @@ type SettingsRcloneSectionProps = {
   showClientId: boolean
   setShowClientId: (next: boolean) => void
   showClientSecret: boolean
-  setShowClientSecret: (next: boolean) => void
+  onToggleClientSecretVisibility: () => void
   showToken: boolean
-  setShowToken: (next: boolean) => void
+  onToggleTokenVisibility: () => void
   onSave: () => void
   onUploadServiceAccount: (file: File) => Promise<void>
   uploadingServiceAccount: boolean
@@ -33,9 +33,9 @@ function SettingsRcloneSection({
   showClientId,
   setShowClientId,
   showClientSecret,
-  setShowClientSecret,
+  onToggleClientSecretVisibility,
   showToken,
-  setShowToken,
+  onToggleTokenVisibility,
   onSave,
   onUploadServiceAccount,
   uploadingServiceAccount,
@@ -169,7 +169,7 @@ function SettingsRcloneSection({
             <button
               type="button"
               className="toggle-visibility"
-              onClick={() => setShowClientSecret(!showClientSecret)}
+              onClick={onToggleClientSecretVisibility}
               title={showClientSecret ? 'Hide' : 'Show'}
             >
               {showClientSecret ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -190,7 +190,7 @@ function SettingsRcloneSection({
             <button
               type="button"
               className="toggle-visibility"
-              onClick={() => setShowToken(!showToken)}
+              onClick={onToggleTokenVisibility}
               title={showToken ? 'Hide' : 'Show'}
             >
               {showToken ? <EyeOff size={18} /> : <Eye size={18} />}

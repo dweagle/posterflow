@@ -218,6 +218,52 @@ function Settings() {
   const [showClientId, setShowClientId] = useState(false)
   const [showClientSecret, setShowClientSecret] = useState(false)
   const [showToken, setShowToken] = useState(false)
+
+  const handleToggleClientSecretVisibility = async () => {
+    const willShow = !showClientSecret
+    if (willShow && rcloneSettings.google_client_secret === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'google_client_secret' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Client Secret available to reveal', 'error')
+          return
+        }
+        rcloneBaselineRef.current = normalizeRcloneSettings({
+          ...rcloneBaselineRef.current,
+          google_client_secret: revealedValue,
+        })
+        setRcloneSettings((prev) => ({ ...prev, google_client_secret: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Client Secret'), 'error')
+        return
+      }
+    }
+    setShowClientSecret((prev) => !prev)
+  }
+
+  const handleToggleTokenVisibility = async () => {
+    const willShow = !showToken
+    if (willShow && rcloneSettings.google_token === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'google_token' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Google Token available to reveal', 'error')
+          return
+        }
+        rcloneBaselineRef.current = normalizeRcloneSettings({
+          ...rcloneBaselineRef.current,
+          google_token: revealedValue,
+        })
+        setRcloneSettings((prev) => ({ ...prev, google_token: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Google Token'), 'error')
+        return
+      }
+    }
+    setShowToken((prev) => !prev)
+  }
   const [mediaBaselineVersion, setMediaBaselineVersion] = useState(0)
   const rcloneBaselineRef = useRef<RcloneSettingsSnapshot>(normalizeRcloneSettings({
     google_client_id: '',
@@ -830,9 +876,9 @@ function Settings() {
             showClientId={showClientId}
             setShowClientId={setShowClientId}
             showClientSecret={showClientSecret}
-            setShowClientSecret={setShowClientSecret}
+            onToggleClientSecretVisibility={handleToggleClientSecretVisibility}
             showToken={showToken}
-            setShowToken={setShowToken}
+            onToggleTokenVisibility={handleToggleTokenVisibility}
             onSave={handleSaveRcloneWithSnapshot}
             onUploadServiceAccount={handleUploadServiceAccount}
             uploadingServiceAccount={uploadingServiceAccount}
