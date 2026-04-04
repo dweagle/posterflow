@@ -1,0 +1,1419 @@
+/* Maker Tools page styles (standalone from PosterManager) */
+
+.idarr-header {
+  margin-bottom: 1rem;
+}
+
+.idarr-page {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.idarr-header h1 {
+  color: #64b5f6;
+  margin-bottom: 0.5rem;
+}
+
+.idarr-header p {
+  color: #aaa;
+  margin-bottom: 0;
+}
+
+.idarr-page .toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem;
+  background-color: #3D4556;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #5c6882 #3D4556;
+}
+
+.idarr-page .toolbar > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.idarr-page .toolbar h2 {
+  color: #64b5f6;
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.idarr-page .toolbar p {
+  color: #aaa;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.idarr-page .toolbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.idarr-page .toolbar::-webkit-scrollbar-track {
+  background: #3D4556;
+  border-radius: 3px;
+}
+
+.idarr-page .toolbar::-webkit-scrollbar-thumb {
+  background: #5c6882;
+  border-radius: 3px;
+}
+
+.idarr-page .toolbar::-webkit-scrollbar-thumb:hover {
+  background: #6c7892;
+}
+
+.idarr-page .action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.idarr-page .pending-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+
+.idarr-page .pending-actions-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+
+.idarr-page .pending-actions-label {
+  color: #9fb5d6;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.idarr-page .pending-filter-buttons .btn-toolbar {
+  min-width: 130px;
+  justify-content: center;
+}
+
+.idarr-page .pending-item-actions {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.idarr-page .pending-item-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.idarr-page .pending-item-actions-primary .btn-toolbar {
+  min-width: 130px;
+}
+
+.idarr-page .pending-item-actions-secondary .btn-toolbar {
+  min-width: 95px;
+  background-color: #4d596f;
+}
+
+.idarr-page .pending-item-actions-secondary .btn-toolbar:hover:not(:disabled) {
+  background-color: #5d6980;
+}
+
+.idarr-page .pending-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.idarr-page .pending-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.idarr-page .pending-list::-webkit-scrollbar-track {
+  background: #252525;
+  border-radius: 4px;
+}
+
+.idarr-page .pending-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+.idarr-page .pending-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.idarr-page .pending-list-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+
+.idarr-page .pending-list-main {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.idarr-page .pending-list-title {
+  color: #fff;
+  font-weight: 500;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idarr-page .pending-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.idarr-page .pending-list-date {
+  color: #999;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idarr-page .pending-type-chip {
+  border: 1px solid transparent;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.idarr-page .pending-type-chip.chip-movie {
+  background: rgba(91, 137, 196, 0.16);
+  border-color: rgba(91, 137, 196, 0.35);
+  color: #e5e7eb;
+}
+
+.idarr-page .pending-type-chip.chip-show {
+  background: rgba(76, 175, 80, 0.14);
+  border-color: rgba(76, 175, 80, 0.32);
+  color: #e5e7eb;
+}
+
+.idarr-page .pending-type-chip.chip-collection {
+  background: rgba(255, 183, 77, 0.12);
+  border-color: rgba(255, 183, 77, 0.3);
+  color: #e5e7eb;
+}
+
+.idarr-page .pending-type-chip.pending-status-chip.chip-conflict {
+  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(244, 67, 54, 0.28);
+  color: #e5e7eb;
+}
+
+.idarr-page .pending-type-chip.pending-status-chip.chip-review {
+  background: rgba(255, 183, 77, 0.12);
+  border-color: rgba(255, 183, 77, 0.3);
+  color: #e5e7eb;
+}
+
+.idarr-page .pending-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.idarr-page .pending-list-actions .btn-toolbar {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  justify-content: center;
+  padding: 0.34rem 0.35rem;
+  font-size: 0.8rem;
+}
+
+.idarr-page .pending-list-actions .btn-toolbar:not(.btn-primary) {
+  background-color: #4d596f;
+}
+
+.idarr-page .pending-list-actions .btn-toolbar:not(.btn-primary):hover:not(:disabled) {
+  background-color: #5d6980;
+}
+
+.idarr-page .btn-primary svg,
+.idarr-page .btn-toolbar svg,
+.idarr-page .btn-secondary svg {
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+.idarr-page .btn-icon-spin {
+  animation: idarr-button-spin 1s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes idarr-button-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.idarr-page .btn-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #5c6882;
+  color: #E8ECEF;
+  border: none;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  flex-grow: 0;
+  min-width: fit-content;
+  max-width: max-content;
+  width: auto;
+}
+
+.idarr-page .btn-toolbar:hover:not(:disabled) {
+  background-color: #6c7892;
+}
+
+.idarr-page .btn-toolbar.btn-toolbar-link {
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #424242;
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.idarr-page .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
+  background: #555;
+}
+
+.idarr-page .btn-toolbar.btn-primary {
+  background-color: #5B89C4;
+  color: #fff;
+}
+
+.idarr-page .btn-toolbar.btn-primary:hover:not(:disabled) {
+  background-color: #6c9bd4;
+}
+
+.idarr-page .poster-manager-tabs button .icon-idarr {
+  color: #66bb6a;
+}
+
+.idarr-page .poster-manager-tabs button .icon-settings {
+  color: #78909c;
+}
+
+.idarr-page .btn-toolbar.btn-unsaved {
+  background-color: #ef5350;
+  color: #fff;
+}
+
+.idarr-page .btn-toolbar.btn-unsaved:hover:not(:disabled) {
+  background-color: #e53935;
+}
+
+.idarr-page .btn-toolbar:disabled,
+.idarr-page .btn-primary:disabled,
+.idarr-page .btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.idarr-page .settings-section {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.idarr-page .settings-section h2 {
+  font-size: 1.1rem;
+  color: #64b5f6;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.idarr-page .pending-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.idarr-page .pending-section-header h2 {
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
+}
+
+.idarr-page .ignored-section-header {
+  margin-bottom: 0.75rem;
+}
+
+.idarr-page .ignored-section-header .action-buttons .btn-toolbar {
+  padding: 0.34rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.idarr-page .section-description {
+  color: #aaa;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.idarr-page .run-cache-actions-grid {
+  gap: 0.65rem;
+}
+
+.idarr-page .run-cache-actions-group {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+
+.idarr-page .run-cache-actions-label {
+  margin-bottom: 0;
+}
+
+.idarr-page .run-cache-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  justify-content: start;
+}
+
+.idarr-page .run-cache-buttons-combined {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.idarr-page .run-cache-buttons .btn-toolbar {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  justify-content: center;
+}
+
+.idarr-page .ignored-titles-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.idarr-page .ignored-list-items {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.idarr-page .ignored-list-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+
+.idarr-page .ignored-list-main {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.idarr-page .ignored-list-title {
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.92rem;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idarr-page .ignored-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.idarr-page .ignored-list-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.idarr-page .ignored-list-actions .btn-toolbar {
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+  justify-content: center;
+  padding: 0.34rem 0.35rem;
+  font-size: 0.8rem;
+}
+
+.idarr-page .ignored-titles-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.idarr-page .ignored-titles-list::-webkit-scrollbar-track {
+  background: #252525;
+  border-radius: 4px;
+}
+
+.idarr-page .ignored-titles-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+.idarr-page .ignored-titles-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.idarr-page .idarr-upload-card {
+  margin-bottom: 1rem;
+}
+
+.idarr-page .idarr-upload-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.idarr-page .idarr-upload-inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #ccc;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.idarr-page .idarr-upload-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border: 1px dashed #5c6882;
+  border-radius: 8px;
+  background: #252525;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.idarr-page .idarr-upload-dropzone strong {
+  display: block;
+  color: #fff;
+  margin-bottom: 0.15rem;
+}
+
+.idarr-page .idarr-upload-dropzone p {
+  color: #aaa;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.idarr-page .idarr-upload-dropzone.is-drag-over {
+  border-color: #64b5f6;
+  background: #2a2a2a;
+}
+
+.idarr-page .idarr-upload-dropzone.is-uploading {
+  opacity: 0.8;
+}
+
+.idarr-page .idarr-upload-input {
+  display: none;
+}
+
+.idarr-page .settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.idarr-page .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.idarr-page .field-group label {
+  font-size: 0.875rem;
+  color: #ccc;
+  font-weight: 500;
+}
+
+.idarr-page .field-group input[type="text"],
+.idarr-page .field-group input[type="number"],
+.idarr-page .field-group input[type="password"],
+.idarr-page .field-group select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.875rem;
+}
+
+.idarr-page .field-group input[type="text"]:focus,
+.idarr-page .field-group input[type="number"]:focus,
+.idarr-page .field-group input[type="password"]:focus,
+.idarr-page .field-group select:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.idarr-page .field-group .input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.idarr-page .field-group .input-with-toggle input {
+  width: 100%;
+  padding-right: 2.5rem;
+}
+
+.idarr-page .field-group .input-with-toggle .toggle-visibility {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.125rem;
+}
+
+.idarr-page .field-group .input-with-toggle .toggle-visibility:hover {
+  color: #64b5f6;
+}
+
+.idarr-page .field-group small {
+  color: #777;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.idarr-page .checkbox-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.idarr-page .checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.idarr-page .checkbox-label:hover {
+  border-color: #444;
+  background: #333;
+}
+
+.idarr-page .checkbox-label input[type="checkbox"] {
+  margin-top: 0.25rem;
+  flex-shrink: 0;
+}
+
+.idarr-page .checkbox-label span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.idarr-page .checkbox-label strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.idarr-settings-card .section-description {
+  margin-bottom: 0.75rem;
+}
+
+.idarr-settings-groups {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.idarr-settings-group-combined {
+  grid-column: 1;
+}
+
+.idarr-settings-group-behavior {
+  grid-column: 2;
+}
+
+.idarr-settings-group-sync-targets {
+  grid-column: 1 / -1;
+}
+
+.idarr-settings-group {
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.idarr-settings-group h3 {
+  margin: 0 0 0.65rem;
+  color: #9fb5d6;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.idarr-sync-target-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.idarr-sync-target-row {
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.55rem 0.6rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.idarr-sync-target-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+.idarr-sync-target-card-header strong {
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.idarr-sync-target-card-header .btn-toolbar {
+  min-width: 90px;
+  justify-content: center;
+}
+
+.idarr-sync-target-row-fields {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(220px, 1.2fr) minmax(220px, 1.2fr);
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.idarr-sync-target-row-fields .field-group {
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.idarr-sync-target-row-fields .field-group label {
+  font-size: 0.78rem;
+}
+
+.idarr-sync-target-row-fields .field-group input[type="text"] {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.idarr-page .toolbar .action-buttons select {
+  min-width: 190px;
+  padding: 0.5rem 0.75rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.idarr-page .toolbar .action-buttons select:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.settings-grid.idarr-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.idarr-settings-grid .field-group {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(2.3rem, auto);
+  align-content: start;
+}
+
+.idarr-settings-grid .field-group {
+  gap: 0.35rem;
+}
+
+.idarr-settings-grid .field-group small {
+  min-height: 2.3rem;
+}
+
+.idarr-settings-grid .field-group input[type="text"],
+.idarr-settings-grid .field-group input[type="number"],
+.idarr-settings-grid .field-group input[type="password"],
+.idarr-settings-grid .field-group select {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.idarr-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.65rem;
+}
+
+@media (max-width: 1180px) {
+  .idarr-settings-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .idarr-settings-group-combined,
+  .idarr-settings-group-behavior,
+  .idarr-settings-group-sync-targets {
+    grid-column: 1;
+  }
+
+  .settings-grid.idarr-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .idarr-sync-target-row-fields {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .idarr-sync-target-row-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.idarr-toggle-card {
+  display: block;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.7rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.idarr-toggle-card:hover {
+  border-color: #424242;
+  background: #2f2f2f;
+}
+
+.idarr-toggle-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.idarr-toggle-card-header strong {
+  display: block;
+  color: #fff;
+  font-size: 0.88rem;
+  margin-bottom: 0.25rem;
+}
+
+.idarr-toggle-card-header small {
+  display: block;
+  color: #999;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.idarr-toggle-control {
+  position: relative;
+  width: 42px;
+  min-width: 42px;
+  height: 24px;
+  margin-top: 0.1rem;
+}
+
+.idarr-toggle-control input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.idarr-toggle-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #424242;
+  border: 1px solid #555;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.idarr-toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+
+.idarr-toggle-control input:checked + .idarr-toggle-slider {
+  background: #64b5f6;
+  border-color: #64b5f6;
+}
+
+.idarr-toggle-control input:checked + .idarr-toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.idarr-toggle-control input:focus-visible + .idarr-toggle-slider {
+  box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.3);
+}
+
+.idarr-settings-grid .checkbox-row {
+  display: block;
+}
+
+.idarr-settings-grid .checkbox-label {
+  padding: 0.5rem 0.65rem;
+  gap: 0.5rem;
+}
+
+.idarr-settings-grid .checkbox-label strong {
+  font-size: 0.85rem;
+}
+
+.idarr-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.idarr-main-column,
+.idarr-side-column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.idarr-layout .settings-section {
+  margin-bottom: 0;
+}
+
+.idarr-page .modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.idarr-page .schedule-modal {
+  background: #1a1a1a;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 700px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #404040;
+}
+
+.idarr-page .resolver-modal {
+  max-width: 760px;
+  height: min(90vh, 860px);
+}
+
+.idarr-page .resolver-modal .modal-body {
+  overflow-y: auto;
+}
+
+.idarr-page .resolver-candidates-list {
+  min-height: 280px;
+}
+
+.idarr-page .modal-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.idarr-page .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #404040;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.idarr-page .resolver-item-count {
+  font-size: 0.9rem;
+  color: #c6d4e8;
+}
+
+.idarr-page .resolver-asset-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.idarr-page .resolver-asset-header-text {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.idarr-page .resolver-asset-header-text div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idarr-page .resolver-id-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.idarr-page .resolver-id-row .form-group {
+  margin: 0;
+}
+
+.idarr-page .resolver-candidate-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.idarr-page .resolver-candidate-actions .btn-toolbar {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  justify-content: center;
+}
+
+.idarr-page .resolver-candidate-actions .btn-toolbar,
+.idarr-page .resolver-candidate-actions .btn-secondary {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 40px;
+  min-height: 40px;
+  padding: 0.5rem 0.75rem;
+  line-height: 1.1;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  justify-content: center;
+}
+
+.idarr-page .resolver-candidate-actions .btn-secondary {
+  background-color: #4d596f;
+  color: #e8ecef;
+  border: none;
+}
+
+.idarr-page .resolver-candidate-actions .btn-secondary:hover:not(:disabled) {
+  background-color: #5d6980;
+}
+
+.idarr-page .resolver-ignore-next-btn {
+  background-color: #3d74b8;
+  color: #eef6ff;
+}
+
+.idarr-page .resolver-ignore-next-btn:hover:not(:disabled) {
+  background-color: #4b84c9;
+}
+
+.idarr-page .resolver-candidate-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.idarr-page .resolver-candidate-poster-wrap {
+  flex-shrink: 0;
+}
+
+.idarr-page .resolver-candidate-poster {
+  width: 46px;
+  height: 68px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  display: block;
+}
+
+.idarr-page .resolver-candidate-poster-link {
+  display: block;
+  border-radius: 4px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.idarr-page .resolver-source-preview-trigger {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.idarr-page .resolver-candidate-poster-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px #64b5f6;
+}
+
+.idarr-page .resolver-candidate-poster-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 0.65rem;
+  text-align: center;
+  padding: 0.2rem;
+}
+
+.idarr-page .resolver-candidate-header-text {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.idarr-page .resolver-candidate-meta-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #bbb;
+  font-size: 0.8rem;
+}
+
+.idarr-page .resolver-candidate-header-text label,
+.idarr-page .resolver-candidate-header-text div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idarr-page .resolver-candidate-tmdb-link {
+  color: #64b5f6;
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+
+.idarr-page .resolver-candidate-tmdb-link:hover {
+  color: #42a5f5;
+  text-decoration: underline;
+}
+
+.idarr-page .resolver-refresh-row {
+  margin-top: 0.6rem;
+}
+
+.idarr-page .resolver-no-candidates {
+  display: grid;
+  gap: 0.65rem;
+  color: #aaa;
+}
+
+.idarr-page .resolver-no-candidates-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.idarr-page .resolver-search-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #424242;
+  background: #2a2a2a;
+  color: #64b5f6;
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+
+.idarr-page .resolver-search-link:hover {
+  border-color: #64b5f6;
+  color: #42a5f5;
+}
+
+.idarr-page .resolver-preview-modal {
+  width: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.idarr-page .resolver-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #121212;
+}
+
+.idarr-page .resolver-candidate-single-action {
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .idarr-page .resolver-id-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.idarr-page .modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+.idarr-page .modal-close {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 2rem;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.idarr-page .modal-close:hover {
+  color: #fff;
+}
+
+.idarr-page .modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.idarr-page .idarr-action-confirm-details {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #424242;
+  border-radius: 8px;
+  background: #252525;
+}
+
+.idarr-page .idarr-action-confirm-line {
+  margin: 0 0 0.65rem;
+  color: #d1d5db;
+  font-size: 1rem;
+}
+
+.idarr-page .idarr-action-confirm-line:last-child {
+  margin-bottom: 0;
+}
+
+.idarr-page .idarr-action-confirm-line strong {
+  color: #fff;
+  font-weight: 700;
+}
+
+.idarr-page .idarr-action-confirm-line span {
+  color: #64b5f6;
+  font-weight: 700;
+  font-size: 1.08rem;
+}
+
+.idarr-page .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid #404040;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.idarr-page .modal-body .form-group {
+  margin-bottom: 1rem;
+}
+
+.idarr-page .modal-footer .btn-secondary {
+  padding: 0.75rem 1.5rem;
+  background: #2a2a2a;
+  border: 1px solid #404040;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+}
+
+.idarr-page .modal-footer .btn-secondary:hover:not(:disabled) {
+  background: #333;
+}
+
+.idarr-page .modal-footer .btn-primary {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  background: #64b5f6;
+  border: none;
+  color: #000;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.idarr-page .modal-footer .btn-primary:hover:not(:disabled) {
+  background: #5B89C4;
+}
+
+.idarr-page .ignored-editor-textarea {
+  width: 100%;
+  min-height: 340px;
+  padding: 0.6rem 0.75rem;
+  background: #1a1a1a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.idarr-page .ignored-editor-textarea:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+@media (max-width: 1200px) {
+  .idarr-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .idarr-main-column,
+  .idarr-side-column {
+    grid-template-rows: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .idarr-page .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .idarr-page .pending-actions-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .idarr-page .pending-item-actions-row {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .idarr-page .run-cache-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+

@@ -1,0 +1,237 @@
+.sidebar {
+  width: 250px;
+  background-color: #1e1e1e;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #333;
+}
+
+.sidebar-header {
+  padding: 2rem 1.5rem;
+  border-bottom: 1px solid #333;
+}
+
+.sidebar-header .logo-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-header .logo-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.sidebar-header .title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-header h1 {
+  font-size: 1.75rem;
+  color: #64b5f6;
+  margin: 0;
+}
+
+.sidebar-header .version {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.sidebar-header .inspired-byline {
+  font-size: 0.7rem;
+  color: #aaa;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.sidebar-header .version-update-badge {
+  margin-top: 0.1rem;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  background-color: rgba(244, 67, 54, 0.12);
+  color: #ffb3b3;
+  border: 1px solid rgba(244, 67, 54, 0.35);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.sidebar-header .version-update-badge:hover {
+  background-color: rgba(244, 67, 54, 0.2);
+  border-color: rgba(244, 67, 54, 0.5);
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 1rem 0;
+}
+
+.sidebar-job-mini {
+  border-top: 1px solid #333;
+  padding: 0.85rem 1rem 1rem;
+  background-color: #1e1e1e;
+}
+
+.sidebar-job-mini-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+  margin-bottom: 0.35rem;
+}
+
+.sidebar-job-mini-type {
+  color: #e8f3ff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-bottom: 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-job-mini-message {
+  color: #ccc;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  margin-bottom: 0.45rem;
+  min-height: 1.9em;
+}
+
+.sidebar-job-mini-progress {
+  height: 6px;
+  background-color: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sidebar-job-mini-progress-fill {
+  height: 100%;
+  background-color: #64b5f6;
+  transition: width 0.2s ease;
+}
+
+.sidebar-job-mini-meta {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: #aaa;
+  text-align: right;
+}
+
+.sidebar-job-mini-empty {
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  padding: 0.875rem 1.5rem;
+  color: #ccc;
+  text-decoration: none;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.sidebar-nav a:hover {
+  background-color: #2a2a2a;
+  color: #fff;
+}
+
+.sidebar-nav a.active {
+  background-color: rgba(100, 181, 246, 0.2);
+  color: #e8f3ff;
+}
+
+.sidebar-nav a .icon {
+  margin-right: 0.75rem;
+  font-size: 1.25rem;
+}
+
+.sidebar-nav a .nav-label {
+  min-width: 0;
+}
+
+/* Badge for unmatched count in sidebar */
+.sidebar-badge {
+  margin-left: auto;
+  background-color: rgba(244, 67, 54, 0.1);
+  color: #e5e7eb;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(244, 67, 54, 0.28);
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 76px;
+  }
+
+  .sidebar-header {
+    padding: 1.25rem 0.75rem;
+  }
+
+  .sidebar-header .logo-container {
+    justify-content: center;
+  }
+
+  .sidebar-header .title-group {
+    display: none;
+  }
+
+  .sidebar-nav a {
+    justify-content: center;
+    padding: 0.875rem 0.5rem;
+    min-height: 48px;
+  }
+
+  .sidebar-nav a .icon {
+    margin-right: 0;
+  }
+
+  .sidebar-nav a .nav-label {
+    display: none;
+  }
+
+  .sidebar-nav a:hover::after {
+    content: attr(data-label);
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: #202020;
+    color: #f1f1f1;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    white-space: nowrap;
+    z-index: 25;
+    pointer-events: none;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-badge {
+    position: absolute;
+    top: 0.45rem;
+    right: 0.45rem;
+    margin-left: 0;
+    padding: 0.05rem 0.35rem !important;
+    min-width: 1.1rem;
+    font-size: 0.65rem !important;
+  }
+
+  .sidebar-job-mini {
+    display: none;
+  }
+}

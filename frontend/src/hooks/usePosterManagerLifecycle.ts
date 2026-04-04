@@ -1,0 +1,178 @@
+import { useEffect } from 'react'
+import { Drive, PosterConfig } from '../api/client'
+import { PosterManagerTab } from '../components/poster-manager/PosterManagerTabs'
+
+interface UsePosterManagerLifecycleOptions {
+  locationState: unknown
+  activeTab: PosterManagerTab
+  setActiveTab: React.Dispatch<React.SetStateAction<PosterManagerTab>>
+  config: PosterConfig | null
+  originalConfigRef: React.MutableRefObject<PosterConfig | null>
+  setHasUnsavedChanges: React.Dispatch<React.SetStateAction<boolean>>
+  enabledStyles: Set<string>
+  priorityList: Drive[]
+  originalPriorityRef: React.MutableRefObject<{ drive_ids: number[]; enabled_styles: string[] } | null>
+  setHasUnsavedPriorityChanges: React.Dispatch<React.SetStateAction<boolean>>
+  borderColors: string[]
+  borderWidth: number
+  borderMode: 'incremental' | 'full'
+  autoRunBorder: boolean
+  holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
+  skipRunOutsideHoliday: boolean
+  removeBorders: boolean
+  originalBorderSettingsRef: React.MutableRefObject<{
+    colors: string[]
+    width: number
+    mode: 'incremental' | 'full'
+    autoRunBorder: boolean
+    holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
+    skipRunOutsideHoliday: boolean
+    removeBorders: boolean
+  } | null>
+  setHasUnsavedBorderChanges: React.Dispatch<React.SetStateAction<boolean>>
+  selectedLibraries: Set<string>
+  originalLibrarySelectionRef: React.MutableRefObject<Set<string> | null>
+  setHasUnsavedLibraryChanges: React.Dispatch<React.SetStateAction<boolean>>
+  clearDragOverTimeout: () => void
+  refreshStats: () => Promise<void>
+  fetchConfig: () => Promise<void>
+  fetchDrives: () => Promise<void>
+  fetchFlowConfig: () => Promise<void>
+  fetchBorderSettings: () => Promise<void>
+  checkActiveWorkflow: () => Promise<void>
+  fetchLibraryConfigs: () => Promise<void>
+  drives: Drive[]
+  loadPriority: () => Promise<void>
+}
+
+type PosterManagerLocationState = {
+  activeTab?: PosterManagerTab
+}
+
+export function usePosterManagerLifecycle({
+  locationState,
+  activeTab,
+  setActiveTab,
+  config,
+  originalConfigRef,
+  setHasUnsavedChanges,
+  enabledStyles,
+  priorityList,
+  originalPriorityRef,
+  setHasUnsavedPriorityChanges,
+  borderColors,
+  borderWidth,
+  borderMode,
+  autoRunBorder,
+  holidaySchedules,
+  skipRunOutsideHoliday,
+  removeBorders,
+  originalBorderSettingsRef,
+  setHasUnsavedBorderChanges,
+  selectedLibraries,
+  originalLibrarySelectionRef,
+  setHasUnsavedLibraryChanges,
+  clearDragOverTimeout,
+  refreshStats,
+  fetchConfig,
+  fetchDrives,
+  fetchFlowConfig,
+  fetchBorderSettings,
+  checkActiveWorkflow,
+  fetchLibraryConfigs,
+  drives,
+  loadPriority,
+}: UsePosterManagerLifecycleOptions) {
+  useEffect(() => {
+    return () => {
+      clearDragOverTimeout()
+    }
+  }, [clearDragOverTimeout])
+
+  useEffect(() => {
+    if (!config || !originalConfigRef.current) return
+    const hasChanged = JSON.stringify(config) !== JSON.stringify(originalConfigRef.current)
+    setHasUnsavedChanges(hasChanged)
+  }, [config, originalConfigRef, setHasUnsavedChanges])
+
+  useEffect(() => {
+    if (!originalPriorityRef.current) return
+
+    const currentDriveIds = priorityList.map((drive) => drive.id)
+    const currentStyles = Array.from(enabledStyles).sort()
+    const originalStyles = [...originalPriorityRef.current.enabled_styles].sort()
+
+    const driveIdsChanged = JSON.stringify(currentDriveIds) !== JSON.stringify(originalPriorityRef.current.drive_ids)
+    const stylesChanged = JSON.stringify(currentStyles) !== JSON.stringify(originalStyles)
+
+    setHasUnsavedPriorityChanges(driveIdsChanged || stylesChanged)
+  }, [enabledStyles, originalPriorityRef, priorityList, setHasUnsavedPriorityChanges])
+
+  useEffect(() => {
+    if (!originalBorderSettingsRef.current) return
+
+    const colorsChanged = JSON.stringify(borderColors) !== JSON.stringify(originalBorderSettingsRef.current.colors)
+    const widthChanged = borderWidth !== originalBorderSettingsRef.current.width
+    const modeChanged = borderMode !== originalBorderSettingsRef.current.mode
+    const autoRunChanged = autoRunBorder !== originalBorderSettingsRef.current.autoRunBorder
+    const holidaysChanged = JSON.stringify(holidaySchedules) !== JSON.stringify(originalBorderSettingsRef.current.holidaySchedules)
+    const skipRunChanged = skipRunOutsideHoliday !== originalBorderSettingsRef.current.skipRunOutsideHoliday
+    const removeBordersChanged = removeBorders !== originalBorderSettingsRef.current.removeBorders
+
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged)
+  }, [
+    autoRunBorder,
+    borderColors,
+    borderMode,
+    borderWidth,
+    holidaySchedules,
+    skipRunOutsideHoliday,
+    removeBorders,
+    originalBorderSettingsRef,
+    setHasUnsavedBorderChanges,
+  ])
+
+  useEffect(() => {
+    if (!originalLibrarySelectionRef.current) return
+
+    const currentSelection = Array.from(selectedLibraries).sort()
+    const originalSelection = Array.from(originalLibrarySelectionRef.current).sort()
+    const hasChanged = JSON.stringify(currentSelection) !== JSON.stringify(originalSelection)
+
+    setHasUnsavedLibraryChanges(hasChanged)
+  }, [originalLibrarySelectionRef, selectedLibraries, setHasUnsavedLibraryChanges])
+
+  useEffect(() => {
+    const navigationState = locationState as PosterManagerLocationState | null
+    if (navigationState?.activeTab) {
+      setActiveTab(navigationState.activeTab)
+    }
+  }, [locationState, setActiveTab])
+
+  useEffect(() => {
+    refreshStats()
+    fetchConfig()
+    fetchDrives()
+    fetchFlowConfig()
+    fetchBorderSettings()
+    checkActiveWorkflow()
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'rename' || activeTab === 'unmatched') {
+      fetchLibraryConfigs()
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'border') {
+      fetchBorderSettings()
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    if (drives.length > 0) {
+      loadPriority()
+    }
+  }, [drives])
+}

@@ -1,0 +1,151 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #121212;
+  color: #ffffff;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Button base styles */
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  font-family: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Page container for consistent max-width */
+.page-container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Input base styles */
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+}
+
+:root {
+  --pf-tab-text: #aaa;
+  --pf-tab-text-hover: #fff;
+  --pf-tab-text-active: #64b5f6;
+  --pf-tab-border: #333;
+  --pf-tab-hover-bg: rgba(100, 181, 246, 0.1);
+  --pf-tab-active-border: #64b5f6;
+  --pf-chip-radius: 6px;
+  --pf-chip-font-size: 0.72rem;
+  --pf-chip-font-weight: 700;
+  --pf-chip-padding-y: 0.16rem;
+  --pf-chip-padding-x: 0.58rem;
+}
+
+/* Shared top-tab styling across page tab bars */
+:where(
+  .poster-manager-tabs button,
+  .settings-tabs button,
+  .plex-upload-tabs button,
+  .maker-tools-tabs button,
+  .logs-page .tab
+) {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.38rem !important;
+  padding: 0.78rem 1.5rem !important;
+  background: transparent !important;
+  color: var(--pf-tab-text) !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  margin-bottom: -2px !important;
+  font-size: 0.95rem !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  transition: all 0.2s !important;
+}
+
+:where(
+  .poster-manager-tabs button,
+  .settings-tabs button,
+  .plex-upload-tabs button,
+  .maker-tools-tabs button,
+  .logs-page .tab
+):hover {
+  color: var(--pf-tab-text-hover) !important;
+  background: var(--pf-tab-hover-bg) !important;
+}
+
+:where(
+  .poster-manager-tabs button,
+  .settings-tabs button,
+  .plex-upload-tabs button,
+  .maker-tools-tabs button,
+  .logs-page .tab
+).active {
+  color: var(--pf-tab-text-active) !important;
+  border-bottom-color: var(--pf-tab-active-border) !important;
+}
+
+/* Shared chip/badge baseline across pages */
+:where(
+  .stat-badge,
+  .schedule-badge,
+  .pending-type-chip,
+  .summary-day-chip,
+  .drive-badge,
+  .style-badge,
+  .tab-badge,
+  .job-badge,
+  .library-badge,
+  .sidebar-badge,
+  .webhook-stat-chip,
+  .maker-tools-page .badge,
+  .unmatched-card .badge,
+  .priority-badge
+) {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.25rem !important;
+  padding: var(--pf-chip-padding-y) var(--pf-chip-padding-x) !important;
+  border-radius: var(--pf-chip-radius) !important;
+  font-size: var(--pf-chip-font-size) !important;
+  font-weight: var(--pf-chip-font-weight) !important;
+  line-height: 1 !important;
+}

@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Data and logs
+/posters/
+/config/
+*.db
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+
+# OS / temp
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+
+# GitHub Copilot (personal)
+.github/copilot-instructions.md
+
+# Environment
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Docker
+.docker/
+/docker-compose.override.yml
+/build-local.sh
+
+# CI
+.ci-tmp/

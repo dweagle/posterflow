@@ -1,0 +1,633 @@
+.maker-tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.maker-header {
+  margin-bottom: 1rem;
+}
+
+.maker-header h1 {
+  color: #64b5f6;
+  margin-bottom: 0.5rem;
+}
+
+.maker-header p {
+  color: #aaa;
+  margin: 0;
+}
+
+.maker-tools-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.maker-tools-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0;
+  margin-bottom: 1.5rem;
+}
+
+.maker-tools-page .toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem;
+  background-color: #3D4556;
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 0;
+}
+
+.maker-tools-page .toolbar > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.maker-tools-page .toolbar h2 {
+  color: #64b5f6;
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.maker-tools-page .toolbar p {
+  color: #aaa;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.maker-tools-page .action-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.maker-tools-page .toolbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.maker-tools-page .toolbar::-webkit-scrollbar-track {
+  background: #3D4556;
+  border-radius: 3px;
+}
+
+.maker-tools-page .toolbar::-webkit-scrollbar-thumb {
+  background: #5c6882;
+  border-radius: 3px;
+}
+
+.maker-tools-page .toolbar::-webkit-scrollbar-thumb:hover {
+  background: #6c7892;
+}
+
+.maker-tools-page .modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.maker-tools-page .schedule-modal {
+  background: #1a1a1a;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 1050px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #404040;
+}
+
+.maker-tools-page .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #404040;
+}
+
+.maker-tools-page .modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+.maker-tools-page .modal-close {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 2rem;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.maker-tools-page .modal-close:hover {
+  color: #fff;
+}
+
+.maker-tools-page .modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.maker-tools-page .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid #404040;
+}
+
+.maker-tools-page .btn-secondary {
+  padding: 0.75rem 1.5rem;
+  background: #2a2a2a;
+  border: 1px solid #404040;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.maker-tools-page .btn-secondary:hover:not(:disabled) {
+  background: #333;
+}
+
+.maker-tools-page .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #64b5f6;
+  border: none;
+  color: #000;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.maker-tools-page .btn-primary:hover:not(:disabled) {
+  background: #42a5f5;
+}
+
+.maker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.maker-card {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.85rem;
+}
+
+.maker-card h3 {
+  margin: 0 0 0.65rem;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.maker-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #ccc;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.maker-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.maker-help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #424242;
+  border-radius: 999px;
+  background: #2a2a2a;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.maker-help-button:hover {
+  color: #fff;
+  border-color: #64b5f6;
+}
+
+.maker-card input {
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+.maker-card input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.maker-tools-page .maker-card input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.maker-tools-page .maker-card input[type='number']::-webkit-outer-spin-button,
+.maker-tools-page .maker-card input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.maker-checkbox-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.maker-checkbox-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.maker-card select {
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+.maker-card select:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.maker-card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.maker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.maker-list-item {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 90px 44px;
+  gap: 0.45rem;
+}
+
+.maker-list-item.maker-drive-item {
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+}
+
+.maker-help-text {
+  margin: 0 0 0.45rem;
+}
+
+.maker-tools-page .btn-toolbar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #424242;
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.maker-tools-page .btn-toolbar:hover:not(:disabled) {
+  background: #555;
+}
+
+.maker-tools-page .btn-toolbar:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.maker-tools-page .btn-toolbar.btn-primary {
+  background: #64b5f6;
+  border-color: #64b5f6;
+}
+
+.maker-tools-page .btn-toolbar.btn-primary:hover:not(:disabled) {
+  background: #42a5f5;
+  border-color: #42a5f5;
+}
+
+.maker-tools-page .btn-toolbar.btn-danger {
+  background: #3f2727;
+  border-color: #5b3131;
+}
+
+.maker-tools-page .btn-toolbar.btn-danger:hover:not(:disabled) {
+  background: #542f2f;
+}
+
+.maker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.maker-results-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.maker-tools-page .stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #1e1e1e;
+}
+
+.maker-tools-page .stat-card span {
+  color: #64b5f6;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.maker-tools-page .stat-card small,
+.maker-tools-page .maker-range,
+.maker-tools-page .muted {
+  color: #999;
+}
+
+.maker-result-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid #333;
+  padding-bottom: 0.75rem;
+}
+
+.maker-result-tabs button,
+.maker-subtabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d1d5db;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.maker-result-tabs button.active {
+  background: rgba(91, 137, 196, 0.16);
+  border-color: rgba(91, 137, 196, 0.35);
+  color: #f3f4f6;
+}
+
+.maker-result-panel {
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #1e1e1e;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.maker-library-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.maker-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.maker-subtabs button.active {
+  background: rgba(91, 137, 196, 0.16);
+  border-color: rgba(91, 137, 196, 0.35);
+  color: #f3f4f6;
+}
+
+.maker-result-tabs button:hover,
+.maker-subtabs button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f3f4f6;
+}
+
+.maker-language-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.maker-language-group h4 {
+  margin: 0;
+  color: #d1d5db;
+  font-size: 0.95rem;
+}
+
+.maker-show-list.full-width {
+  width: 100%;
+}
+
+.maker-show-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.maker-show-item {
+  border: 1px solid #333;
+  border-left: 4px solid #424242;
+  border-radius: 6px;
+  background: #252525;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.maker-show-item.ready {
+  border-left-color: #4caf50;
+}
+
+.maker-show-item.todo {
+  border-left-color: #ff9800;
+}
+
+.maker-show-item a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.maker-show-item a:hover {
+  color: #64b5f6;
+  text-decoration: underline;
+}
+
+.maker-show-item span {
+  color: #ccc;
+  font-size: 0.85rem;
+}
+
+.maker-show-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.maker-show-title-row {
+  display: block;
+}
+
+.maker-badges {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.maker-badges.wrap {
+  flex-wrap: wrap;
+}
+
+.maker-tools-page .badge {
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.maker-tools-page .badge svg {
+  flex-shrink: 0;
+}
+
+.maker-tools-page .badge-green {
+  background: rgba(76, 175, 80, 0.14);
+  color: #e5e7eb;
+  border-color: rgba(76, 175, 80, 0.32);
+}
+
+.maker-tools-page .badge-orange {
+  background: rgba(255, 183, 77, 0.12);
+  color: #e5e7eb;
+  border-color: rgba(255, 183, 77, 0.3);
+}
+
+.maker-tools-page .badge-blue {
+  background: rgba(100, 181, 246, 0.2);
+  color: #f3f9ff;
+  border-color: #64b5f6;
+}
+
+.maker-tools-page .badge-purple {
+  background: rgba(156, 39, 176, 0.14);
+  color: #e5e7eb;
+  border-color: rgba(156, 39, 176, 0.32);
+}
+
+.maker-tools-page .badge-gold {
+  background: rgba(255, 183, 77, 0.12);
+  color: #e5e7eb;
+  border-color: rgba(255, 183, 77, 0.3);
+}
+
+.maker-tools-page .badge-grey {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 1200px) {
+  .maker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-library-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .maker-list-item {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-list-item.maker-drive-item {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .maker-results-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-library-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-show-item {
+    flex-direction: column;
+  }
+
+  .maker-badges {
+    justify-content: flex-start;
+  }
+}

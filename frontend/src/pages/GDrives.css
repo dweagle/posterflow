@@ -1,0 +1,623 @@
+.gdrives-header {
+  margin-bottom: 1.5rem;
+}
+
+.gdrives-header h1 {
+  color: #64b5f6;
+  margin-bottom: 0.5rem;
+}
+
+.gdrives-header p {
+  color: #aaa;
+  margin-bottom: 0;
+}
+
+/* Toolbar with filters and action buttons */
+.gdrives .toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #3D4556;
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  /* Smooth scrolling for touch devices */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #5c6882 #3D4556;
+}
+
+/* Custom scrollbar styling for webkit browsers */
+.gdrives .toolbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.gdrives .toolbar::-webkit-scrollbar-track {
+  background: #3D4556;
+  border-radius: 3px;
+}
+
+.gdrives .toolbar::-webkit-scrollbar-thumb {
+  background: #5c6882;
+  border-radius: 3px;
+}
+
+.gdrives .toolbar::-webkit-scrollbar-thumb:hover {
+  background: #6c7892;
+}
+
+.gdrives .gdrives .filter-buttons {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+.gdrives .gdrives .filter-buttons button {
+  padding: 0.5rem 1rem;
+  background-color: #5c6882;
+  color: #E8ECEF;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.gdrives .filter-buttons button:hover {
+  background-color: #6c7892;
+}
+
+.gdrives .filter-buttons button.active {
+  background-color: #5B89C4;
+  color: #fff;
+}
+
+.gdrives .sort-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.gdrives .gdrives .sort-dropdown label {
+  color: #aaa;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.gdrives .gdrives .sort-dropdown select {
+  padding: 0.5rem 0.75rem;
+  background-color: #5c6882;
+  color: #E8ECEF;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.gdrives .sort-dropdown select:hover {
+  background-color: #6c7892;
+}
+
+.gdrives .sort-dropdown select:focus {
+  background-color: #5B89C4;
+  box-shadow: 0 0 0 2px rgba(91, 137, 196, 0.3);
+}
+
+.gdrives .toolbar-divider {
+  width: 1px;
+  height: 28px;
+  background-color: #444;
+  margin: 0 0.25rem;
+  flex-shrink: 0;
+}
+
+.gdrives .action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Bulk Actions Bar */
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.bulk-action-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bulk-label {
+  color: #aaa;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 60px;
+}
+
+.btn-bulk {
+  padding: 0.4rem 0.75rem;
+  background-color: #3D4556;
+  color: #E8ECEF;
+  border: 1px solid #444;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-bulk:hover {
+  background-color: #4a5566;
+  border-color: #5B89C4;
+}
+
+.btn-bulk:active {
+  transform: scale(0.98);
+}
+
+/* Responsive: make buttons slightly smaller on narrow screens */
+@media (max-width: 900px) {
+  .gdrives .btn-toolbar {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.8rem;
+  }
+  
+  .gdrives .filter-buttons button {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.85rem;
+  }
+}
+
+/* Very narrow screens: even more compact */
+@media (max-width: 600px) {
+  .gdrives .toolbar {
+    padding: 0.5rem;
+    gap: 0.75rem;
+    flex-wrap: nowrap;
+  }
+  
+  .gdrives .btn-toolbar {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.75rem;
+  }
+  
+  .gdrives .filter-buttons {
+    gap: 0.4rem;
+    flex-wrap: nowrap;
+  }
+  
+  .gdrives .filter-buttons button {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.8rem;
+  }
+
+  .bulk-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .bulk-action-group {
+    justify-content: space-between;
+    width: 100%;
+  }
+}
+
+.gdrives .btn-toolbar {
+  padding: 0.5rem 0.875rem;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+  color: #fff;
+  flex-shrink: 0;
+  flex-grow: 0;
+  min-width: fit-content;
+  max-width: max-content;
+  width: auto;
+}
+
+.gdrives .btn-toolbar.btn-toolbar-link {
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #424242;
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.gdrives .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
+  background: #555;
+}
+
+.gdrives .btn-toolbar.btn-reload {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #D16B5A;
+}
+
+.gdrives .btn-toolbar.btn-reload:hover:not(:disabled) {
+  background-color: #dc7b6a;
+}
+
+.gdrives .btn-toolbar.btn-reload:disabled {
+  background-color: #5c6882;
+  cursor: not-allowed;
+}
+
+.gdrives .btn-toolbar.btn-add-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #4A9E8E;
+}
+
+.gdrives .btn-toolbar.btn-add-custom:hover {
+  background-color: #5aae9e;
+}
+
+.gdrives .btn-toolbar.btn-sync-all {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #5B89C4;
+}
+
+.gdrives .btn-toolbar.btn-sync-all:hover:not(:disabled) {
+  background-color: #6b99d4;
+}
+
+.gdrives .btn-toolbar.btn-sync-all:disabled {
+  background-color: #666;
+  cursor: not-allowed;
+}
+
+/* Drive sections with headers */
+.drive-section {
+  margin-bottom: 2rem;
+}
+
+.drive-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-header {
+  color: #64b5f6;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.875rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #333;
+}
+
+.drives-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.875rem;
+}
+
+@media (max-width: 1400px) {
+  .drives-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+@media (max-width: 1200px) {
+  .drives-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (max-width: 992px) {
+  .drives-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .drives-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 576px) {
+  .drives-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.drive-card {
+  position: relative;
+  background-color: #1e1e1e;
+  border: 2px solid #444;
+  border-radius: 6px;
+  padding: 0.6rem;
+  transition: all 0.2s;
+  text-align: center;
+  width: 100%;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+.drive-card:hover {
+  border-color: #64b5f6;
+  transform: translateY(-2px);
+}
+
+.drive-card.subscribed {
+  border-color: #4285F4;
+}
+
+.drive-card.deprecated {
+  border-color: #dc3545;
+  border-width: 3px;
+  opacity: 0.85;
+}
+
+.drive-card.deprecated:hover {
+  border-color: #ff4757;
+}
+
+.deprecated-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, rgba(220, 53, 69, 0.95) 0%, rgba(220, 53, 69, 0.7) 100%);
+  border-radius: 4px 4px 0 0;
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+  z-index: 1;
+}
+
+.deprecated-badge {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.deprecated-message {
+  font-size: 0.75rem;
+  color: #fff;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.drive-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.drive-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.drive-card h3 {
+  color: #fff;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.drive-badge {
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.drive-badge-cl2k {
+  background-color: rgba(100, 181, 246, 0.18);
+  color: #e5e7eb;
+  border: 1px solid rgba(100, 181, 246, 0.42);
+}
+
+.drive-badge-mm2k {
+  background-color: rgba(76, 175, 80, 0.14);
+  color: #e5e7eb;
+  border: 1px solid rgba(76, 175, 80, 0.32);
+}
+
+.drive-badge-custom {
+  background-color: rgba(156, 39, 176, 0.14);
+  color: #e5e7eb;
+  border: 1px solid rgba(156, 39, 176, 0.32);
+}
+
+.drive-meta {
+  flex-grow: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.4rem;
+}
+
+.drive-id {
+  font-size: 0.6rem;
+  color: #888;
+  margin: 0;
+  font-family: monospace;
+}
+
+.last-synced {
+  font-size: 0.58rem;
+  color: #888;
+  margin: 0;
+}
+
+.custom-path {
+  font-size: 0.58rem;
+  color: #888;
+  margin: 0;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.poster-count {
+  font-size: 0.625rem;
+  color: #64b5f6;
+  margin: 0;
+  font-weight: 500;
+}
+
+.file-count-mismatch {
+  color: #ffb74d;
+  font-weight: 600;
+}
+
+.drive-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.4rem;
+  margin-top: auto;
+  justify-content: center;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  transition: background-color 0.2s;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+}
+
+.btn-icon.btn-sync {
+  background-color: #5B89C4;
+}
+
+.btn-icon.btn-sync:hover:not(:disabled) {
+  background-color: #6b99d4;
+}
+
+.btn-icon.btn-sync:disabled {
+  background-color: #666;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-icon.btn-edit {
+  background-color: #5c6882;
+}
+
+.btn-icon.btn-edit:hover {
+  background-color: #6c7892;
+}
+
+.btn-icon.btn-subscribed {
+  background-color: #4caf50;
+}
+
+.btn-icon.btn-subscribed:hover {
+  background-color: #5cbf60;
+}
+
+.btn-subscribe {
+  background-color: #5B89C4;
+  color: #fff;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-subscribe:hover {
+  background-color: #6b99d4;
+}
+
+.btn-delete-icon {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  background: none;
+  color: #d32f2f;
+  border: none;
+  padding: 0;
+  font-size: 1rem;
+  transition: all 0.2s;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.btn-delete-icon:hover {
+  color: #c62828;
+  transform: scale(1.15);
+}
+
+/* Delete button inside deprecated overlay */
+.deprecated-overlay .btn-delete-icon {
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 0.25rem;
+  border-radius: 4px;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
+.deprecated-overlay .btn-delete-icon:hover {
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #aaa;
+}
+
+/* Spinning animation for reload button */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.priority-badge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background-color: rgba(255, 183, 77, 0.12);
+  color: #e5e7eb;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 183, 77, 0.3);
+}

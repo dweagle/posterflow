@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.log
+.git
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.swo
+README.md
+.env
+tests/

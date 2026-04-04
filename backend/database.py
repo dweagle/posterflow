@@ -1,0 +1,37 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from core.config import settings
+from core.logging import log_info, LogTags
+import logging
+from typing import Generator
+
+# Suppress SQLAlchemy query logging to prevent log spam
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+
+# Create SQLAlchemy engine
+engine = create_engine(
+    settings.database_url,
+    connect_args={"check_same_thread": False},  # Needed for SQLite
+    echo=False  # Disable SQL query logging (causes log spam)
+)
+
+# Create session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base class for models
+Base = declarative_base()
+
+# Dependency for FastAPI endpoints
+def get_db() -> Generator[Session, None, None]:
+    """
+    Database session dependency for FastAPI routes.
+    Usage: def my_endpoint(db: Session = Depends(get_db))
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+log_info(LogTags.STARTUP, f"Database configured: {settings.database_url}")

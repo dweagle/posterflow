@@ -1,0 +1,168 @@
+.confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.confirm-dialog {
+  background-color: #2d3748;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  max-width: 450px;
+  width: 90%;
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.confirm-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.confirm-header-danger {
+  color: #f44336;
+}
+
+.confirm-header-warning {
+  color: #ff9800;
+}
+
+.confirm-header-info {
+  color: #64b5f6;
+}
+
+.confirm-body {
+  min-height: auto;
+  max-height: none;
+}
+
+.confirm-body p {
+  margin: 0;
+  color: #d1d5db;
+  line-height: 1.6;
+}
+
+.confirm-footer {
+  background-color: #252d3a;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 0.5rem 1.25rem;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.btn-cancel {
+  background-color: #4a5568;
+  color: #fff;
+}
+
+.btn-cancel:hover {
+  background-color: #5a6678;
+}
+
+.btn-confirm {
+  color: #fff;
+}
+
+.btn-confirm-danger {
+  background-color: #f44336;
+}
+
+.btn-confirm-danger:hover {
+  background-color: #e53935;
+}
+
+.btn-confirm-warning {
+  background-color: #ff9800;
+}
+
+.btn-confirm-warning:hover {
+  background-color: #fb8c00;
+}
+
+.btn-confirm-info {
+  background-color: #2196f3;
+}
+
+.btn-confirm-info:hover {
+  background-color: #1e88e5;
+}
+
+.confirm-extra {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #3d4556;
+}
+
+.delete-files-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  padding: 0.75rem;
+  background-color: rgba(220, 53, 69, 0.1);
+  border: 1px solid rgba(220, 53, 69, 0.3);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.delete-files-checkbox:hover {
+  background-color: rgba(220, 53, 69, 0.15);
+  border-color: rgba(220, 53, 69, 0.5);
+}
+
+.delete-files-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.delete-files-checkbox span {
+  color: #e8ecef;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  user-select: none;
+}

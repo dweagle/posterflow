@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.log
+.venv/
+.pytest_cache/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Tests
+backend/tests/
+
+# Runtime data
+config/
+posters/
+logs/
+idarr/
+*.db
+
+# Node (frontend already built in image)
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# Local tooling
+.ci-tmp/
+
+# Docker
+.docker/

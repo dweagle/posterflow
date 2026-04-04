@@ -1,0 +1,128 @@
+.security-status-row {
+  margin-bottom: 1.5rem;
+}
+
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.security-badge--active {
+  background: rgba(76, 175, 80, 0.15);
+  color: #90e69a;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.security-badge--inactive {
+  background: rgba(255, 183, 77, 0.12);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
+.security-form-block {
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 480px;
+}
+
+.security-form-block h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.security-form-block--danger {
+  border-color: rgba(244, 67, 54, 0.35);
+}
+
+.security-form-block--danger h3 {
+  color: #ff6b6b;
+}
+
+.security-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.security-field label {
+  color: #ccc;
+  font-size: 0.88rem;
+}
+
+.security-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.security-input-row:focus-within {
+  border-color: #64b5f6;
+}
+
+.security-input-row input {
+  flex: 1;
+  padding: 0.65rem 0.9rem;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.security-input-row input:disabled {
+  opacity: 0.5;
+}
+
+.security-eye-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  padding: 0 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s;
+}
+
+.security-eye-btn:hover {
+  color: #ccc;
+}
+
+.settings .btn-danger {
+  padding: 0.65rem 1.25rem;
+  background: transparent;
+  color: #ff6b6b;
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.settings .btn-danger:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.12);
+  border-color: #f44336;
+}
+
+.settings .btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

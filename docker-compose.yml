@@ -1,0 +1,14 @@
+services:
+  posterflow:
+    image: dweagle/posterflow:latest
+    container_name: posterflow
+    ports:
+      - 8357:8000
+    volumes:
+      - ./config:/config   # Database, rclone config, logs, and idarr working dir
+      - ./posters:/posters # Downloaded GDrive poster files
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    restart: unless-stopped
