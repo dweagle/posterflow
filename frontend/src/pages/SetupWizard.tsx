@@ -28,7 +28,6 @@ interface FormData {
   radarr_instances: ServerInstance[]
 }
 
-const STORAGE_KEY = 'posterflow_setup_data'
 const DEFAULT_POSTER_DESTINATION = '/posters/assets'
 
 function SetupWizard({ onComplete }: SetupWizardProps) {
@@ -40,6 +39,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [skipSonarr, setSkipSonarr] = useState(false)
   const [skipRadarr, setSkipRadarr] = useState(false)
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
   const [showRestoreRestartConfirm, setShowRestoreRestartConfirm] = useState(false)
   const [serviceAccountUploadLoading, setServiceAccountUploadLoading] = useState(false)
@@ -93,38 +93,23 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
   
   const { showToast } = useToast()
-  
-  // Load from localStorage or use defaults
-  const loadSavedData = (): FormData => {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch (e) {
-        console.error('Error parsing saved data:', e)
-      }
-    }
-    return {
-      google_client_id: '',
-      google_client_secret: '',
-      google_refresh_token: '',
-      google_service_account_file: '',
-      poster_destination: '',
-      plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
-      sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
-      radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }]
-    }
-  }
 
-  const [formData, setFormData] = useState<FormData>(loadSavedData)
+  const [formData, setFormData] = useState<FormData>({
+    google_client_id: '',
+    google_client_secret: '',
+    google_refresh_token: '',
+    google_service_account_file: '',
+    poster_destination: '',
+    plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
+    sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
+    radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
+  })
 
   // Fetch existing settings from backend on mount
   useEffect(() => {
     const loadExistingSettings = async () => {
       try {
         const settings = await getSettings()
-        
-        // Start with current form data to avoid overwriting localStorage auto-save
         const updatedFormData: FormData = {
           google_client_id: settings.google_client_id || '',
           google_client_secret: settings.google_client_secret || '',
@@ -133,68 +118,35 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           poster_destination: settings.poster_destination || '',
           plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
           sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
-          radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }]
+          radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
         }
-
-        // Parse Plex instances (stored as JSON string)
         if (settings.plex_instances) {
           try {
-            const plexInstances = JSON.parse(settings.plex_instances)
-            if (Array.isArray(plexInstances) && plexInstances.length > 0) {
-              // Keep all instances, even if empty (user might be editing them)
-              updatedFormData.plex_instances = plexInstances
-            }
-          } catch (e) {
-            console.error('Error parsing plex instances:', e)
-          }
+            const parsed = JSON.parse(settings.plex_instances)
+            if (Array.isArray(parsed) && parsed.length > 0) updatedFormData.plex_instances = parsed
+          } catch (e) { console.error('Error parsing plex instances:', e) }
         }
-
-        // Parse Sonarr instances (stored as JSON string)
         if (settings.sonarr_instances) {
           try {
-            const sonarrInstances = JSON.parse(settings.sonarr_instances)
-            if (Array.isArray(sonarrInstances) && sonarrInstances.length > 0) {
-              // Keep all instances, even if empty (user might be editing them)
-              updatedFormData.sonarr_instances = sonarrInstances
-            }
-          } catch (e) {
-            console.error('Error parsing sonarr instances:', e)
-          }
+            const parsed = JSON.parse(settings.sonarr_instances)
+            if (Array.isArray(parsed) && parsed.length > 0) updatedFormData.sonarr_instances = parsed
+          } catch (e) { console.error('Error parsing sonarr instances:', e) }
         }
-
-        // Parse Radarr instances (stored as JSON string)
         if (settings.radarr_instances) {
           try {
-            const radarrInstances = JSON.parse(settings.radarr_instances)
-            if (Array.isArray(radarrInstances) && radarrInstances.length > 0) {
-              // Keep all instances, even if empty (user might be editing them)
-              updatedFormData.radarr_instances = radarrInstances
-            }
-          } catch (e) {
-            console.error('Error parsing radarr instances:', e)
-          }
+            const parsed = JSON.parse(settings.radarr_instances)
+            if (Array.isArray(parsed) && parsed.length > 0) updatedFormData.radarr_instances = parsed
+          } catch (e) { console.error('Error parsing radarr instances:', e) }
         }
-
-        // Update form data with backend settings (takes precedence over localStorage)
         setFormData(updatedFormData)
       } catch (error) {
         console.error('Error loading settings:', error)
-        // If error, keep the localStorage defaults
       } finally {
         setIsLoadingSettings(false)
       }
     }
-
     loadExistingSettings()
   }, [])
-
-  // Auto-save to localStorage whenever formData changes (but only after initial load)
-  useEffect(() => {
-    // Don't save during initial loading to avoid race conditions
-    if (!isLoadingSettings) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(formData))
-    }
-  }, [formData, isLoadingSettings])
 
   const updateGoogleCreds = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -344,38 +296,92 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSaveStep1 = async () => {
+    const hasServiceAccount = formData.google_service_account_file.trim() !== ''
+    const hasOAuth =
+      formData.google_client_id.trim() !== '' &&
+      formData.google_client_secret.trim() !== '' &&
+      formData.google_refresh_token.trim() !== ''
+    if (!hasServiceAccount && !hasOAuth) {
+      showToast('Please enter either your OAuth credentials (Client ID, Client Secret, and Refresh Token) or upload a Service Account JSON file.', 'error')
+      return
+    }
+    setIsSaving(true)
     try {
-      const posterDestination = formData.poster_destination.trim() || DEFAULT_POSTER_DESTINATION
-      const settings = {
+      await saveSettings({
         google_client_id: formData.google_client_id,
         google_client_secret: formData.google_client_secret,
         google_refresh_token: formData.google_refresh_token,
         google_token: formData.google_refresh_token,
         google_service_account_file: formData.google_service_account_file,
-        poster_destination: posterDestination,
-        plex_instances: JSON.stringify(formData.plex_instances.filter(p => p.url)),
-        sonarr_instances: JSON.stringify(formData.sonarr_instances.filter(s => s.url)),
-        radarr_instances: JSON.stringify(formData.radarr_instances.filter(r => r.url)),
-        setup_complete: 'true'
-      }
-      await saveSettings(settings)
-      localStorage.removeItem(STORAGE_KEY) // Clear saved data after successful setup
-      onComplete()
+      })
+      setStep(2)
     } catch (error) {
       console.error('Error saving settings:', error)
       showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveStep2 = async () => {
+    const missing: string[] = []
+    if (!skipPlex && !formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')) missing.push('Plex (or check "I don\'t have Plex")')
+    if (!skipSonarr && !formData.sonarr_instances.some(s => s.url.trim() !== '' && s.api_key.trim() !== '')) missing.push('Sonarr (or check "I don\'t have Sonarr")')
+    if (!skipRadarr && !formData.radarr_instances.some(r => r.url.trim() !== '' && r.api_key.trim() !== '')) missing.push('Radarr (or check "I don\'t have Radarr")')
+    if (missing.length > 0) {
+      showToast(`Please complete: ${missing.join(', ')}`, 'error')
+      return
+    }
+    setIsSaving(true)
+    try {
+      await saveSettings({
+        plex_instances: JSON.stringify(formData.plex_instances.filter(p => p.url)),
+        sonarr_instances: JSON.stringify(formData.sonarr_instances.filter(s => s.url)),
+        radarr_instances: JSON.stringify(formData.radarr_instances.filter(r => r.url)),
+      })
+      setStep(3)
+    } catch (error) {
+      console.error('Error saving settings:', error)
+      showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveStep3 = async () => {
+    setIsSaving(true)
+    try {
+      const posterDestination = formData.poster_destination.trim() || DEFAULT_POSTER_DESTINATION
+      await saveSettings({ poster_destination: posterDestination })
+      setStep(4)
+    } catch (error) {
+      console.error('Error saving settings:', error)
+      showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCompleteSetup = async () => {
+    setIsSaving(true)
+    try {
+      await saveSettings({ setup_complete: 'true' })
+      navigate('/', { replace: true })
+      onComplete()
+    } catch (error) {
+      console.error('Error completing setup:', error)
+      showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
     }
   }
 
   const handleSkip = async () => {
     try {
       await saveSettings({ setup_complete: 'true' })
-      localStorage.removeItem(STORAGE_KEY)
-      onComplete()
-      // Force navigation to dashboard
       navigate('/', { replace: true })
+      onComplete()
     } catch (error) {
       console.error('Error skipping setup:', error)
       showToast('Error skipping setup. Please try again.', 'error')
@@ -395,29 +401,6 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }
 
-  // Validation functions
-  const isStep1Valid = () => {
-    const hasServiceAccount = formData.google_service_account_file.trim() !== ''
-    const hasOAuth =
-      formData.google_client_id.trim() !== '' &&
-      formData.google_client_secret.trim() !== '' &&
-      formData.google_refresh_token.trim() !== ''
-
-    return hasServiceAccount || hasOAuth
-  }
-
-  const isStep2Valid = () => {
-    const hasPlex = formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')
-    const hasSonarr = formData.sonarr_instances.some(s => s.url.trim() !== '' && s.api_key.trim() !== '')
-    const hasRadarr = formData.radarr_instances.some(r => r.url.trim() !== '' && r.api_key.trim() !== '')
-    
-    return (hasPlex || skipPlex) && (hasSonarr || skipSonarr) && (hasRadarr || skipRadarr)
-  }
-
-  const isStep3Valid = () => {
-    return true
-  }
-
   return (
     <div className="setup-wizard">
       <div className="setup-container">
@@ -427,7 +410,6 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             Welcome to PosterFlow
           </h1>
           <p>Let's get you set up with automated poster management</p>
-          {step > 0 && <small className="auto-save-notice">✓ Progress automatically saved</small>}
         </div>
 
         {isLoadingSettings ? (
@@ -445,7 +427,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="setup-form">
+            <form className="setup-form">
           {step === 0 && (
             <div className="welcome-screen">
               <div className="welcome-content">
@@ -722,13 +704,13 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   <button type="button" className="btn-secondary" onClick={() => setStep(0)}>
                     ← Back
                   </button>
-                  <button 
-                    type="button" 
-                    className="btn-primary" 
-                    onClick={() => setStep(2)}
-                    disabled={!isStep1Valid()}
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleSaveStep1}
+                    disabled={isSaving}
                   >
-                    Next
+                    {isSaving ? 'Saving...' : 'Save & Continue'}
                   </button>
                 </div>
                 <small className="btn-subtext">Enter either OAuth fields above or a Service Account JSON path</small>
@@ -785,6 +767,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Name</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.name}
                           onChange={(e) => updatePlexInstance(index, 'name', e.target.value)}
                           placeholder="e.g., Plex Main, Plex 4K"
@@ -795,6 +778,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Plex URL</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.url}
                           onChange={(e) => updatePlexInstance(index, 'url', e.target.value)}
                           placeholder="http://localhost:32400"
@@ -806,6 +790,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <div className="input-with-toggle">
                           <input
                             type={showPlexTokens[index] ? "text" : "password"}
+                            autoComplete="new-password"
                             value={instance.api_key}
                             onChange={(e) => updatePlexInstance(index, 'api_key', e.target.value)}
                             placeholder="Your Plex Token"
@@ -883,6 +868,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Name</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.name}
                           onChange={(e) => updateSonarrInstance(index, 'name', e.target.value)}
                           placeholder="e.g., Sonarr 4K, Sonarr HD"
@@ -893,6 +879,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Sonarr URL</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.url}
                           onChange={(e) => updateSonarrInstance(index, 'url', e.target.value)}
                           placeholder="http://localhost:8989"
@@ -904,6 +891,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <div className="input-with-toggle">
                           <input
                             type={showSonarrKeys[index] ? "text" : "password"}
+                            autoComplete="new-password"
                             value={instance.api_key}
                             onChange={(e) => updateSonarrInstance(index, 'api_key', e.target.value)}
                             placeholder="Your Sonarr API Key"
@@ -981,6 +969,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Name</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.name}
                           onChange={(e) => updateRadarrInstance(index, 'name', e.target.value)}
                           placeholder="e.g., Radarr 4K, Radarr HD"
@@ -991,6 +980,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <label>Radarr URL</label>
                         <input
                           type="text"
+                          autoComplete="off"
                           value={instance.url}
                           onChange={(e) => updateRadarrInstance(index, 'url', e.target.value)}
                           placeholder="http://localhost:7878"
@@ -1002,6 +992,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                         <div className="input-with-toggle">
                           <input
                             type={showRadarrKeys[index] ? "text" : "password"}
+                            autoComplete="new-password"
                             value={instance.api_key}
                             onChange={(e) => updateRadarrInstance(index, 'api_key', e.target.value)}
                             placeholder="Your Radarr API Key"
@@ -1041,13 +1032,13 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
                   Back
                 </button>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="btn-primary"
-                  onClick={() => setStep(3)}
-                  disabled={!isStep2Valid()}
+                  onClick={handleSaveStep2}
+                  disabled={isSaving}
                 >
-                  Next
+                  {isSaving ? 'Saving...' : 'Save & Continue'}
                 </button>
               </div>
             </div>
@@ -1080,10 +1071,10 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <button
                   type="button"
                   className="btn-primary"
-                  onClick={() => setStep(4)}
-                  disabled={!isStep3Valid()}
+                  onClick={handleSaveStep3}
+                  disabled={isSaving}
                 >
-                  Next
+                  {isSaving ? 'Saving...' : 'Save & Continue'}
                 </button>
               </div>
             </div>
@@ -1110,10 +1101,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   Back
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   className="btn-primary"
+                  onClick={handleCompleteSetup}
+                  disabled={isSaving}
                 >
-                  Complete Setup
+                  {isSaving ? 'Saving...' : 'Complete Setup'}
                 </button>
               </div>
             </div>
