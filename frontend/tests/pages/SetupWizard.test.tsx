@@ -54,7 +54,7 @@ describe('SetupWizard', () => {
     expect(screen.getByText('Start Setup Wizard')).toBeTruthy()
   })
 
-  it('requires google fields before enabling Next on step 1', async () => {
+  it('shows toast when trying to advance step 1 without credentials', async () => {
     const user = userEvent.setup()
     render(<SetupWizard onComplete={mockOnComplete} />)
 
@@ -63,19 +63,17 @@ describe('SetupWizard', () => {
 
     await screen.findByText('Google Drive Configuration')
 
-    const nextButton = screen.getByRole('button', { name: 'Next' })
-    expect(nextButton.hasAttribute('disabled')).toBe(true)
-
-    await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
-    await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
-    await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
 
     await waitFor(() => {
-      expect(nextButton.hasAttribute('disabled')).toBe(false)
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringContaining('OAuth credentials'),
+        'error'
+      )
     })
   })
 
-  it('moves from step 1 to media server step when Next is clicked', async () => {
+  it('moves from step 1 to media server step when Save & Continue is clicked', async () => {
     const user = userEvent.setup()
     render(<SetupWizard onComplete={mockOnComplete} />)
 
@@ -86,10 +84,9 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
 
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
 
     await screen.findByText('Media Server Configuration')
-    expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy()
   })
 
   it('allows step 1 with service account path only', async () => {
@@ -99,17 +96,14 @@ describe('SetupWizard', () => {
     await screen.findByRole('button', { name: 'Start Setup Wizard' })
     await user.click(screen.getByRole('button', { name: 'Start Setup Wizard' }))
 
-    const nextButton = screen.getByRole('button', { name: 'Next' })
-    expect(nextButton.hasAttribute('disabled')).toBe(true)
-
     await user.type(
       screen.getByPlaceholderText(/\/config\/service_accounts\/my-service-account\.json/i),
       '/config/service_accounts/my-service-account.json'
     )
 
-    await waitFor(() => {
-      expect(nextButton.hasAttribute('disabled')).toBe(false)
-    })
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+
+    await screen.findByText('Media Server Configuration')
   })
 
   it('skips setup and navigates to dashboard', async () => {
@@ -137,36 +131,43 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
 
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
 
     await user.click(screen.getByRole('checkbox', { name: /I don't have Plex/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Sonarr/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
 
     await user.type(screen.getByPlaceholderText(/ex\. \/kometa\/config\/assets/i), '/kometa/config/assets')
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
 
     await screen.findByText('Setup Complete')
     await user.click(screen.getByRole('button', { name: 'Complete Setup' }))
 
     await waitFor(() => {
-      expect(mockSaveSettings).toHaveBeenCalledWith({
+      expect(mockSaveSettings).toHaveBeenNthCalledWith(1, {
         google_client_id: 'client-id',
         google_client_secret: 'client-secret',
         google_refresh_token: 'refresh-token',
         google_token: 'refresh-token',
         google_service_account_file: '',
-        poster_destination: '/kometa/config/assets',
+      })
+      expect(mockSaveSettings).toHaveBeenNthCalledWith(2, {
         plex_instances: '[]',
         sonarr_instances: '[]',
         radarr_instances: '[]',
+      })
+      expect(mockSaveSettings).toHaveBeenNthCalledWith(3, {
+        poster_destination: '/kometa/config/assets',
+      })
+      expect(mockSaveSettings).toHaveBeenNthCalledWith(4, {
         setup_complete: 'true',
       })
       expect(mockOnComplete).toHaveBeenCalled()
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true })
     })
   })
 
@@ -189,7 +190,12 @@ describe('SetupWizard', () => {
 
   it('shows toast and does not complete when final setup submit fails', async () => {
     const user = userEvent.setup()
-    mockSaveSettings.mockRejectedValueOnce(new Error('submit failed'))
+    // First 3 saves (steps 1-3) succeed; the 4th (Complete Setup) fails
+    mockSaveSettings
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: true })
+      .mockRejectedValueOnce(new Error('submit failed'))
 
     render(<SetupWizard onComplete={mockOnComplete} />)
 
@@ -200,18 +206,18 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
 
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
 
     await user.click(screen.getByRole('checkbox', { name: /I don't have Plex/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Sonarr/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
 
     await user.type(screen.getByPlaceholderText(/ex\. \/kometa\/config\/assets/i), '/kometa/config/assets')
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
 
     await screen.findByText('Setup Complete')
     await user.click(screen.getByRole('button', { name: 'Complete Setup' }))
