@@ -629,7 +629,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     name="google_refresh_token"
                     value={formData.google_refresh_token}
                     onChange={(e) => updateGoogleCreds('google_refresh_token', e.target.value)}
-                    placeholder="1//xxxxxxxxxxxxx"
+                    placeholder="{1//xxxxxxxxxxxxx}"
                     required
                   />
                   <button
