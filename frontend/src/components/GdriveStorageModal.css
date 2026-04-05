@@ -1,0 +1,83 @@
+.gdrive-storage-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gdrive-storage-loading {
+  color: #aaa;
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.gdrive-storage-description {
+  color: #ccc;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.gdrive-storage-description code {
+  background: #2a2a2a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  color: #64b5f6;
+}
+
+.gdrive-storage-modal .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.gdrive-storage-modal .form-group label {
+  font-size: 0.9rem;
+  color: #ccc;
+  font-weight: 500;
+}
+
+.gdrive-storage-modal .form-group input {
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.gdrive-storage-modal .form-group input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.gdrive-storage-modal .form-group small {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.gdrive-storage-modal .form-group small code {
+  background: #2a2a2a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  color: #64b5f6;
+}
+
+.gdrive-storage-note {
+  background: #252525;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+.gdrive-storage-note strong {
+  color: #ffb74d;
+}
+
+.gdrive-storage-note em {
+  color: #ccc;
+}

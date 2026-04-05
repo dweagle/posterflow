@@ -92,13 +92,21 @@ function DriveEditModal({ drive, onClose, onSave }: DriveEditModalProps) {
               type="text"
               value={customPath}
               onChange={(e) => setCustomPath(e.target.value)}
-              placeholder="e.g., Movies/Overrides"
+              placeholder={excludeFromSync ? 'e.g., /media/posters or subfolders/name' : 'e.g., /media/posters or subfolders/name'}
             />
-            <small>
-              {excludeFromSync
-                ? 'Leave empty to use app default folder location. Set a custom path to use a specific subfolder.'
-                : 'Leave empty to sync to app default folder. Set to custom path to specific subfolders.'}
-            </small>
+            {excludeFromSync ? (
+              <>
+                <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
+                <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
+                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
+              </>
+            ) : (
+              <>
+                <small>Leave empty to sync into the default location: <code>{'<storage>/<style>/<drive name>'}</code>.</small>
+                <small><strong>Absolute path</strong> (starts with <code>/</code>): syncs directly into that folder, no subfolders added — e.g. <code>/media/posters/movies</code>.</small>
+                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>overrides/movies</code> → <code>/config/posters/gdrive/overrides/movies</code>.</small>
+              </>
+            )}
           </div>
         </div>
 

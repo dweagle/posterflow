@@ -21,6 +21,7 @@ vi.mock('../../src/components/Toast', () => ({
 vi.mock('../../src/api/client', () => ({
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
   saveSettings: (...args: unknown[]) => mockSaveSettings(...args),
+  saveGdriveStoragePath: vi.fn().mockResolvedValue({ path: '/config/posters/gdrive' }),
   testPlex: vi.fn(),
   testSonarr: vi.fn(),
   testRadarr: vi.fn(),
@@ -85,7 +86,9 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByText('Storage Configuration')
 
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
   })
 
@@ -102,7 +105,9 @@ describe('SetupWizard', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByText('Storage Configuration')
 
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
   })
 
@@ -130,6 +135,9 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByText('Storage Configuration')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
@@ -190,7 +198,7 @@ describe('SetupWizard', () => {
 
   it('shows toast and does not complete when final setup submit fails', async () => {
     const user = userEvent.setup()
-    // First 3 saves (steps 1-3) succeed; the 4th (Complete Setup) fails
+    // Step 1 (google), step 3 (media servers), step 4 (destination) succeed; Complete Setup fails
     mockSaveSettings
       .mockResolvedValueOnce({ success: true })
       .mockResolvedValueOnce({ success: true })
@@ -205,6 +213,9 @@ describe('SetupWizard', () => {
     await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
     await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByText('Storage Configuration')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')

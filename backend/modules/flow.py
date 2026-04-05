@@ -285,7 +285,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             rename_child = _create_child_job(db, JOB_TYPE_POSTER_RENAMER, "Workflow requested Poster Renamer")
             try:
                 config_data: dict[str, Any] = {
-                    "destination": get_setting_value(db, "poster_destination", "/posters/assets"),
+                    "destination": get_setting_value(db, "poster_destination", "/config/posters/assets"),
                     "action_type": get_setting_value(db, "poster_action_type", "copy"),
                     "dry_run": dry_run,
                     "match_threshold": 0.8,

@@ -352,6 +352,14 @@ export const savePlexLibraryConfig = async (config: PlexLibraryConfig) => {
   return postData('/api/settings/plex-libraries', config)
 }
 
+export const getGdriveStoragePath = async (): Promise<{ path: string }> => {
+  return getData('/api/settings/gdrive-storage')
+}
+
+export const saveGdriveStoragePath = async (path: string): Promise<{ path: string }> => {
+  return postData('/api/settings/gdrive-storage', { path })
+}
+
 export const getMakerIdarrConfig = async (): Promise<MakerIdarrConfig> => {
   return getData('/api/idarr/')
 }

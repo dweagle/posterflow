@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting } from '../api/client'
+import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -23,12 +23,13 @@ interface FormData {
   google_refresh_token: string
   google_service_account_file: string
   poster_destination: string
+  gdrive_storage_path: string
   plex_instances: ServerInstance[]
   sonarr_instances: ServerInstance[]
   radarr_instances: ServerInstance[]
 }
 
-const DEFAULT_POSTER_DESTINATION = '/posters/assets'
+const DEFAULT_POSTER_DESTINATION = '/config/posters/assets'
 
 function SetupWizard({ onComplete }: SetupWizardProps) {
   const navigate = useNavigate()
@@ -100,6 +101,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     google_refresh_token: '',
     google_service_account_file: '',
     poster_destination: '',
+    gdrive_storage_path: '',
     plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
     sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
     radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
@@ -116,6 +118,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           google_refresh_token: settings.google_token || settings.google_refresh_token || '',
           google_service_account_file: settings.google_service_account_file || '',
           poster_destination: settings.poster_destination || '',
+          gdrive_storage_path: settings.gdrive_storage_path || '',
           plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
           sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
           radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
@@ -325,6 +328,19 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   }
 
   const handleSaveStep2 = async () => {
+    setIsSaving(true)
+    try {
+      await saveGdriveStoragePath(formData.gdrive_storage_path.trim())
+      setStep(3)
+    } catch (error) {
+      console.error('Error saving settings:', error)
+      showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveStep3 = async () => {
     const missing: string[] = []
     if (!skipPlex && !formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')) missing.push('Plex (or check "I don\'t have Plex")')
     if (!skipSonarr && !formData.sonarr_instances.some(s => s.url.trim() !== '' && s.api_key.trim() !== '')) missing.push('Sonarr (or check "I don\'t have Sonarr")')
@@ -340,7 +356,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         sonarr_instances: JSON.stringify(formData.sonarr_instances.filter(s => s.url)),
         radarr_instances: JSON.stringify(formData.radarr_instances.filter(r => r.url)),
       })
-      setStep(3)
+      setStep(4)
     } catch (error) {
       console.error('Error saving settings:', error)
       showToast('Error saving settings. Please try again.', 'error')
@@ -349,12 +365,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }
 
-  const handleSaveStep3 = async () => {
+  const handleSaveStep4 = async () => {
     setIsSaving(true)
     try {
       const posterDestination = formData.poster_destination.trim() || DEFAULT_POSTER_DESTINATION
       await saveSettings({ poster_destination: posterDestination })
-      setStep(4)
+      setStep(5)
     } catch (error) {
       console.error('Error saving settings:', error)
       showToast('Error saving settings. Please try again.', 'error')
@@ -421,9 +437,10 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             {step > 0 && (
               <div className="setup-steps">
                 <div className={`step ${step === 1 ? 'active' : ''}`}>1. Google Drive</div>
-                <div className={`step ${step === 2 ? 'active' : ''}`}>2. Media Servers</div>
-                <div className={`step ${step === 3 ? 'active' : ''}`}>3. Destination</div>
-                <div className={`step ${step === 4 ? 'active' : ''}`}>4. Finish</div>
+                <div className={`step ${step === 2 ? 'active' : ''}`}>2. Storage</div>
+                <div className={`step ${step === 3 ? 'active' : ''}`}>3. Media Servers</div>
+                <div className={`step ${step === 4 ? 'active' : ''}`}>4. Destination</div>
+                <div className={`step ${step === 5 ? 'active' : ''}`}>5. Finish</div>
               </div>
             )}
 
@@ -719,6 +736,42 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           )}
 
           {step === 2 && (
+            <div className="form-section">
+              <h2>Storage Configuration</h2>
+              <p className="section-description">
+                Set where synced poster files will be stored on disk.
+              </p>
+
+              <div className="form-group">
+                <label>GDrive Poster Storage Path</label>
+                <input
+                  type="text"
+                  name="gdrive_storage_path"
+                  value={formData.gdrive_storage_path}
+                  onChange={(e) => updateGoogleCreds('gdrive_storage_path', e.target.value)}
+                  placeholder="ex. /posters/gdrive"
+                />
+                <small>Leave blank to use default: <code>/config/posters/gdrive</code> — stored inside your <code>/config</code> volume.</small>
+                <small>Set a custom absolute path only if you mount a separate volume for posters (e.g. <code>/posters</code>).</small>
+              </div>
+
+              <div className="button-group">
+                <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleSaveStep2}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save & Continue'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
             <div className="form-section">
               <h2>Media Server Configuration</h2>
               <p className="section-description">
@@ -1029,13 +1082,13 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               <div className="button-group">
-                <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
+                <button type="button" className="btn-secondary" onClick={() => setStep(2)}>
                   Back
                 </button>
                 <button
                   type="button"
                   className="btn-primary"
-                  onClick={handleSaveStep2}
+                  onClick={handleSaveStep3}
                   disabled={isSaving}
                 >
                   {isSaving ? 'Saving...' : 'Save & Continue'}
@@ -1044,7 +1097,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="form-section">
               <h2>Destination Folder Setup</h2>
               <p className="section-description">
@@ -1065,13 +1118,13 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               <div className="button-group">
-                <button type="button" className="btn-secondary" onClick={() => setStep(2)}>
+                <button type="button" className="btn-secondary" onClick={() => setStep(3)}>
                   Back
                 </button>
                 <button
                   type="button"
                   className="btn-primary"
-                  onClick={handleSaveStep3}
+                  onClick={handleSaveStep4}
                   disabled={isSaving}
                 >
                   {isSaving ? 'Saving...' : 'Save & Continue'}
@@ -1080,7 +1133,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="form-section">
               <h2>Setup Complete</h2>
               <p className="section-description">
@@ -1097,7 +1150,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </ul>
 
               <div className="button-group">
-                <button type="button" className="btn-secondary" onClick={() => setStep(3)}>
+                <button type="button" className="btn-secondary" onClick={() => setStep(4)}>
                   Back
                 </button>
                 <button

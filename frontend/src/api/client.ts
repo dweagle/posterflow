@@ -79,6 +79,8 @@ export {
   saveMakerIdarrConfig,
   savePlexLibraryConfig,
   saveSettings,
+  getGdriveStoragePath,
+  saveGdriveStoragePath,
   testDiscordNotification,
   testPlex,
   testRadarr,

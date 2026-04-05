@@ -4,7 +4,8 @@ import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, u
 import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Check, Trash2, RotateCw, Plus } from 'lucide-react'
+import GdriveStorageModal from '../components/GdriveStorageModal'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, Check, Trash2, RotateCw, Plus } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import './GDrives.css'
 
@@ -28,6 +29,7 @@ function GDrives() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{show: boolean, driveId: number | null, driveName: string, isDeprecated: boolean}>({show: false, driveId: null, driveName: '', isDeprecated: false})
   const [deleteFiles, setDeleteFiles] = useState(false)
+  const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
 
   useEffect(() => {
@@ -378,6 +380,13 @@ function GDrives() {
           >
             Discord
           </button>
+          <button
+            className="btn-toolbar btn-toolbar-link"
+            onClick={() => setShowStorageModal(true)}
+            title="Configure poster storage location"
+          >
+            <Settings2 size={16} /> Configure
+          </button>
           <button 
             className="btn-toolbar btn-reload" 
             onClick={handleReloadDrives}
@@ -654,6 +663,12 @@ function GDrives() {
         <AddCustomDriveModal
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddCustomDrive}
+        />
+      )}
+
+      {showStorageModal && (
+        <GdriveStorageModal
+          onClose={() => setShowStorageModal(false)}
         />
       )}
 

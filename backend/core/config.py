@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     
     # Paths
     config_dir: Path = Path("/config")   # Database, rclone config, drives cache
-    gdrive_dir: Path = Path("/posters/gdrive")  # Synced GDrive poster folders
+    gdrive_dir: Path = Path("/config/posters/gdrive")  # Synced GDrive poster folders (overrideable via DB setting)
     logs_dir: Path = Path("/config/logs")  # Application logs
 
     
@@ -41,5 +41,5 @@ settings = Settings()
 # Ensure directories exist
 settings.config_dir.mkdir(parents=True, exist_ok=True)
 settings.logs_dir.mkdir(parents=True, exist_ok=True)
-settings.gdrive_dir.mkdir(parents=True, exist_ok=True)
+# Note: gdrive_dir is created at startup after reading the persisted path setting
 (settings.config_dir / "idarr").mkdir(parents=True, exist_ok=True)

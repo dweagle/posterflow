@@ -243,6 +243,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if is_testing:
         log_info(LogTags.STARTUP, "Testing mode enabled - skipping startup side effects")
     else:
+        # Restore persisted gdrive storage path (if configured)
+        try:
+            from models.setting import get_setting as _get_setting
+            _storage_db = SessionLocal()
+            try:
+                storage_setting = _get_setting(_storage_db, "gdrive_storage_path")
+                if storage_setting and storage_setting.value and storage_setting.value.strip():
+                    custom_path = Path(storage_setting.value.strip())
+                    settings.gdrive_dir = custom_path
+                    log_info(LogTags.STARTUP, f"Using custom GDrive storage path: {custom_path}")
+            finally:
+                _storage_db.close()
+        except Exception as e:
+            log_warning(LogTags.STARTUP, f"Could not restore gdrive storage path setting: {e}")
+
         # Restore persisted debug toggle (if configured)
         try:
             from models.setting import get_setting

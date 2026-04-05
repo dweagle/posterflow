@@ -166,7 +166,7 @@ def run_workflow_for_schedule() -> None:
 def run_poster_rename_for_schedule() -> None:
     """Wrapper for scheduled Poster Renamer runs."""
     def _submit(db: Session) -> None:
-        destination = get_setting_value(db, "poster_destination", "/posters/assets")
+        destination = get_setting_value(db, "poster_destination", "/config/posters/assets")
         action_type = get_setting_value(db, "poster_action_type", "copy")
         asset_folders_value = get_setting_value(db, "poster_asset_folders", "true")
         asset_folders = str(asset_folders_value).lower() == "true"

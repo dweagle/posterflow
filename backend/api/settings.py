@@ -80,6 +80,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_skip_non_holiday",
     "border_replacer_remove_borders",
     "auto_run_border",
+    # GDrive storage path
+    "gdrive_storage_path",
 })
 
 
@@ -637,3 +639,62 @@ async def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depe
     
     return {"message": "Library configuration saved", "instance": config.instance_name}
 
+
+# ---------------------------------------------------------------------------
+# GDrive storage path
+# ---------------------------------------------------------------------------
+
+class GdriveStoragePathRequest(BaseModel):
+    path: str
+
+
+@router.get("/gdrive-storage")
+async def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
+    """Return the current GDrive poster storage path setting."""
+    setting = get_setting(db, "gdrive_storage_path")
+    current_path = setting.value.strip() if setting and setting.value else ""
+    return {"path": current_path}
+
+
+@router.post("/gdrive-storage")
+async def save_gdrive_storage_path(
+    payload: GdriveStoragePathRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Persist the GDrive poster storage path and apply it immediately."""
+    from pathlib import Path as _Path
+    from core.config import settings as app_settings
+
+    raw = payload.path.strip()
+
+    if raw:
+        # Validate: must be an absolute path, no traversal
+        try:
+            resolved = _Path(raw).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path")
+        if ".." in _Path(raw).parts:
+            raise HTTPException(status_code=400, detail="Path traversal not allowed")
+        if not _Path(raw).is_absolute():
+            raise HTTPException(status_code=400, detail="Path must be absolute")
+        save_value = raw
+        new_dir = _Path(raw)
+    else:
+        # Empty = revert to default
+        save_value = ""
+        new_dir = _Path("/config/posters/gdrive")
+
+    upsert_setting(db, "gdrive_storage_path", save_value)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.API, f"Failed to save gdrive_storage_path: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save setting")
+
+    # Apply immediately (without restart)
+    app_settings.gdrive_dir = new_dir
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    log_user_action("Updated GDrive storage path", path=str(new_dir))
+    return {"path": str(new_dir)}
