@@ -237,6 +237,9 @@
 }
 
 .gdrives .btn-toolbar.btn-toolbar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   border: 1px solid #4b5563;
   border-radius: 6px;
   background: #424242;
