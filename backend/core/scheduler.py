@@ -87,10 +87,12 @@ def _queue_pending_job(
     job_type: str,
     runner: Callable[..., Any],
     args_builder: Optional[Callable[[Job], tuple[Any, ...]]] = None,
+    runner_kwargs: Optional[dict] = None,
 ) -> Job:
     job = _create_pending_job(db, job_type)
     runner_args = args_builder(job) if args_builder else (job.id,)
-    job_queue.submit(runner, job.id, *runner_args)
+    kwargs = runner_kwargs or {}
+    job_queue.submit(runner, job.id, *runner_args, **kwargs)
     return job
 
 
@@ -111,7 +113,7 @@ def sync_one_drive_job(drive_id: int, job_id: int) -> dict:
     Sync a single drive. Used for both scheduled and manual syncs.
     Called by APScheduler for scheduled jobs, or as background task for manual syncs.
     """
-    return run_sync_one_job(drive_id, job_id)
+    return run_sync_one_job(drive_id, job_id, triggered_by="scheduled")
 
 def sync_all_drives_job(job_id: int) -> dict:
     """
@@ -121,7 +123,7 @@ def sync_all_drives_job(job_id: int) -> dict:
     Args:
         job_id: ID of the existing job record to track progress
     """
-    return run_sync_all_job(job_id)
+    return run_sync_all_job(job_id, triggered_by="scheduled")
 
 def sync_drive_group_job(drive_group: str) -> None:
     """
@@ -131,7 +133,7 @@ def sync_drive_group_job(drive_group: str) -> None:
     Args:
         drive_group: The group to sync - 'CL2K', 'MM2K', or 'Custom'
     """
-    return run_sync_group_job(drive_group)
+    return run_sync_group_job(drive_group, triggered_by="scheduled")
 
 
 def sync_drive_group_for_schedule(drive_group: str) -> None:
@@ -146,6 +148,7 @@ def sync_drive_group_for_schedule(drive_group: str) -> None:
             job_type_sync_group(drive_group),
             run_sync_group_job,
             args_builder=lambda job: (drive_group, job.id),
+            runner_kwargs={"triggered_by": "scheduled"},
         ),
     )
 
@@ -159,6 +162,7 @@ def run_workflow_for_schedule() -> None:
             JOB_TYPE_POSTER_WORKFLOW,
             run_flow_background_job,
             args_builder=lambda job: (job.id, False),
+            runner_kwargs={"triggered_by": "scheduled"},
         ),
     )
 
@@ -184,6 +188,7 @@ def run_poster_rename_for_schedule() -> None:
             JOB_TYPE_POSTER_RENAMER,
             run_rename_background_job,
             args_builder=lambda job: (job.id, config_data),
+            runner_kwargs={"triggered_by": "scheduled"},
         )
 
     _run_scheduled_operation("Scheduled Poster Renamer failed", _submit)
@@ -198,6 +203,7 @@ def run_unmatched_assets_for_schedule() -> None:
             JOB_TYPE_UNMATCHED_DETECTION,
             run_unmatched_detection_background_job,
             args_builder=lambda job: (job.id,),
+            runner_kwargs={"triggered_by": "scheduled"},
         ),
     )
 
@@ -214,6 +220,7 @@ def run_border_replacer_for_schedule() -> None:
             JOB_TYPE_BORDER_REPLACER,
             run_border_replacer_background_job,
             args_builder=lambda job: (job.id, False, mode),
+            runner_kwargs={"triggered_by": "scheduled"},
         )
 
     _run_scheduled_operation("Scheduled border replacer failed", _submit)

@@ -33,6 +33,7 @@ from models.job import (
 )
 from services.poster_renamer import PosterRenameService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
+from core.hooks import run_post_job_hook, HOOK_KEY_RENAMER
 
 
 def _extract_target_name(rename_message: str) -> str:
@@ -85,7 +86,7 @@ def _build_progress_callback(
     return rename_progress
 
 
-def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_discord: bool = False) -> None:
+def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_discord: bool = False, triggered_by: str = "manual") -> None:
     """
     Execute Poster Renamer in a background thread.
     Shared orchestration used by poster manager entrypoints.
@@ -426,4 +427,5 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
             db.rollback()
     finally:
         remove_job_log_handler(handler_id, "poster_renamer", success=success)
+        run_post_job_hook(HOOK_KEY_RENAMER, success=success, triggered_by=triggered_by, db=db)
         db.close()

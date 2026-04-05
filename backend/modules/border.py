@@ -26,6 +26,7 @@ from models.job import (
     mark_job_failed,
     update_job_state,
 )
+from core.hooks import run_post_job_hook, HOOK_KEY_BORDER
 
 
 def _build_progress_callback(
@@ -47,7 +48,7 @@ def _build_progress_callback(
     return border_progress
 
 
-def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode: str = "full") -> None:
+def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode: str = "full", triggered_by: str = "manual") -> None:
     """
     Execute border replacer in a background thread.
     Shared orchestration used by poster manager entrypoints.
@@ -180,4 +181,5 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
             db.rollback()
     finally:
         remove_job_log_handler(handler_id, "border_replacer", success=success)
+        run_post_job_hook(HOOK_KEY_BORDER, success=success, triggered_by=triggered_by, db=db)
         db.close()

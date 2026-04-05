@@ -29,6 +29,7 @@ from models.job import (
 from services.poster_renamer import PosterRenameService
 from services.unmatched_assets import UnmatchedAssetsService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
+from core.hooks import run_post_job_hook, HOOK_KEY_UNMATCHED
 
 
 def _build_progress_callback(
@@ -54,7 +55,7 @@ def _build_progress_callback(
     return unmatched_progress
 
 
-def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = False) -> None:
+def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = False, triggered_by: str = "manual") -> None:
     """
     Execute unmatched detection in a background thread.
     Shared orchestration used by poster manager entrypoints.
@@ -210,4 +211,5 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
             db.rollback()
     finally:
         remove_job_log_handler(handler_id, "unmatched_assets", success=success)
+        run_post_job_hook(HOOK_KEY_UNMATCHED, success=success, triggered_by=triggered_by, db=db)
         db.close()

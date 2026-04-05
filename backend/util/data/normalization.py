@@ -14,6 +14,7 @@ from util.constants import (
 )
 
 
+
 def remove_common_words(text: str) -> str:
     """Remove complete words found in common_words (case-insensitive).
 

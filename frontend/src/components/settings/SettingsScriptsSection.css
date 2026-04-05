@@ -1,0 +1,251 @@
+.scripts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.scripts-loading {
+  color: #aaa;
+  padding: 2rem;
+  text-align: center;
+}
+
+/* Info banner */
+
+.scripts-info-banner {
+  display: flex;
+  gap: 0.75rem;
+  background: rgba(100, 181, 246, 0.07);
+  border: 1px solid rgba(100, 181, 246, 0.2);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  color: #ccc;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.scripts-info-icon {
+  flex-shrink: 0;
+  color: #64b5f6;
+  margin-top: 2px;
+}
+
+.scripts-info-banner p {
+  margin: 0 0 0.5rem;
+}
+
+.scripts-info-banner p:last-child {
+  margin-bottom: 0;
+}
+
+.scripts-info-banner ul {
+  margin: 0.25rem 0 0.5rem 1.2rem;
+  padding: 0;
+}
+
+.scripts-info-banner ul li {
+  margin-bottom: 0.15rem;
+}
+
+.scripts-info-banner code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+  color: #90caf9;
+}
+
+.scripts-info-note {
+  color: #999;
+  font-size: 0.8rem;
+}
+
+/* Table header row */
+
+.scripts-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scripts-table-header h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.scripts-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  color: #ccc;
+  border-radius: 5px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.scripts-refresh-btn:hover:not(:disabled) {
+  background: #333;
+  color: #fff;
+}
+
+.scripts-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Empty notice */
+
+.scripts-empty-notice {
+  background: #1e1e1e;
+  border: 1px dashed #424242;
+  border-radius: 6px;
+  padding: 0.9rem 1.25rem;
+  color: #888;
+  font-size: 0.875rem;
+}
+
+.scripts-empty-notice code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+  color: #90caf9;
+}
+
+/* Hook table */
+
+.scripts-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.scripts-table-row {
+  display: grid;
+  grid-template-columns: 1.8fr 80px 1.5fr 1.2fr 1.2fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #2a2a2a;
+  transition: background 0.15s;
+}
+
+.scripts-table-row:last-child {
+  border-bottom: none;
+}
+
+.scripts-table-row--header {
+  background: #252525;
+  color: #888;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.scripts-table-row:not(.scripts-table-row--header) {
+  background: #1e1e1e;
+}
+
+.scripts-table-row--active:not(.scripts-table-row--header) {
+  background: rgba(100, 181, 246, 0.04);
+}
+
+.scripts-job-label {
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+/* Toggle switch */
+
+.scripts-toggle-cell {
+  display: flex;
+  justify-content: center;
+}
+
+.scripts-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.scripts-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.scripts-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #424242;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.scripts-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.scripts-toggle input:checked + .scripts-toggle-slider {
+  background: #64b5f6;
+}
+
+.scripts-toggle input:checked + .scripts-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* Select */
+
+.scripts-select {
+  width: 100%;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  color: #fff;
+  border-radius: 5px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.scripts-select:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.scripts-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Footer */
+
+.scripts-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}

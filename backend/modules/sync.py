@@ -23,6 +23,7 @@ from core.logging import (
     remove_job_log_handler,
 )
 from services.discord_notifications import send_discord_notification, send_major_error_notification
+from core.hooks import run_post_job_hook, HOOK_KEY_SYNC_ONE, HOOK_KEY_SYNC_ALL
 
 
 def _build_progress_callback(
@@ -45,12 +46,13 @@ def _build_progress_callback(
     return sync_progress
 
 
-def run_sync_one_job(drive_id: int, job_id: int) -> dict[str, Any]:
+def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -> dict[str, Any]:
     """
     Sync a single drive.
     Shared orchestration used by both manual API jobs and scheduler-triggered jobs.
     """
     handler_id = add_job_log_handler("sync_one", job_id)
+    success = False
 
     db = SessionLocal()
     try:
@@ -67,6 +69,7 @@ def run_sync_one_job(drive_id: int, job_id: int) -> dict[str, Any]:
         )
 
         if result.get('success'):
+            success = True
             log_debug(LogTags.SCHEDULER, f"Completed '{drive_name}'")
             send_discord_notification(
                 db,
@@ -127,10 +130,11 @@ def run_sync_one_job(drive_id: int, job_id: int) -> dict[str, Any]:
         raise
     finally:
         remove_job_log_handler(handler_id)
+        run_post_job_hook(HOOK_KEY_SYNC_ONE, success=success, triggered_by=triggered_by, db=db)
         db.close()
 
 
-def run_sync_all_job(job_id: int, skip_discord: bool = False) -> dict[str, Any]:
+def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str = "manual") -> dict[str, Any]:
     """
     Sync all subscribed drives.
     Shared orchestration used by both manual API jobs and scheduler-triggered jobs.
@@ -138,6 +142,7 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False) -> dict[str, Any]:
         skip_discord: When True, suppresses individual Discord notifications (e.g. when called from workflow).
     """
     handler_id = add_job_log_handler("sync_all", job_id)
+    success = False
 
     db = SessionLocal()
     try:
@@ -164,6 +169,7 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False) -> dict[str, Any]:
         )
 
         if result.get('success'):
+            success = True
             log_debug(LogTags.SCHEDULER, f"Completed sync: {result.get('message', 'Done')}")
             if not skip_discord:
                 send_discord_notification(
@@ -224,15 +230,17 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False) -> dict[str, Any]:
         raise
     finally:
         remove_job_log_handler(handler_id)
+        run_post_job_hook(HOOK_KEY_SYNC_ALL, success=success, triggered_by=triggered_by, db=db)
         db.close()
 
 
-def run_sync_group_job(drive_group: str, job_id: Optional[int] = None) -> None:
+def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered_by: str = "manual") -> None:
     """
     Sync all drives for a specific group (CL2K, MM2K, Custom), regardless of
     subscription status. Subscription is for the daily workflow; group syncs
     run all drives of that type unconditionally.
     """
+    success = False
     db = SessionLocal()
     try:
         log_debug(LogTags.SCHEDULER, f"Starting scheduled sync for {drive_group} drives")
@@ -289,6 +297,8 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None) -> None:
             progress_callback=_build_progress_callback(db, job.id, LogTags.SCHEDULER),
         )
 
+        if result.get('success'):
+            success = True
         log_debug(LogTags.SCHEDULER, f"Sync completed: {result.get('message', 'Done')}")
 
     except Exception as e:
@@ -297,4 +307,5 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None) -> None:
             mark_job_failed(db, job_id, e)
         raise
     finally:
+        run_post_job_hook(HOOK_KEY_SYNC_ALL, success=success, triggered_by=triggered_by, db=db)
         db.close()

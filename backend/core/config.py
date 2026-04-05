@@ -43,3 +43,4 @@ settings.config_dir.mkdir(parents=True, exist_ok=True)
 settings.logs_dir.mkdir(parents=True, exist_ok=True)
 # Note: gdrive_dir is created at startup after reading the persisted path setting
 (settings.config_dir / "idarr").mkdir(parents=True, exist_ok=True)
+(settings.config_dir / "scripts").mkdir(parents=True, exist_ok=True)

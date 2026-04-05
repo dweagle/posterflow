@@ -1,6 +1,6 @@
-import { Bell, Calendar, Cloud, Database, Server, Settings, Shield, Wrench } from 'lucide-react'
+import { Bell, Calendar, Cloud, Database, FileCode, Server, Settings, Shield, Wrench } from 'lucide-react'
 
-type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security'
+type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
 
 type SettingsTabsProps = {
   activeTab: SettingsTab
@@ -41,6 +41,10 @@ function SettingsTabs({ activeTab, onTabChange }: SettingsTabsProps) {
       <button className={activeTab === 'security' ? 'active' : ''} onClick={() => onTabChange('security')}>
         <Shield size={16} className="tab-icon" />
         Security
+      </button>
+      <button className={activeTab === 'scripts' ? 'active' : ''} onClick={() => onTabChange('scripts')}>
+        <FileCode size={16} className="tab-icon" />
+        Scripts
       </button>
     </div>
   )

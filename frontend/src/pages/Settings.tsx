@@ -27,17 +27,18 @@ import SettingsMediaSection from '../components/settings/SettingsMediaSection'
 import PlexLibraryModal from '../components/settings/PlexLibraryModal'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import SettingsSecuritySection from '../components/settings/SettingsSecuritySection'
+import SettingsScriptsSection from '../components/settings/SettingsScriptsSection'
 import { useSettingsSchedules } from '../hooks/useSettingsSchedules'
 import { useSettingsMedia } from '../hooks/useSettingsMedia'
 import { useSettingsOperations } from '../hooks/useSettingsOperations'
 import { useSettingsCore } from '../hooks/useSettingsCore'
 import './Settings.css'
 
-type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security'
+type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
 const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
 
 const isSettingsTab = (value: string): value is SettingsTab => {
-  return ['basic', 'notifications', 'rclone', 'media', 'scheduling', 'backup', 'maintenance', 'security'].includes(value)
+  return ['basic', 'notifications', 'rclone', 'media', 'scheduling', 'backup', 'maintenance', 'security', 'scripts'].includes(value)
 }
 
 type RcloneSettingsSnapshot = {
@@ -929,6 +930,10 @@ function Settings() {
 
       {activeTab === 'security' && (
         <SettingsSecuritySection showToast={showToast} />
+      )}
+
+      {activeTab === 'scripts' && (
+        <SettingsScriptsSection showToast={showToast} />
       )}
 
       <ConfirmDialog

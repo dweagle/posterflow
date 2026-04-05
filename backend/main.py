@@ -28,6 +28,7 @@ from api.database import router as database_router
 from api.idarr import router as idarr_router
 from api.maker_tools import router as maker_tools_router
 from api.stats import router as stats_router
+from api.scripts import router as scripts_router
 from services.drive_loader import load_drives_data
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -437,6 +438,7 @@ app.include_router(database_router)
 app.include_router(idarr_router)
 app.include_router(maker_tools_router)
 app.include_router(stats_router)
+app.include_router(scripts_router)
 
 # API health check (must be before catch-all frontend route)
 @app.get("/api/health")

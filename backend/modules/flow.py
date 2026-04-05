@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import traceback
+from functools import partial
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -40,6 +41,7 @@ from modules.renamer import run_rename_background_job, _build_renamer_section
 from modules.border import run_border_replacer_background_job
 from modules.unmatched import run_unmatched_detection_background_job
 from services.discord_notifications import send_discord_notification, send_discord_workflow_summary, send_major_error_notification
+from core.hooks import run_post_job_hook, HOOK_KEY_WORKFLOW
 
 
 def _create_child_job(db: Any, job_type: str, message: str) -> Job:
@@ -132,7 +134,7 @@ def _promote_child_progress_to_parent(
     return result_container["value"]
 
 
-def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optional[Callable[[], None]] = None) -> None:
+def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optional[Callable[[], None]] = None, triggered_by: str = "manual") -> None:
     """
     Execute the Flow workflow in a background thread.
     Shared orchestration used by poster manager entrypoints.
@@ -141,6 +143,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         job_id: Workflow job id
         dry_run: Whether to run in dry run mode
         on_finish: Optional callback executed in finally block (used to release locks)
+        triggered_by: "manual" or "scheduled"
     """
     db = SessionLocal()
 
@@ -216,7 +219,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     0,
                     30,
                     format_workflow_step(1, 4, "Syncing Google Drives..."),
-                    run_sync_all_job,
+                    partial(run_sync_all_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
                 child_ok, child_message = _get_child_result(db, sync_child.id)
@@ -302,7 +305,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     30,
                     60,
                     format_workflow_step(2, 4, "Renaming and organizing posters..."),
-                    run_rename_background_job,
+                    partial(run_rename_background_job, triggered_by="workflow"),
                     config_data,
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
@@ -409,7 +412,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     60,
                     75,
                     format_workflow_step(3, 4, "Applying borders to posters..."),
-                    run_border_replacer_background_job,
+                    partial(run_border_replacer_background_job, triggered_by="workflow"),
                     dry_run,
                     border_mode,
                 )
@@ -480,7 +483,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     75,
                     95,
                     format_workflow_step(4, 4, "Detecting unmatched assets..."),
-                    run_unmatched_detection_background_job,
+                    partial(run_unmatched_detection_background_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
                 child_ok, child_message = _get_child_result(db, unmatched_child.id)
@@ -651,6 +654,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             db.rollback()
     finally:
         remove_job_log_handler(workflow_handler_id, "workflow", success=success)
+        run_post_job_hook(HOOK_KEY_WORKFLOW, success=success, triggered_by=triggered_by, db=db)
         db.close()
         if on_finish:
             on_finish()
