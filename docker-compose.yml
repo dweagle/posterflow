@@ -5,8 +5,8 @@ services:
     ports:
       - 8357:8000
     volumes:
-      - ./config:/config   # Database, rclone config, logs, and idarr working dir
-      - ./posters:/posters # Downloaded GDrive poster files
+      - ./config:/config   # Database, rclone config, logs, default poster dir, and idarr working dir
+      # - ./posters:/posters  # Optional: mount a custom poster/gdrive storage path (configure path in Settings)
     environment:
       - PUID=1000
       - PGID=1000

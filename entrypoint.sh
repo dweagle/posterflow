@@ -16,8 +16,7 @@ if [ "$CURRENT_UID" != "$PUID" ]; then
 	usermod -o -u "$PUID" posterflow
 fi
 
-# Fix ownership of writable directories
-chown -R posterflow:posterflow /app /config /posters
+chown posterflow:posterflow /config
 
 TIMESTAMP=$(date +"%y/%m/%d %H:%M:%S")
 printf "%s | INFO     | [    STARTUP    ] • Entrypoint ready (uid=%s gid=%s)\n" "$TIMESTAMP" "$PUID" "$PGID"
