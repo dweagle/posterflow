@@ -436,11 +436,11 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           <>
             {step > 0 && (
               <div className="setup-steps">
-                <div className={`step ${step === 1 ? 'active' : ''}`}>1. Google Drive</div>
-                <div className={`step ${step === 2 ? 'active' : ''}`}>2. Storage</div>
-                <div className={`step ${step === 3 ? 'active' : ''}`}>3. Media Servers</div>
-                <div className={`step ${step === 4 ? 'active' : ''}`}>4. Destination</div>
-                <div className={`step ${step === 5 ? 'active' : ''}`}>5. Finish</div>
+                <div className={`step ${step === 1 ? 'active' : ''}`}><span className="step-number">1</span><span className="step-label">Google Drive</span></div>
+                <div className={`step ${step === 2 ? 'active' : ''}`}><span className="step-number">2</span><span className="step-label">Storage</span></div>
+                <div className={`step ${step === 3 ? 'active' : ''}`}><span className="step-number">3</span><span className="step-label">Media Servers</span></div>
+                <div className={`step ${step === 4 ? 'active' : ''}`}><span className="step-number">4</span><span className="step-label">Destination</span></div>
+                <div className={`step ${step === 5 ? 'active' : ''}`}><span className="step-number">5</span><span className="step-label">Finish</span></div>
               </div>
             )}
 
