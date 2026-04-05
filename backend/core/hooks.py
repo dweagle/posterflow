@@ -199,9 +199,9 @@ def run_post_job_hook(
             )
             if result.stdout.strip():
                 log_info(_TAG, f"Hook stdout:\n{result.stdout.strip()}", hook_key=hook_key)
-            if result.stderr.strip():
-                log_warning(_TAG, f"Hook stderr:\n{result.stderr.strip()}", hook_key=hook_key)
             if result.returncode != 0:
+                if result.stderr.strip():
+                    log_warning(_TAG, f"Hook stderr:\n{result.stderr.strip()}", hook_key=hook_key)
                 log_warning(
                     _TAG,
                     f"Hook '{script}' exited with code {result.returncode}",
@@ -209,6 +209,8 @@ def run_post_job_hook(
                     returncode=result.returncode,
                 )
             else:
+                if result.stderr.strip():
+                    log_info(_TAG, f"Hook stderr:\n{result.stderr.strip()}", hook_key=hook_key)
                 log_info(_TAG, f"Hook '{script}' completed successfully", hook_key=hook_key)
         except subprocess.TimeoutExpired:
             log_error(
