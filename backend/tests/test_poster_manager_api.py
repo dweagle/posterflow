@@ -273,21 +273,21 @@ def test_flow_module_delegates_to_module_runners(test_db, monkeypatch):
         child.message = f"{step_name} completed"
         test_db.commit()
 
-    def _sync_runner(child_job_id: int, skip_discord: bool = False):
+    def _sync_runner(child_job_id: int, skip_discord: bool = False, **kwargs):
         call_order.append("sync_drives")
         _complete_child(child_job_id, "sync")
         return {"success": True}
 
-    def _rename_runner(child_job_id: int, _config_data: dict, skip_discord: bool = False):
+    def _rename_runner(child_job_id: int, _config_data: dict, skip_discord: bool = False, **kwargs):
         call_order.append("rename_posters")
         rename_config.update(_config_data)
         _complete_child(child_job_id, "rename")
 
-    def _border_runner(child_job_id: int, _dry_run: bool, _mode: str):
+    def _border_runner(child_job_id: int, _dry_run: bool, _mode: str, **kwargs):
         call_order.append("border_replacer")
         _complete_child(child_job_id, "border")
 
-    def _unmatched_runner(child_job_id: int, skip_discord: bool = False):
+    def _unmatched_runner(child_job_id: int, skip_discord: bool = False, **kwargs):
         call_order.append("detect_unmatched")
         _complete_child(child_job_id, "unmatched")
 
