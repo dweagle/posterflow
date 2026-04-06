@@ -426,6 +426,6 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
             log_error(LogTags.POSTER_RENAMER, f"Failed to update job status: {commit_error}\n{traceback.format_exc()}")
             db.rollback()
     finally:
-        remove_job_log_handler(handler_id, "poster_renamer", success=success)
         run_post_job_hook(HOOK_KEY_RENAMER, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(handler_id, "poster_renamer", success=success)
         db.close()

@@ -210,6 +210,6 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
             log_error(LogTags.UNMATCHED, f"Failed to update job status: {commit_error}\n{traceback.format_exc()}")
             db.rollback()
     finally:
-        remove_job_log_handler(handler_id, "unmatched_assets", success=success)
         run_post_job_hook(HOOK_KEY_UNMATCHED, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(handler_id, "unmatched_assets", success=success)
         db.close()

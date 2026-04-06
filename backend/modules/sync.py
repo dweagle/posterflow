@@ -129,8 +129,8 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
 
         raise
     finally:
-        remove_job_log_handler(handler_id)
         run_post_job_hook(HOOK_KEY_SYNC_ONE, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(handler_id)
         db.close()
 
 
@@ -229,8 +229,8 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str 
 
         raise
     finally:
-        remove_job_log_handler(handler_id)
         run_post_job_hook(HOOK_KEY_SYNC_ALL, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(handler_id)
         db.close()
 
 

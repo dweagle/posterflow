@@ -653,8 +653,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             log_error(LogTags.WORKFLOW, f"Failed to update job status: {commit_error}\n{traceback.format_exc()}")
             db.rollback()
     finally:
-        remove_job_log_handler(workflow_handler_id, "workflow", success=success)
         run_post_job_hook(HOOK_KEY_WORKFLOW, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(workflow_handler_id, "workflow", success=success)
         db.close()
         if on_finish:
             on_finish()
