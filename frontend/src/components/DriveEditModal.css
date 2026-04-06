@@ -65,7 +65,7 @@
   margin-bottom: 0;
 }
 
-.modal-body label {
+.modal-body label:not(.checkbox-label):not(.delete-files-checkbox) {
   display: block;
   color: #ccc;
   font-weight: 500;
@@ -73,7 +73,7 @@
   font-size: 0.875rem;
 }
 
-.modal-body input {
+.modal-body input:not([type='checkbox']) {
   width: 100%;
   padding: 0.75rem;
   background-color: #2a2a2a;
@@ -95,7 +95,7 @@
   transition: border-color 0.2s;
 }
 
-.modal-body input:focus {
+.modal-body input:not([type='checkbox']):focus {
   border-color: #64b5f6;
   outline: none;
 }
@@ -105,7 +105,7 @@
   outline: none;
 }
 
-.modal-body input:disabled {
+.modal-body input:not([type='checkbox']):disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -117,20 +117,41 @@
   margin-top: 0.25rem;
 }
 
+.modal-body small code {
+  background: #2a2a2a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  color: #64b5f6;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
 .checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  background-color: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
   margin-bottom: 0;
 }
 
 .checkbox-label {
-  display: flex !important;
+  display: flex;
   align-items: center;
-  gap: 0.5rem;
   cursor: pointer;
 }
 
 .checkbox-label input[type='checkbox'] {
-  width: auto;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0;
   margin: 0;
+  margin-right: 0.65rem;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .modal-footer {

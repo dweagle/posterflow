@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react'
+import { useToast } from './Toast'
 import './DriveEditModal.css'
 
 interface AddCustomDriveModalProps {
@@ -16,15 +17,16 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
   const [driveId, setDriveId] = useState('')
   const [customPath, setCustomPath] = useState('')
   const [excludeFromSync, setExcludeFromSync] = useState(false)
+  const { showToast } = useToast()
 
   const handleAdd = () => {
     if (!name) {
-      alert('Drive name is required')
+      showToast('Drive name is required', 'error')
       return
     }
 
     if (!excludeFromSync && !driveId.trim()) {
-      alert('Google Drive ID is required when sync is enabled')
+      showToast('Google Drive ID is required when sync is enabled', 'error')
       return
     }
 
@@ -97,11 +99,19 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
               onChange={(e) => setCustomPath(e.target.value)}
               placeholder="e.g., Movies/Overrides"
             />
-            <small>
-              {excludeFromSync
-                ? 'Leave empty to use app default folder location. Set a custom path to use a specific subfolder.'
-                : 'Leave empty to sync to app default folder. Set to custom path to specific subfolders.'}
-            </small>
+            {excludeFromSync ? (
+              <>
+                <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
+                <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
+                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
+              </>
+            ) : (
+              <>
+                <small>Leave empty to sync into the default location: <code>{'<storage>/<style>/<drive name>'}</code>.</small>
+                <small><strong>Absolute path</strong> (starts with <code>/</code>): syncs directly into that folder, no subfolders added — e.g. <code>/media/posters/movies</code>.</small>
+                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>overrides/movies</code> → <code>/config/posters/gdrive/overrides/movies</code>.</small>
+              </>
+            )}
           </div>
         </div>
 

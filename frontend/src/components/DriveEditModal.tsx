@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react'
+import { useToast } from './Toast'
 import './DriveEditModal.css'
 
 interface DriveEditModalProps {
@@ -19,10 +20,11 @@ function DriveEditModal({ drive, onClose, onSave }: DriveEditModalProps) {
   const [customPath, setCustomPath] = useState(drive.custom_path || '')
   const [driveId, setDriveId] = useState(initiallyExcludedFromSync ? '' : (drive.drive_id || ''))
   const [excludeFromSync, setExcludeFromSync] = useState(initiallyExcludedFromSync)
+  const { showToast } = useToast()
 
   const handleSave = () => {
     if (drive.is_custom && !excludeFromSync && !driveId.trim()) {
-      alert('Google Drive ID is required when sync is enabled')
+      showToast('Google Drive ID is required when sync is enabled', 'error')
       return
     }
 

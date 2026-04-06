@@ -358,7 +358,7 @@
   gap: 1.5rem;
 }
 
-.checkbox-label {
+.poster-manager .checkbox-label {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
@@ -370,28 +370,28 @@
   transition: all 0.2s;
 }
 
-.checkbox-label:hover {
+.poster-manager .checkbox-label:hover {
   border-color: #444;
   background: #333;
 }
 
-.checkbox-label input[type="checkbox"] {
+.poster-manager .checkbox-label input[type="checkbox"] {
   margin-top: 0.25rem;
   flex-shrink: 0;
 }
 
-.checkbox-label span {
+.poster-manager .checkbox-label span {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.checkbox-label strong {
+.poster-manager .checkbox-label strong {
   color: #fff;
   font-size: 0.95rem;
 }
 
-.checkbox-label small {
+.poster-manager .checkbox-label small {
   color: #888;
   font-size: 0.8rem;
   line-height: 1.4;
