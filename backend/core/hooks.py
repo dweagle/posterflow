@@ -197,11 +197,20 @@ def run_post_job_hook(
                 text=True,
                 env=env,
             )
-            if result.stdout.strip():
-                log_info(_TAG, f"Hook stdout:\n{result.stdout.strip()}", hook_key=hook_key)
+
+            # Check whether script output logging is enabled (default: enabled)
+            _logging_raw = get_setting_value(session, "hooks_script_logging")
+            script_logging_enabled = _logging_raw.lower() != "false" if _logging_raw is not None else True
+
+            if script_logging_enabled:
+                for line in result.stdout.splitlines():
+                    if line.strip():
+                        log_info(_TAG, f"[{script}] {line.strip()}", hook_key=hook_key)
             if result.returncode != 0:
-                if result.stderr.strip():
-                    log_warning(_TAG, f"Hook stderr:\n{result.stderr.strip()}", hook_key=hook_key)
+                # Always show stderr on failure so the user knows what went wrong
+                for line in result.stderr.splitlines():
+                    if line.strip():
+                        log_warning(_TAG, f"[{script}] {line.strip()}", hook_key=hook_key)
                 log_warning(
                     _TAG,
                     f"Hook '{script}' exited with code {result.returncode}",
@@ -209,8 +218,10 @@ def run_post_job_hook(
                     returncode=result.returncode,
                 )
             else:
-                if result.stderr.strip():
-                    log_info(_TAG, f"Hook stderr:\n{result.stderr.strip()}", hook_key=hook_key)
+                if script_logging_enabled:
+                    for line in result.stderr.splitlines():
+                        if line.strip():
+                            log_info(_TAG, f"[{script}] {line.strip()}", hook_key=hook_key)
                 log_info(_TAG, f"Hook '{script}' completed successfully", hook_key=hook_key)
         except subprocess.TimeoutExpired:
             log_error(

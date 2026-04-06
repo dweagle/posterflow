@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FileCode, RefreshCw } from 'lucide-react'
-import { getAvailableScripts, getHooks, saveHooks, type HookConfig } from '../../api/scripts'
+import { getAvailableScripts, getHooks, saveHooks, getScriptLogging, setScriptLogging, type HookConfig } from '../../api/scripts'
 import './SettingsScriptsSection.css'
 
 type ToastType = 'success' | 'error' | 'info'
@@ -27,14 +27,17 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [refreshingScripts, setRefreshingScripts] = useState(false)
+  const [scriptLoggingEnabled, setScriptLoggingEnabled] = useState(true)
+  const [togglingLogging, setTogglingLogging] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [hooksRes, scriptsRes] = await Promise.all([getHooks(), getAvailableScripts()])
+      const [hooksRes, scriptsRes, loggingRes] = await Promise.all([getHooks(), getAvailableScripts(), getScriptLogging()])
       setHooks(hooksRes.hooks)
       setScriptsDir(hooksRes.scripts_dir)
       setAvailableScripts(scriptsRes.scripts)
+      setScriptLoggingEnabled(loggingRes.enabled)
     } catch {
       showToast('Failed to load scripts configuration', 'error')
     } finally {
@@ -64,6 +67,20 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
       ...prev,
       [key]: { ...prev[key], [field]: value },
     }))
+  }
+
+  const handleToggleLogging = async (enabled: boolean) => {
+    setScriptLoggingEnabled(enabled) // optimistic update — prevents controlled-input flash
+    setTogglingLogging(true)
+    try {
+      await setScriptLogging(enabled)
+      showToast(`Script logging ${enabled ? 'enabled' : 'disabled'}`, 'success')
+    } catch {
+      setScriptLoggingEnabled(!enabled) // revert on failure
+      showToast('Failed to update script logging setting', 'error')
+    } finally {
+      setTogglingLogging(false)
+    }
   }
 
   const handleSave = async () => {
@@ -116,15 +133,29 @@ function SettingsScriptsSection({ showToast }: SettingsScriptsSectionProps) {
 
       <div className="scripts-table-header">
         <h3>Post-Job Hooks</h3>
-        <button
-          className="scripts-refresh-btn"
-          onClick={refreshScripts}
-          disabled={refreshingScripts}
-          title="Refresh script list from disk"
-        >
-          <RefreshCw size={14} className={refreshingScripts ? 'spinning' : ''} />
-          Refresh
-        </button>
+        <div className="scripts-table-header-actions">
+          <div className="scripts-logging-toggle">
+            <span className="scripts-logging-label">Show script output in PosterFlow logs</span>
+            <label className="scripts-toggle" title={scriptLoggingEnabled ? 'Script output shown in logs' : 'Script output hidden from logs'}>
+              <input
+                type="checkbox"
+                checked={scriptLoggingEnabled}
+                disabled={togglingLogging}
+                onChange={(e) => handleToggleLogging(e.target.checked)}
+              />
+              <span className="scripts-toggle-slider" />
+            </label>
+          </div>
+          <button
+            className="scripts-refresh-btn"
+            onClick={refreshScripts}
+            disabled={refreshingScripts}
+            title="Refresh script list from disk"
+          >
+            <RefreshCw size={14} className={refreshingScripts ? 'spinning' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {availableScripts.length === 0 && (

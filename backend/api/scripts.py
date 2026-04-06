@@ -14,6 +14,8 @@ router = APIRouter(prefix="/api/scripts", tags=["scripts"])
 _VALID_RUN_WHEN = {"always", "scheduled", "manual"}
 _VALID_TRIGGER_ON = {"always", "success", "failure"}
 
+SETTING_SCRIPT_LOGGING = "hooks_script_logging"
+
 
 class HookConfig(BaseModel):
     enabled: bool = False
@@ -24,6 +26,10 @@ class HookConfig(BaseModel):
 
 class HooksPayload(BaseModel):
     hooks: Dict[str, HookConfig]
+
+
+class ScriptLoggingPayload(BaseModel):
+    enabled: bool
 
 
 @router.get("/available")
@@ -91,3 +97,21 @@ def save_hooks(payload: HooksPayload, db: Session = Depends(get_db)):
     log_info(LogTags.API, f"Saved {len(validated)} hook(s)")
 
     return {"message": "Hooks saved", "hooks": validated}
+
+
+@router.get("/logging")
+def get_script_logging(db: Session = Depends(get_db)):
+    """Return whether script stdout/stderr logging is enabled."""
+    raw = get_setting_value(db, SETTING_SCRIPT_LOGGING)
+    # Default: enabled
+    enabled = raw.lower() == "true" if raw is not None else True
+    return {"enabled": enabled}
+
+
+@router.put("/logging")
+def set_script_logging(payload: ScriptLoggingPayload, db: Session = Depends(get_db)):
+    """Enable or disable script stdout/stderr logging."""
+    upsert_setting(db, SETTING_SCRIPT_LOGGING, "true" if payload.enabled else "false")
+    db.commit()
+    log_user_action("Updated script logging setting", enabled=payload.enabled)
+    return {"enabled": payload.enabled}

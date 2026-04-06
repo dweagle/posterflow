@@ -26,3 +26,9 @@ export const getHooks = (): Promise<HooksResponse> =>
 
 export const saveHooks = (hooks: Record<string, Omit<HookConfig, 'label'>>): Promise<{ message: string }> =>
   putData<{ message: string }>('/api/scripts/hooks', { hooks })
+
+export const getScriptLogging = (): Promise<{ enabled: boolean }> =>
+  getData<{ enabled: boolean }>('/api/scripts/logging')
+
+export const setScriptLogging = (enabled: boolean): Promise<{ enabled: boolean }> =>
+  putData<{ enabled: boolean }>('/api/scripts/logging', { enabled })

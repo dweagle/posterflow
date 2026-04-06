@@ -7,11 +7,15 @@ const mockShowToast = vi.fn()
 const mockGetAvailableScripts = vi.fn()
 const mockGetHooks = vi.fn()
 const mockSaveHooks = vi.fn()
+const mockGetScriptLogging = vi.fn()
+const mockSetScriptLogging = vi.fn()
 
 vi.mock('../../src/api/scripts', () => ({
   getAvailableScripts: (...args: unknown[]) => mockGetAvailableScripts(...args),
   getHooks: (...args: unknown[]) => mockGetHooks(...args),
   saveHooks: (...args: unknown[]) => mockSaveHooks(...args),
+  getScriptLogging: (...args: unknown[]) => mockGetScriptLogging(...args),
+  setScriptLogging: (...args: unknown[]) => mockSetScriptLogging(...args),
 }))
 
 const DEFAULT_HOOKS = {
@@ -33,6 +37,8 @@ describe('SettingsScriptsSection', () => {
     mockGetHooks.mockResolvedValue({ hooks: DEFAULT_HOOKS, scripts_dir: '/config/scripts' })
     mockGetAvailableScripts.mockResolvedValue({ scripts: ['test_hook.sh', 'notify.sh'], scripts_dir: '/config/scripts' })
     mockSaveHooks.mockResolvedValue({ message: 'Hooks saved' })
+    mockGetScriptLogging.mockResolvedValue({ enabled: true })
+    mockSetScriptLogging.mockResolvedValue({ enabled: true })
   })
 
   it('renders all six job type rows after loading', async () => {

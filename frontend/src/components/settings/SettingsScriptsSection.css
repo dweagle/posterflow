@@ -74,6 +74,31 @@
   font-size: 1rem;
 }
 
+.scripts-table-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.scripts-logging-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.scripts-logging-label {
+  font-size: 0.85rem;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+/* Logging toggle reuses scripts-toggle but needs explicit block sizing */
+.scripts-logging-toggle .scripts-toggle {
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+}
+
 .scripts-refresh-btn {
   display: inline-flex;
   align-items: center;

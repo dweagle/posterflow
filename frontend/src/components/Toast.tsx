@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react'
 import './Toast.css'
 
 interface Toast {
@@ -24,17 +24,19 @@ export const useToast = () => {
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now()
     setToasts(prev => [...prev, { id, message, type }])
     
     setTimeout(() => {
       setToasts(prev => prev.filter(toast => toast.id !== id))
     }, 4000)
-  }
+  }, [])
+
+  const contextValue = useMemo(() => ({ showToast }), [showToast])
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <div className="toast-container">
         {toasts.map(toast => (
