@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
 from core.config import settings
 from core.logging import log_info, LogTags
@@ -14,6 +14,13 @@ engine = create_engine(
     connect_args={"check_same_thread": False},  # Needed for SQLite
     echo=False  # Disable SQL query logging (causes log spam)
 )
+
+# Enable WAL mode so readers don't block writers and vice versa
+@event.listens_for(engine, "connect")
+def set_wal_mode(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

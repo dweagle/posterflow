@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from typing import Any, Callable, Dict, List
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timedelta, timezone
@@ -145,6 +146,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if has_active_jobs
                     else settings.job_ws_poll_interval_idle
                 )
+            except SQLAlchemyOperationalError as e:
+                if "database is locked" in str(e):
+                    # SQLite is busy with a heavy write (e.g. bulk border processing).
+                    # Skip this poll cycle and retry after a short back-off rather
+                    # than crashing the WebSocket connection.
+                    log_debug(LogTags.WEBSOCKET, f"Job WS #{conn_id} DB busy, skipping poll cycle", conn_id=conn_id)
+                    sleep_seconds = 1.0
+                else:
+                    raise
             finally:
                 db.close()
 

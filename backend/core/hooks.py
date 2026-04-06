@@ -90,6 +90,17 @@ def _validate_script(filename: str) -> tuple[bool, str]:
     if not os.access(script_path, os.X_OK):
         return False, f"Script is not executable: '{filename}' — run: chmod +x /config/scripts/{filename}"
 
+    try:
+        with open(script_path, "rb") as f:
+            first_line = f.readline()
+        if first_line.endswith(b"\r\n"):
+            return False, (
+                f"Script '{filename}' has Windows line endings (CRLF). "
+                f"Convert with: sed -i 's/\\r//' /config/scripts/{filename}"
+            )
+    except OSError:
+        pass
+
     return True, ""
 
 
@@ -227,6 +238,14 @@ def run_post_job_hook(
             log_error(
                 _TAG,
                 f"Hook '{script}' timed out after {SCRIPT_EXECUTION_TIMEOUT}s",
+                hook_key=hook_key,
+                script=script,
+            )
+        except FileNotFoundError:
+            log_error(
+                _TAG,
+                f"Hook '{script}' could not be executed — the script or its shebang interpreter was not found. "
+                f"Ensure the script starts with a valid shebang (e.g. #!/bin/bash) and has Unix (LF) line endings.",
                 hook_key=hook_key,
                 script=script,
             )
