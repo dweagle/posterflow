@@ -19,8 +19,14 @@ engine = create_engine(
 @event.listens_for(engine, "connect")
 def set_wal_mode(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.close()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        # WAL is a persistent DB-level setting; if another connection already
+        # set it (or the DB is briefly locked during startup), this is safe to ignore.
+        pass
+    finally:
+        cursor.close()
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
