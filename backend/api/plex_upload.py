@@ -48,6 +48,7 @@ from modules.upload import (
     _build_cache_clear_response as build_cache_clear_response,
     _build_cache_export_payload as build_cache_export_payload,
     _cache_summary as cache_summary,
+    _fast_cache_summary as fast_cache_summary,
     _clear_webhook_dedupe_cache as clear_webhook_dedupe_cache,
     _coerce_webhook_retry_int as coerce_webhook_retry_int,
     _increment_webhook_stat as increment_webhook_stat,
@@ -1051,8 +1052,7 @@ async def save_plex_upload_library_override_settings(
 async def get_plex_upload_cache(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get persisted per-file Plex upload cache used for skip logic."""
     try:
-        cache = load_plex_upload_file_cache(db)
-        return cache_summary(cache)
+        return fast_cache_summary(db)
     except Exception as e:
         raise_internal_error("Failed to get plex upload file cache", e)
 

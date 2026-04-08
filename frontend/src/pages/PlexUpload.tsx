@@ -808,7 +808,6 @@ function PlexUpload() {
 
     fetchLatestPlexJob()
     fetchWebhookStats()
-    fetchUploadCache()
 
     const loadToggleSettings = async () => {
       await Promise.all([fetchManualSettings(), fetchWebhookSettings(), fetchLibraryOverrideSettings()])
@@ -818,6 +817,10 @@ function PlexUpload() {
       }
 
       setToggleSettingsReady(true)
+
+      if (!cancelled) {
+        fetchUploadCache()
+      }
     }
 
     loadToggleSettings()

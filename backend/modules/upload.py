@@ -9,6 +9,7 @@ import time
 import traceback
 from typing import Any, Dict, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.logging import (
@@ -829,6 +830,64 @@ def _cache_summary(cache: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         "entries_count": len(entries),
         "total_library_refs": total_library_refs,
         "total_edition_refs": total_edition_refs,
+        "entries": entries,
+    }
+
+
+
+def _fast_cache_summary(db: Session) -> Dict[str, Any]:
+    """
+    Build a cache summary using targeted SQL queries instead of loading all records.
+
+    Returns the same shape as _cache_summary but only fetches the last 10 entries
+    for the recent-entries display widget.  Aggregate counts use SQL so the event
+    loop is not held up iterating thousands of ORM objects.
+    """
+    from models.plex_upload import PlexUploadRecord
+
+    entries_count = db.query(func.count()).select_from(PlexUploadRecord).scalar() or 0
+
+    total_library_refs = (
+        db.query(
+            func.coalesce(
+                func.sum(func.json_array_length(PlexUploadRecord.uploaded_to_libraries)),
+                0,
+            )
+        ).scalar()
+        or 0
+    )
+
+    total_edition_refs = (
+        db.query(
+            func.coalesce(
+                func.sum(func.json_array_length(PlexUploadRecord.uploaded_editions)),
+                0,
+            )
+        ).scalar()
+        or 0
+    )
+
+    recent_records_desc = (
+        db.query(PlexUploadRecord)
+        .order_by(PlexUploadRecord.id.desc())
+        .limit(10)
+        .all()
+    )
+    # Reverse back to ascending order so the frontend's .slice(-10).reverse() works correctly
+    recent_records = list(reversed(recent_records_desc))
+
+    entries = [
+        {
+            "file_path": record.file_path,
+            **record.to_dict(),
+        }
+        for record in recent_records
+    ]
+
+    return {
+        "entries_count": entries_count,
+        "total_library_refs": int(total_library_refs),
+        "total_edition_refs": int(total_edition_refs),
         "entries": entries,
     }
 
