@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, getUnmatchedStats, UnmatchedStats, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType } from '../api/client'
 import { useNavigate } from 'react-router-dom'
-import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw } from 'lucide-react'
+import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import './Dashboard.css'
@@ -14,7 +14,9 @@ function Dashboard() {
   const [unmatchedStats, setUnmatchedStats] = useState<UnmatchedStats | null>(null)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [recentPosters, setRecentPosters] = useState<RecentSyncedPoster[]>([])
-  const [recentPosterIndex, setRecentPosterIndex] = useState(0)
+  const [posterFilter, setPosterFilter] = useState<'all' | 'movie' | 'season' | 'collection'>('all')
+  const [carouselPage, setCarouselPage] = useState(0)
+  const [expandedPoster, setExpandedPoster] = useState<RecentSyncedPoster | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [idarrTargets, setIdarrTargets] = useState<MakerIdarrSyncTarget[]>([])
   const [activityStats, setActivityStats] = useState<PosterActivityStats | null>(null)
@@ -24,6 +26,8 @@ function Dashboard() {
   const [renameRunning, setRenameRunning] = useState(false)
   const [queuePopoverOpen, setQueuePopoverOpen] = useState(false)
   const [displayJobProgress, setDisplayJobProgress] = useState(0)
+  const [hoveredSchedule, setHoveredSchedule] = useState<{ data: Schedule; rect: DOMRect } | null>(null)
+  const scheduleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastDisplayJobIdRef = useRef<number | null>(null)
   const { showToast } = useToast()
 
@@ -102,9 +106,8 @@ function Dashboard() {
 
   const fetchRecentPosters = async () => {
     await fetchWithLogging(async () => {
-      const data = await getRecentSyncedPosters(25)
+      const data = await getRecentSyncedPosters(100)
       setRecentPosters(data.items)
-      setRecentPosterIndex(0)
     }, 'Error fetching recent posters:')
   }
 
@@ -172,6 +175,7 @@ function Dashboard() {
       }
     })
   }
+
 
   const formatNextRun = (nextRun: string | null) => {
     if (!nextRun) return 'Not scheduled'
@@ -327,6 +331,14 @@ function Dashboard() {
     return null
   }
 
+  const truncateText = (value: string, maxLength: number) => {
+    const normalized = String(value || '')
+    if (normalized.length <= maxLength) {
+      return normalized
+    }
+    return `${normalized.slice(0, maxLength)}…`
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'running': return '#2196f3'
@@ -337,38 +349,36 @@ function Dashboard() {
     }
   }
 
-  const truncateText = (value: string, maxLength: number) => {
-    const normalized = String(value || '')
-    if (normalized.length <= maxLength) {
-      return normalized
-    }
-    return `${normalized.slice(0, maxLength)}…`
-  }
-
-  const sortedSchedules = [...schedules].sort((a, b) => {
-    const aTime = a.next_run ? new Date(a.next_run).getTime() : Number.POSITIVE_INFINITY
-    const bTime = b.next_run ? new Date(b.next_run).getTime() : Number.POSITIVE_INFINITY
-    return aTime - bTime
-  })
-
-  const currentRecentPoster = recentPosters.length > 0
-    ? recentPosters[((recentPosterIndex % recentPosters.length) + recentPosters.length) % recentPosters.length]
-    : null
-
   const getRecentPosterImageUrl = (poster: RecentSyncedPoster) => {
     const versionToken = poster.downloaded_at || String((poster as { file_mtime?: number }).file_mtime || poster.id)
     return `${poster.image_url}?v=${encodeURIComponent(versionToken)}`
   }
 
-  const goToPreviousRecentPoster = () => {
-    if (recentPosters.length === 0) return
-    setRecentPosterIndex((prev) => (prev - 1 + recentPosters.length) % recentPosters.length)
+  const getPosterMediaType = (poster: RecentSyncedPoster): 'season' | 'collection' | 'movie' => {
+    const name = poster.file_name
+    if (/season\s*\d+|specials/i.test(name)) return 'season'
+    if (!/\(\d{4}\)/.test(name)) return 'collection'
+    return 'movie'
   }
 
-  const goToNextRecentPoster = () => {
-    if (recentPosters.length === 0) return
-    setRecentPosterIndex((prev) => (prev + 1) % recentPosters.length)
+  const POSTERS_PER_PAGE = 10
+  const filteredPosters = posterFilter === 'all'
+    ? recentPosters
+    : recentPosters.filter(p => getPosterMediaType(p) === posterFilter)
+  const totalPages = Math.ceil(filteredPosters.length / POSTERS_PER_PAGE)
+  const clampedPage = Math.min(carouselPage, Math.max(0, totalPages - 1))
+  const pagePosters = filteredPosters.slice(clampedPage * POSTERS_PER_PAGE, (clampedPage + 1) * POSTERS_PER_PAGE)
+  const goCarouselPage = (dir: 'prev' | 'next') => {
+    setCarouselPage(p => dir === 'prev' ? Math.max(0, p - 1) : Math.min(totalPages - 1, p + 1))
   }
+
+  // Close lightbox on Escape
+  useEffect(() => {
+    if (!expandedPoster) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpandedPoster(null) }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [expandedPoster])
 
   const runningJobs = jobs
     .filter(job => job.status === 'running')
@@ -377,6 +387,13 @@ function Dashboard() {
     .filter(job => job.status === 'pending')
     .sort((a, b) => a.id - b.id)
   const displayJob = runningJobs[0] || queuedJobs[0] || null
+
+  const sortedSchedules = [...schedules].sort((a, b) => {
+    // Sort chronologically by next_run, nulls (disabled/no schedule) at end
+    const aTime = a.next_run ? new Date(a.next_run).getTime() : Number.POSITIVE_INFINITY
+    const bTime = b.next_run ? new Date(b.next_run).getTime() : Number.POSITIVE_INFINITY
+    return aTime - bTime
+  })
 
   useEffect(() => {
     if (!displayJob || displayJob.status !== 'running') {
@@ -429,13 +446,9 @@ function Dashboard() {
 
   return (
     <div className="page-container dashboard">
-      <h1>Dashboard</h1>
-
-      <div className="quick-actions-bar">
-        <div className="quick-actions-header">
-          <h2>Quick Actions</h2>
-        </div>
-        <div className="quick-actions-buttons">
+      <div className="dashboard-header">
+        <h1>Dashboard</h1>
+        <div className="dashboard-header-actions">
           <button className="quick-action-btn" onClick={handleRunFlow} disabled={flowRunning}>
             <Waves size={18} className="icon-workflow" />
             <span className="action-title">Run Workflow</span>
@@ -524,10 +537,52 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="dashboard-panels-grid">
-        <div className="stat-card recent-posters-card panel-recent">
-          <div className="recent-posters-card-header">
-            <h3>Recently Synced Posters</h3>
+      {/* Recently Synced Posters – full-width carousel */}
+      {/* Poster lightbox */}
+      {expandedPoster && (
+        <div className="poster-lightbox-overlay" onClick={() => setExpandedPoster(null)}>
+          <div className="poster-lightbox-content" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className="poster-lightbox-close"
+              onClick={() => setExpandedPoster(null)}
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={getRecentPosterImageUrl(expandedPoster)}
+              alt={expandedPoster.file_name}
+              className="poster-lightbox-img"
+            />
+            <div className="poster-lightbox-meta">
+              <span className="poster-lightbox-name">{expandedPoster.file_name.replace(/\.[^.]+$/, '')}</span>
+              <span className="poster-lightbox-drive">{expandedPoster.drive_name}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recently Synced Posters – paged carousel */}
+      <div className="poster-carousel-section stat-card">
+        <div className="poster-carousel-header">
+          <h3>Recently Synced Posters</h3>
+          <div className="poster-carousel-header-right">
+            <div className="poster-filter-bar">
+              {(['all', 'movie', 'season', 'collection'] as const).map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`poster-filter-btn${posterFilter === f ? ' active' : ''}`}
+                  onClick={() => { setPosterFilter(f); setCarouselPage(0) }}
+                >
+                  {f === 'all' ? 'All' : f === 'movie' ? 'Movie / Show' : f === 'season' ? 'Season' : 'Collection'}
+                </button>
+              ))}
+            </div>
+            <span className="poster-carousel-count">
+              {filteredPosters.length > 0 ? `${clampedPage + 1} / ${totalPages}` : '0 results'}
+            </span>
             <button
               className="recent-posters-refresh-btn"
               onClick={fetchRecentPosters}
@@ -537,228 +592,291 @@ function Dashboard() {
               <RefreshCw size={14} />
             </button>
           </div>
-          <div className="stat-details recent-posters-details">
-            {currentRecentPoster ? (
-              <>
-                <div className="recent-poster-carousel">
-                  <button type="button" className="recent-poster-nav" onClick={goToPreviousRecentPoster} aria-label="Previous poster">
-                    <ChevronLeft size={18} />
-                  </button>
-                  <div className="recent-poster-image-wrap">
-                    <img src={getRecentPosterImageUrl(currentRecentPoster)} alt={currentRecentPoster.file_name} className="recent-poster-image" />
+        </div>
+        {filteredPosters.length > 0 ? (
+          <div className="poster-carousel-outer">
+            <button
+              type="button"
+              className="poster-carousel-nav poster-carousel-nav-left"
+              onClick={() => goCarouselPage('prev')}
+              aria-label="Previous page"
+              disabled={clampedPage === 0}
+            >
+              <ChevronLeft size={22} />
+            </button>
+            <div className="poster-carousel-track-clip">
+              <div className="poster-carousel-track">
+              {pagePosters.map(poster => (
+                <div
+                  key={poster.id}
+                  className="poster-carousel-item"
+                  onClick={() => setExpandedPoster(poster)}
+                  title={poster.file_name.replace(/\.[^.]+$/, '')}
+                >
+                  <div className="poster-carousel-thumb-wrap">
+                    <img
+                      src={getRecentPosterImageUrl(poster)}
+                      alt={poster.file_name}
+                      className="poster-carousel-thumb"
+                      loading="lazy"
+                    />
                   </div>
-                  <button type="button" className="recent-poster-nav" onClick={goToNextRecentPoster} aria-label="Next poster">
-                    <ChevronRight size={18} />
-                  </button>
+                  <span className="poster-carousel-label" title={poster.drive_name}>
+                    {poster.drive_name}
+                  </span>
                 </div>
-                <div className="recent-poster-drive">
-                  Added in: <strong>{currentRecentPoster.drive_name}</strong>
-                </div>
-                {recentPosters.length > 1 && (
-                  <div className="recent-poster-position">
-                    {recentPosterIndex + 1} / {recentPosters.length}
+              ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="poster-carousel-nav poster-carousel-nav-right"
+              onClick={() => goCarouselPage('next')}
+              aria-label="Next page"
+              disabled={clampedPage >= totalPages - 1}
+            >
+              <ChevronRight size={22} />
+            </button>
+          </div>
+        ) : (
+          <div className="poster-carousel-empty">
+            {recentPosters.length === 0 ? 'No recently synced posters' : `No ${posterFilter} posters in recent history`}
+          </div>
+        )}
+      </div>
+
+      {/* Three-column grid: Active Jobs | Scheduled Tasks | Poster Stats */}
+      <div className="dashboard-three-col-grid">
+
+        {/* Active Jobs */}
+        <div className="active-jobs-bar stat-card">
+          <div className="active-jobs-header">
+            <h2>Active Jobs</h2>
+            <div className="active-jobs-summary">
+              <div className={`active-slot-indicator ${runningJobs.length > 0 ? 'busy' : 'idle'}`}>
+                <span className="slot-label">Slot</span>
+                <span className="slot-value">{runningJobs.length > 0 ? '1/1 Busy' : '0/1 Idle'}</span>
+              </div>
+              <div
+                className="queue-popover-wrap"
+                onMouseEnter={() => setQueuePopoverOpen(true)}
+                onMouseLeave={() => setQueuePopoverOpen(false)}
+              >
+                <button
+                  type="button"
+                  className={`queued-count-indicator queue-trigger ${queuedJobs.length === 0 ? 'empty' : ''}`}
+                  onClick={() => setQueuePopoverOpen(prev => !prev)}
+                  aria-label="Show queued jobs"
+                >
+                  <ListOrdered size={14} />
+                  <span>{queuedJobs.length} queued</span>
+                </button>
+                {queuePopoverOpen && (
+                  <div className="queue-popover">
+                    <div className="queue-popover-title">Queued Jobs</div>
+                    {queuedJobs.length === 0 ? (
+                      <div className="queue-empty">No queued jobs</div>
+                    ) : (
+                      <ul className="queue-list">
+                        {queuedJobs.map((job, index) => (
+                          <li key={job.id} className="queue-item">
+                            <span className="queue-index">#{index + 1}</span>
+                            <div className="queue-content">
+                              <span className="queue-type">{formatJobType(job.job_type)}</span>
+                              <span className="queue-message">{job.message || 'Waiting for available slot...'}</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
-              </>
-            ) : (
-              <div className="stat-item">
-                <span style={{ color: '#888', fontStyle: 'italic' }}>No recently synced posters</span>
               </div>
-            )}
+            </div>
+          </div>
+          {displayJob ? (
+            <div className="jobs-list">
+              <div key={displayJob.id} className={`job-item ${displayJob.status === 'pending' ? 'queued' : 'running'}`}>
+                <div className="job-header">
+                  <span className="job-type">{formatJobType(displayJob.job_type).toUpperCase()}</span>
+                  <span className="job-status" style={{ color: getStatusColor(displayJob.status) }}>
+                    {displayJob.status === 'pending' ? 'queued' : displayJob.status}
+                  </span>
+                </div>
+                <div className="job-message">{displayJob.message}</div>
+                {displayJob.status === 'pending' ? (
+                  <div className="job-progress queued-indicator">
+                    <span className="queue-icon">⏳</span>
+                    <span className="progress-text">Waiting for available slot...</span>
+                  </div>
+                ) : (
+                  <div className="job-progress">
+                    <div className="progress-bar" style={{ width: `${displayJobProgress}%` }} />
+                    <span className="progress-text">{displayJobProgress}%</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="no-active-jobs">
+              <span className="no-active-jobs-dot" />
+              <span className="no-active-jobs-label">No active jobs</span>
+            </div>
+          )}
+        </div>
+
+        {/* Poster Stats */}
+        <div className="stat-card poster-stats-card">
+          <h3>Poster Stats</h3>
+          <div className="poster-stats-grid">
+            {/* Header row */}
+            <span className="psg-section-label">Synced Drives</span>
+            <span className="psg-section-total">{stats?.drives.subscribed || 0} / {stats?.drives.total || 0}</span>
+            <span className="psg-divider" />
+            <span className="psg-section-label">Posters</span>
+            <span className="psg-section-total">{stats?.subscribed_posters || 0}</span>
+            <span className="psg-divider" />
+            <span />
+            <span className="psg-col-head">Today</span>
+            <span className="psg-col-head">Week</span>
+            <span className="psg-col-head">Month</span>
+            {/* Row separator */}
+            <span className="psg-row-sep" />
+            {/* CL2K row */}
+            <span><span className="stat-badge cl2k">CL2K</span></span>
+            <span className="psg-val">{driveCountsByType.synced.cl2k} / {driveCountsByType.subscribed.cl2k}</span>
+            <span className="psg-divider" />
+            <span><span className="stat-badge cl2k">CL2K</span></span>
+            <span className="psg-val">{stats?.posters_by_type.cl2k || 0}</span>
+            <span className="psg-divider" />
+            <span className="psg-act-label">New Synced</span>
+            <span className="psg-act-val">{activityStats?.synced_new_today ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_new_week ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_new_month ?? '—'}</span>
+            {/* MM2K row */}
+            <span><span className="stat-badge mm2k">MM2K</span></span>
+            <span className="psg-val">{driveCountsByType.synced.mm2k} / {driveCountsByType.subscribed.mm2k}</span>
+            <span className="psg-divider" />
+            <span><span className="stat-badge mm2k">MM2K</span></span>
+            <span className="psg-val">{stats?.posters_by_type.mm2k || 0}</span>
+            <span className="psg-divider" />
+            <span className="psg-act-label">Replaced</span>
+            <span className="psg-act-val">{activityStats?.synced_replaced_today ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_replaced_week ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_replaced_month ?? '—'}</span>
+            {/* Custom row */}
+            <span><span className="stat-badge custom">Custom</span></span>
+            <span className="psg-val">{driveCountsByType.synced.custom} / {driveCountsByType.subscribed.custom}</span>
+            <span className="psg-divider" />
+            <span><span className="stat-badge custom">Custom</span></span>
+            <span className="psg-val">{stats?.posters_by_type.custom || 0}</span>
+            <span className="psg-divider" />
+            <span className="psg-act-label">Deleted</span>
+            <span className="psg-act-val">{activityStats?.synced_deleted_today ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_deleted_week ?? '—'}</span>
+            <span className="psg-act-val">{activityStats?.synced_deleted_month ?? '—'}</span>
           </div>
         </div>
 
-        <div className="right-column">
-          <div className="right-top-cards">
-            <div className="stat-card schedule-stat-card">
-              <div className="schedule-card-header-row">
-                <div className="schedule-card-title-inline">
-                  <h3>Scheduled Tasks:</h3>
-                  <span className="schedule-count-inline">{schedules.length}</span>
-                </div>
-                <button type="button" className="schedule-settings-link" onClick={openSchedulingSettings}>
-                  Manage
-                </button>
-              </div>
-              <div className="stat-details schedule-stat-details">
-                <div className="stat-row schedule-summary-row">
-                  <span className="stat-label">Enabled:</span>
-                  <span className="stat-number">{schedules.filter(s => s.enabled).length} / {schedules.length}</span>
-                </div>
-                <div className="stat-breakdown schedule-breakdown-scroll">
-                  {schedules.length > 0 ? (
-                    sortedSchedules.map((schedule, index) => (
-                      <div key={schedule.id} className="stat-item schedule-item">
-                        <div className="schedule-main">
-                          <span className="schedule-inline" title={`${schedule.name} · ${getScheduleTaskLabel(schedule.job_type)}${getScheduleScope(schedule) ? ` · ${getScheduleScope(schedule)}` : ''} · ${getScheduleCadence(schedule)} · ${index === 0 && schedule.next_run ? 'Next up · ' : ''}${formatNextRun(schedule.next_run)}`}>
-                            <span className="schedule-primary-line">
-                              <span className="schedule-name-inline">{truncateText(schedule.name, 22)}</span>
-                              <span className="schedule-separator"> · </span>
-                              <span className="schedule-task-inline">{getScheduleTaskLabel(schedule.job_type)}</span>
-                              {getScheduleScope(schedule)
-                                ? (
-                                  <>
-                                    <span className="schedule-separator"> · </span>
-                                    <span className="schedule-scope-inline">{getScheduleScope(schedule)}</span>
-                                  </>
-                                )
-                                : ''}
-                            </span>
-                            <span className="schedule-detail-line">
-                              <span className="schedule-cadence-inline">{getScheduleCadence(schedule)}</span>
-                              <span className="schedule-separator"> · </span>
-                              <span className="schedule-time-inline">{index === 0 && schedule.next_run ? 'Next up · ' : ''}{formatNextRun(schedule.next_run)}</span>
-                            </span>
-                          </span>
-                        </div>
-                        <span className={`schedule-badge ${schedule.enabled ? 'enabled' : 'disabled'}`}>
-                          {schedule.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="stat-item">
-                      <span style={{ color: '#888', fontStyle: 'italic' }}>No schedules configured</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+        {/* Scheduled Tasks */}
+        <div className="stat-card schedule-stat-card">
+          <div className="schedule-card-header-row">
+            <div className="schedule-card-title-inline">
+              <h3>Scheduled Tasks:</h3>
+              <span className="schedule-count-inline">{schedules.length}</span>
             </div>
-
-            <div className="stat-card poster-stats-card">
-              <h3>Poster Stats</h3>
-              <div className="stat-details">
-                <div className="combined-columns">
-                  <div className="combined-section">
-                    <div className="stat-row">
-                      <span className="stat-label">Synced Drives:</span>
-                      <span className="stat-number">{stats?.drives.subscribed || 0} / {stats?.drives.total || 0}</span>
-                    </div>
-                    <div className="stat-breakdown">
-                      <div className="stat-item"><span className="stat-badge cl2k">CL2K</span><span>{driveCountsByType.synced.cl2k} / {driveCountsByType.subscribed.cl2k}</span></div>
-                      <div className="stat-item"><span className="stat-badge mm2k">MM2K</span><span>{driveCountsByType.synced.mm2k} / {driveCountsByType.subscribed.mm2k}</span></div>
-                      <div className="stat-item"><span className="stat-badge custom">Custom</span><span>{driveCountsByType.synced.custom} / {driveCountsByType.subscribed.custom}</span></div>
-                    </div>
-                  </div>
-                  <div className="combined-section combined-section-right">
-                    <div className="stat-row">
-                      <span className="stat-label">Posters:</span>
-                      <span className="stat-number">{stats?.subscribed_posters || 0}</span>
-                    </div>
-                    <div className="stat-breakdown">
-                      <div className="stat-item"><span className="stat-badge cl2k">CL2K</span><span>{stats?.posters_by_type.cl2k || 0} </span></div>
-                      <div className="stat-item"><span className="stat-badge mm2k">MM2K</span><span>{stats?.posters_by_type.mm2k || 0} </span></div>
-                      <div className="stat-item"><span className="stat-badge custom">Custom</span><span>{stats?.posters_by_type.custom || 0} </span></div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="stat-section-divider" />
-
-                <div className="activity-stats-section">
-                  <div className="activity-stats-row activity-stats-header">
-                    <span className="activity-stat-label" />
-                    <span className="activity-stat-col-head">Today</span>
-                    <span className="activity-stat-col-head">Week</span>
-                    <span className="activity-stat-col-head">Month</span>
-                  </div>
-                  <div className="activity-stats-row">
-                    <span className="activity-stat-label">New Synced</span>
-                    <span className="activity-stat-value">{activityStats?.synced_new_today ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_new_week ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_new_month ?? '—'}</span>
-                  </div>
-                  <div className="activity-stats-row">
-                    <span className="activity-stat-label">Replaced</span>
-                    <span className="activity-stat-value">{activityStats?.synced_replaced_today ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_replaced_week ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_replaced_month ?? '—'}</span>
-                  </div>
-                  <div className="activity-stats-row">
-                    <span className="activity-stat-label">Deleted</span>
-                    <span className="activity-stat-value">{activityStats?.synced_deleted_today ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_deleted_week ?? '—'}</span>
-                    <span className="activity-stat-value">{activityStats?.synced_deleted_month ?? '—'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            </div>
-
-          <div className="active-jobs-bar right-active-jobs">
-          <div className="active-jobs-header">
-              <h2>Active Jobs</h2>
-              <div className="active-jobs-summary">
-                <div className={`active-slot-indicator ${runningJobs.length > 0 ? 'busy' : 'idle'}`}>
-                  <span className="slot-label">Slot</span>
-                  <span className="slot-value">{runningJobs.length > 0 ? '1/1 Busy' : '0/1 Idle'}</span>
-                </div>
-                <div
-                  className="queue-popover-wrap"
-                  onMouseEnter={() => setQueuePopoverOpen(true)}
-                  onMouseLeave={() => setQueuePopoverOpen(false)}
-                >
-                  <button
-                    type="button"
-                    className={`queued-count-indicator queue-trigger ${queuedJobs.length === 0 ? 'empty' : ''}`}
-                    onClick={() => setQueuePopoverOpen(prev => !prev)}
-                    aria-label="Show queued jobs"
+            <button type="button" className="schedule-settings-link" onClick={openSchedulingSettings}>
+              Manage
+            </button>
+          </div>
+          <div className="schedule-stat-details">
+            <div className="schedule-breakdown-scroll">
+              {schedules.length > 0 ? (
+                sortedSchedules.map((schedule) => (
+                  <div
+                    key={schedule.id}
+                    className="schedule-row"
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget
+                      if (scheduleHoverTimerRef.current) clearTimeout(scheduleHoverTimerRef.current)
+                      scheduleHoverTimerRef.current = setTimeout(() => {
+                        setHoveredSchedule({ data: schedule, rect: el.getBoundingClientRect() })
+                      }, 400)
+                    }}
+                    onMouseLeave={() => {
+                      if (scheduleHoverTimerRef.current) clearTimeout(scheduleHoverTimerRef.current)
+                      setHoveredSchedule(null)
+                    }}
                   >
-                    <ListOrdered size={14} />
-                    <span>{queuedJobs.length} queued</span>
-                  </button>
-                  {queuePopoverOpen && (
-                    <div className="queue-popover">
-                      <div className="queue-popover-title">Queued Jobs</div>
-                      {queuedJobs.length === 0 ? (
-                        <div className="queue-empty">No queued jobs</div>
-                      ) : (
-                        <ul className="queue-list">
-                          {queuedJobs.map((job, index) => (
-                            <li key={job.id} className="queue-item">
-                              <span className="queue-index">#{index + 1}</span>
-                              <div className="queue-content">
-                                <span className="queue-type">{formatJobType(job.job_type)}</span>
-                                <span className="queue-message">{job.message || 'Waiting for available slot...'}</span>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {displayJob ? (
-              <div className="jobs-list">
-                <div key={displayJob.id} className={`job-item ${displayJob.status === 'pending' ? 'queued' : 'running'}`}>
-                  <div className="job-header">
-                    <span className="job-type">{formatJobType(displayJob.job_type).toUpperCase()}</span>
-                    <span className="job-status" style={{ color: getStatusColor(displayJob.status) }}>
-                      {displayJob.status === 'pending' ? 'queued' : displayJob.status}
+                    <span className={`sched-dot ${schedule.enabled ? 'enabled' : 'disabled'}`} />
+                    <span className="sched-name">{truncateText(schedule.name, 22)}</span>
+                    <span className="sched-meta">
+                      <span className="sched-task">{getScheduleTaskLabel(schedule.job_type)}</span>
+                      {getScheduleScope(schedule) ? (
+                        <>
+                          <span className="sched-sep"> · </span>
+                          <span className="sched-scope">{getScheduleScope(schedule)}</span>
+                        </>
+                      ) : null}
+                    </span>
+                    <span className="sched-next">
+                      {schedule.next_run ? formatNextRun(schedule.next_run) : '—'}
                     </span>
                   </div>
-                  <div className="job-message">{displayJob.message}</div>
-                  {displayJob.status === 'pending' ? (
-                    <div className="job-progress queued-indicator">
-                      <span className="queue-icon">⏳</span>
-                      <span className="progress-text">Waiting for available slot...</span>
-                    </div>
-                  ) : (
-                    <div className="job-progress">
-                      <div className="progress-bar" style={{ width: `${displayJobProgress}%` }} />
-                      <span className="progress-text">{displayJobProgress}%</span>
-                    </div>
-                  )}
+                ))
+              ) : (
+                <div className="stat-item">
+                  <span style={{ color: '#888', fontStyle: 'italic' }}>No schedules configured</span>
                 </div>
-              </div>
-            ) : (
-              <div className="no-active-jobs">No active jobs</div>
-            )}
+              )}
+            </div>
           </div>
         </div>
+
+      {hoveredSchedule && (() => {
+        const { data: s, rect } = hoveredSchedule
+        const tooltipWidth = 260
+        let left = rect.left
+        if (left + tooltipWidth > window.innerWidth - 8) {
+          left = window.innerWidth - tooltipWidth - 8
+        }
+        const spaceBelow = window.innerHeight - rect.bottom
+        const top = spaceBelow > 140 ? rect.bottom + 6 : rect.top - 6
+        const above = spaceBelow <= 140
+        return (
+          <div
+            className={`sched-tooltip-popup${above ? ' above' : ''}`}
+            style={{ left, top, width: tooltipWidth }}
+          >
+            <div className="scht-header">
+              <span className="scht-name">{s.name}</span>
+              <span className={`scht-status ${s.enabled ? 'enabled' : 'disabled'}`}>
+                {s.enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <div className="scht-row">
+              <span className="scht-label">Task</span>
+              <span className="scht-value scht-task">{getScheduleTaskLabel(s.job_type)}</span>
+            </div>
+            {getScheduleScope(s) && (
+              <div className="scht-row">
+                <span className="scht-label">Scope</span>
+                <span className="scht-value">{getScheduleScope(s)}</span>
+              </div>
+            )}
+            <div className="scht-row">
+              <span className="scht-label">Schedule</span>
+              <span className="scht-value scht-cadence">{getScheduleCadence(s)}</span>
+            </div>
+            {s.next_run && (
+              <div className="scht-row">
+                <span className="scht-label">Next run</span>
+                <span className="scht-value scht-next">{formatNextRun(s.next_run)}</span>
+              </div>
+            )}
+          </div>
+        )
+      })()}
       </div>
     </div>
   )

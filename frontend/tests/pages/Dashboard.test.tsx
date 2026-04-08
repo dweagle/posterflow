@@ -93,7 +93,7 @@ describe('Dashboard', () => {
       expect(mockGetUnmatchedStats).toHaveBeenCalledTimes(1)
       expect(mockGetSchedules).toHaveBeenCalledTimes(1)
       expect(mockGetDrives).toHaveBeenCalledTimes(1)
-      expect(mockGetRecentSyncedPosters).toHaveBeenCalledWith(25)
+      expect(mockGetRecentSyncedPosters).toHaveBeenCalledWith(100)
     })
 
     expect(screen.getByText('3 / 4')).toBeTruthy()

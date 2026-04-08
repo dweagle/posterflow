@@ -44,7 +44,7 @@ export interface RecentSyncedPosterResponse {
   count: number
 }
 
-export const getRecentSyncedPosters = async (limit: number = 10): Promise<RecentSyncedPosterResponse> => {
+export const getRecentSyncedPosters = async (limit: number = 100): Promise<RecentSyncedPosterResponse> => {
   return getData(`/api/stats/recent-posters?limit=${limit}`)
 }
 

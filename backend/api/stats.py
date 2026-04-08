@@ -11,6 +11,7 @@ from models.job import (
     JOB_STATUS_COMPLETED,
     JOB_TYPE_POSTER_RENAMER,
     JOB_TYPE_BORDER_REPLACER,
+    JOB_TYPE_GDRIVE_SYNC,
 )
 from models.drive import Drive
 from models.poster import Poster
@@ -201,8 +202,8 @@ async def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_d
     Ordering prioritizes the poster content timestamp (file mtime) and falls back
     to DB download timestamp when mtime is unavailable.
     """
-    safe_limit = max(1, min(limit, 50))
-    raw_limit = min(safe_limit * 8, 400)
+    safe_limit = max(1, min(limit, 100))
+    raw_limit = min(safe_limit * 8, 800)
     content_recency = func.coalesce(
         Poster.file_mtime,
         func.strftime('%s', Poster.downloaded_at).cast(Float),
@@ -368,7 +369,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
             if border_match:
                 posters_borders_replaced_today += int(border_match.group(1))
 
-        if job_type.startswith("Sync"):
+        if job_type.startswith("Sync") or job_type == JOB_TYPE_GDRIVE_SYNC:
             added_match = sync_added_pattern.search(message)
             if added_match:
                 synced_new_today += int(added_match.group(1))
@@ -387,7 +388,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
         if not message:
             continue
 
-        if job_type.startswith("Sync"):
+        if job_type.startswith("Sync") or job_type == JOB_TYPE_GDRIVE_SYNC:
             added_match = sync_added_pattern.search(message)
             if added_match:
                 synced_new_week += int(added_match.group(1))
@@ -406,7 +407,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
         if not message:
             continue
 
-        if job_type.startswith("Sync"):
+        if job_type.startswith("Sync") or job_type == JOB_TYPE_GDRIVE_SYNC:
             added_match = sync_added_pattern.search(message)
             if added_match:
                 synced_new_month += int(added_match.group(1))
