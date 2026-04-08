@@ -113,6 +113,7 @@ function PlexUpload() {
     }
     return 'settings'
   })
+  const [manualSettingsReady, setManualSettingsReady] = useState(false)
   const [toggleSettingsReady, setToggleSettingsReady] = useState(false)
   const [dryRun, setDryRun] = useState(true)
   const [reapply, setReapply] = useState(false)
@@ -389,6 +390,7 @@ function PlexUpload() {
       showToast(getApiErrorMessage(error, 'Failed to load manual settings'), 'error')
     } finally {
       setManualSettingsLoading(false)
+      setManualSettingsReady(true)
     }
   }
 
@@ -826,13 +828,13 @@ function PlexUpload() {
   }, [])
 
   useEffect(() => {
-    if (!toggleSettingsReady) {
+    if (!manualSettingsReady) {
       return
     }
 
     const currentSnapshot = createManualSnapshot(dryRun, reapply, removeOverlayLabel)
     setHasUnsavedManualSettings(JSON.stringify(currentSnapshot) !== JSON.stringify(manualBaselineRef.current))
-  }, [toggleSettingsReady, dryRun, reapply, removeOverlayLabel])
+  }, [manualSettingsReady, dryRun, reapply, removeOverlayLabel])
 
   useEffect(() => {
     if (!toggleSettingsReady) {
@@ -1036,7 +1038,7 @@ function PlexUpload() {
                 type="button"
                 className={`plex-refresh-btn ${hasUnsavedManualSettings ? 'btn-unsaved' : ''}`}
                 onClick={saveManualSettings}
-                disabled={!toggleSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
               >
                 {manualSettingsSaving ? 'Saving…' : 'Save Manual Settings'}
               </button>
@@ -1044,7 +1046,7 @@ function PlexUpload() {
             <p className="card-description">These options apply to both manual run actions below: <strong>All Posters</strong> and <strong>Single Poster</strong>.</p>
             <p className="card-description">Pre-upload preparation follows your configured <strong>Poster Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
 
-            {!toggleSettingsReady ? (
+            {!manualSettingsReady ? (
               <p className="card-description">Loading saved manual options…</p>
             ) : (
               <>
@@ -1086,9 +1088,9 @@ function PlexUpload() {
               <h2>Manual Upload (All Posters)</h2>
               <p className="card-description">Queue a background Plex upload job for all posters from the current poster destination.</p>
 
-              {!toggleSettingsReady && <p className="card-description">Loading run options…</p>}
+              {!manualSettingsReady && <p className="card-description">Loading run options…</p>}
 
-              <button type="button" className="plex-run-btn" onClick={runUpload} disabled={!toggleSettingsReady || loading || isJobActive}>
+              <button type="button" className="plex-run-btn" onClick={runUpload} disabled={!manualSettingsReady || loading || isJobActive}>
                 <UploadCloud size={18} />
                 {loading ? 'Starting…' : isJobActive ? 'Job Running…' : 'Run All Posters Upload'}
               </button>
@@ -1202,7 +1204,7 @@ function PlexUpload() {
               type="button"
               className="plex-run-btn"
               onClick={runSingleUpload}
-              disabled={!toggleSettingsReady || !selectedSourcePoster || singleUploadLoading || isJobActive}
+              disabled={!manualSettingsReady || !selectedSourcePoster || singleUploadLoading || isJobActive}
             >
               <UploadCloud size={18} />
               {singleUploadLoading ? 'Starting Single Upload…' : 'Upload Selected to Plex'}
