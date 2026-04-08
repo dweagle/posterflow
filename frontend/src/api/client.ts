@@ -108,6 +108,7 @@ export {
   type FlowResult,
   type PosterConfig,
   type PosterSearchItem,
+  type TmdbCandidate,
   type UnmatchedStats,
   getDrivePriority,
   getFlowConfig,
@@ -119,6 +120,7 @@ export {
   saveFlowConfig,
   savePosterConfig,
   searchPosters,
+  searchUnmatchedTmdb,
   startPosterRename,
   startUnmatchedDetection,
 } from './posterManager'

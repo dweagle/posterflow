@@ -114,6 +114,27 @@ export const startUnmatchedDetection = async (): Promise<{ success: boolean; job
   return postData('/api/poster-manager/detect-unmatched')
 }
 
+export interface TmdbCandidate {
+  tmdb_id: number
+  tvdb_id: number | null
+  imdb_id: string | null
+  title: string
+  year: number | null
+  poster_url: string | null
+  overview: string
+  popularity: number
+  media_type: 'movie' | 'show' | 'collection'
+  match_reason: string
+}
+
+export const searchUnmatchedTmdb = async (params: {
+  title: string
+  year: number | null
+  type: 'movie' | 'show' | 'collection'
+}): Promise<{ candidates: TmdbCandidate[] }> => {
+  return postData('/api/poster-manager/unmatched-tmdb-search', params)
+}
+
 export const searchPosters = async (query: string, limit: number = 200): Promise<PosterSearchResponse> => {
   return getData('/api/stats/poster-search', {
     params: {

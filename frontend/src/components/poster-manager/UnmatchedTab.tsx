@@ -1,4 +1,5 @@
-import { AlertCircle, Download, RefreshCw, Save } from 'lucide-react'
+import { AlertCircle, Download, Eye, EyeOff, List, RefreshCw, Save, Search } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
 
@@ -19,9 +20,12 @@ type UnmatchedTabProps = {
   unmatchedIgnoreRootFoldersText: string
   unmatchedIgnoreCollectionsText: string
   unmatchedIgnoreUnmonitored: boolean
+  unmatchedTmdbApiKey: string
   onSetUnmatchedIgnoreRootFoldersText: (value: string) => void
   onSetUnmatchedIgnoreCollectionsText: (value: string) => void
   onSetUnmatchedIgnoreUnmonitored: (value: boolean) => void
+  onSetUnmatchedTmdbApiKey: (value: string) => void
+  onOpenModal: (type: 'movies' | 'series' | 'seasons' | 'collections') => void
 }
 
 function UnmatchedTab({
@@ -41,11 +45,15 @@ function UnmatchedTab({
   unmatchedIgnoreRootFoldersText,
   unmatchedIgnoreCollectionsText,
   unmatchedIgnoreUnmonitored,
+  unmatchedTmdbApiKey,
   onSetUnmatchedIgnoreRootFoldersText,
   onSetUnmatchedIgnoreCollectionsText,
   onSetUnmatchedIgnoreUnmonitored,
+  onSetUnmatchedTmdbApiKey,
+  onOpenModal,
 }: UnmatchedTabProps) {
   const navigate = useNavigate()
+  const [showTmdbKey, setShowTmdbKey] = useState(false)
 
   const openSchedulingSettings = () => {
     localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
@@ -87,10 +95,27 @@ function UnmatchedTab({
             {detectingUnmatched ? 'Detecting...' : 'Detect Unmatched'}
           </button>
           {unmatchedStats && unmatchedStats.last_run && (
-            <button className="btn-toolbar" onClick={onDownloadReport} title="Download complete report of all unmatched items">
-              <Download size={16} />
-              Download Report
-            </button>
+            <>
+              <button
+                className="btn-toolbar btn-primary"
+                onClick={() => {
+                  // Open the first category that has missing items
+                  if ((unmatchedStats.unmatched.movies?.length ?? 0) > 0) return onOpenModal('movies')
+                  if (unmatchedStats.unmatched.series?.some((s) => s.missing_main_poster)) return onOpenModal('series')
+                  if (unmatchedStats.unmatched.series?.some((s) => s.missing_seasons?.length > 0)) return onOpenModal('seasons')
+                  if ((unmatchedStats.unmatched.collections?.length ?? 0) > 0) return onOpenModal('collections')
+                  onOpenModal('movies')
+                }}
+                title="View and search missing items"
+              >
+                <Search size={16} />
+                View / Search
+              </button>
+              <button className="btn-toolbar" onClick={onDownloadReport} title="Download complete report of all unmatched items">
+                <Download size={16} />
+                Download Report
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -135,6 +160,12 @@ function UnmatchedTab({
                     )}
                   </div>
                 )}
+                {unmatchedStats.unmatched.movies && unmatchedStats.unmatched.movies.length > 0 && (
+                  <button className="card-view-all-btn" onClick={() => onOpenModal('movies')}>
+                    <List size={14} />
+                    View All {unmatchedStats.unmatched.movies.length} Missing
+                  </button>
+                )}
               </div>
             )}
 
@@ -177,6 +208,12 @@ function UnmatchedTab({
                       <div className="list-more">+ {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length - cardPreviewLimit} more...</div>
                     )}
                   </div>
+                )}
+                {unmatchedStats.unmatched.series && unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length > 0 && (
+                  <button className="card-view-all-btn" onClick={() => onOpenModal('series')}>
+                    <List size={14} />
+                    View All {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length} Missing
+                  </button>
                 )}
               </div>
             )}
@@ -226,6 +263,12 @@ function UnmatchedTab({
                     )}
                   </div>
                 )}
+                {unmatchedStats.unmatched.series && unmatchedStats.unmatched.series.filter((s) => s.missing_seasons?.length > 0).length > 0 && (
+                  <button className="card-view-all-btn" onClick={() => onOpenModal('seasons')}>
+                    <List size={14} />
+                    View All {unmatchedStats.unmatched.series.filter((s) => s.missing_seasons?.length > 0).length} Missing
+                  </button>
+                )}
               </div>
             )}
 
@@ -264,6 +307,12 @@ function UnmatchedTab({
                       <div className="list-more">+ {unmatchedStats.unmatched.collections.length - cardPreviewLimit} more...</div>
                     )}
                   </div>
+                )}
+                {unmatchedStats.unmatched.collections && unmatchedStats.unmatched.collections.length > 0 && (
+                  <button className="card-view-all-btn" onClick={() => onOpenModal('collections')}>
+                    <List size={14} />
+                    View All {unmatchedStats.unmatched.collections.length} Missing
+                  </button>
                 )}
               </div>
             )}
@@ -313,6 +362,31 @@ function UnmatchedTab({
                 <small>Exclude unmonitored movies, series, and seasons from unmatched detection.</small>
               </span>
             </label>
+
+            <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>TMDB API Key</label>
+            <div className="tmdb-key-input-row">
+              <input
+                type={showTmdbKey ? 'text' : 'password'}
+                className="settings-input tmdb-key-input"
+                value={unmatchedTmdbApiKey}
+                onChange={(e) => onSetUnmatchedTmdbApiKey(e.target.value)}
+                placeholder="Enter your TMDB API key"
+              />
+              <button
+                className="tmdb-key-toggle"
+                type="button"
+                onClick={() => setShowTmdbKey((v) => !v)}
+                title={showTmdbKey ? 'Hide key' : 'Show key'}
+              >
+                {showTmdbKey ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+            <small>
+              Used to search TMDB when viewing unmatched items. Get your key at{' '}
+              <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                themoviedb.org
+              </a>.
+            </small>
           </div>
 
           <div className="field-group">

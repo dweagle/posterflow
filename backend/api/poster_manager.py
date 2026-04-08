@@ -5,9 +5,13 @@ from pydantic import BaseModel
 import traceback
 import os
 import json
+import re
+import unicodedata
+import requests as http_requests
 from pathlib import Path
 import threading
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
 from database import get_db
 from core.job_queue import job_queue
@@ -42,6 +46,7 @@ SETTING_POSTER_DRIVE_PRIORITY = "poster_drive_priority"
 SETTING_AUTO_RUN_BORDER = "auto_run_border"
 SETTING_BORDER_REPLACER_MODE = "border_replacer_mode"
 SETTING_POSTER_FLOW_CONFIG = "poster_flow_config"
+SETTING_UNMATCHED_TMDB_API_KEY = "unmatched_tmdb_api_key"
 
 # Global lock to prevent multiple flow executions
 _flow_lock = threading.Lock()
@@ -557,6 +562,230 @@ async def start_unmatched_detection(
     except Exception as e:
         log_error(LogTags.UNMATCHED, f"Error during detection: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class UnmatchedTmdbSearchRequest(BaseModel):
+    title: str
+    year: Optional[int] = None
+    type: str  # "movie", "show", "collection"
+
+
+def _get_unmatched_tmdb_key(db: Session) -> str:
+    """Get TMDB API key from the unmatched assets setting."""
+    setting = get_setting(db, SETTING_UNMATCHED_TMDB_API_KEY)
+    if not setting or not setting.value:
+        return ""
+    return setting.value.strip()
+
+
+_TMDB_TITLE_ALIASES: Dict[str, str] = {
+    "&": "and", "and": "and",
+    "vs.": "versus", "vs": "versus",
+    "ep.": "episode", "ep": "episode",
+    "vol.": "volume", "vol": "volume",
+    "pt.": "part", "pt": "part",
+    "dr.": "doctor", "dr": "doctor", "doctor": "doctor",
+}
+
+
+def _tmdb_normalize(value: str) -> str:
+    """Normalize a title for comparison: strip accents, punctuation, apply canonical aliases."""
+    normalized = re.sub(r"[''`\u02b9\u02bc]", "", str(value or ""))
+    normalized = normalized.replace(":", "")
+    normalized = unicodedata.normalize("NFKD", normalized).encode("ASCII", "ignore").decode()
+    words = re.split(r"(\W+)", normalized)
+    mapped = [_TMDB_TITLE_ALIASES.get(t.lower(), t.lower()) if t.strip() else t for t in words]
+    return re.sub(r"\s+", " ", "".join(mapped)).strip().lower()
+
+
+def _tmdb_word_jaccard(left: str, right: str) -> float:
+    left_words = set(re.findall(r"\w+", left.lower()))
+    right_words = set(re.findall(r"\w+", right.lower()))
+    if not left_words or not right_words:
+        return 0.0
+    return len(left_words & right_words) / len(left_words | right_words)
+
+
+def _tmdb_score_candidates(
+    title: str,
+    year: Optional[int],
+    candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Score and sort TMDB candidate results using fuzzy title + year matching."""
+    requested_norm = _tmdb_normalize(title)
+    scored = []
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+
+        candidate_title = str(candidate.get("title") or candidate.get("name") or "").strip()
+        candidate_norms = [
+            _tmdb_normalize(candidate_title),
+            _tmdb_normalize(str(candidate.get("original_title") or "")),
+            _tmdb_normalize(str(candidate.get("original_name") or "")),
+        ]
+        candidate_norms = [v for v in candidate_norms if v]
+        if not candidate_norms:
+            continue
+
+        release_text = str(candidate.get("release_date") or candidate.get("first_air_date") or "").strip()
+        candidate_year = int(release_text[:4]) if len(release_text) >= 4 and release_text[:4].isdigit() else None
+
+        ratio = max(
+            (SequenceMatcher(None, requested_norm, n).ratio() for n in candidate_norms),
+            default=0.0,
+        ) if requested_norm else 0.0
+        jaccard = max(
+            (_tmdb_word_jaccard(requested_norm, n) for n in candidate_norms),
+            default=0.0,
+        ) if requested_norm else 0.0
+
+        exact_title = bool(requested_norm and any(requested_norm == n for n in candidate_norms))
+        year_match = bool(isinstance(year, int) and isinstance(candidate_year, int) and year == candidate_year)
+        year_close = bool(isinstance(year, int) and isinstance(candidate_year, int) and abs(year - candidate_year) <= 1)
+
+        score = int(ratio * 60) + int(jaccard * 20)
+        if exact_title:
+            score += 15
+        if year_match:
+            score += 20
+        elif year_close:
+            score += 10
+
+        if exact_title and year_match:
+            reason = "exact"
+        elif exact_title:
+            reason = "exact_title"
+        elif ratio >= 0.90 and (year_match or year_close):
+            reason = "fuzzy_title_year"
+        elif ratio >= 0.90:
+            reason = "fuzzy_title"
+        elif jaccard >= 0.75 and (year_match or year_close):
+            reason = "token_overlap_year"
+        elif year_match:
+            reason = "year_match_only"
+        else:
+            reason = "rank_fallback"
+
+        scored.append({"candidate": candidate, "score": score, "reason": reason})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored
+
+
+@router.post("/unmatched-tmdb-search")
+async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Search TMDB for candidates matching an unmatched media item.
+    Returns up to 10 candidate results with title, year, poster URL, and TMDB link.
+    """
+    title = (payload.title or "").strip()
+    year = payload.year if isinstance(payload.year, int) else None
+    media_type = (payload.type or "").strip().lower()
+
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if media_type not in {"movie", "show", "collection"}:
+        raise HTTPException(status_code=400, detail="type must be one of: movie, show, collection")
+
+    tmdb_api_key = _get_unmatched_tmdb_key(db)
+    if not tmdb_api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Poster Manager → Unmatched Assets → Detection Configuration.")
+
+    if media_type == "show":
+        endpoint = "/search/tv"
+        query_params: Dict[str, Any] = {"query": title, "include_adult": "false"}
+        if year:
+            query_params["first_air_date_year"] = year
+        tmdb_entity = "tv"
+        response_media_type = "show"
+    elif media_type == "collection":
+        endpoint = "/search/collection"
+        query_params = {"query": title, "include_adult": "false"}
+        tmdb_entity = "collection"
+        response_media_type = "collection"
+    else:
+        endpoint = "/search/movie"
+        query_params = {"query": title, "include_adult": "false"}
+        if year:
+            query_params["year"] = year
+        tmdb_entity = "movie"
+        response_media_type = "movie"
+
+    try:
+        response = http_requests.get(
+            f"https://api.themoviedb.org/3{endpoint}",
+            params={"api_key": tmdb_api_key, **query_params},
+            timeout=20,
+        )
+        response.raise_for_status()
+        tmdb_data = response.json()
+    except http_requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"TMDB search failed: {exc}")
+
+    results = tmdb_data.get("results") if isinstance(tmdb_data, dict) else []
+    if not isinstance(results, list):
+        results = []
+
+    tmdb_ext_cache: Dict[int, Dict[str, Any]] = {}
+
+    def fetch_external_ids(tmdb_id: int) -> Dict[str, Any]:
+        if tmdb_id in tmdb_ext_cache:
+            return tmdb_ext_cache[tmdb_id]
+        if tmdb_entity == "collection":
+            tmdb_ext_cache[tmdb_id] = {}
+            return {}
+        try:
+            ext_resp = http_requests.get(
+                f"https://api.themoviedb.org/3/{tmdb_entity}/{tmdb_id}/external_ids",
+                params={"api_key": tmdb_api_key},
+                timeout=12,
+            )
+            ext_resp.raise_for_status()
+            ext_data = ext_resp.json()
+            if isinstance(ext_data, dict):
+                tmdb_ext_cache[tmdb_id] = ext_data
+                return ext_data
+        except http_requests.RequestException:
+            pass
+        tmdb_ext_cache[tmdb_id] = {}
+        return {}
+
+    # Score and sort results using fuzzy title + year matching
+    scored = _tmdb_score_candidates(title, year, results[:10])
+
+    candidates = []
+    for entry in scored:
+        item = entry["candidate"]
+        reason = entry["reason"]
+        tmdb_id = item.get("id")
+        if not isinstance(tmdb_id, int):
+            continue
+        ext = fetch_external_ids(tmdb_id)
+        imdb_id = ext.get("imdb_id") if isinstance(ext.get("imdb_id"), str) else None
+        tvdb_raw = ext.get("tvdb_id")
+        tvdb_id = tvdb_raw if isinstance(tvdb_raw, int) else None
+        candidate_title = str(item.get("title") or item.get("name") or "").strip()
+        release_text = str(item.get("release_date") or item.get("first_air_date") or "").strip()
+        release_year = int(release_text[:4]) if len(release_text) >= 4 and release_text[:4].isdigit() else None
+        poster_path = item.get("poster_path")
+        poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if isinstance(poster_path, str) and poster_path else None
+        candidates.append({
+            "tmdb_id": tmdb_id,
+            "tvdb_id": tvdb_id,
+            "imdb_id": imdb_id,
+            "title": candidate_title,
+            "year": release_year,
+            "poster_url": poster_url,
+            "overview": str(item.get("overview") or "").strip(),
+            "popularity": float(item.get("popularity") or 0),
+            "media_type": response_media_type,
+            "match_reason": reason,
+        })
+
+    log_info(LogTags.UNMATCHED, f"TMDB search for '{title}' ({media_type}): {len(candidates)} candidates", year=year)
+    return {"candidates": candidates}
 
 
 @router.get("/flow/config")

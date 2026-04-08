@@ -1,62 +1,166 @@
-import { CheckCircle, Download } from 'lucide-react'
-import { type MouseEvent } from 'react'
-import { UnmatchedStats } from '../../api/client'
+import { useState, useCallback } from 'react'
+import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, X } from 'lucide-react'
+import type { MouseEvent } from 'react'
+import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | null
+
+type TmdbSearchType = 'movie' | 'show' | 'collection'
+
+interface NormalizedItem {
+  title: string
+  year: number | null
+  origIdx: number
+  missingSeasonsText?: string
+}
 
 type UnmatchedItemsModalProps = {
   modalType: UnmatchedModalType
   unmatchedStats: UnmatchedStats | null
   modalDisplayLimit: number
+  tmdbApiKeyConfigured: boolean
   onClose: () => void
   onDownloadList: (type: Exclude<UnmatchedModalType, null>) => void
+}
+
+function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
+  if (modalType === 'movies') return 'movie'
+  if (modalType === 'collections') return 'collection'
+  return 'show'
+}
+
+function getTmdbLink(candidate: TmdbCandidate): string {
+  if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
+  if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
+  return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
+}
+
+function getModalTitle(modalType: UnmatchedModalType): string {
+  if (modalType === 'movies') return 'Movies Missing Posters'
+  if (modalType === 'series') return 'Series Missing Main Posters'
+  if (modalType === 'seasons') return 'Series Missing Season Posters'
+  if (modalType === 'collections') return 'Collections Missing Posters'
+  return ''
+}
+
+function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedStats): NormalizedItem[] {
+  if (modalType === 'movies') {
+    return (unmatchedStats.unmatched.movies ?? []).map((item, i) => ({
+      title: item.title,
+      year: item.year ?? null,
+      origIdx: i,
+    }))
+  }
+  if (modalType === 'series') {
+    return (unmatchedStats.unmatched.series ?? [])
+      .filter((s) => s.missing_main_poster)
+      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i }))
+  }
+  if (modalType === 'seasons') {
+    return (unmatchedStats.unmatched.series ?? [])
+      .filter((s) => s.missing_seasons.length > 0)
+      .map((item, i) => ({
+        title: item.title,
+        year: item.year ?? null,
+        origIdx: i,
+        missingSeasonsText: item.missing_seasons.map((s) => `S${s}`).join(', '),
+      }))
+  }
+  if (modalType === 'collections') {
+    return (unmatchedStats.unmatched.collections ?? []).map((item, i) => ({
+      title: item.title,
+      year: item.year ?? null,
+      origIdx: i,
+    }))
+  }
+  return []
 }
 
 function UnmatchedItemsModal({
   modalType,
   unmatchedStats,
   modalDisplayLimit,
+  tmdbApiKeyConfigured,
   onClose,
   onDownloadList,
 }: UnmatchedItemsModalProps) {
-  if (!modalType || !unmatchedStats?.unmatched) {
-    return null
-  }
+  const [searchQuery, setSearchQuery] = useState('')
+  const [candidatesMap, setCandidatesMap] = useState<Record<string, TmdbCandidate[]>>({})
+  const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [copiedLink, setCopiedLink] = useState<string | null>(null)
+  const [noKeyItems, setNoKeyItems] = useState<Set<string>>(new Set())
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      onClose()
-    }
+    if (event.target === event.currentTarget) onClose()
   }
 
-  let hasItems = false
-  let itemCount = 0
+  const itemKey = useCallback((item: NormalizedItem) => `${item.origIdx}::${item.title}`, [])
 
-  if (modalType === 'movies') {
-    itemCount = unmatchedStats.unmatched.movies?.length || 0
-    hasItems = itemCount > 0
-  } else if (modalType === 'series') {
-    itemCount = unmatchedStats.unmatched.series?.filter((s) => s.missing_main_poster).length || 0
-    hasItems = itemCount > 0
-  } else if (modalType === 'seasons') {
-    itemCount = unmatchedStats.unmatched.series?.filter((s) => s.missing_seasons.length > 0).length || 0
-    hasItems = itemCount > 0
-  } else if (modalType === 'collections') {
-    itemCount = unmatchedStats.unmatched.collections?.length || 0
-    hasItems = itemCount > 0
-  }
+  const handleTmdbSearch = useCallback(
+    async (item: NormalizedItem) => {
+      const key = itemKey(item)
+      if (loadingKeys.has(key)) return
 
-  if (!hasItems) {
+      // Toggle off if already expanded with results
+      if (expandedKey === key) {
+        setExpandedKey(null)
+        return
+      }
+
+      setExpandedKey(key)
+
+      // Warn if no API key configured
+      if (!tmdbApiKeyConfigured) {
+        setNoKeyItems((prev) => new Set(prev).add(key))
+        return
+      }
+
+      // Clear any prior no-key warning for this item
+      setNoKeyItems((prev) => { const next = new Set(prev); next.delete(key); return next })
+
+      // Use cache if available
+      if (candidatesMap[key] !== undefined) return
+
+      setLoadingKeys((prev) => new Set(prev).add(key))
+      try {
+        const result = await searchUnmatchedTmdb({
+          title: item.title,
+          year: item.year,
+          type: getTmdbSearchType(modalType),
+        })
+        setCandidatesMap((prev) => ({ ...prev, [key]: result.candidates }))
+      } catch {
+        setCandidatesMap((prev) => ({ ...prev, [key]: [] }))
+      } finally {
+        setLoadingKeys((prev) => {
+          const next = new Set(prev)
+          next.delete(key)
+          return next
+        })
+      }
+    },
+    [modalType, candidatesMap, expandedKey, loadingKeys, itemKey, tmdbApiKeyConfigured],
+  )
+
+  const handleCopyLink = useCallback((link: string) => {
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedLink(link)
+      setTimeout(() => setCopiedLink(null), 2000)
+    })
+  }, [])
+
+  if (!modalType || !unmatchedStats?.unmatched) return null
+
+  const allItems = buildAllItems(modalType, unmatchedStats)
+
+  if (allItems.length === 0) {
     return (
       <div className="modal-overlay" onClick={handleOverlayClick}>
         <div className="modal-content schedule-modal">
           <div className="modal-header">
-            <h2>
-              {modalType === 'movies' && 'Movies'}
-              {modalType === 'series' && 'Series'}
-              {modalType === 'seasons' && 'Seasons'}
-              {modalType === 'collections' && 'Collections'}
-            </h2>
+            <h2>{getModalTitle(modalType)}</h2>
             <button className="modal-close" onClick={onClose}>×</button>
           </div>
           <div className="modal-body">
@@ -73,113 +177,186 @@ function UnmatchedItemsModal({
     )
   }
 
+  const lowerQuery = searchQuery.trim().toLowerCase()
+  const filteredItems = lowerQuery
+    ? allItems.filter((item) => item.title.toLowerCase().includes(lowerQuery))
+    : allItems.slice(0, modalDisplayLimit)
+
+  const hasMore = !lowerQuery && allItems.length > modalDisplayLimit
+
   return (
+    <>
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content schedule-modal">
         <div className="modal-header">
-          <h2>
-            {modalType === 'movies' && 'Movies Missing Posters'}
-            {modalType === 'series' && 'Series Missing Main Posters'}
-            {modalType === 'seasons' && 'Series Missing Season Posters'}
-            {modalType === 'collections' && 'Collections Missing Posters'}
-          </h2>
+          <h2>{getModalTitle(modalType)}</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
+
         <div className="modal-body">
-          {modalType === 'movies' && unmatchedStats.unmatched.movies && (
-            <div className="unmatched-list">
-              <p className="list-count">{unmatchedStats.unmatched.movies.length} movies without posters</p>
-              {unmatchedStats.unmatched.movies.length > modalDisplayLimit && (
-                <p className="performance-warning">
-                  ⚠️ Showing first {modalDisplayLimit} of {unmatchedStats.unmatched.movies.length} items for performance
-                </p>
-              )}
-              {unmatchedStats.unmatched.movies.slice(0, modalDisplayLimit).map((item, idx) => (
-                <div key={idx} className="unmatched-item">
-                  <span className="item-title">{item.title}</span>
-                  {item.year && <span className="item-year">({item.year})</span>}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Search bar */}
+          <div className="unmatched-search-bar">
+            <Search size={15} className="search-bar-icon" />
+            <input
+              type="text"
+              className="unmatched-search-input"
+              placeholder={`Search ${allItems.length} items…`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="search-clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+                <X size={14} />
+              </button>
+            )}
+          </div>
 
-          {modalType === 'series' && unmatchedStats.unmatched.series && (
-            <div className="unmatched-list">
-              <p className="list-count">
-                {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length} series without main posters
+          <div className="unmatched-list">
+            <p className="list-count">
+              {lowerQuery
+                ? `${filteredItems.length} of ${allItems.length} items`
+                : `${allItems.length} items`}
+            </p>
+
+            {hasMore && (
+              <p className="performance-warning">
+                ⚠️ Showing first {modalDisplayLimit} of {allItems.length} items. Use search to find specific items.
               </p>
-              {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length > modalDisplayLimit && (
-                <p className="performance-warning">
-                  ⚠️ Showing first {modalDisplayLimit} of {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length} items for performance
-                </p>
-              )}
-              {unmatchedStats.unmatched.series
-                .filter((s) => s.missing_main_poster)
-                .slice(0, modalDisplayLimit)
-                .map((item, idx) => (
-                  <div key={idx} className="unmatched-item">
-                    <span className="item-title">{item.title}</span>
-                    {item.year && <span className="item-year">({item.year})</span>}
-                  </div>
-                ))}
-            </div>
-          )}
+            )}
 
-          {modalType === 'seasons' && unmatchedStats.unmatched.series && (
-            <div className="unmatched-list">
-              {unmatchedStats.unmatched.series.filter((s) => s.missing_seasons.length > 0).length > modalDisplayLimit && (
-                <p className="performance-warning">
-                  ⚠️ Showing first {modalDisplayLimit} of {unmatchedStats.unmatched.series.filter((s) => s.missing_seasons.length > 0).length} items for performance
-                </p>
-              )}
-              {unmatchedStats.unmatched.series
-                .filter((s) => s.missing_seasons.length > 0)
-                .slice(0, modalDisplayLimit)
-                .map((item, idx) => (
-                  <div key={idx} className="unmatched-item-group">
-                    <div className="item-title-row">
+            {filteredItems.map((item) => {
+              const key = itemKey(item)
+              const isExpanded = expandedKey === key
+              const isLoading = loadingKeys.has(key)
+              const candidates = candidatesMap[key]
+              const isNoKey = noKeyItems.has(key)
+
+              return (
+                <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
+                  <div className="unmatched-item">
+                    <div className="unmatched-item-meta">
                       <span className="item-title">{item.title}</span>
                       {item.year && <span className="item-year">({item.year})</span>}
                     </div>
-                    <div className="missing-seasons">
-                      Missing: {item.missing_seasons.map((season) => `Season ${season}`).join(', ')}
-                    </div>
+                    <button
+                      className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
+                      onClick={() => handleTmdbSearch(item)}
+                      title="Search TMDB for this item"
+                    >
+                      {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
+                      <span>TMDB</span>
+                    </button>
                   </div>
-                ))}
-            </div>
-          )}
 
-          {modalType === 'collections' && unmatchedStats.unmatched.collections && (
-            <div className="unmatched-list">
-              <p className="list-count">{unmatchedStats.unmatched.collections.length} collections without posters</p>
-              {unmatchedStats.unmatched.collections.length > modalDisplayLimit && (
-                <p className="performance-warning">
-                  ⚠️ Showing first {modalDisplayLimit} of {unmatchedStats.unmatched.collections.length} items for performance
-                </p>
-              )}
-              {unmatchedStats.unmatched.collections.slice(0, modalDisplayLimit).map((item, idx) => (
-                <div key={idx} className="unmatched-item">
-                  <span className="item-title">{item.title}</span>
-                  {item.year && <span className="item-year">({item.year})</span>}
+                  {item.missingSeasonsText && (
+                    <div className="missing-seasons">Missing: {item.missingSeasonsText}</div>
+                  )}
+
+                  {isExpanded && (
+                    <div className="tmdb-candidates-panel">
+                      {isNoKey ? (
+                        <div className="tmdb-candidates-warning">
+                          <AlertCircle size={14} />
+                          <span>No TMDB API key configured. Close this modal and add it under <strong>Detection Configuration</strong> in the Unmatched Assets tab.</span>
+                        </div>
+                      ) : isLoading ? (
+                        <div className="tmdb-candidates-loading">
+                          <Loader2 size={16} className="spin-icon" />
+                          <span>Searching TMDB…</span>
+                        </div>
+                      ) : !candidates || candidates.length === 0 ? (
+                        <div className="tmdb-candidates-empty">No TMDB results found</div>
+
+                      ) : (
+                        candidates.map((candidate, cidx) => {
+                          const link = getTmdbLink(candidate)
+                          const isCopied = copiedLink === link
+                          const previewSrc = candidate.poster_url
+                            ? candidate.poster_url.replace('/w185/', '/w342/')
+                            : null
+                          return (
+                            <div key={cidx} className="tmdb-candidate-item">
+                              {previewSrc ? (
+                                <button
+                                  className="tmdb-candidate-poster-btn"
+                                  onClick={() => setPreviewUrl(previewSrc)}
+                                  title="Click to preview poster"
+                                >
+                                  <img
+                                    src={candidate.poster_url!}
+                                    alt=""
+                                    className="tmdb-candidate-poster"
+                                    loading="lazy"
+                                  />
+                                </button>
+                              ) : (
+                                <div className="tmdb-candidate-poster tmdb-candidate-poster--empty" />
+                              )}
+                              <div className="tmdb-candidate-info">
+                                <div className="tmdb-candidate-title-row">
+                                  <span className="candidate-title">{candidate.title}</span>
+                                  {candidate.year && <span className="candidate-year">({candidate.year})</span>}
+                                  <span className={`tmdb-type-badge tmdb-type-badge--${candidate.media_type}`}>
+                                    {candidate.media_type}
+                                  </span>
+                                </div>
+                                <div className="tmdb-candidate-link-row">
+                                  <span className="tmdb-link-text">{link}</span>
+                                  <a
+                                    href={link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="tmdb-icon-btn"
+                                    title="Open in TMDB"
+                                  >
+                                    <ExternalLink size={13} />
+                                  </a>
+                                  <button
+                                    className={`tmdb-copy-btn${isCopied ? ' copied' : ''}`}
+                                    onClick={() => handleCopyLink(link)}
+                                    title={isCopied ? 'Copied!' : 'Copy link'}
+                                  >
+                                    {isCopied ? <Check size={13} /> : <Copy size={13} />}
+                                    <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
         </div>
+
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>Close</button>
-          <button
-            className="btn-primary"
-            onClick={() => onDownloadList(modalType)}
-            title="Download full list as text file"
-          >
+          <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
             <Download size={18} />
             Download List
           </button>
         </div>
       </div>
     </div>
+
+    {previewUrl && (
+      <div className="modal-overlay tmdb-poster-preview-overlay" onClick={() => setPreviewUrl(null)}>
+        <div className="tmdb-poster-preview-modal">
+          <img
+            src={previewUrl ?? undefined}
+            alt="Poster preview"
+            className="tmdb-poster-preview-image"
+          />
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 
 export default UnmatchedItemsModal
+

@@ -72,6 +72,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "unmatched_ignore_root_folders",
     "unmatched_ignore_collections",
     "unmatched_ignore_unmonitored",
+    "unmatched_tmdb_api_key",
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",

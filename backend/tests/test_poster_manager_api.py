@@ -1,13 +1,192 @@
 import time
 import json
 from datetime import datetime, timezone, timedelta
+from unittest.mock import patch, MagicMock
 
 from models.setting import Setting
 from models.drive import Drive
 from models.job import Job
 
 
-def test_rename_rejects_missing_destination(client):
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _tmdb_movie_result(tmdb_id: int, title: str, year: int, popularity: float = 10.0) -> dict:
+    return {
+        "id": tmdb_id,
+        "title": title,
+        "release_date": f"{year}-01-01",
+        "poster_path": f"/poster{tmdb_id}.jpg",
+        "overview": f"Overview of {title}",
+        "popularity": popularity,
+    }
+
+
+# ---------------------------------------------------------------------------
+# TMDB search endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_unmatched_tmdb_search_rejects_missing_api_key(client):
+    """Should return 400 when TMDB API key is not configured."""
+    response = client.post(
+        "/api/poster-manager/unmatched-tmdb-search",
+        json={"title": "The Batman", "year": 2022, "type": "movie"},
+    )
+    assert response.status_code == 400
+    assert "TMDB API key is not configured" in response.json()["detail"]
+
+
+def test_unmatched_tmdb_search_rejects_empty_title(client, test_db):
+    """Should return 400 when title is empty."""
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    response = client.post(
+        "/api/poster-manager/unmatched-tmdb-search",
+        json={"title": "   ", "year": None, "type": "movie"},
+    )
+    assert response.status_code == 400
+    assert "title is required" in response.json()["detail"]
+
+
+def test_unmatched_tmdb_search_rejects_invalid_type(client, test_db):
+    """Should return 400 when type is not movie/show/collection."""
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    response = client.post(
+        "/api/poster-manager/unmatched-tmdb-search",
+        json={"title": "Avatar", "year": 2009, "type": "episode"},
+    )
+    assert response.status_code == 400
+    assert "type must be one of" in response.json()["detail"]
+
+
+def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
+    """Should return candidates sorted by score with correct fields."""
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    mock_results = [
+        _tmdb_movie_result(100, "The Batman", 2022, popularity=50.0),
+        _tmdb_movie_result(200, "Batman Begins", 2005, popularity=80.0),
+    ]
+
+    mock_search_resp = MagicMock()
+    mock_search_resp.status_code = 200
+    mock_search_resp.json.return_value = {"results": mock_results}
+    mock_search_resp.raise_for_status = MagicMock()
+
+    mock_ext_resp = MagicMock()
+    mock_ext_resp.status_code = 200
+    mock_ext_resp.json.return_value = {"imdb_id": "tt1234567", "tvdb_id": None}
+    mock_ext_resp.raise_for_status = MagicMock()
+
+    with patch("api.poster_manager.http_requests.get") as mock_get:
+        mock_get.side_effect = [mock_search_resp, mock_ext_resp, mock_ext_resp]
+
+        response = client.post(
+            "/api/poster-manager/unmatched-tmdb-search",
+            json={"title": "The Batman", "year": 2022, "type": "movie"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "candidates" in data
+    candidates = data["candidates"]
+    assert len(candidates) == 2
+
+    # Exact title + year match should be first
+    assert candidates[0]["title"] == "The Batman"
+    assert candidates[0]["year"] == 2022
+    assert candidates[0]["tmdb_id"] == 100
+    assert candidates[0]["media_type"] == "movie"
+    assert candidates[0]["match_reason"] == "exact"
+    assert "poster_url" in candidates[0]
+    assert candidates[0]["poster_url"].startswith("https://image.tmdb.org")
+
+
+def test_unmatched_tmdb_search_show_maps_to_tv_endpoint(client, test_db):
+    """Should call /search/tv endpoint for show type."""
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"results": [
+        {"id": 1, "name": "Breaking Bad", "first_air_date": "2008-01-20",
+         "poster_path": "/bb.jpg", "overview": "", "popularity": 99.0}
+    ]}
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_ext = MagicMock()
+    mock_ext.json.return_value = {"tvdb_id": 81189, "imdb_id": "tt0903747"}
+    mock_ext.raise_for_status = MagicMock()
+
+    with patch("api.poster_manager.http_requests.get") as mock_get:
+        mock_get.side_effect = [mock_resp, mock_ext]
+
+        response = client.post(
+            "/api/poster-manager/unmatched-tmdb-search",
+            json={"title": "Breaking Bad", "year": 2008, "type": "show"},
+        )
+
+    assert response.status_code == 200
+    # Verify the search URL used the /search/tv path
+    search_call_url = mock_get.call_args_list[0][0][0]
+    assert "/search/tv" in search_call_url
+    candidates = response.json()["candidates"]
+    assert candidates[0]["tvdb_id"] == 81189
+
+
+def test_unmatched_tmdb_search_returns_502_on_tmdb_failure(client, test_db):
+    """Should return 502 when TMDB API call fails."""
+    import requests as real_requests
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    with patch("api.poster_manager.http_requests.get") as mock_get:
+        mock_get.side_effect = real_requests.RequestException("connection refused")
+
+        response = client.post(
+            "/api/poster-manager/unmatched-tmdb-search",
+            json={"title": "Inception", "year": 2010, "type": "movie"},
+        )
+
+    assert response.status_code == 502
+    assert "TMDB search failed" in response.json()["detail"]
+
+
+def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
+    """Collections should not call /external_ids endpoint."""
+    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"results": [
+        {"id": 10, "name": "Avengers Collection", "poster_path": "/av.jpg",
+         "overview": "", "popularity": 30.0}
+    ]}
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("api.poster_manager.http_requests.get") as mock_get:
+        mock_get.return_value = mock_resp
+
+        response = client.post(
+            "/api/poster-manager/unmatched-tmdb-search",
+            json={"title": "Avengers Collection", "type": "collection"},
+        )
+
+    assert response.status_code == 200
+    # Only 1 call: the search. No external_ids call for collections.
+    assert mock_get.call_count == 1
+    candidates = response.json()["candidates"]
+    assert candidates[0]["tvdb_id"] is None
+    assert candidates[0]["imdb_id"] is None
+    assert candidates[0]["media_type"] == "collection"
+
+
+
     """Rename should fail when destination is missing from payload config."""
     response = client.post("/api/poster-manager/rename", json={"config": {}})
     assert response.status_code == 400

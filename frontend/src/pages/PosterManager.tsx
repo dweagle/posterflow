@@ -172,12 +172,14 @@ function PosterManager() {
     unmatchedIgnoreRootFoldersText,
     unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
+    unmatchedTmdbApiKey,
     hasUnsavedUnmatchedSettings,
     fetchLibraryConfigs,
     toggleLibrarySelection,
     setUnmatchedIgnoreRootFoldersText,
     setUnmatchedIgnoreCollectionsText,
     setUnmatchedIgnoreUnmonitored,
+    setUnmatchedTmdbApiKey,
     saveRenameSettings,
     resetLibrarySettingsToOriginal,
   } = usePosterManagerLibraries({
@@ -378,20 +380,26 @@ function PosterManager() {
           unmatchedIgnoreRootFoldersText={unmatchedIgnoreRootFoldersText}
           unmatchedIgnoreCollectionsText={unmatchedIgnoreCollectionsText}
           unmatchedIgnoreUnmonitored={unmatchedIgnoreUnmonitored}
+          unmatchedTmdbApiKey={unmatchedTmdbApiKey}
           hasUnsavedUnmatchedSettings={hasUnsavedUnmatchedSettings}
           onSetUnmatchedIgnoreRootFoldersText={setUnmatchedIgnoreRootFoldersText}
           onSetUnmatchedIgnoreCollectionsText={setUnmatchedIgnoreCollectionsText}
           onSetUnmatchedIgnoreUnmonitored={setUnmatchedIgnoreUnmonitored}
+          onSetUnmatchedTmdbApiKey={setUnmatchedTmdbApiKey}
+          onOpenModal={setShowUnmatchedModal}
         />
       )}
 
-      <UnmatchedItemsModal
-        modalType={showUnmatchedModal}
-        unmatchedStats={unmatchedStats}
-        modalDisplayLimit={MODAL_DISPLAY_LIMIT}
-        onClose={() => setShowUnmatchedModal(null)}
-        onDownloadList={downloadUnmatchedList}
-      />
+      {showUnmatchedModal && (
+        <UnmatchedItemsModal
+          modalType={showUnmatchedModal}
+          unmatchedStats={unmatchedStats}
+          modalDisplayLimit={MODAL_DISPLAY_LIMIT}
+          tmdbApiKeyConfigured={!!unmatchedTmdbApiKey.trim()}
+          onClose={() => setShowUnmatchedModal(null)}
+          onDownloadList={downloadUnmatchedList}
+        />
+      )}
 
       {/* Flow Tab */}
       {activeTab === 'rename' && (
