@@ -9,7 +9,7 @@ PosterFlow is heavily inspired by [DAPS by Drazzilb](https://github.com/Drazzilb
 - **Drive Syncing** — Subscribe to community preset drives (MM2K, CL2K, etc.) or add your own custom Google Drive sources
 - **Poster Renamer** — Automatically renames downloaded posters to match your Plex/Radarr/Sonarr library
 - **Border Replacer** — Replaces poster borders in bulk
-- **Unmatched Assets** — Detects and reports assets in your library that are missing posters.
+- **Unmatched Assets** — Detects and reports assets in your library that are missing posters. TMDB links for missing items
 - **Plex Upload** — Upload posters directly to Plex libraries
 - **IDarr** — Metadata enrichment pipeline for poster-maker assets (TMDB/TVDB/IMDB ID assignment and rename normalization)
 - **Maker Tools** — Poster-makers can monitor upcoming movie and TV releases to track missing posters
@@ -18,14 +18,6 @@ PosterFlow is heavily inspired by [DAPS by Drazzilb](https://github.com/Drazzilb
 - **Discord Notifications** — Optional notifications on job completion
 
 ## Quick Start
-
-```bash
-# 1. Build and start
-docker compose up --build -d
-
-# 2. Open the app
-# http://localhost:8357
-```
 
 The setup wizard runs on first launch to configure your media server connections and Google Drive credentials.
 
@@ -49,7 +41,6 @@ services:
     # you are using kometa assets folder, or want your posters stored in a different location,
     # mount those locations.
       - path/to/config:/config   # Database, rclone config, logs, and idarr working dir
-      - path/to/posters:/posters # Downloaded GDrive poster files
       - path/to/kometa/assets:/assets # in poster manager settings, set destination directory to this location
       - path/to/idarr/posters:/idarr # for poster makers only -location of posters you want to sync up to gdrive
     environment:
