@@ -178,6 +178,20 @@ function UnmatchedItemsModal({
     navigator.clipboard.writeText(link).then(() => {
       setCopiedLink(link)
       setTimeout(() => setCopiedLink(null), 2000)
+    }).catch(() => {
+      try {
+        const el = document.createElement('textarea')
+        el.value = link
+        el.style.position = 'fixed'
+        el.style.opacity = '0'
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+        setCopiedLink(link)
+        setTimeout(() => setCopiedLink(null), 2000)
+      } catch {
+      }
     })
   }, [])
 
