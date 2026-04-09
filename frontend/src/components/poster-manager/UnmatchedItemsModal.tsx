@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { useToast } from '../Toast'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -114,6 +115,7 @@ function UnmatchedItemsModal({
   onClose,
   onDownloadList,
 }: UnmatchedItemsModalProps) {
+  const { showToast } = useToast()
   const [searchQuery, setSearchQuery] = useState('')
   const [candidatesMap, setCandidatesMap] = useState<Record<string, TmdbCandidate[]>>({})
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
@@ -174,25 +176,32 @@ function UnmatchedItemsModal({
     [modalType, candidatesMap, expandedKey, loadingKeys, itemKey, tmdbApiKeyConfigured],
   )
 
-  const handleCopyLink = useCallback((link: string) => {
-    navigator.clipboard.writeText(link).then(() => {
+  const handleCopyLink = useCallback(async (link: string) => {
+    try {
+      await navigator.clipboard.writeText(link)
       setCopiedLink(link)
       setTimeout(() => setCopiedLink(null), 2000)
-    }).catch(() => {
+      showToast('Link copied')
+    } catch {
       try {
         const el = document.createElement('textarea')
         el.value = link
         el.style.position = 'fixed'
-        el.style.opacity = '0'
+        el.style.left = '-9999px'
+        el.style.top = '-9999px'
         document.body.appendChild(el)
+        el.focus()
         el.select()
-        document.execCommand('copy')
+        ;(document as unknown as { execCommand(cmd: string): boolean }).execCommand('copy')
         document.body.removeChild(el)
         setCopiedLink(link)
         setTimeout(() => setCopiedLink(null), 2000)
-      } catch {
+        showToast('Link copied')
+      } catch (fallbackError) {
+        console.error('Failed to copy link:', fallbackError)
+        showToast('Failed to copy link', 'error')
       }
-    })
+    }
   }, [])
 
   if (!modalType || !unmatchedStats?.unmatched) return null
@@ -361,6 +370,7 @@ function UnmatchedItemsModal({
                                     <ExternalLink size={13} />
                                   </a>
                                   <button
+                                    type="button"
                                     className={`tmdb-copy-btn${isCopied ? ' copied' : ''}`}
                                     onClick={() => handleCopyLink(link)}
                                     title={isCopied ? 'Copied!' : 'Copy link'}
