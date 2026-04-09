@@ -15,6 +15,7 @@ PosterFlow is heavily inspired by [DAPS by Drazzilb](https://github.com/Drazzilb
 - **Maker Tools** — Poster-makers can monitor upcoming movie and TV releases to track missing posters
 - **Scheduler** — Automate any job on a recurring schedule
 - **Live Job Status** — WebSocket-powered real-time job progress and log streaming
+- **After Job Scripts** — Autorun a custom script after a completed job
 - **Discord Notifications** — Optional notifications on job completion
 
 ## Quick Start
@@ -40,7 +41,7 @@ services:
     # These are default locations for app files, downloading from gdrives and renaming.  If
     # you are using kometa assets folder, or want your posters stored in a different location,
     # mount those locations.
-      - path/to/config:/config   # Database, rclone config, logs, and idarr working dir
+      - path/to/config:/config   # Defualt Poster Storage, Database, rclone config, logs, and idarr working dir
       - path/to/kometa/assets:/assets # in poster manager settings, set destination directory to this location
       - path/to/idarr/posters:/idarr # for poster makers only -location of posters you want to sync up to gdrive
     environment:
@@ -52,9 +53,8 @@ services:
 
 | Path | Purpose |
 |------|---------|
-| `/config` | SQLite database, rclone config, drives cache, logs, and idarr working dir |
-| `/posters` | Downloaded GDrive poster files (`gdrive/` for drive syncs, `assets/` for renamed posters) |
-
+| `/config` | Defualt Poster Storage, SQLite database, rclone config, drives cache, logs, and idarr working dir |
+| `/custom` | Add custom mounts directed to assets, non-default poster storage, etc. |
 ## Environment Variables
 
 | Variable | Default | Description |
