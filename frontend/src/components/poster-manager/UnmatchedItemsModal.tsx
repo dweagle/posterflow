@@ -22,7 +22,7 @@ type UnmatchedItemsModalProps = {
   modalDisplayLimit: number
   tmdbApiKeyConfigured: boolean
   onClose: () => void
-  onDownloadList: (type: Exclude<UnmatchedModalType, null>) => void
+  onDownloadList: (type: Exclude<UnmatchedModalType, null | 'all'>) => void
 }
 
 function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
