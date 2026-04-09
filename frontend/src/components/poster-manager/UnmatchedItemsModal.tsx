@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2,
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 
-export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | null
+export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
 type TmdbSearchType = 'movie' | 'show' | 'collection'
 
@@ -12,6 +12,8 @@ interface NormalizedItem {
   year: number | null
   origIdx: number
   missingSeasonsText?: string
+  tmdbType?: TmdbSearchType
+  category?: string
 }
 
 type UnmatchedItemsModalProps = {
@@ -40,6 +42,7 @@ function getModalTitle(modalType: UnmatchedModalType): string {
   if (modalType === 'series') return 'Series Missing Main Posters'
   if (modalType === 'seasons') return 'Series Missing Season Posters'
   if (modalType === 'collections') return 'Collections Missing Posters'
+  if (modalType === 'all') return 'All Missing Posters'
   return ''
 }
 
@@ -73,6 +76,33 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
       origIdx: i,
     }))
   }
+  if (modalType === 'all') {
+    const result: NormalizedItem[] = []
+    ;(unmatchedStats.unmatched.movies ?? []).forEach((item, i) => {
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'movie', category: 'Movie' })
+    })
+    ;(unmatchedStats.unmatched.series ?? [])
+      .filter((s) => s.missing_main_poster)
+      .forEach((item, i) => {
+        result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'show', category: 'Series' })
+      })
+    ;(unmatchedStats.unmatched.series ?? [])
+      .filter((s) => s.missing_seasons.length > 0)
+      .forEach((item, i) => {
+        result.push({
+          title: item.title,
+          year: item.year ?? null,
+          origIdx: i,
+          missingSeasonsText: item.missing_seasons.map((s) => `S${s}`).join(', '),
+          tmdbType: 'show',
+          category: 'Season',
+        })
+      })
+    ;(unmatchedStats.unmatched.collections ?? []).forEach((item, i) => {
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'collection', category: 'Collection' })
+    })
+    return result
+  }
   return []
 }
 
@@ -96,7 +126,7 @@ function UnmatchedItemsModal({
     if (event.target === event.currentTarget) onClose()
   }
 
-  const itemKey = useCallback((item: NormalizedItem) => `${item.origIdx}::${item.title}`, [])
+  const itemKey = useCallback((item: NormalizedItem) => `${item.category ?? ''}::${item.origIdx}::${item.title}`, [])
 
   const handleTmdbSearch = useCallback(
     async (item: NormalizedItem) => {
@@ -128,7 +158,7 @@ function UnmatchedItemsModal({
         const result = await searchUnmatchedTmdb({
           title: item.title,
           year: item.year,
-          type: getTmdbSearchType(modalType),
+          type: item.tmdbType ?? getTmdbSearchType(modalType),
         })
         setCandidatesMap((prev) => ({ ...prev, [key]: result.candidates }))
       } catch {
@@ -237,6 +267,11 @@ function UnmatchedItemsModal({
                     <div className="unmatched-item-meta">
                       <span className="item-title">{item.title}</span>
                       {item.year && <span className="item-year">({item.year})</span>}
+                      {item.category && (
+                        <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
+                          {item.category}
+                        </span>
+                      )}
                     </div>
                     <button
                       className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
@@ -335,10 +370,12 @@ function UnmatchedItemsModal({
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>Close</button>
-          <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
-            <Download size={18} />
-            Download List
-          </button>
+          {modalType !== 'all' && (
+            <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
+              <Download size={18} />
+              Download List
+            </button>
+          )}
         </div>
       </div>
     </div>

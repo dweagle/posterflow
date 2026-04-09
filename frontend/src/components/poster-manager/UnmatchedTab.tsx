@@ -25,7 +25,7 @@ type UnmatchedTabProps = {
   onSetUnmatchedIgnoreCollectionsText: (value: string) => void
   onSetUnmatchedIgnoreUnmonitored: (value: boolean) => void
   onSetUnmatchedTmdbApiKey: (value: string) => void
-  onOpenModal: (type: 'movies' | 'series' | 'seasons' | 'collections') => void
+  onOpenModal: (type: 'movies' | 'series' | 'seasons' | 'collections' | 'all') => void
 }
 
 function UnmatchedTab({
@@ -98,14 +98,7 @@ function UnmatchedTab({
             <>
               <button
                 className="btn-toolbar btn-primary"
-                onClick={() => {
-                  // Open the first category that has missing items
-                  if ((unmatchedStats.unmatched.movies?.length ?? 0) > 0) return onOpenModal('movies')
-                  if (unmatchedStats.unmatched.series?.some((s) => s.missing_main_poster)) return onOpenModal('series')
-                  if (unmatchedStats.unmatched.series?.some((s) => s.missing_seasons?.length > 0)) return onOpenModal('seasons')
-                  if ((unmatchedStats.unmatched.collections?.length ?? 0) > 0) return onOpenModal('collections')
-                  onOpenModal('movies')
-                }}
+                onClick={() => onOpenModal('all')}
                 title="View and search missing items"
               >
                 <Search size={16} />

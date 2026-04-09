@@ -1964,6 +1964,40 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   min-width: 0;
 }
 
+.unmatched-cat-badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.unmatched-cat-badge--movie {
+  background: rgba(100, 181, 246, 0.15);
+  color: #64b5f6;
+  border: 1px solid rgba(100, 181, 246, 0.3);
+}
+
+.unmatched-cat-badge--series {
+  background: rgba(76, 175, 80, 0.15);
+  color: #81c784;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.unmatched-cat-badge--season {
+  background: rgba(149, 117, 205, 0.15);
+  color: #b39ddb;
+  border: 1px solid rgba(149, 117, 205, 0.3);
+}
+
+.unmatched-cat-badge--collection {
+  background: rgba(255, 183, 77, 0.15);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
 .tmdb-link-text {
   color: #6b8caa;
   font-size: 0.75rem;
