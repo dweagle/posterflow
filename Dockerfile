@@ -17,16 +17,16 @@ ARG BRANCH
 # Use bash with pipefail for safer pipe handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system dependencies including rclone, gosu, and timezone data
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    gcc \
+# Install system dependencies; upgrade openssl specifically to patch CVE-2026-28390
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
-    unzip \
     tzdata \
     gosu \
-    && curl https://rclone.org/install.sh | bash \
+    && apt-get install -y --only-upgrade libssl3 openssl \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy rclone binary from official image (multi-arch aware)
+COPY --from=rclone/rclone:1.73.4 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
@@ -41,9 +41,10 @@ RUN groupadd -g 1000 posterflow && \
 WORKDIR /app
 
 # Copy requirements and install as root
-COPY backend/requirements.txt .
+COPY backend/requirements.txt backend/requirements-dev.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y pip
 
 # Create necessary directories
 RUN mkdir -p /config/logs /app/frontend/dist
@@ -59,6 +60,9 @@ COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 # Expose port (both frontend and backend on same port now)
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 
 # Container starts as root; entrypoint remaps PUID/PGID then drops to posterflow user
 ENTRYPOINT ["/entrypoint.sh"]
