@@ -45,9 +45,8 @@ COPY backend/requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Create necessary directories and set permissions
-RUN mkdir -p /posters/gdrive /config/logs /app/frontend/dist && \
-    chown -R posterflow:posterflow /app /posters /config
+# Create necessary directories
+RUN mkdir -p /config/logs /app/frontend/dist
 
 # Copy backend application code
 COPY --chown=posterflow:posterflow backend/ .
