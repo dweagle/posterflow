@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import time
 from typing import Any, Callable, Optional
 from sqlalchemy.orm import Session
@@ -344,15 +345,16 @@ class PosterSyncService:
             local_files = []
             
             try:
-                for file_path in local_folder.iterdir():
-                    if file_path.is_file() and file_path.suffix.lower() in image_extensions:
-                        stat = file_path.stat()
-                        local_files.append({
-                            'name': file_path.name,
-                            'path': file_path,
-                            'size': stat.st_size,
-                            'mtime': stat.st_mtime
-                        })
+                with os.scandir(local_folder) as it:
+                    for entry in it:
+                        if entry.is_file() and Path(entry.name).suffix.lower() in image_extensions:
+                            stat = entry.stat()
+                            local_files.append({
+                                'name': entry.name,
+                                'path': Path(entry.path),
+                                'size': stat.st_size,
+                                'mtime': stat.st_mtime
+                            })
             except Exception as e:
                 log_error(LogTags.SYNC, f"Error scanning local folder: {e}", drive=drive.name, error=str(e), path=str(local_folder))
                 update_job_state(
@@ -366,20 +368,22 @@ class PosterSyncService:
             
             log_debug(LogTags.SYNC, f"Found {len(local_files)} image files on disk", drive=drive.name, count=len(local_files))
             
-            # Phase 2: Get existing database records
-            existing_posters = self.db.query(Poster).filter(
-                Poster.drive_id == drive.drive_id
-            ).all()
+            # Phase 2: Get existing database records (lightweight columns only)
+            existing_rows = (
+                self.db.query(Poster.id, Poster.file_name, Poster.file_path, Poster.file_size, Poster.file_mtime)
+                .filter(Poster.drive_id == drive.drive_id)
+                .all()
+            )
             
             # Build dicts for quick lookup
             local_filenames = {f['name'] for f in local_files}
-            existing_by_name = {p.file_name: p for p in existing_posters}
+            existing_by_name = {r.file_name: r for r in existing_rows}
             db_filenames = set(existing_by_name.keys())
             
             log_debug(
                 LogTags.SYNC,
-                f"Database has {len(existing_posters)} records",
-                drive=drive.name, db_count=len(existing_posters)
+                f"Database has {len(existing_rows)} records",
+                drive=drive.name, db_count=len(existing_rows)
             )
             
             # Phase 3: Self-healing - Find and fix discrepancies
@@ -392,16 +396,16 @@ class PosterSyncService:
                     f"Self-heal: Removing {len(missing_from_disk)} orphaned DB records",
                     drive=drive.name, count=len(missing_from_disk)
                 )
+                ids_to_delete = []
                 for filename in missing_from_disk:
-                    poster = existing_by_name[filename]
-                    self.db.delete(poster)
+                    ids_to_delete.append(existing_by_name[filename].id)
                     deleted += 1
                     # Remove from lookup dict so it doesn't interfere with add/update logic below
                     del existing_by_name[filename]
                 
-                if deleted > 0:
-                    self.db.commit()
-                    log_success(LogTags.SYNC, f"Cleaned up {deleted} orphaned records", drive=drive.name, deleted=deleted)
+                self.db.query(Poster).filter(Poster.id.in_(ids_to_delete)).delete(synchronize_session=False)
+                self.db.commit()
+                log_success(LogTags.SYNC, f"Cleaned up {deleted} orphaned records", drive=drive.name, deleted=deleted)
             
             # Phase 4: Dual-check change detection and updates (80-95%)
             if progress_callback:
@@ -411,6 +415,9 @@ class PosterSyncService:
             updated = 0
             unchanged = 0
             MTIME_TOLERANCE = 1.0  # 1 second tolerance for filesystem quirks
+            
+            pending_updates: list[dict] = []
+            pending_inserts: list[Poster] = []
             
             for idx, file_info in enumerate(local_files):
                 try:
@@ -442,12 +449,15 @@ class PosterSyncService:
                         path_changed = existing.file_path != str(file_path)
                         
                         if mtime_changed or size_changed or path_changed:
-                            # File changed - update DB and mark for reprocessing
-                            existing.file_path = str(file_path)
-                            existing.file_size = file_size
-                            existing.file_mtime = file_mtime
-                            existing.downloaded_at = datetime.now(timezone.utc)
-                            existing.last_processed = None  # Mark stale for rename
+                            # File changed - queue update and mark for reprocessing
+                            pending_updates.append({
+                                'id': existing.id,
+                                'file_path': str(file_path),
+                                'file_size': file_size,
+                                'file_mtime': file_mtime,
+                                'downloaded_at': datetime.now(timezone.utc),
+                                'last_processed': None,  # Mark stale for rename
+                            })
                             updated += 1
                             
                             reasons = []
@@ -467,22 +477,27 @@ class PosterSyncService:
                             # Truly unchanged
                             unchanged += 1
                     else:
-                        # New file - add to DB
-                        poster = Poster(
+                        # New file - queue insert
+                        pending_inserts.append(Poster(
                             drive_id=drive.drive_id,
                             file_name=file_name,
                             file_path=str(file_path),
                             file_size=file_size,
                             file_mtime=file_mtime,
                             gdrive_file_id=file_name  # Use filename as ID since we're scanning locally
-                        )
-                        self.db.add(poster)
+                        ))
                         added += 1
                         
                         log_debug(LogTags.SYNC, f"Added: {file_name}", drive=drive.name, file=file_name)
                     
-                    # Commit every 50 files to avoid memory buildup
-                    if idx % 50 == 0 and idx > 0:
+                    # Flush every 500 files to bound memory
+                    if idx % 500 == 0 and idx > 0:
+                        if pending_updates:
+                            self.db.bulk_update_mappings(Poster, pending_updates)
+                            pending_updates = []
+                        if pending_inserts:
+                            self.db.bulk_save_objects(pending_inserts)
+                            pending_inserts = []
                         self.db.commit()
                         
                 except Exception as e:
@@ -492,7 +507,11 @@ class PosterSyncService:
                         drive=drive.name, file=file_info.get('name', 'unknown'), error=str(e)
                     )
             
-            # Final commit
+            # Final flush and commit
+            if pending_updates:
+                self.db.bulk_update_mappings(Poster, pending_updates)
+            if pending_inserts:
+                self.db.bulk_save_objects(pending_inserts)
             self.db.commit()
             
             # Phase 5: Update drive stats (95-100%)
@@ -903,15 +922,16 @@ class PosterSyncService:
                 local_files = []
                 
                 try:
-                    for file_path in local_folder.iterdir():
-                        if file_path.is_file() and file_path.suffix.lower() in image_extensions:
-                            stat = file_path.stat()
-                            local_files.append({
-                                'name': file_path.name,
-                                'path': file_path,
-                                'size': stat.st_size,
-                                'mtime': stat.st_mtime
-                            })
+                    with os.scandir(local_folder) as it:
+                        for entry in it:
+                            if entry.is_file() and Path(entry.name).suffix.lower() in image_extensions:
+                                stat = entry.stat()
+                                local_files.append({
+                                    'name': entry.name,
+                                    'path': Path(entry.path),
+                                    'size': stat.st_size,
+                                    'mtime': stat.st_mtime
+                                })
                 except OSError as e:
                     import traceback
                     log_error(
@@ -924,12 +944,14 @@ class PosterSyncService:
                 
                 log_debug(LogTags.SYNC, f"Found {len(local_files)} image files", drive=drive_name, count=len(local_files))
                 
-                # Get existing posters from database
-                existing_posters = self.db.query(Poster).filter(
-                    Poster.drive_id == drive_id
-                ).all()
+                # Get existing posters from database (lightweight columns only)
+                existing_rows = (
+                    self.db.query(Poster.id, Poster.file_name, Poster.file_path, Poster.file_size, Poster.file_mtime)
+                    .filter(Poster.drive_id == drive_id)
+                    .all()
+                )
                 
-                existing_by_name = {p.file_name: p for p in existing_posters}
+                existing_by_name = {r.file_name: r for r in existing_rows}
                 
                 # Build set of local filenames safely
                 local_filenames = set()
@@ -951,15 +973,18 @@ class PosterSyncService:
                         f"Removing {len(missing_from_disk)} orphaned records",
                         drive=drive_name, count=len(missing_from_disk)
                     )
+                    ids_to_delete = []
                     for filename in missing_from_disk:
-                        poster_to_delete = existing_by_name.get(filename)
-                        if poster_to_delete:
-                            self.db.delete(poster_to_delete)
+                        row = existing_by_name.get(filename)
+                        if row:
+                            ids_to_delete.append(row.id)
                             deleted += 1
                             # Remove from lookup dict so it doesn't interfere with add/update logic below
                             del existing_by_name[filename]
                         else:
                             log_warning(LogTags.SYNC, f"Could not find poster to delete: {filename}", drive=drive_name)
+                    if ids_to_delete:
+                        self.db.query(Poster).filter(Poster.id.in_(ids_to_delete)).delete(synchronize_session=False)
                 
                 # Dual-check updates
                 added = 0
@@ -967,6 +992,9 @@ class PosterSyncService:
                 unchanged = 0
                 metadata_populated = 0  # Track initial metadata population
                 MTIME_TOLERANCE = 1.0
+                
+                pending_updates: list[dict] = []
+                pending_inserts: list[Poster] = []
                 
                 log_debug(LogTags.SYNC, f"Processing {len(local_files)} files for {drive_name}...", drive=drive_name)
                 
@@ -999,33 +1027,41 @@ class PosterSyncService:
                         
                         # Update metadata if missing OR if actual change detected
                         if is_initial_metadata or mtime_changed or size_changed or path_changed:
-                            existing.file_path = str(file_path)
-                            existing.file_size = file_size
-                            existing.file_mtime = file_mtime
+                            update_dict: dict = {
+                                'id': existing.id,
+                                'file_path': str(file_path),
+                                'file_size': file_size,
+                                'file_mtime': file_mtime,
+                            }
                             
                             # Only reset last_processed and count as update if this is an ACTUAL change
                             if not is_initial_metadata and (mtime_changed or size_changed or path_changed):
-                                existing.downloaded_at = datetime.now(timezone.utc)
-                                existing.last_processed = None
+                                update_dict['downloaded_at'] = datetime.now(timezone.utc)
+                                update_dict['last_processed'] = None
                                 updated += 1
                             else:
                                 # Initial metadata population - not a real update
                                 metadata_populated += 1
                                 unchanged += 1
+                            pending_updates.append(update_dict)
                         else:
                             unchanged += 1
                     else:
                         # New file
-                        poster = Poster(
+                        pending_inserts.append(Poster(
                             drive_id=drive_id,
                             file_name=file_name,
                             file_path=str(file_path),
                             file_size=file_size,
                             file_mtime=file_mtime,
                             gdrive_file_id=file_name
-                        )
-                        self.db.add(poster)
+                        ))
                         added += 1
+                
+                if pending_updates:
+                    self.db.bulk_update_mappings(Poster, pending_updates)
+                if pending_inserts:
+                    self.db.bulk_save_objects(pending_inserts)
                 
                 log_debug(
                     LogTags.SYNC,

@@ -452,8 +452,9 @@ class IdarrRunner:
     def _scan_assets(self, source_dir: Path) -> list[dict[str, Any]]:
         assets: list[dict[str, Any]] = []
         grouped_indexes: dict[str, list[int]] = {}
-        filename_cache_index = self._load_cache_filename_index()
-        group_cache_hints = self._load_group_cache_hints()
+        cache_rows = self._load_all_cache_rows("index build")
+        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
+        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
 
         for entry in sorted(source_dir.iterdir()):
             if not entry.is_file():
@@ -627,9 +628,10 @@ class IdarrRunner:
     def scan_files_in_flat_folder(self, source_dir: Path) -> list[dict[str, Any]]:
         return self._scan_assets(source_dir)
 
-    def _load_cache_filename_index(self) -> dict[str, dict[str, Any]]:
+    def _load_cache_filename_index(self, rows: list | None = None) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
-        rows = self._load_all_cache_rows("filename index")
+        if rows is None:
+            rows = self._load_all_cache_rows("filename index")
         if not rows:
             return index
 
@@ -681,10 +683,11 @@ class IdarrRunner:
 
         return index
 
-    def _load_group_cache_hints(self) -> dict[str, dict[Any, Any]]:
+    def _load_group_cache_hints(self, rows: list | None = None) -> dict[str, dict[Any, Any]]:
         by_tmdb: dict[int, list[dict[str, Any]]] = {}
         by_title_year: dict[str, dict[str, Any]] = {}
-        rows = self._load_all_cache_rows("group hints")
+        if rows is None:
+            rows = self._load_all_cache_rows("group hints")
         if not rows:
             return {"by_tmdb": by_tmdb, "by_title_year": by_title_year}
 
