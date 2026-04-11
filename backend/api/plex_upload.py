@@ -134,7 +134,7 @@ def build_library_override_response(db: Session, override: Dict[str, Any]) -> Di
 
 def raise_internal_error(context: str, error: Exception) -> None:
     log_error(LogTags.UPLOADER, f"{context}: {error}\n{traceback.format_exc()}")
-    raise HTTPException(status_code=500, detail=str(error))
+    raise HTTPException(status_code=500, detail=context)
 
 
 def get_required_source_dirs(db: Session, empty_message: str) -> list[str]:

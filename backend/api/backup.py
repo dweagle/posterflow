@@ -71,7 +71,7 @@ async def create_backup() -> FileResponse:
         
     except Exception as e:
         log_error(LogTags.BACKUP, f"Failed to create backup: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to create backup: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create backup")
 
 
 @router.post("/")
@@ -175,4 +175,4 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
         raise
     except Exception as e:
         log_error(LogTags.BACKUP, f"Failed to restore backup: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to restore backup: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to restore backup")

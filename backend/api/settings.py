@@ -382,7 +382,7 @@ async def test_discord_notification(
         response = requests.post(webhook_url, json=discord_payload, timeout=10)
     except requests.RequestException as e:
         log_error(LogTags.API, f"Discord test notification request failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Failed to send Discord test notification: {str(e)}")
+        raise HTTPException(status_code=502, detail="Failed to send Discord test notification")
 
     if response.status_code not in (200, 204):
         detail = response.text.strip() or "Discord rejected the webhook payload"
@@ -515,7 +515,7 @@ async def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get
     except Exception as e:
         db.rollback()
         log_error(LogTags.API, f"Database error saving bulk settings: {e}\n{traceback.format_exc()}", count=len(allowed))
-        raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save settings")
 
     return {"message": "Settings saved", "count": len(allowed)}
 
@@ -636,7 +636,7 @@ async def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depe
     except Exception as e:
         db.rollback()
         log_error(LogTags.API, f"Database error saving Plex library config: {e}\n{traceback.format_exc()}", instance=config.instance_name)
-        raise HTTPException(status_code=500, detail=f"Failed to save library configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save library configuration")
     
     return {"message": "Library configuration saved", "instance": config.instance_name}
 

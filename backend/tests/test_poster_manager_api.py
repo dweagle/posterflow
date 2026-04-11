@@ -528,7 +528,7 @@ def test_flow_config_save_returns_500_when_storage_fails(client, monkeypatch):
 
     response = client.post("/api/poster-manager/flow/config", json=payload)
     assert response.status_code == 500
-    assert "simulated storage failure" in response.json()["detail"]
+    assert "Error saving flow config" in response.json()["detail"]
 
 
 def test_flow_run_returns_500_and_releases_lock_when_create_job_fails(client, monkeypatch):
@@ -545,7 +545,7 @@ def test_flow_run_returns_500_and_releases_lock_when_create_job_fails(client, mo
 
     response = client.post("/api/poster-manager/flow/run", json={"dry_run": False})
     assert response.status_code == 500
-    assert "simulated job creation failure" in response.json()["detail"]
+    assert "Failed to start workflow" in response.json()["detail"]
 
     assert poster_manager_module._flow_running is False
     assert poster_manager_module._flow_started_at is None

@@ -46,7 +46,7 @@ scheduler = BackgroundScheduler(
         'default': ThreadPoolExecutor(10)
     },
     job_defaults={
-        'coalesce': False,
+        'coalesce': True,
         'max_instances': 3
     },
     timezone=get_localzone()

@@ -146,7 +146,7 @@ def create_schedule(schedule_data: ScheduleCreate, db: Session = Depends(get_db)
     except Exception as e:
         db.rollback()
         log_error(LogTags.SCHEDULER, f"Database error creating schedule: {e}\n{traceback.format_exc()}", schedule_name=schedule_data.name)
-        raise HTTPException(status_code=500, detail=f"Failed to create schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create schedule")
 
     try:
         update_schedules()
@@ -277,7 +277,7 @@ def update_schedule(
     except Exception as e:
         db.rollback()
         log_error(LogTags.SCHEDULER, f"Database error updating schedule {schedule_id}: {e}\n{traceback.format_exc()}", schedule_id=schedule_id)
-        raise HTTPException(status_code=500, detail=f"Failed to update schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update schedule")
 
     try:
         update_schedules()
@@ -318,7 +318,7 @@ def delete_schedule(schedule_id: int, db: Session = Depends(get_db)) -> dict[str
     except Exception as e:
         db.rollback()
         log_error(LogTags.SCHEDULER, f"Database error deleting schedule {schedule_id}: {e}\n{traceback.format_exc()}", schedule_id=schedule_id)
-        raise HTTPException(status_code=500, detail=f"Failed to delete schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete schedule")
 
     log_info(LogTags.SCHEDULER, f"Deleted schedule: '{schedule_name}'")
 

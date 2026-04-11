@@ -81,7 +81,7 @@ async def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> 
         
     except Exception as e:
         log_warning(LogTags.DATABASE, f"Error previewing cleanup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error previewing cleanup")
 
 
 @router.post("/cleanup/execute")
@@ -158,7 +158,7 @@ async def execute_cleanup(
     except Exception as e:
         db.rollback()
         log_warning(LogTags.DATABASE, f"Error executing cleanup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error executing cleanup")
 
 
 @router.get("/stats")
@@ -218,4 +218,4 @@ async def database_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         
     except Exception as e:
         log_warning(LogTags.DATABASE, f"Error getting stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting database stats")

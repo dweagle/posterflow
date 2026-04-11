@@ -2042,7 +2042,7 @@ async def export_maker_idarr_csvs(payload: IdarrExportRequest, db: Session = Dep
         stats_payload = json.loads(latest_run.stats_json) if latest_run.stats_json else {}
         details_payload = json.loads(latest_run.details_json) if latest_run.details_json else {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse IDarr run payload: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse IDarr run payload")
 
     if not isinstance(stats_payload, dict):
         stats_payload = {}
@@ -2255,7 +2255,7 @@ async def revert_maker_idarr_latest_run(payload: IdarrRevertRequest, db: Session
     try:
         details_payload = json.loads(latest_run.details_json) if latest_run.details_json else {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse IDarr run details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse IDarr run details")
 
     if not isinstance(details_payload, dict):
         details_payload = {}

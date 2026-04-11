@@ -213,7 +213,7 @@ async def rename_posters(
         raise
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Failed to start Poster Renamer: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to start Poster Renamer")
 
 
 @router.post("/border-replacer/run")
@@ -264,7 +264,7 @@ async def run_border_replacer(
         raise
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Failed to start border replacer: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to start border replacer")
 
 
 @router.get("/config")
@@ -291,7 +291,7 @@ async def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Error getting Poster Renamer config: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting Poster Renamer config")
 
 
 @router.post("/config")
@@ -319,7 +319,7 @@ async def save_rename_config(
     except Exception as e:
         db.rollback()
         log_error(LogTags.POSTER_RENAMER, f"Error saving Poster Renamer config: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error saving Poster Renamer config")
 
 
 @router.get("/stats")
@@ -401,7 +401,7 @@ async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Error getting poster stats: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting poster stats")
 
 
 @router.get("/priority")
@@ -426,7 +426,7 @@ async def get_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Error getting drive priority: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting drive priority")
 
 
 @router.post("/priority")
@@ -458,7 +458,7 @@ async def save_drive_priority(
     except Exception as e:
         db.rollback()
         log_error(LogTags.POSTER_RENAMER, f"Error saving drive priority: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error saving drive priority")
 
 
 @router.get("/auto-run-border")
@@ -471,7 +471,7 @@ async def get_auto_run_border(db: Session = Depends(get_db)) -> Dict[str, bool]:
         return {"enabled": setting.value.lower() == "true" if setting else False}
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Error getting auto-run border setting: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting auto-run border setting")
 
 
 @router.post("/auto-run-border")
@@ -497,7 +497,7 @@ async def save_auto_run_border(
     except Exception as e:
         db.rollback()
         log_error(LogTags.POSTER_RENAMER, f"Error saving auto-run border setting: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error saving auto-run border setting")
 
 
 @router.get("/scan")
@@ -518,7 +518,7 @@ async def get_unmatched_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return unmatched_service.get_cached_results()
     except Exception as e:
         log_error(LogTags.UNMATCHED, f"Error getting stats: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting unmatched stats")
 
 
 @router.post("/detect-unmatched")
@@ -561,7 +561,7 @@ async def start_unmatched_detection(
         raise
     except Exception as e:
         log_error(LogTags.UNMATCHED, f"Error during detection: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error starting unmatched detection")
 
 
 class UnmatchedTmdbSearchRequest(BaseModel):
@@ -816,7 +816,7 @@ async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Error getting flow config: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error getting flow config")
 
 
 @router.post("/flow/config")
@@ -836,7 +836,7 @@ async def save_flow_config(
     except Exception as e:
         db.rollback()
         log_error(LogTags.WORKFLOW, f"Error saving flow config: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error saving flow config")
 
 
 @router.post("/flow/run")
@@ -905,4 +905,4 @@ async def run_flow(
             _flow_running = False
             _flow_started_at = None
         log_error(LogTags.WORKFLOW, f"Failed to start workflow: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to start workflow")

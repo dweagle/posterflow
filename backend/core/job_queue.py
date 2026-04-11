@@ -34,15 +34,7 @@ class JobQueueManager:
         
     def submit(self, job_func: Callable[..., Any], job_id: int, *args: Any, **kwargs: Any) -> Future[Any]:
         """Submit a job to the queue."""
-        with self.lock:
-            self._ensure_executor_ready()
-            self.pending_jobs += 1
-            queue_position = self.pending_jobs
-
-        if queue_position > 1:
-            log_debug("QUEUE", f"Job {job_id} waiting (position {queue_position} in queue, {self.active_jobs}/{self.max_concurrent} slots active)")
-        
-        def wrapped_job() -> None:
+        def wrapped_job() -> Any:
             """Wrapper that tracks active job count."""
             with self.lock:
                 self.pending_jobs -= 1
@@ -55,9 +47,16 @@ class JobQueueManager:
                 with self.lock:
                     self.active_jobs -= 1
                 log_debug("QUEUE", f"Job {job_id} completed ({self.active_jobs}/{self.max_concurrent} slots active)")
-        
-        # Submit to thread pool
-        future = self.executor.submit(wrapped_job)
+
+        # Submit inside lock to prevent race with shutdown()
+        with self.lock:
+            self._ensure_executor_ready()
+            self.pending_jobs += 1
+            queue_position = self.pending_jobs
+            if queue_position > 1:
+                log_debug("QUEUE", f"Job {job_id} waiting (position {queue_position} in queue, {self.active_jobs}/{self.max_concurrent} slots active)")
+            future = self.executor.submit(wrapped_job)
+
         return future
         
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
