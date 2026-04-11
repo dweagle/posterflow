@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import Float, func
 from typing import Any, Dict
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dt_time
 import re
 from database import get_db
 from models.job import (
@@ -296,16 +296,31 @@ async def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> Fil
 @router.get("/poster-daily-activity")
 async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get daily and weekly poster activity summary for dashboard card."""
-    now_utc = datetime.now(timezone.utc)
-    today_iso = now_utc.date().isoformat()
-    week_ago_iso = (now_utc - timedelta(days=7)).date().isoformat()
-    month_ago_iso = (now_utc - timedelta(days=30)).date().isoformat()
+    # Use local system time to determine day boundaries so "today" matches the
+    # user's calendar day regardless of UTC offset. DB timestamps are UTC-naive,
+    # so we convert local boundaries back to UTC for range comparisons.
+    now_local = datetime.now().astimezone()
+    today_local = now_local.date()
+    local_tz = now_local.tzinfo
+    today_start_utc = (
+        datetime.combine(today_local, dt_time.min, tzinfo=local_tz)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    tomorrow_start_utc = (
+        datetime.combine(today_local + timedelta(days=1), dt_time.min, tzinfo=local_tz)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    week_ago_start_utc = today_start_utc - timedelta(days=7)
+    month_ago_start_utc = today_start_utc - timedelta(days=30)
 
     # --- Renamed stats (from Poster.last_processed) ---
     posters_renamed_today = (
         db.query(func.count(Poster.id))
         .filter(Poster.last_processed.isnot(None))
-        .filter(func.date(Poster.last_processed) == today_iso)
+        .filter(Poster.last_processed >= today_start_utc)
+        .filter(Poster.last_processed < tomorrow_start_utc)
         .scalar()
         or 0
     )
@@ -313,7 +328,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
     posters_renamed_week = (
         db.query(func.count(Poster.id))
         .filter(Poster.last_processed.isnot(None))
-        .filter(func.date(Poster.last_processed) >= week_ago_iso)
+        .filter(Poster.last_processed >= week_ago_start_utc)
         .scalar()
         or 0
     )
@@ -323,7 +338,8 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
         db.query(Job.job_type, Job.message)
         .filter(Job.status == JOB_STATUS_COMPLETED)
         .filter(Job.completed_at.isnot(None))
-        .filter(func.date(Job.completed_at) == today_iso)
+        .filter(Job.completed_at >= today_start_utc)
+        .filter(Job.completed_at < tomorrow_start_utc)
         .all()
     )
 
@@ -331,7 +347,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
         db.query(Job.job_type, Job.message)
         .filter(Job.status == JOB_STATUS_COMPLETED)
         .filter(Job.completed_at.isnot(None))
-        .filter(func.date(Job.completed_at) >= week_ago_iso)
+        .filter(Job.completed_at >= week_ago_start_utc)
         .all()
     )
 
@@ -339,7 +355,7 @@ async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, 
         db.query(Job.job_type, Job.message)
         .filter(Job.status == JOB_STATUS_COMPLETED)
         .filter(Job.completed_at.isnot(None))
-        .filter(func.date(Job.completed_at) >= month_ago_iso)
+        .filter(Job.completed_at >= month_ago_start_utc)
         .all()
     )
 
