@@ -1841,6 +1841,54 @@ def test_webhook_dedupe_entries_search_rejects_invalid_media_type(client):
     assert response.status_code == 400
 
 
+def test_webhook_different_seasons_not_deduplicated(client, monkeypatch):
+    """Webhooks for different seasons of the same show must each queue a separate job.
+
+    Season 2 arriving within the dedupe window after Season 1 must NOT be treated as
+    a duplicate — each season needs its own upload job.  Per-episode spam within the
+    same season is still collapsed (second webhook for the same season IS a duplicate).
+    """
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+
+    enable_resp = client.post(
+        "/api/poster-manager/plex-upload/webhook-settings",
+        json={"enabled": True},
+    )
+    assert enable_resp.status_code == 200
+
+    def _make_series_payload(season_number: int) -> dict:
+        return {
+            "eventType": "Download",
+            "series": {
+                "title": "Breaking Bad",
+                "year": 2008,
+                "tvdbId": 81189,
+            },
+            "episodes": [{"seasonNumber": season_number, "episodeNumber": 1}],
+        }
+
+    # Season 1 — should queue
+    s1_first = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(1))
+    assert s1_first.status_code == 200
+    assert s1_first.json()["queued"] is True, "Season 1 first webhook should be queued"
+
+    # Season 1 again — should be deduplicated (same season)
+    s1_dup = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(1))
+    assert s1_dup.status_code == 200
+    assert s1_dup.json()["queued"] is False, "Season 1 repeat within window should be deduplicated"
+    assert s1_dup.json()["duplicate"] is True
+
+    # Season 2 — must NOT be deduplicated even though it's within the window
+    s2_first = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(2))
+    assert s2_first.status_code == 200
+    assert s2_first.json()["queued"] is True, "Season 2 should not be deduplicated by Season 1's cache entry"
+
+    # Season 2 again — should be deduplicated
+    s2_dup = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(2))
+    assert s2_dup.status_code == 200
+    assert s2_dup.json()["queued"] is False, "Season 2 repeat within window should be deduplicated"
+
+
 def test_webhook_disabled_rejects_and_tracks_stats(client):
     """Disabled webhook setting should block ingestion and increment disabled counter."""
     disable_resp = client.post(

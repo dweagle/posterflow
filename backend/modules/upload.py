@@ -1252,11 +1252,11 @@ def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any]) -> 
     now_ts = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts - PLEX_WEBHOOK_DEDUPE_WINDOW_SECONDS
 
-    # Season number is intentionally excluded from the dedupe key for series.
-    # Sonarr fires one webhook per episode import, so a brand-new show triggers
-    # one webhook per season (each has a different season_number).  Including
-    # season_number would cause a separate job per season; instead, all webhooks
-    # for the same show within the dedupe window collapse to a single job.
+    # Season number IS included in the dedupe key for series.
+    # Sonarr fires one webhook per episode import, so all per-episode webhooks for
+    # the same season collapse to a single job (same season_number → same key).
+    # Different seasons of the same show each get their own dedupe slot, so Season 2
+    # arriving within the window after Season 1 is NOT treated as a duplicate.
     # For movies, season_number is always None, so this has no effect on movie dedup.
     dedupe_key = ":".join(
         [
@@ -1265,6 +1265,7 @@ def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any]) -> 
             parsed_payload.get("media_type", "unknown"),
             normalize_titles(parsed_payload.get("title", "")),
             str(parsed_payload.get("year") or ""),
+            str(parsed_payload.get("season_number") if parsed_payload.get("season_number") is not None else ""),
         ]
     )
 
@@ -1298,8 +1299,7 @@ def _clear_webhook_dedupe_cache(
     media_key = media_type.strip().lower() if isinstance(media_type, str) and media_type.strip() else None
     title_key = normalize_titles(title) if isinstance(title, str) and title.strip() else None
     year_key = str(year) if isinstance(year, int) else None
-    # season_number is no longer part of the dedupe key; the parameter is accepted
-    # for backward-compat but has no effect on matching.
+    season_key = str(season_number) if isinstance(season_number, int) else None
 
     pruned_cache = _load_pruned_webhook_dedupe_cache(db, cutoff_ts)
 
@@ -1311,13 +1311,14 @@ def _clear_webhook_dedupe_cache(
             removed += 1
             continue
 
-        # Support both the old 6-part key (source:event:media:title:year:season)
-        # and the new 5-part key (source:event:media:title:year).
+        # Support both the current 6-part key (source:event:media:title:year:season)
+        # and legacy 5-part keys (source:event:media:title:year) from before season was added.
         parts = str(dedupe_key).split(":", 5)
         if len(parts) == 6:
-            key_source, key_event, key_media, key_title, key_year, _key_season = parts
+            key_source, key_event, key_media, key_title, key_year, key_season = parts
         elif len(parts) == 5:
             key_source, key_event, key_media, key_title, key_year = parts
+            key_season = None
         else:
             filtered_cache[dedupe_key] = timestamp
             continue
@@ -1335,6 +1336,11 @@ def _clear_webhook_dedupe_cache(
             filtered_cache[dedupe_key] = timestamp
             continue
         if year_key and key_year != year_key:
+            filtered_cache[dedupe_key] = timestamp
+            continue
+        # Only filter by season when the entry has a season component; legacy 5-part
+        # entries (key_season is None) are left untouched when a season filter is given.
+        if season_key and key_season is not None and key_season != season_key:
             filtered_cache[dedupe_key] = timestamp
             continue
 
@@ -1370,13 +1376,14 @@ def _search_webhook_dedupe_entries(
 
     entries: list[Dict[str, Any]] = []
     for dedupe_key, timestamp in pruned_cache.items():
-        # Support both the old 6-part key (source:event:media:title:year:season)
-        # and the new 5-part key (source:event:media:title:year).
+        # Support both the current 6-part key (source:event:media:title:year:season)
+        # and legacy 5-part keys (source:event:media:title:year) from before season was added.
         parts = str(dedupe_key).split(":", 5)
         if len(parts) == 6:
-            key_source, key_event, key_media, key_title, key_year, _key_season = parts
+            key_source, key_event, key_media, key_title, key_year, key_season = parts
         elif len(parts) == 5:
             key_source, key_event, key_media, key_title, key_year = parts
+            key_season = None
         else:
             continue
 
@@ -1388,6 +1395,7 @@ def _search_webhook_dedupe_entries(
             continue
 
         year_value = int(key_year) if key_year.isdigit() else None
+        season_value = int(key_season) if key_season is not None and key_season.isdigit() else None
         last_seen = datetime.fromtimestamp(int(timestamp), timezone.utc).isoformat()
 
         entries.append(
@@ -1397,6 +1405,7 @@ def _search_webhook_dedupe_entries(
                 "media_type": key_media,
                 "title": key_title,
                 "year": year_value,
+                "season_number": season_value,
                 "dedupe_key": dedupe_key,
                 "last_seen_at": last_seen,
             }
