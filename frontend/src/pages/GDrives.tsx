@@ -5,7 +5,7 @@ import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, Check, Trash2, RotateCw, Plus } from 'lucide-react'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import './GDrives.css'
 
@@ -517,7 +517,7 @@ function GDrives() {
                               onClick={() => handleUnsubscribe(drive.id)}
                               title="Unsubscribe from drive"
                             >
-                              <Check size={16} />
+                              <BookmarkMinus size={16} />
                             </button>
                           </>
                         ) : (
@@ -624,7 +624,7 @@ function GDrives() {
                       onClick={() => handleUnsubscribe(drive.id)}
                       title="Unsubscribe from drive"
                     >
-                      <Check size={16} />
+                      <BookmarkMinus size={16} />
                     </button>
                   </>
                 ) : (

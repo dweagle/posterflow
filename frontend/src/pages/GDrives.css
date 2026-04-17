@@ -538,11 +538,11 @@
 }
 
 .btn-icon.btn-subscribed {
-  background-color: #4caf50;
+  background-color: #c62828;
 }
 
 .btn-icon.btn-subscribed:hover {
-  background-color: #5cbf60;
+  background-color: #d32f2f;
 }
 
 .btn-subscribe {
