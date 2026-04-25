@@ -4327,8 +4327,16 @@ class IdarrRunner:
             and not isinstance(a.get("tvdb_id"), int)
         ]
         if tvdb_missing_assets:
-            log_info(LogTags.IDARR, f"📺 {len(tvdb_missing_assets)} TV show(s) still missing TVDB ID after enrichment:")
-            for _a in sorted(tvdb_missing_assets, key=lambda x: str(x.get("title") or "").lower()):
+            # Deduplicate by TMDB ID so base poster + season posters count as one show
+            seen_tmdb: set[int] = set()
+            tvdb_missing_unique: list[dict[str, Any]] = []
+            for _a in tvdb_missing_assets:
+                _tid = int(_a["tmdb_id"])
+                if _tid not in seen_tmdb:
+                    seen_tmdb.add(_tid)
+                    tvdb_missing_unique.append(_a)
+            log_info(LogTags.IDARR, f"📺 {len(tvdb_missing_unique)} TV show(s) still missing TVDB ID after enrichment:")
+            for _a in sorted(tvdb_missing_unique, key=lambda x: str(x.get("title") or "").lower()):
                 _title = str(_a.get("title") or "unknown")
                 _year = f" ({_a['year']})" if isinstance(_a.get("year"), int) else ""
                 _tmdb = f" [tmdb-{_a['tmdb_id']}]"
