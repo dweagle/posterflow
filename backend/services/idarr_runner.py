@@ -4320,6 +4320,20 @@ class IdarrRunner:
         for _row in summary_report:
             log_info(LogTags.IDARR, f"{_row.get('label', '')}: {_row.get('value', '')}")
 
+        tvdb_missing_assets = [
+            a for a in assets
+            if str(a.get("type") or "") == "tv_series"
+            and isinstance(a.get("tmdb_id"), int)
+            and not isinstance(a.get("tvdb_id"), int)
+        ]
+        if tvdb_missing_assets:
+            log_info(LogTags.IDARR, f"📺 {len(tvdb_missing_assets)} TV show(s) still missing TVDB ID after enrichment:")
+            for _a in sorted(tvdb_missing_assets, key=lambda x: str(x.get("title") or "").lower()):
+                _title = str(_a.get("title") or "unknown")
+                _year = f" ({_a['year']})" if isinstance(_a.get("year"), int) else ""
+                _tmdb = f" [tmdb-{_a['tmdb_id']}]"
+                log_info(LogTags.IDARR, f"  ○ {_title}{_year}{_tmdb}")
+
         _notify_progress("finalizing", 99, "IDarr run complete, saving final status")
 
         message = "IDarr tool run complete"
