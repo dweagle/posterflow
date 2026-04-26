@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pathvalidate import is_valid_filename, sanitize_filename
 
-from core.logging import logger, LogTags, log_success, log_error, log_info, log_debug, log_section_start, log_section_end
+from core.logging import logger, LogTags, log_success, log_error, log_info, log_warning, log_debug, log_section_start, log_section_end
 from models.setting import get_setting
 from sqlalchemy.orm import Session
 from util.arr.client import create_arr_client
@@ -335,6 +335,49 @@ class PosterRenameService:
         
         return merged_list
 
+    def _merge_duplicate_collections(self, collections_list: List[MediaItem], log_tag: str = LogTags.POSTER_RENAMER) -> List[MediaItem]:
+        """
+        Deduplicate collection entries from multiple Plex libraries.
+
+        The same collection (e.g. 'Netflix Top 10') can appear in both a Movies
+        and a TV library, producing identical destination folders.  Keep only the
+        first-seen entry per normalized title so downstream matching doesn't try
+        to write the same poster.jpg twice.
+
+        Args:
+            collections_list: List of collections from all Plex instances/libraries.
+            log_tag: Tag to use for logging.
+
+        Returns:
+            Deduplicated list.
+        """
+        if not collections_list:
+            return []
+
+        seen: Dict[str, Dict[str, Any]] = {}
+        for collection in collections_list:
+            # Prefer TMDB ID as key; fall back to normalized title for custom collections
+            tmdb_id = collection.get("tmdb_id")
+            key = f"tmdb_{tmdb_id}" if tmdb_id else normalize_titles(collection.get("title", ""))
+            if key not in seen:
+                seen[key] = collection
+            else:
+                log_debug(
+                    log_tag,
+                    f"Deduplicated collection: '{collection.get('title')}' "
+                    f"(instance: {collection.get('instance', '?')})"
+                )
+
+        merged_list = list(seen.values())
+        if len(merged_list) < len(collections_list):
+            log_info(
+                log_tag,
+                f"Deduplicated collections: {len(collections_list)} entries → {len(merged_list)} unique "
+                f"(removed {len(collections_list) - len(merged_list)} duplicates across Plex libraries)"
+            )
+
+        return merged_list
+
     def process_file(
         self, file: str, new_file_path: str, action_type: str
     ) -> None:
@@ -391,6 +434,7 @@ class PosterRenameService:
         # Calculate total items to process
         total_items = sum(len(matched_assets[asset_type]) for asset_type in asset_types)
         current_item = 0
+        written_dest_paths: Dict[str, str] = {}  # dest_path -> source filename that won
         
         for asset_type in asset_types:
             output[asset_type] = []
@@ -458,6 +502,26 @@ class PosterRenameService:
                                 new_file_name = f"{folder}{file_extension}"
                             new_file_path = os.path.join(dest_dir, new_file_name)
                         
+                        # Skip if already written to this destination in this run (highest-priority entry wins)
+                        if new_file_path in written_dest_paths:
+                            src_drive = os.path.basename(os.path.dirname(os.path.dirname(file)))
+                            src_folder = os.path.basename(os.path.dirname(file))
+                            winning_file = written_dest_paths[new_file_path]
+                            log_warning(
+                                LogTags.POSTER_RENAMER,
+                                f"Skipping '{item_name}' from [{src_drive}/{src_folder}] — "
+                                f"'{new_file_name}' was already written by a higher-priority source this run. "
+                                f"This is normal when multiple sources with different file names match the same media. "
+                                f"Winner: '{winning_file}' | Skipped: '{file_name}'",
+                                media=item_name,
+                                source_folder=src_folder,
+                                drive=src_drive,
+                                dest=new_file_path,
+                                winning_file=winning_file,
+                                skipped_file=file_name,
+                            )
+                            continue
+
                         # Check if destination exists and is different
                         if os.path.lexists(new_file_path):
                             existing_file = os.path.join(dest_dir, new_file_name)
@@ -513,6 +577,8 @@ class PosterRenameService:
                                     f"  → {file_name} → {new_file_name}",
                                     source=file_name, dest=new_file_name
                                 )
+
+                        written_dest_paths[new_file_path] = file_name
 
                     if progress_callback:
                         if item_had_changes:
@@ -650,6 +716,7 @@ class PosterRenameService:
         # This matches DAPS behavior: combine season lists from multiple Sonarr instances
         media_dict["movies"] = self._merge_duplicate_movies(media_dict["movies"], log_tag)
         media_dict["series"] = self._merge_duplicate_series(media_dict["series"], log_tag)
+        media_dict["collections"] = self._merge_duplicate_collections(media_dict["collections"], log_tag)
         
         return media_dict
 

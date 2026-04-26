@@ -72,6 +72,29 @@ def merge_assets(
     """
     for new in new_assets:
         search_matched_assets = search_matches(prefix_index, new["title"])
+
+        # Supplement with ID-based search to catch cases where title prefix differs
+        # (e.g., "Ready or Not 2 Here I Come" vs "Ready or Not Here I Come" with same TMDB ID).
+        # Filter to same type only — TMDB uses separate namespaces for movies and TV shows but
+        # stores them as plain integers, so the same number can exist for both a movie and a series.
+        new_tmdb_id = new.get("tmdb_id")
+        new_tvdb_id = new.get("tvdb_id")
+        new_type = new.get("type")
+        id_candidates = []
+        if new_tmdb_id:
+            id_candidates = [
+                a for a in search_matches(prefix_index, new["title"], tmdb_id=new_tmdb_id)
+                if a.get("type") == new_type
+            ]
+        elif new_tvdb_id:
+            id_candidates = [
+                a for a in search_matches(prefix_index, new["title"], tvdb_id=new_tvdb_id)
+                if a.get("type") == new_type
+            ]
+        if id_candidates:
+            seen_ids = {id(a) for a in id_candidates}
+            search_matched_assets = id_candidates + [a for a in search_matched_assets if id(a) not in seen_ids]
+
         merged = False
         
         for final in search_matched_assets:
