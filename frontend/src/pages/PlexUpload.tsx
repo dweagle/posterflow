@@ -1269,6 +1269,10 @@ function PlexUpload() {
             )}
           </section>
 
+          <div className="plex-upload-initial-warning">
+            <strong>Initial Setup Recommendation:</strong> Run a full manual Plex upload on first use. This caches all current posters and prevents unnecessary re-uploads during future automated runs.
+          </div>
+
           <section className="plex-upload-section">
             <div className="plex-upload-section-header">
               <h2>Automation & Controls</h2>
