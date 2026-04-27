@@ -663,28 +663,11 @@ def test_webhook_preupload_fast_path_skips_when_exact_target_is_already_current(
                 }
             ]
 
-    def _fake_get_assets_files(_source_dirs, _logger):
-        return (
-            [
-                {
-                    "type": "movies",
-                    "title": "Zootopia",
-                    "normalized_title": "zootopia2016",
-                    "tmdb_id": 269149,
-                    "imdb_id": "tt2948356",
-                    "tvdb_id": None,
-                    "files": [source_file],
-                }
-            ],
-            {},
-        )
-
     def _fake_rename_posters(self, **_kwargs):
         rename_called["value"] = True
         return {"success": True, "stats": {"total_matched": 1, "movies": 1, "series": 0, "collections": 0}}
 
     monkeypatch.setattr("modules.upload.PlexUploadService", _FakePlexUploadService)
-    monkeypatch.setattr("modules.upload.get_assets_files", _fake_get_assets_files)
     monkeypatch.setattr("modules.upload.os.path.getmtime", lambda _path: 100.0)
     monkeypatch.setattr("modules.upload.PosterRenameService.rename_posters", _fake_rename_posters)
 
@@ -747,28 +730,11 @@ def test_webhook_preupload_fast_path_runs_when_source_changed_after_last_process
                 }
             ]
 
-    def _fake_get_assets_files(_source_dirs, _logger):
-        return (
-            [
-                {
-                    "type": "movies",
-                    "title": "Zootopia",
-                    "normalized_title": "zootopia2016",
-                    "tmdb_id": 269149,
-                    "imdb_id": "tt2948356",
-                    "tvdb_id": None,
-                    "files": [source_file],
-                }
-            ],
-            {},
-        )
-
     def _fake_rename_posters(self, **_kwargs):
         rename_called["value"] = True
         return {"success": True, "stats": {"total_matched": 1, "movies": 1, "series": 0, "collections": 0}}
 
     monkeypatch.setattr("modules.upload.PlexUploadService", _FakePlexUploadService)
-    monkeypatch.setattr("modules.upload.get_assets_files", _fake_get_assets_files)
     monkeypatch.setattr("modules.upload.os.path.getmtime", lambda _path: 100.0)
     monkeypatch.setattr("modules.upload.PosterRenameService.rename_posters", _fake_rename_posters)
 

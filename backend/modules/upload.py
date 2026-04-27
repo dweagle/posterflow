@@ -9,7 +9,7 @@ import time
 import traceback
 from typing import Any, Dict, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from core.logging import (
@@ -44,7 +44,6 @@ from services.poster_renamer import PosterRenameService
 from services.plex_upload import PlexUploadService
 from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
-from util.posters.assets import get_assets_files
 
 # Regex to extract edition title from a Radarr-style folder token like {edition-Extended Cut}
 _RADARR_EDITION_TOKEN_RE = re.compile(r"\{edition-([^}]+)\}", re.IGNORECASE)
@@ -131,6 +130,7 @@ def _load_priority_source_dir_context(db: Session) -> tuple[list[Dict[str, Any]]
         source_dir_context.append(
             {
                 "drive_id": drive.id,
+                "gdrive_id": drive.drive_id,
                 "drive_name": drive.name,
                 "drive_type": drive_type,
                 "path": str(drive.get_local_path()),
@@ -237,13 +237,15 @@ def _run_webhook_preupload_rename_pass(
         )
         return summary
 
-    source_dirs, source_dirs_error = _load_priority_source_dirs(db)
+    _source_dir_ctx, source_dirs_error = _load_priority_source_dir_context(db)
     if source_dirs_error:
         log_warning(
             LogTags.UPLOADER,
             f"Webhook rename-then-upload source discovery failed; skipping rename prep: {source_dirs_error}",
         )
         return summary
+    source_dirs = [entry["path"] for entry in _source_dir_ctx]
+    allowed_gdrive_ids = [entry["gdrive_id"] for entry in _source_dir_ctx if entry.get("gdrive_id")]
 
     destination_assets_cache: Optional[list[Dict[str, Any]]] = None
 
@@ -347,40 +349,57 @@ def _run_webhook_preupload_rename_pass(
         return any(asset.get("asset_type") == "main" for asset in matching_assets)
 
     def _source_target_is_unchanged_since_last_processed() -> bool:
-        target_ids = _target_id_keys(parsed_payload)
-        if not target_ids:
+        tmdb_id = parsed_payload.get("tmdb_id")
+        tvdb_id = parsed_payload.get("tvdb_id")
+        imdb_id = parsed_payload.get("imdb_id")
+
+        id_filters = []
+        if isinstance(tmdb_id, int):
+            id_filters.append(Poster.file_path.ilike(f"%{{tmdb-{tmdb_id}}}%"))
+        if isinstance(tvdb_id, int):
+            id_filters.append(Poster.file_path.ilike(f"%{{tvdb-{tvdb_id}}}%"))
+        if isinstance(imdb_id, str) and imdb_id.strip():
+            id_filters.append(Poster.file_path.ilike(f"%{{imdb-{imdb_id.strip()}}}%"))
+
+        if not id_filters or not allowed_gdrive_ids:
             return False
 
-        try:
-            source_assets, _source_index = get_assets_files(source_dirs, logger)
-        except Exception:
-            return False
-
-        rename_service = PosterRenameService(db)
-        filtered_assets, _filtered_index = rename_service._filter_assets_for_target(
-            source_assets,
-            target_media_type=parsed_payload.get("media_type"),
-            target_title=parsed_payload.get("title"),
-            target_year=parsed_payload.get("year"),
-            target_tmdb_id=parsed_payload.get("tmdb_id"),
-            target_tvdb_id=parsed_payload.get("tvdb_id"),
-            target_imdb_id=parsed_payload.get("imdb_id"),
-            target_season_number=parsed_payload.get("season_number"),
+        candidates = (
+            db.query(Poster)
+            .filter(
+                Poster.drive_id.in_(allowed_gdrive_ids),
+                or_(*id_filters),
+            )
+            .all()
         )
 
-        if len(filtered_assets) != 1:
+        if not candidates:
             return False
 
-        target_asset = filtered_assets[0]
-        asset_files = target_asset.get("files") if isinstance(target_asset.get("files"), list) else []
-        if len(asset_files) != 1:
+        media_type = str(parsed_payload.get("media_type") or "").strip().lower()
+        season_number = parsed_payload.get("season_number")
+
+        if media_type == "series":
+            filtered = []
+            for poster in candidates:
+                stem = Path(poster.file_path).stem.lower()
+                if isinstance(season_number, int):
+                    season_match = re.search(r"season\s*0*(\d+)", stem)
+                    if season_match and int(season_match.group(1)) == season_number:
+                        filtered.append(poster)
+                else:
+                    if not re.match(r"season\s*\d+", stem):
+                        filtered.append(poster)
+            candidates = filtered
+
+        if len(candidates) != 1:
             return False
 
-        source_file = str(Path(str(asset_files[0])).resolve())
-        source_poster = db.query(Poster).filter(Poster.file_path == source_file).first()
-        if not source_poster or source_poster.last_processed is None:
+        source_poster = candidates[0]
+        if source_poster.last_processed is None:
             return False
 
+        source_file = source_poster.file_path
         try:
             current_mtime = float(os.path.getmtime(source_file))
         except Exception:
@@ -390,16 +409,11 @@ def _run_webhook_preupload_rename_pass(
             return False
 
         last_processed = source_poster.last_processed
-        if last_processed is None:
-            return False
         if last_processed.tzinfo is None:
             last_processed = last_processed.replace(tzinfo=timezone.utc)
 
         current_mtime_dt = datetime.fromtimestamp(current_mtime, timezone.utc)
-        if current_mtime_dt > last_processed:
-            return False
-
-        return True
+        return current_mtime_dt <= last_processed
 
     if _destination_has_exact_target_asset() and _source_target_is_unchanged_since_last_processed():
         summary["fast_path_skipped"] = True
