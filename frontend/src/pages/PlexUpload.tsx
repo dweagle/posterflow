@@ -1242,7 +1242,7 @@ function PlexUpload() {
                     <ul className="walkthrough-substeps">
                       <li>
                         <strong>Radarr:</strong> Settings → Connect → + → Webhook.
-                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On File Import</strong> only in import events.
+                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On File Import</strong> and <strong>On File Upgrade</strong> only in import events.
                       </li>
                       <li>
                         <strong>Sonarr:</strong> Settings → Connect → + → Webhook.
