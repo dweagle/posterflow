@@ -1234,6 +1234,50 @@ def test_handle_radarr_upgrade_skips_action_when_no_edition_in_path(test_db, tmp
     assert "default_edition" in json.loads(remaining.uploaded_editions)
 
 
+def test_handle_radarr_upgrade_clears_cache_when_edition_removed(test_db, tmp_path):
+    """When a movie loses its edition (edition → no-edition), the cache should be cleared so that
+    Plex's new no-edition library entry receives a poster upload."""
+    (tmp_path / "Aliens (1986)").mkdir()
+    poster = tmp_path / "Aliens (1986)" / "poster.jpg"
+    poster.write_bytes(b"fake")
+
+    from models.setting import upsert_setting as _upsert_setting
+    _upsert_setting(test_db, "poster_destination", str(tmp_path))
+    test_db.commit()
+
+    # Cache records a prior upload for the edition version.
+    record = PlexUploadRecord(
+        file_path=str(poster),
+        uploaded_to_libraries=json.dumps(["Movies"]),
+        uploaded_to_library_keys=json.dumps(["abc123"]),
+        uploaded_editions=json.dumps(["Extended Cut"]),  # real edition previously cached
+        uploaded_media_types=json.dumps(["movies"]),
+        file_hash=None,
+    )
+    test_db.add(record)
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    from modules.upload import _handle_radarr_upgrade_edition_check
+
+    # New file path has no {edition-*} token — edition was removed.
+    parsed_payload = {
+        "source": "radarr",
+        "is_upgrade": True,
+        "movie_file_path": "/movies/Aliens (1986)/Aliens.1986.mkv",
+        "year": 1986,
+        "tmdb_id": 679,
+        "tvdb_id": None,
+        "imdb_id": "tt0090605",
+    }
+
+    _handle_radarr_upgrade_edition_check(service, parsed_payload, "movie", "Aliens")
+
+    # DB record should have been cleared so the no-edition Plex entry gets a poster.
+    remaining = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(poster)).first()
+    assert remaining is None
+
+
 def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_db, monkeypatch):
     """Webhook background job should complete early without running upload when cache gate says target is already uploaded."""
     import modules.upload as upload_module

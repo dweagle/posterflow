@@ -1731,8 +1731,15 @@ def _handle_radarr_upgrade_edition_check(
     media_type: str,
     title: str,
 ) -> None:
-    """For Radarr upgrade events, check if the file path signals a new edition and clear the upload
-    cache if so, ensuring the pre-gate subsequently returns False and the upload runs.
+    """For Radarr upgrade events, check if the file path signals an edition change and clear the
+    upload cache if so, ensuring the pre-gate subsequently returns False and the upload runs.
+
+    Handles two edition-change scenarios:
+      - No edition → edition: new file has {edition-*} token not yet in cache → clear cache.
+      - Edition → no edition: new file has no {edition-*} token but cache has prior real editions
+        → edition was removed; Plex creates a new no-edition item that needs a poster → clear cache.
+
+    A quality-only upgrade (no prior edition, no new edition) leaves the cache untouched.
 
     Uses only local DB data — no Plex API calls — so there is no timing dependency on Plex
     having rescanned the new file.
@@ -1741,14 +1748,52 @@ def _handle_radarr_upgrade_edition_check(
     edition_hint = _extract_edition_from_radarr_path(movie_file_path)
 
     if not edition_hint:
-        # No {edition-*} token in the path — this is a quality-only upgrade for a non-edition
-        # movie.  Plex won't create a new item, so the existing upload cache is still valid;
-        # let the pre-gate handle it normally.
-        log_debug(
-            LogTags.UPLOADER,
-            "Radarr upgrade: no edition token in file path — skipping cache check (quality-only upgrade)",
+        # No {edition-*} token in the new file path. This is either:
+        #   (a) a quality-only upgrade for a non-edition movie — cache is still valid, or
+        #   (b) the edition was REMOVED (edition → no-edition) — Plex will create a new
+        #       no-edition library item that has no poster yet, so we must clear the cache.
+        # Distinguish the two cases by checking whether any real editions are cached.
+        cached_editions = service.get_cached_editions_for_target(
+            media_type=media_type,
             title=title,
-            movie_file_path=movie_file_path or "(not provided)",
+            year=parsed_payload.get("year"),
+            tmdb_id=parsed_payload.get("tmdb_id"),
+            tvdb_id=parsed_payload.get("tvdb_id"),
+            imdb_id=parsed_payload.get("imdb_id"),
+        )
+        real_cached_editions = {e for e in cached_editions if e != PlexUploadService.DEFAULT_EDITION_MOVIE}
+
+        if not real_cached_editions:
+            # Case (a): no prior edition, no new edition — quality-only upgrade.
+            log_debug(
+                LogTags.UPLOADER,
+                "Radarr upgrade: no edition token in file path and no prior editions cached — skipping cache check (quality-only upgrade)",
+                title=title,
+                movie_file_path=movie_file_path or "(not provided)",
+            )
+            return
+
+        # Case (b): prior editions found but new file has no edition — edition was removed.
+        # Plex will create a new no-edition entry; clear the cache to force a re-upload.
+        log_info(
+            LogTags.UPLOADER,
+            f"Radarr upgrade: no edition in new file path but prior editions cached {sorted(real_cached_editions)} — edition removed, clearing cache to force re-upload",
+            title=title,
+            cached_editions=sorted(real_cached_editions),
+        )
+        removed = service.clear_upload_cache_for_target(
+            media_type=media_type,
+            title=title,
+            year=parsed_payload.get("year"),
+            tmdb_id=parsed_payload.get("tmdb_id"),
+            tvdb_id=parsed_payload.get("tvdb_id"),
+            imdb_id=parsed_payload.get("imdb_id"),
+        )
+        log_info(
+            LogTags.UPLOADER,
+            "Radarr upgrade: upload cache cleared due to edition removal",
+            title=title,
+            removed_entries=removed,
         )
         return
 
