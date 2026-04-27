@@ -100,6 +100,8 @@ function PosterManager() {
     handleDragLeave,
     handleDropInPriority,
     handleRemoveFromPriority,
+    handleAddAllStyle,
+    handleRemoveAllStyle,
     handleDropInAvailable,
     handleDragOverEnd,
     savePriority,
@@ -360,6 +362,8 @@ function PosterManager() {
           onDragOverEnd={handleDragOverEnd}
           onDragLeave={handleDragLeave}
           onRemoveFromPriority={handleRemoveFromPriority}
+          onAddAllStyle={handleAddAllStyle}
+          onRemoveAllStyle={handleRemoveAllStyle}
         />
       )}
 

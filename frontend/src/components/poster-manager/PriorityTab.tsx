@@ -1,4 +1,4 @@
-import { GripVertical, Save, Trash2 } from 'lucide-react'
+import { GripVertical, Minus, Plus, Save, Trash2 } from 'lucide-react'
 import { DragEvent } from 'react'
 import { Drive } from '../../api/client'
 
@@ -22,6 +22,8 @@ type PriorityTabProps = {
   onDragOverEnd: (e: DragEvent) => void
   onDragLeave: (e: DragEvent) => void
   onRemoveFromPriority: (driveId: number) => void
+  onAddAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
+  onRemoveAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
 }
 
 function PriorityTab({
@@ -44,6 +46,8 @@ function PriorityTab({
   onDragOverEnd,
   onDragLeave,
   onRemoveFromPriority,
+  onAddAllStyle,
+  onRemoveAllStyle,
 }: PriorityTabProps) {
   const getCardDropIndex = (e: DragEvent<HTMLElement>, index: number) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -69,7 +73,20 @@ function PriorityTab({
       <div className="priority-tab">
         <div className="priority-content">
           <div className="available-drives" onDragOver={onDragOver} onDrop={onDropInAvailable}>
-            <h3>Available Drives</h3>
+            <div className="panel-header-row">
+              <h3>Available Drives</h3>
+              <div className="bulk-action-btns">
+                <button className="bulk-btn bulk-add mm2k" onClick={() => onAddAllStyle('MM2K')} title="Add all MM2K drives to priority">
+                  <Plus size={11} /><span>MM2K</span>
+                </button>
+                <button className="bulk-btn bulk-add cl2k" onClick={() => onAddAllStyle('CL2K')} title="Add all CL2K drives to priority">
+                  <Plus size={11} /><span>CL2K</span>
+                </button>
+                <button className="bulk-btn bulk-add custom" onClick={() => onAddAllStyle('Custom')} title="Add all Custom drives to priority">
+                  <Plus size={11} /><span>Custom</span>
+                </button>
+              </div>
+            </div>
             <p className="section-hint">Drag drives to the priority list on the right. Only subscribed drives from the <strong>GDrives</strong> page appear here.</p>
             <div className="style-checkboxes-inline">
               <label className="style-checkbox-inline">
@@ -86,66 +103,81 @@ function PriorityTab({
               </label>
             </div>
 
-            {enabledStyles.has('MM2K') && (
-              <div className="drive-type-section">
-                <h4 className="drive-type-header">MM2K Drives</h4>
-                <div className="drive-cards">
-                  {drives
-                    .filter((d) => d.style_type === 'MM2K' && !priorityList.find((p) => p.id === d.id))
-                    .map((drive) => (
-                      <div key={drive.id} className="drive-card-small mm2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
-                        <GripVertical size={14} className="drag-handle" />
-                        <div className="drive-info">
-                          <div className="drive-name" title={drive.name}>{drive.name}</div>
-                          <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+            <div className="available-drives-scroll">
+              {enabledStyles.has('MM2K') && (
+                <div className="drive-type-section">
+                  <h4 className="drive-type-header">MM2K Drives</h4>
+                  <div className="drive-cards">
+                    {drives
+                      .filter((d) => d.style_type === 'MM2K' && !priorityList.find((p) => p.id === d.id))
+                      .map((drive) => (
+                        <div key={drive.id} className="drive-card-small mm2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                          <GripVertical size={14} className="drag-handle" />
+                          <div className="drive-info">
+                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {enabledStyles.has('CL2K') && (
-              <div className="drive-type-section">
-                <h4 className="drive-type-header">CL2K Drives</h4>
-                <div className="drive-cards">
-                  {drives
-                    .filter((d) => d.style_type === 'CL2K' && !priorityList.find((p) => p.id === d.id))
-                    .map((drive) => (
-                      <div key={drive.id} className="drive-card-small cl2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
-                        <GripVertical size={14} className="drag-handle" />
-                        <div className="drive-info">
-                          <div className="drive-name" title={drive.name}>{drive.name}</div>
-                          <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+              {enabledStyles.has('CL2K') && (
+                <div className="drive-type-section">
+                  <h4 className="drive-type-header">CL2K Drives</h4>
+                  <div className="drive-cards">
+                    {drives
+                      .filter((d) => d.style_type === 'CL2K' && !priorityList.find((p) => p.id === d.id))
+                      .map((drive) => (
+                        <div key={drive.id} className="drive-card-small cl2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                          <GripVertical size={14} className="drag-handle" />
+                          <div className="drive-info">
+                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {enabledStyles.has('Custom') && (
-              <div className="drive-type-section">
-                <h4 className="drive-type-header">Custom Drives</h4>
-                <div className="drive-cards">
-                  {drives
-                    .filter((d) => d.is_custom && !priorityList.find((p) => p.id === d.id))
-                    .map((drive) => (
-                      <div key={drive.id} className="drive-card-small custom" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
-                        <GripVertical size={14} className="drag-handle" />
-                        <div className="drive-info">
-                          <div className="drive-name" title={drive.name}>{drive.name}</div>
-                          <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+              {enabledStyles.has('Custom') && (
+                <div className="drive-type-section">
+                  <h4 className="drive-type-header">Custom Drives</h4>
+                  <div className="drive-cards">
+                    {drives
+                      .filter((d) => d.is_custom && !priorityList.find((p) => p.id === d.id))
+                      .map((drive) => (
+                        <div key={drive.id} className="drive-card-small custom" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                          <GripVertical size={14} className="drag-handle" />
+                          <div className="drive-info">
+                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           <div className="priority-list-container">
-            <h3>Priority Order</h3>
+            <div className="panel-header-row">
+              <h3>Priority Order</h3>
+              <div className="bulk-action-btns">
+                <button className="bulk-btn bulk-remove mm2k" onClick={() => onRemoveAllStyle('MM2K')} title="Remove all MM2K drives from priority">
+                  <Minus size={11} /><span>MM2K</span>
+                </button>
+                <button className="bulk-btn bulk-remove cl2k" onClick={() => onRemoveAllStyle('CL2K')} title="Remove all CL2K drives from priority">
+                  <Minus size={11} /><span>CL2K</span>
+                </button>
+                <button className="bulk-btn bulk-remove custom" onClick={() => onRemoveAllStyle('Custom')} title="Remove all Custom drives from priority">
+                  <Minus size={11} /><span>Custom</span>
+                </button>
+              </div>
+            </div>
             <p className="section-hint">Choose the drives you want to use. Higher drives override lower ones</p>
 
             <div className={`priority-drop-zone ${priorityList.length === 0 ? 'empty' : ''}`} onDragOver={onDragOver} onDrop={(e) => onDropInPriority(e)} onDragLeave={onDragLeave}>

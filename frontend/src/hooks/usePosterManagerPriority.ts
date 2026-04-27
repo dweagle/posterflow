@@ -204,6 +204,22 @@ export const usePosterManagerPriority = ({
     setPriorityList(prev => prev.filter(d => d.id !== driveId))
   }
 
+  const handleAddAllStyle = (style: 'MM2K' | 'CL2K' | 'Custom') => {
+    const toAdd = drives.filter(d => {
+      const matchesStyle = style === 'Custom' ? d.is_custom : d.style_type === style
+      return matchesStyle && !priorityList.find(p => p.id === d.id)
+    })
+    if (toAdd.length === 0) return
+    setPriorityList(prev => [...prev, ...toAdd])
+  }
+
+  const handleRemoveAllStyle = (style: 'MM2K' | 'CL2K' | 'Custom') => {
+    setPriorityList(prev => prev.filter(d => {
+      const matchesStyle = style === 'Custom' ? d.is_custom : d.style_type === style
+      return !matchesStyle
+    }))
+  }
+
   const handleDropInAvailable = (e: React.DragEvent) => {
     e.preventDefault()
     clearDragOverTimeout()
@@ -266,6 +282,8 @@ export const usePosterManagerPriority = ({
     handleDragLeave,
     handleDropInPriority,
     handleRemoveFromPriority,
+    handleAddAllStyle,
+    handleRemoveAllStyle,
     handleDropInAvailable,
     handleDragOverEnd,
     savePriority,
