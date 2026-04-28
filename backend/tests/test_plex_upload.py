@@ -51,7 +51,7 @@ def test_run_plex_upload_queues_background_job(client, test_db, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", _capture_submit)
 
     response = client.post(
-        "/api/poster-manager/plex-upload/run",
+        "/api/posterflow/plex-upload/run",
         json={
             "dry_run": True,
             "reapply": True,
@@ -101,7 +101,7 @@ def test_source_search_returns_prioritized_source_candidates(client, test_db, mo
     )
     test_db.commit()
 
-    response = client.get("/api/poster-manager/plex-upload/source-search", params={"q": "matrix"})
+    response = client.get("/api/posterflow/plex-upload/source-search", params={"q": "matrix"})
     assert response.status_code == 200
 
     payload = response.json()
@@ -134,7 +134,7 @@ def test_run_single_upload_queues_background_job(client, test_db, monkeypatch):
     test_db.commit()
 
     response = client.post(
-        "/api/poster-manager/plex-upload/run-single",
+        "/api/posterflow/plex-upload/run-single",
         json={
             "media_type": "movie",
             "title": "The Matrix",
@@ -274,7 +274,7 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
 
 def test_webhook_settings_default_disabled(client):
     """Webhook settings should default to disabled when not configured."""
-    response = client.get("/api/poster-manager/plex-upload/webhook-settings")
+    response = client.get("/api/posterflow/plex-upload/webhook-settings")
     assert response.status_code == 200
     data = response.json()
     assert data["enabled"] is False
@@ -288,7 +288,7 @@ def test_webhook_settings_default_disabled(client):
 def test_webhook_settings_toggle(client):
     """Webhook settings endpoint should persist enabled/disabled flag."""
     disable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={
             "enabled": False,
             "remove_overlay_label": True,
@@ -306,7 +306,7 @@ def test_webhook_settings_toggle(client):
     assert disable_resp.json()["retry_attempts"] == 6
     assert disable_resp.json()["retry_delay_seconds"] == 12
 
-    get_resp = client.get("/api/poster-manager/plex-upload/webhook-settings")
+    get_resp = client.get("/api/posterflow/plex-upload/webhook-settings")
     assert get_resp.status_code == 200
     assert get_resp.json()["enabled"] is False
     assert get_resp.json()["remove_overlay_label"] is True
@@ -316,7 +316,7 @@ def test_webhook_settings_toggle(client):
     assert get_resp.json()["retry_delay_seconds"] == 12
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={
             "enabled": True,
             "remove_overlay_label": False,
@@ -338,7 +338,7 @@ def test_webhook_settings_toggle(client):
 def test_webhook_settings_retry_bounds_are_coerced(client, test_db):
     """Retry settings should be clamped to allowed min/max bounds."""
     response = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={
             "enabled": True,
             "remove_overlay_label": False,
@@ -368,7 +368,7 @@ def test_webhook_settings_invalid_persisted_retry_values_use_defaults(client, te
     test_db.add(Setting(key="plex_webhook_retry_delay_seconds", value="also-not-an-int"))
     test_db.commit()
 
-    response = client.get("/api/poster-manager/plex-upload/webhook-settings")
+    response = client.get("/api/posterflow/plex-upload/webhook-settings")
     assert response.status_code == 200
     payload = response.json()
     assert payload["retry_attempts"] == 10
@@ -386,7 +386,7 @@ def test_webhook_queue_passes_rename_then_upload_setting(client, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", _capture_submit)
 
     save_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={
             "enabled": True,
             "remove_overlay_label": False,
@@ -398,7 +398,7 @@ def test_webhook_queue_passes_rename_then_upload_setting(client, monkeypatch):
     assert save_resp.status_code == 200
 
     response = client.post(
-        "/api/poster-manager/plex-upload/webhook",
+        "/api/posterflow/plex-upload/webhook",
         json={
             "eventType": "Download",
             "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
@@ -1631,13 +1631,13 @@ def test_plex_upload_cache_persist_prunes_missing_files_only(test_db, tmp_path):
 def test_webhook_test_event_updates_stats(client):
     """ARR test event should be ignored but counted in webhook stats."""
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
 
     response = client.post(
-        "/api/poster-manager/plex-upload/webhook",
+        "/api/posterflow/plex-upload/webhook",
         json={"eventType": "test"},
     )
     assert response.status_code == 200
@@ -1645,7 +1645,7 @@ def test_webhook_test_event_updates_stats(client):
     assert payload["success"] is True
     assert payload["queued"] is False
 
-    stats_resp = client.get("/api/poster-manager/plex-upload/webhook-stats")
+    stats_resp = client.get("/api/posterflow/plex-upload/webhook-stats")
     assert stats_resp.status_code == 200
     stats = stats_resp.json()
     assert stats["received"] == 1
@@ -1659,7 +1659,7 @@ def test_webhook_duplicate_suppression_updates_stats(client, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
@@ -1674,17 +1674,17 @@ def test_webhook_duplicate_suppression_updates_stats(client, monkeypatch):
         },
     }
 
-    first = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
+    first = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
     assert first.status_code == 200
     assert first.json()["queued"] is True
 
-    second = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
+    second = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
     assert second.status_code == 200
     second_data = second.json()
     assert second_data["queued"] is False
     assert second_data["duplicate"] is True
 
-    stats_resp = client.get("/api/poster-manager/plex-upload/webhook-stats")
+    stats_resp = client.get("/api/posterflow/plex-upload/webhook-stats")
     assert stats_resp.status_code == 200
     stats = stats_resp.json()
     assert stats["received"] == 2
@@ -1697,7 +1697,7 @@ def test_webhook_dedupe_clear_single_item_allows_requeue(client, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
@@ -1712,17 +1712,17 @@ def test_webhook_dedupe_clear_single_item_allows_requeue(client, monkeypatch):
         },
     }
 
-    first = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
+    first = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
     assert first.status_code == 200
     assert first.json()["queued"] is True
 
-    duplicate = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
+    duplicate = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
     assert duplicate.status_code == 200
     assert duplicate.json()["queued"] is False
     assert duplicate.json()["duplicate"] is True
 
     clear_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-dedupe/clear",
+        "/api/posterflow/plex-upload/webhook-dedupe/clear",
         json={
             "media_type": "movie",
             "title": "The Matrix",
@@ -1734,7 +1734,7 @@ def test_webhook_dedupe_clear_single_item_allows_requeue(client, monkeypatch):
     assert clear_data["success"] is True
     assert clear_data["removed"] >= 1
 
-    after_clear = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
+    after_clear = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
     assert after_clear.status_code == 200
     assert after_clear.json()["queued"] is True
 
@@ -1744,7 +1744,7 @@ def test_webhook_dedupe_clear_all_allows_requeue(client, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
@@ -1768,16 +1768,16 @@ def test_webhook_dedupe_clear_all_allows_requeue(client, monkeypatch):
         },
     }
 
-    assert client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload).status_code == 200
-    assert client.post("/api/poster-manager/plex-upload/webhook", json=series_payload).status_code == 200
+    assert client.post("/api/posterflow/plex-upload/webhook", json=movie_payload).status_code == 200
+    assert client.post("/api/posterflow/plex-upload/webhook", json=series_payload).status_code == 200
 
-    movie_dup = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
-    series_dup = client.post("/api/poster-manager/plex-upload/webhook", json=series_payload)
+    movie_dup = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
+    series_dup = client.post("/api/posterflow/plex-upload/webhook", json=series_payload)
     assert movie_dup.status_code == 200 and movie_dup.json()["queued"] is False
     assert series_dup.status_code == 200 and series_dup.json()["queued"] is False
 
     clear_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-dedupe/clear",
+        "/api/posterflow/plex-upload/webhook-dedupe/clear",
         json={"clear_all": True},
     )
     assert clear_resp.status_code == 200
@@ -1785,8 +1785,8 @@ def test_webhook_dedupe_clear_all_allows_requeue(client, monkeypatch):
     assert clear_data["success"] is True
     assert clear_data["removed"] >= 2
 
-    movie_after = client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload)
-    series_after = client.post("/api/poster-manager/plex-upload/webhook", json=series_payload)
+    movie_after = client.post("/api/posterflow/plex-upload/webhook", json=movie_payload)
+    series_after = client.post("/api/posterflow/plex-upload/webhook", json=series_payload)
     assert movie_after.status_code == 200 and movie_after.json()["queued"] is True
     assert series_after.status_code == 200 and series_after.json()["queued"] is True
 
@@ -1796,7 +1796,7 @@ def test_webhook_dedupe_entries_search_returns_active_locks(client, monkeypatch)
     monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
@@ -1820,11 +1820,11 @@ def test_webhook_dedupe_entries_search_returns_active_locks(client, monkeypatch)
         },
     }
 
-    assert client.post("/api/poster-manager/plex-upload/webhook", json=movie_payload).status_code == 200
-    assert client.post("/api/poster-manager/plex-upload/webhook", json=series_payload).status_code == 200
+    assert client.post("/api/posterflow/plex-upload/webhook", json=movie_payload).status_code == 200
+    assert client.post("/api/posterflow/plex-upload/webhook", json=series_payload).status_code == 200
 
     response = client.get(
-        "/api/poster-manager/plex-upload/webhook-dedupe/entries",
+        "/api/posterflow/plex-upload/webhook-dedupe/entries",
         params={"q": "matrix", "media_type": "movie", "limit": 10},
     )
     assert response.status_code == 200
@@ -1845,7 +1845,7 @@ def test_webhook_dedupe_entries_search_returns_active_locks(client, monkeypatch)
 def test_webhook_dedupe_entries_search_rejects_invalid_media_type(client):
     """Webhook dedupe entries endpoint should validate media_type query parameter."""
     response = client.get(
-        "/api/poster-manager/plex-upload/webhook-dedupe/entries",
+        "/api/posterflow/plex-upload/webhook-dedupe/entries",
         params={"q": "matrix", "media_type": "invalid"},
     )
     assert response.status_code == 400
@@ -1861,7 +1861,7 @@ def test_webhook_different_seasons_not_deduplicated(client, monkeypatch):
     monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
 
     enable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": True},
     )
     assert enable_resp.status_code == 200
@@ -1878,23 +1878,23 @@ def test_webhook_different_seasons_not_deduplicated(client, monkeypatch):
         }
 
     # Season 1 — should queue
-    s1_first = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(1))
+    s1_first = client.post("/api/posterflow/plex-upload/webhook", json=_make_series_payload(1))
     assert s1_first.status_code == 200
     assert s1_first.json()["queued"] is True, "Season 1 first webhook should be queued"
 
     # Season 1 again — should be deduplicated (same season)
-    s1_dup = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(1))
+    s1_dup = client.post("/api/posterflow/plex-upload/webhook", json=_make_series_payload(1))
     assert s1_dup.status_code == 200
     assert s1_dup.json()["queued"] is False, "Season 1 repeat within window should be deduplicated"
     assert s1_dup.json()["duplicate"] is True
 
     # Season 2 — must NOT be deduplicated even though it's within the window
-    s2_first = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(2))
+    s2_first = client.post("/api/posterflow/plex-upload/webhook", json=_make_series_payload(2))
     assert s2_first.status_code == 200
     assert s2_first.json()["queued"] is True, "Season 2 should not be deduplicated by Season 1's cache entry"
 
     # Season 2 again — should be deduplicated
-    s2_dup = client.post("/api/poster-manager/plex-upload/webhook", json=_make_series_payload(2))
+    s2_dup = client.post("/api/posterflow/plex-upload/webhook", json=_make_series_payload(2))
     assert s2_dup.status_code == 200
     assert s2_dup.json()["queued"] is False, "Season 2 repeat within window should be deduplicated"
 
@@ -1902,13 +1902,13 @@ def test_webhook_different_seasons_not_deduplicated(client, monkeypatch):
 def test_webhook_disabled_rejects_and_tracks_stats(client):
     """Disabled webhook setting should block ingestion and increment disabled counter."""
     disable_resp = client.post(
-        "/api/poster-manager/plex-upload/webhook-settings",
+        "/api/posterflow/plex-upload/webhook-settings",
         json={"enabled": False, "remove_overlay_label": False},
     )
     assert disable_resp.status_code == 200
 
     response = client.post(
-        "/api/poster-manager/plex-upload/webhook",
+        "/api/posterflow/plex-upload/webhook",
         json={
             "eventType": "Download",
             "movie": {"title": "The Matrix", "year": 1999},
@@ -1916,7 +1916,7 @@ def test_webhook_disabled_rejects_and_tracks_stats(client):
     )
     assert response.status_code == 403
 
-    stats_resp = client.get("/api/poster-manager/plex-upload/webhook-stats")
+    stats_resp = client.get("/api/posterflow/plex-upload/webhook-stats")
     assert stats_resp.status_code == 200
     stats = stats_resp.json()
     assert stats["received"] == 1
@@ -1926,16 +1926,16 @@ def test_webhook_disabled_rejects_and_tracks_stats(client):
 def test_webhook_stats_reset_endpoint(client):
     """Webhook stats reset endpoint should restore all counters/timestamps to defaults."""
     client.post(
-        "/api/poster-manager/plex-upload/webhook",
+        "/api/posterflow/plex-upload/webhook",
         json={"eventType": "test"},
     )
 
-    pre_reset = client.get("/api/poster-manager/plex-upload/webhook-stats")
+    pre_reset = client.get("/api/posterflow/plex-upload/webhook-stats")
     assert pre_reset.status_code == 200
     pre_stats = pre_reset.json()
     assert pre_stats["received"] > 0
 
-    reset_response = client.post("/api/poster-manager/plex-upload/webhook-stats/reset")
+    reset_response = client.post("/api/posterflow/plex-upload/webhook-stats/reset")
     assert reset_response.status_code == 200
     reset_data = reset_response.json()
     assert reset_data["success"] is True
@@ -2478,7 +2478,7 @@ def test_run_single_upload_prefers_id_matched_asset_over_title_overlap(test_db, 
 
 def test_plex_upload_library_override_defaults(client):
     """Plex Upload library override should default to disabled with empty configs."""
-    response = client.get("/api/poster-manager/plex-upload/library-override")
+    response = client.get("/api/posterflow/plex-upload/library-override")
     assert response.status_code == 200
     data = response.json()
     assert data["enabled"] is False
@@ -2513,7 +2513,7 @@ def test_plex_upload_library_override_round_trip(client, test_db):
         ],
     }
 
-    save_response = client.post("/api/poster-manager/plex-upload/library-override", json=payload)
+    save_response = client.post("/api/posterflow/plex-upload/library-override", json=payload)
     assert save_response.status_code == 200
     save_data = save_response.json()
     assert save_data["success"] is True
@@ -2521,7 +2521,7 @@ def test_plex_upload_library_override_round_trip(client, test_db):
     assert len(save_data["configs"]) == 1
     assert len(save_data["global_configs"]) == 1
 
-    get_response = client.get("/api/poster-manager/plex-upload/library-override")
+    get_response = client.get("/api/posterflow/plex-upload/library-override")
     assert get_response.status_code == 200
     get_data = get_response.json()
     assert get_data["enabled"] is True
@@ -2533,7 +2533,7 @@ def test_plex_upload_library_override_round_trip(client, test_db):
 
 def test_plex_upload_cache_defaults(client):
     """Plex upload cache endpoint should return empty summary by default."""
-    response = client.get("/api/poster-manager/plex-upload/upload-cache")
+    response = client.get("/api/posterflow/plex-upload/upload-cache")
     assert response.status_code == 200
     data = response.json()
     assert data["entries_count"] == 0
@@ -2562,13 +2562,13 @@ def test_plex_upload_cache_clear_round_trip(client, test_db):
     ))
     test_db.commit()
 
-    get_response = client.get("/api/poster-manager/plex-upload/upload-cache")
+    get_response = client.get("/api/posterflow/plex-upload/upload-cache")
     assert get_response.status_code == 200
     get_data = get_response.json()
     assert get_data["entries_count"] == 2
 
     clear_one_response = client.post(
-        "/api/poster-manager/plex-upload/upload-cache/clear",
+        "/api/posterflow/plex-upload/upload-cache/clear",
         json={"file_path": "/tmp/a.jpg"},
     )
     assert clear_one_response.status_code == 200
@@ -2577,7 +2577,7 @@ def test_plex_upload_cache_clear_round_trip(client, test_db):
     assert clear_one_data["removed"] == 1
     assert clear_one_data["entries_count"] == 1
 
-    clear_all_response = client.post("/api/poster-manager/plex-upload/upload-cache/clear", json={})
+    clear_all_response = client.post("/api/posterflow/plex-upload/upload-cache/clear", json={})
     assert clear_all_response.status_code == 200
     clear_all_data = clear_all_response.json()
     assert clear_all_data["success"] is True
@@ -2604,7 +2604,7 @@ def test_plex_upload_cache_export(client, test_db):
         ))
     test_db.commit()
 
-    response = client.get("/api/poster-manager/plex-upload/upload-cache/export")
+    response = client.get("/api/posterflow/plex-upload/upload-cache/export")
     assert response.status_code == 200
     payload = response.json()
     assert payload["entries_count"] == 5
@@ -2663,7 +2663,7 @@ def test_plex_upload_cache_entries_pagination_and_search(client, test_db):
     test_db.commit()
 
     first_page = client.get(
-        "/api/poster-manager/plex-upload/upload-cache/entries",
+        "/api/posterflow/plex-upload/upload-cache/entries",
         params={"limit": 2, "offset": 0},
     )
     assert first_page.status_code == 200
@@ -2675,7 +2675,7 @@ def test_plex_upload_cache_entries_pagination_and_search(client, test_db):
     assert len(first_data["entries"]) == 2
 
     second_page = client.get(
-        "/api/poster-manager/plex-upload/upload-cache/entries",
+        "/api/posterflow/plex-upload/upload-cache/entries",
         params={"limit": 2, "offset": 2},
     )
     assert second_page.status_code == 200
@@ -2686,7 +2686,7 @@ def test_plex_upload_cache_entries_pagination_and_search(client, test_db):
     assert len(second_data["entries"]) == 1
 
     filtered = client.get(
-        "/api/poster-manager/plex-upload/upload-cache/entries",
+        "/api/posterflow/plex-upload/upload-cache/entries",
         params={"q": "tv shows", "limit": 25, "offset": 0},
     )
     assert filtered.status_code == 200
@@ -2756,7 +2756,7 @@ def test_plex_upload_cache_entries_limit_and_offset_safety(client, test_db):
     test_db.commit()
 
     response = client.get(
-        "/api/poster-manager/plex-upload/upload-cache/entries",
+        "/api/posterflow/plex-upload/upload-cache/entries",
         params={"limit": 0, "offset": -5},
     )
     assert response.status_code == 200

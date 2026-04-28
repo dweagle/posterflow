@@ -197,7 +197,7 @@ function PlexUpload() {
     return lastJob.status === 'pending' || lastJob.status === 'running'
   }, [lastJob])
 
-  const webhookPath = '/api/poster-manager/plex-upload/webhook'
+  const webhookPath = '/api/posterflow/plex-upload/webhook'
 
   const formatWebhookTimestamp = (value: string | null): string => {
     if (!value) {

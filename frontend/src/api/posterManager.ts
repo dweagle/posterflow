@@ -69,11 +69,11 @@ export interface PosterSearchResponse {
 }
 
 export const getPosterConfig = async (): Promise<PosterConfig> => {
-  return getData('/api/poster-manager/config')
+  return getData('/api/posterflow/config')
 }
 
 export const savePosterConfig = async (config: PosterConfig) => {
-  return postData('/api/poster-manager/config', config)
+  return postData('/api/posterflow/config', config)
 }
 
 export const startPosterRename = async (config: PosterConfig): Promise<{ 
@@ -81,7 +81,7 @@ export const startPosterRename = async (config: PosterConfig): Promise<{
   status: string;
   unmatched_detection?: UnmatchedStats;
 }> => {
-  return postData('/api/poster-manager/rename', { config })
+  return postData('/api/posterflow/rename', { config })
 }
 
 export interface BorderReplacerRunOptions {
@@ -95,23 +95,23 @@ export const runBorderReplacer = async (options?: BorderReplacerRunOptions): Pro
   message: string;
 }> => {
   const payload = options?.dry_run ? { dry_run: true } : undefined
-  return postData('/api/poster-manager/border-replacer/run', payload)
+  return postData('/api/posterflow/border-replacer/run', payload)
 }
 
 export const getDrivePriority = async (): Promise<DrivePriority> => {
-  return getData('/api/poster-manager/priority')
+  return getData('/api/posterflow/priority')
 }
 
 export const saveDrivePriority = async (priority: DrivePriority) => {
-  return postData('/api/poster-manager/priority', priority)
+  return postData('/api/posterflow/priority', priority)
 }
 
 export const getUnmatchedStats = async (): Promise<UnmatchedStats> => {
-  return getData('/api/poster-manager/unmatched-stats')
+  return getData('/api/posterflow/unmatched-stats')
 }
 
 export const startUnmatchedDetection = async (): Promise<{ success: boolean; job_id: number; status: string; message: string }> => {
-  return postData('/api/poster-manager/detect-unmatched')
+  return postData('/api/posterflow/detect-unmatched')
 }
 
 export interface TmdbCandidate {
@@ -132,7 +132,7 @@ export const searchUnmatchedTmdb = async (params: {
   year: number | null
   type: 'movie' | 'show' | 'collection'
 }): Promise<{ candidates: TmdbCandidate[] }> => {
-  return postData('/api/poster-manager/unmatched-tmdb-search', params)
+  return postData('/api/posterflow/unmatched-tmdb-search', params)
 }
 
 export const searchPosters = async (query: string, limit: number = 200): Promise<PosterSearchResponse> => {
@@ -189,14 +189,14 @@ export interface FlowRunOptions {
 }
 
 export const getFlowConfig = async (): Promise<FlowConfig> => {
-  return getData('/api/poster-manager/flow/config')
+  return getData('/api/posterflow/flow/config')
 }
 
 export const saveFlowConfig = async (config: FlowConfig) => {
-  return postData('/api/poster-manager/flow/config', config)
+  return postData('/api/posterflow/flow/config', config)
 }
 
 export const runFlow = async (options?: FlowRunOptions): Promise<FlowResult> => {
   const payload = options?.dry_run ? { dry_run: true } : undefined
-  return postData('/api/poster-manager/flow/run', payload)
+  return postData('/api/posterflow/flow/run', payload)
 }

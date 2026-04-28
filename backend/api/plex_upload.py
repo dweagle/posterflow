@@ -77,7 +77,7 @@ from modules.upload import (
     run_plex_single_manual_background_job as run_plex_single_manual_background_job_module,
 )
 
-router = APIRouter(prefix="/api/poster-manager", tags=["plex-upload"])
+router = APIRouter(prefix="/api/posterflow", tags=["plex-upload"])
 
 
 def job_started_response(
@@ -477,7 +477,7 @@ async def search_plex_upload_source_assets(
                     "imdb_id": metadata["imdb_id"],
                     "source_file": str(source_file),
                     "source_file_name": source_file.name,
-                    "preview_url": f"/api/poster-manager/plex-upload/source-image?path={quote(str(source_file), safe='')}",
+                    "preview_url": f"/api/posterflow/plex-upload/source-image?path={quote(str(source_file), safe='')}",
                     "drive_name": drive_name,
                     "drive_type": drive_type,
                 }
@@ -634,7 +634,7 @@ async def search_plex_items(
                             imdb_id = val
 
                     thumb = getattr(result, "thumb", None)
-                    thumb_url = f"/api/poster-manager/plex-upload/plex-thumb?instance={instance_name}&key={quote(str(thumb), safe='')}" if thumb else None
+                    thumb_url = f"/api/posterflow/plex-upload/plex-thumb?instance={instance_name}&key={quote(str(thumb), safe='')}" if thumb else None
 
                     items.append({
                         "media_type": mapped_type,

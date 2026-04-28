@@ -215,7 +215,7 @@ export const runPlexUpload = async (options?: PlexUploadRunOptions): Promise<Ple
         remove_overlay_label: options.remove_overlay_label ?? false,
       }
     : undefined
-  return postData('/api/poster-manager/plex-upload/run', payload)
+  return postData('/api/posterflow/plex-upload/run', payload)
 }
 
 export const searchPlexUploadSourcePosters = async (
@@ -226,11 +226,11 @@ export const searchPlexUploadSourcePosters = async (
     q: query,
     limit: String(limit),
   })
-  return getData(`/api/poster-manager/plex-upload/source-search?${params.toString()}`)
+  return getData(`/api/posterflow/plex-upload/source-search?${params.toString()}`)
 }
 
 export const runPlexSingleUpload = async (payload: PlexSingleUploadPayload): Promise<PlexUploadRunResponse> => {
-  return postData('/api/poster-manager/plex-upload/run-single', payload)
+  return postData('/api/posterflow/plex-upload/run-single', payload)
 }
 
 export const searchPlexItems = async (
@@ -240,37 +240,37 @@ export const searchPlexItems = async (
 ): Promise<PlexSearchResponse> => {
   const params = new URLSearchParams({ q: query, limit: String(limit) })
   if (mediaType) params.set('media_type', mediaType)
-  return getData(`/api/poster-manager/plex-upload/plex-search?${params.toString()}`)
+  return getData(`/api/posterflow/plex-upload/plex-search?${params.toString()}`)
 }
 
 export const getPlexWebhookSettings = async (): Promise<PlexWebhookSettings> => {
-  return getData('/api/poster-manager/plex-upload/webhook-settings')
+  return getData('/api/posterflow/plex-upload/webhook-settings')
 }
 
 export const getPlexManualSettings = async (): Promise<PlexManualSettings> => {
-  return getData('/api/poster-manager/plex-upload/manual-settings')
+  return getData('/api/posterflow/plex-upload/manual-settings')
 }
 
 export const savePlexManualSettings = async (payload: PlexManualSettingsPayload): Promise<PlexManualSettings & { success: boolean }> => {
-  return postData('/api/poster-manager/plex-upload/manual-settings', payload)
+  return postData('/api/posterflow/plex-upload/manual-settings', payload)
 }
 
 export const savePlexWebhookSettings = async (payload: PlexWebhookSettingsPayload): Promise<PlexWebhookSettings & { success: boolean }> => {
-  return postData('/api/poster-manager/plex-upload/webhook-settings', payload)
+  return postData('/api/posterflow/plex-upload/webhook-settings', payload)
 }
 
 export const getPlexWebhookStats = async (): Promise<PlexWebhookStats> => {
-  return getData('/api/poster-manager/plex-upload/webhook-stats')
+  return getData('/api/posterflow/plex-upload/webhook-stats')
 }
 
 export const resetPlexWebhookStats = async (): Promise<PlexWebhookStats & { success: boolean }> => {
-  return postData('/api/poster-manager/plex-upload/webhook-stats/reset', {})
+  return postData('/api/posterflow/plex-upload/webhook-stats/reset', {})
 }
 
 export const clearPlexWebhookDedupe = async (
   payload: PlexWebhookDedupeClearPayload,
 ): Promise<PlexWebhookDedupeClearResponse> => {
-  return postData('/api/poster-manager/plex-upload/webhook-dedupe/clear', payload)
+  return postData('/api/posterflow/plex-upload/webhook-dedupe/clear', payload)
 }
 
 export const getPlexWebhookDedupeEntries = async (
@@ -285,21 +285,21 @@ export const getPlexWebhookDedupeEntries = async (
   if (mediaType) {
     params.set('media_type', mediaType)
   }
-  return getData(`/api/poster-manager/plex-upload/webhook-dedupe/entries?${params.toString()}`)
+  return getData(`/api/posterflow/plex-upload/webhook-dedupe/entries?${params.toString()}`)
 }
 
 export const getPlexUploadLibraryOverrideSettings = async (): Promise<PlexUploadLibraryOverrideSettings> => {
-  return getData('/api/poster-manager/plex-upload/library-override')
+  return getData('/api/posterflow/plex-upload/library-override')
 }
 
 export const savePlexUploadLibraryOverrideSettings = async (
   payload: PlexUploadLibraryOverridePayload,
 ): Promise<PlexUploadLibraryOverrideSettings & { success: boolean }> => {
-  return postData('/api/poster-manager/plex-upload/library-override', payload)
+  return postData('/api/posterflow/plex-upload/library-override', payload)
 }
 
 export const getPlexUploadCache = async (): Promise<PlexUploadCacheSummary> => {
-  return getData('/api/poster-manager/plex-upload/upload-cache')
+  return getData('/api/posterflow/plex-upload/upload-cache')
 }
 
 export const getPlexUploadCacheEntries = async (
@@ -318,17 +318,17 @@ export const getPlexUploadCacheEntries = async (
 
   const qs = query.toString()
   const path = qs
-    ? `/api/poster-manager/plex-upload/upload-cache/entries?${qs}`
-    : '/api/poster-manager/plex-upload/upload-cache/entries'
+    ? `/api/posterflow/plex-upload/upload-cache/entries?${qs}`
+    : '/api/posterflow/plex-upload/upload-cache/entries'
   return getData(path)
 }
 
 export const clearPlexUploadCache = async (
   payload?: PlexUploadCacheClearPayload,
 ): Promise<PlexUploadCacheSummary & { success: boolean; removed: number; cleared_file_path: string | null }> => {
-  return postData('/api/poster-manager/plex-upload/upload-cache/clear', payload)
+  return postData('/api/posterflow/plex-upload/upload-cache/clear', payload)
 }
 
 export const downloadPlexUploadCacheExport = (): string => {
-  return `${API_URL}/api/poster-manager/plex-upload/upload-cache/export`
+  return `${API_URL}/api/posterflow/plex-upload/upload-cache/export`
 }

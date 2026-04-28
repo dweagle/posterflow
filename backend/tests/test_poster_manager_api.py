@@ -30,7 +30,7 @@ def _tmdb_movie_result(tmdb_id: int, title: str, year: int, popularity: float = 
 def test_unmatched_tmdb_search_rejects_missing_api_key(client):
     """Should return 400 when TMDB API key is not configured."""
     response = client.post(
-        "/api/poster-manager/unmatched-tmdb-search",
+        "/api/posterflow/unmatched-tmdb-search",
         json={"title": "The Batman", "year": 2022, "type": "movie"},
     )
     assert response.status_code == 400
@@ -43,7 +43,7 @@ def test_unmatched_tmdb_search_rejects_empty_title(client, test_db):
     test_db.commit()
 
     response = client.post(
-        "/api/poster-manager/unmatched-tmdb-search",
+        "/api/posterflow/unmatched-tmdb-search",
         json={"title": "   ", "year": None, "type": "movie"},
     )
     assert response.status_code == 400
@@ -56,7 +56,7 @@ def test_unmatched_tmdb_search_rejects_invalid_type(client, test_db):
     test_db.commit()
 
     response = client.post(
-        "/api/poster-manager/unmatched-tmdb-search",
+        "/api/posterflow/unmatched-tmdb-search",
         json={"title": "Avatar", "year": 2009, "type": "episode"},
     )
     assert response.status_code == 400
@@ -87,7 +87,7 @@ def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
         mock_get.side_effect = [mock_search_resp, mock_ext_resp, mock_ext_resp]
 
         response = client.post(
-            "/api/poster-manager/unmatched-tmdb-search",
+            "/api/posterflow/unmatched-tmdb-search",
             json={"title": "The Batman", "year": 2022, "type": "movie"},
         )
 
@@ -127,7 +127,7 @@ def test_unmatched_tmdb_search_show_maps_to_tv_endpoint(client, test_db):
         mock_get.side_effect = [mock_resp, mock_ext]
 
         response = client.post(
-            "/api/poster-manager/unmatched-tmdb-search",
+            "/api/posterflow/unmatched-tmdb-search",
             json={"title": "Breaking Bad", "year": 2008, "type": "show"},
         )
 
@@ -149,7 +149,7 @@ def test_unmatched_tmdb_search_returns_502_on_tmdb_failure(client, test_db):
         mock_get.side_effect = real_requests.RequestException("connection refused")
 
         response = client.post(
-            "/api/poster-manager/unmatched-tmdb-search",
+            "/api/posterflow/unmatched-tmdb-search",
             json={"title": "Inception", "year": 2010, "type": "movie"},
         )
 
@@ -173,7 +173,7 @@ def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
         mock_get.return_value = mock_resp
 
         response = client.post(
-            "/api/poster-manager/unmatched-tmdb-search",
+            "/api/posterflow/unmatched-tmdb-search",
             json={"title": "Avengers Collection", "type": "collection"},
         )
 
@@ -188,7 +188,7 @@ def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
 
 
     """Rename should fail when destination is missing from payload config."""
-    response = client.post("/api/poster-manager/rename", json={"config": {}})
+    response = client.post("/api/posterflow/rename", json={"config": {}})
     assert response.status_code == 400
     assert "Destination directory not specified" in response.json()["detail"]
 
@@ -196,7 +196,7 @@ def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
 def test_rename_rejects_without_drive_priority(client):
     """Rename should fail when drive priority is not configured."""
     response = client.post(
-        "/api/poster-manager/rename",
+        "/api/posterflow/rename",
         json={"config": {"destination": "/tmp/posters"}},
     )
     assert response.status_code == 400
@@ -209,7 +209,7 @@ def test_rename_rejects_invalid_drive_priority_json(client, test_db):
     test_db.commit()
 
     response = client.post(
-        "/api/poster-manager/rename",
+        "/api/posterflow/rename",
         json={"config": {"destination": "/tmp/posters"}},
     )
     assert response.status_code == 400
@@ -232,7 +232,7 @@ def test_rename_rejects_when_priority_drives_not_subscribed(client, test_db):
     test_db.commit()
 
     response = client.post(
-        "/api/poster-manager/rename",
+        "/api/posterflow/rename",
         json={"config": {"destination": "/tmp/posters"}},
     )
     assert response.status_code == 400
@@ -241,7 +241,7 @@ def test_rename_rejects_when_priority_drives_not_subscribed(client, test_db):
 
 def test_border_replacer_rejects_when_destination_missing(client):
     """Border replacer should fail when destination setting is not configured."""
-    response = client.post("/api/poster-manager/border-replacer/run", json={})
+    response = client.post("/api/posterflow/border-replacer/run", json={})
     assert response.status_code == 400
     assert "No destination directory configured" in response.json()["detail"]
 
@@ -252,7 +252,7 @@ def test_border_replacer_rejects_when_destination_path_missing(client, test_db):
     test_db.add(Setting(key="poster_destination", value=missing_path))
     test_db.commit()
 
-    response = client.post("/api/poster-manager/border-replacer/run", json={})
+    response = client.post("/api/posterflow/border-replacer/run", json={})
     assert response.status_code == 400
     assert "Destination directory does not exist" in response.json()["detail"]
 
@@ -278,7 +278,7 @@ def test_rename_starts_successfully_with_valid_priority(client, test_db, monkeyp
     monkeypatch.setattr("api.poster_manager.run_rename_background_job", _noop_rename_job)
 
     response = client.post(
-        "/api/poster-manager/rename",
+        "/api/posterflow/rename",
         json={"config": {"destination": "/tmp/posters"}},
     )
     assert response.status_code == 200
@@ -302,7 +302,7 @@ def test_border_replacer_starts_successfully(client, test_db, monkeypatch, tmp_p
     monkeypatch.setattr("api.poster_manager.run_border_replacer_background_job", _noop_border_job)
 
     response = client.post(
-        "/api/poster-manager/border-replacer/run",
+        "/api/posterflow/border-replacer/run",
         json={"dry_run": True},
     )
     assert response.status_code == 200
@@ -325,11 +325,11 @@ def test_flow_config_round_trip(client):
         "plex_upload": {"enabled": False, "stop_on_error": False},
     }
 
-    save_response = client.post("/api/poster-manager/flow/config", json=payload)
+    save_response = client.post("/api/posterflow/flow/config", json=payload)
     assert save_response.status_code == 200
     assert save_response.json()["success"] is True
 
-    get_response = client.get("/api/poster-manager/flow/config")
+    get_response = client.get("/api/posterflow/flow/config")
     assert get_response.status_code == 200
     data = get_response.json()
     assert data["border_replacer"]["enabled"] is True
@@ -353,7 +353,7 @@ def test_flow_run_rejects_when_already_running(client, test_db):
     poster_manager_module._flow_started_at = datetime.now(timezone.utc)
 
     try:
-        response = client.post("/api/poster-manager/flow/run", json={"dry_run": False})
+        response = client.post("/api/posterflow/flow/run", json={"dry_run": False})
         assert response.status_code == 409
         assert "Workflow is already running" in response.json()["detail"]
     finally:
@@ -374,7 +374,7 @@ def test_flow_run_recovers_stale_lock_and_starts(client, test_db, monkeypatch):
     poster_manager_module._flow_started_at = datetime.now(timezone.utc)
 
     try:
-        response = client.post("/api/poster-manager/flow/run", json={"dry_run": True})
+        response = client.post("/api/posterflow/flow/run", json={"dry_run": True})
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -419,7 +419,7 @@ def test_flow_run_forces_release_after_long_lock_age(client, test_db, monkeypatc
     poster_manager_module._flow_started_at = datetime.now(timezone.utc) - timedelta(minutes=16)
 
     try:
-        response = client.post("/api/poster-manager/flow/run", json={"dry_run": False})
+        response = client.post("/api/posterflow/flow/run", json={"dry_run": False})
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -526,7 +526,7 @@ def test_flow_config_save_returns_500_when_storage_fails(client, monkeypatch):
         "plex_upload": {"enabled": False, "stop_on_error": False},
     }
 
-    response = client.post("/api/poster-manager/flow/config", json=payload)
+    response = client.post("/api/posterflow/flow/config", json=payload)
     assert response.status_code == 500
     assert "Error saving flow config" in response.json()["detail"]
 
@@ -543,7 +543,7 @@ def test_flow_run_returns_500_and_releases_lock_when_create_job_fails(client, mo
     poster_manager_module._flow_running = False
     poster_manager_module._flow_started_at = None
 
-    response = client.post("/api/poster-manager/flow/run", json={"dry_run": False})
+    response = client.post("/api/posterflow/flow/run", json={"dry_run": False})
     assert response.status_code == 500
     assert "Failed to start workflow" in response.json()["detail"]
 

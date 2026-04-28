@@ -36,7 +36,7 @@ from modules.unmatched import run_unmatched_detection_background_job
 from modules.flow import run_flow_background_job
 from services.unmatched_assets import UnmatchedAssetsService
 
-router = APIRouter(prefix="/api/poster-manager", tags=["poster-manager"])
+router = APIRouter(prefix="/api/posterflow", tags=["poster-manager"])
 
 SETTING_POSTER_DESTINATION = "poster_destination"
 SETTING_POSTER_ACTION_TYPE = "poster_action_type"
