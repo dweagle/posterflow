@@ -167,6 +167,19 @@ def _get_remote_base_version(owner: str, repo: str, branch: str) -> str | None:
     return content or None
 
 
+def _get_latest_release_notes(owner: str, repo: str) -> str | None:
+    """Fetch the body of the latest GitHub Release."""
+    import json
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    try:
+        with urlopen(url, timeout=6) as response:  # nosec B310 - URL is hardcoded https:// prefix, path segments are quote()-escaped
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    return data.get("body") or None
+
+
 def get_version_update_status() -> dict[str, Any]:
     local_full = get_app_version()
     status: dict[str, Any] = {
@@ -174,6 +187,7 @@ def get_version_update_status() -> dict[str, Any]:
         "latest_version": None,
         "update_available": False,
         "releases_url": None,
+        "release_notes": None,
         "repo": None,
     }
 
@@ -198,6 +212,10 @@ def get_version_update_status() -> dict[str, Any]:
     remote_full = f"{remote_base}.{branch}{remote_build}"
     status["latest_version"] = remote_full
     status["update_available"] = (remote_base == local_base and remote_build > local_build) or remote_base != local_base
+
+    if status["update_available"]:
+        status["release_notes"] = _get_latest_release_notes(owner, repo)
+
     return status
 
 

@@ -1,0 +1,74 @@
+# Changelog
+
+All notable changes to PosterFlow will be documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Versions follow [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.1.3] - 2026-04-27
+### Added
+- Bulk add/remove functionality for drive styles in the Priority tab
+- IDarr: deduplicate TV shows missing TVDB IDs by TMDB ID after enrichment
+- IDarr: log missing TVDB IDs for TV series after enrichment
+- Plex upload: deduplication logic for collections and improved asset merging with ID-based search
+- Plex upload: initial setup warning to prevent re-uploads on first run
+- Plex upload: gdrive_id added to source context for improved asset filtering
+- In-app update notification with release notes popover in sidebar
+- CHANGELOG for tracking version history
+
+### Fixed
+- Unmatched assets view/search modal success message and close button alignment
+- Radarr upgrade handling now clears cache when edition is removed
+- Radarr webhook instructions updated to include "On File Upgrade" for import events
+
+### Changed
+- Updated frontend dependencies (axios, follow-redirects, postcss, proxy-from-env)
+
+## [0.1.2] - 2026-04-16
+### Added
+- Poster sync: optimized file scanning and database operations
+- Poster daily activity endpoint now uses local time for date boundaries
+- Webhook deduplication logic for different seasons
+- Separated development dependencies into `requirements-dev.txt`
+
+### Fixed
+- Hardened backend reliability and security
+- Simplified directory creation in Dockerfile
+
+### Changed
+- GDrives: updated unsubscribe button icon and adjusted button colors
+
+## [0.1.1] - 2026-04-08
+### Added
+- Dashboard: poster filtering and lightbox feature
+- Unmatched items modal with "all" category and category badges
+- TMDB API key support for unmatched items search
+- Clipboard copy with toast notification and non-HTTPS fallback
+- Plex upload: fast cache summary for optimized retrieval and improved manual settings handling
+- Post-job script hooks with enable/disable logging
+- Toast notifications for error handling in drive modals
+
+### Fixed
+- Database WAL mode exception handling
+- Post-job hook log handlers now properly removed after execution
+- Setup wizard layout, save states, and token/secret visibility
+
+### Changed
+- Docker Compose and entrypoint refactored for clarity and ownership management
+
+## [0.1.0] - 2026-04-04
+### Added
+- Initial release of PosterFlow
+- Google Drive poster sync via rclone
+- Poster Manager with unmatched asset detection
+- IDarr metadata enrichment and rename normalization
+- Plex Upload integration
+- Poster Search
+- Maker Tools
+- Scheduled sync jobs
+- Job queue with live progress via WebSocket
+- Discord notifications
+- Backup and restore
+- Setup wizard
+- Dark theme UI

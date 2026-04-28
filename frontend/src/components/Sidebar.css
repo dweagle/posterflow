@@ -47,6 +47,10 @@
   letter-spacing: 0.02em;
 }
 
+.sidebar-header .version-update-wrapper {
+  position: relative;
+}
+
 .sidebar-header .version-update-badge {
   margin-top: 0.1rem;
   display: inline-flex;
@@ -58,13 +62,61 @@
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
   font-size: 0.65rem;
-  text-decoration: none;
+  cursor: pointer;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .sidebar-header .version-update-badge:hover {
   background-color: rgba(244, 67, 54, 0.2);
   border-color: rgba(244, 67, 54, 0.5);
+}
+
+.sidebar-header .release-notes-popover {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 0.75rem;
+  width: 280px;
+  background-color: #1e1e1e;
+  border: 1px solid #424242;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.sidebar-header .release-notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #333;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64b5f6;
+}
+
+.sidebar-header .release-notes-header a {
+  font-size: 0.65rem;
+  color: #aaa;
+  text-decoration: none;
+}
+
+.sidebar-header .release-notes-header a:hover {
+  color: #64b5f6;
+}
+
+.sidebar-header .release-notes-body {
+  padding: 0.6rem 0.75rem;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.7rem;
+  color: #ccc;
+  line-height: 1.5;
+}
+
+.sidebar-header .release-notes-body p {
+  margin: 0.15rem 0;
 }
 
 .sidebar-nav {

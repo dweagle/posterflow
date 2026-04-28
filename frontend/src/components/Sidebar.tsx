@@ -11,6 +11,7 @@ type VersionUpdateStatus = {
   latest_version: string | null
   update_available: boolean
   releases_url: string | null
+  release_notes: string | null
 }
 
 function Sidebar() {
@@ -19,6 +20,8 @@ function Sidebar() {
   const [version, setVersion] = useState<string>('0.1.0')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [releasesUrl, setReleasesUrl] = useState<string>('')
+  const [releaseNotes, setReleaseNotes] = useState<string | null>(null)
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false)
   const [displayProgress, setDisplayProgress] = useState<number>(0)
   const lastDisplayedJobIdRef = useRef<number | null>(null)
 
@@ -75,8 +78,10 @@ function Sidebar() {
         }
         if (payload.update_available && payload.latest_version) {
           setLatestVersion(payload.latest_version)
+          setReleaseNotes(payload.release_notes ?? null)
         } else {
           setLatestVersion(null)
+          setReleaseNotes(null)
         }
         if (payload.releases_url) {
           setReleasesUrl(payload.releases_url)
@@ -102,15 +107,29 @@ function Sidebar() {
             <p className="inspired-byline">DAPS Reimagined</p>
             <p className="version">v{version}</p>
             {latestVersion && releasesUrl && (
-              <a
-                className="version-update-badge"
-                href={releasesUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Update available | Current: ${version} | Latest: ${latestVersion}`}
-              >
-                Update Available
-              </a>
+              <div className="version-update-wrapper">
+                <button
+                  className="version-update-badge"
+                  onClick={() => setShowReleaseNotes(prev => !prev)}
+                  title={`Update available | Current: ${version} | Latest: ${latestVersion}`}
+                >
+                  Update Available
+                </button>
+                {showReleaseNotes && (
+                  <div className="release-notes-popover">
+                    <div className="release-notes-header">
+                      <span>What's New in {latestVersion}</span>
+                      <a href={releasesUrl} target="_blank" rel="noopener noreferrer">View on GitHub</a>
+                    </div>
+                    <div className="release-notes-body">
+                      {releaseNotes
+                        ? releaseNotes.split('\n').map((line, i) => <p key={i}>{line}</p>)
+                        : <p>See GitHub releases for details.</p>
+                      }
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
