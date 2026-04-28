@@ -103,7 +103,7 @@ function SettingsMediaSection({
               const hasSettings = !!(instance.url || instance.api_key)
               const hasUnsaved = dirtyPlexInstances.has(index)
               return (
-                <div key={index} className={`server-card ${!isEditing && hasSettings ? 'locked' : ''}`}>
+                <div key={index} className={`server-card plex-card ${!isEditing && hasSettings ? 'locked' : ''}`}>
                   <div className="card-header">
                     <span className="card-title">{instance.name || `Plex ${index + 1}`}</span>
                     <div className="card-actions">
@@ -177,6 +177,7 @@ function SettingsMediaSection({
                           {showPlexTokens[index] ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                       </div>
+                      <small>Find your token: <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex Support Article</a></small>
                     </div>
                   </div>
                 </div>
@@ -248,6 +249,7 @@ function SettingsMediaSection({
                         placeholder="http://localhost:8989"
                         readOnly={!isEditing && hasSettings}
                       />
+                      <small>If Sonarr has a Base URL set (Settings → General), include it here. e.g., <code>http://localhost:8989/sonarr</code></small>
                     </div>
                     <div className="form-group">
                       <label>API Key</label>
@@ -267,6 +269,7 @@ function SettingsMediaSection({
                           {showSonarrKeys[index] ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                       </div>
+                      <small>Find in Sonarr: Settings → General → Security → API Key</small>
                     </div>
                   </div>
                 </div>
@@ -338,6 +341,7 @@ function SettingsMediaSection({
                         placeholder="http://localhost:7878"
                         readOnly={!isEditing && hasSettings}
                       />
+                      <small>If Radarr has a Base URL set (Settings → General), include it here. e.g., <code>http://localhost:7878/radarr</code></small>
                     </div>
                     <div className="form-group">
                       <label>API Key</label>
@@ -357,6 +361,7 @@ function SettingsMediaSection({
                           {showRadarrKeys[index] ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                       </div>
+                      <small>Find in Radarr: Settings → General → Security → API Key</small>
                     </div>
                   </div>
                 </div>

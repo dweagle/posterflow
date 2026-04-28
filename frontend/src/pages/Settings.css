@@ -377,7 +377,7 @@
   display: flex;
   flex-direction: column;
   width: 360px;
-  height: 290px;
+  height: 300px;
 }
 
 .server-card:hover {
@@ -413,7 +413,7 @@
 }
 
 .server-card .card-body {
-  padding: 1rem;
+  padding: 0.5rem;
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
@@ -439,7 +439,7 @@
 }
 
 .server-card .form-group {
-  margin-bottom: 0.875rem;
+  margin-bottom: 0.45rem;
 }
 
 .server-card .form-group:last-child {
@@ -448,21 +448,37 @@
 
 .server-card .form-group label {
   display: block;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.2rem;
   color: #aaa;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
 }
 
 .server-card input {
   width: 100%;
-  padding: 0.6rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid #333;
   border-radius: 4px;
   background-color: #2a2a2a;
   color: #E8ECEF;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   transition: all 0.2s;
+}
+
+.server-card .form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: #777;
+  line-height: 1.4;
+}
+
+.server-card .form-group small code {
+  font-size: 0.7rem;
+  color: #888;
+  background-color: #222;
+  padding: 0 3px;
+  border-radius: 3px;
 }
 
 .server-card input:focus {
@@ -483,6 +499,10 @@
 
 .server-card.locked .card-header {
   background-color: #1e1e1e;
+}
+
+.server-card.plex-card {
+  height: 255px;
 }
 
 .btn-add-instance {

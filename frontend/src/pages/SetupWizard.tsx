@@ -937,6 +937,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                           onChange={(e) => updateSonarrInstance(index, 'url', e.target.value)}
                           placeholder="http://localhost:8989"
                         />
+                        <small>If Sonarr has a Base URL set (Settings → General), include it here. e.g., <code>http://localhost:8989/sonarr</code></small>
                       </div>
 
                       <div className="form-group">
@@ -1038,6 +1039,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                           onChange={(e) => updateRadarrInstance(index, 'url', e.target.value)}
                           placeholder="http://localhost:7878"
                         />
+                        <small>If Radarr has a Base URL set (Settings → General), include it here. e.g., <code>http://localhost:7878/radarr</code></small>
                       </div>
 
                       <div className="form-group">
