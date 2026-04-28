@@ -123,6 +123,10 @@
   cursor: not-allowed;
 }
 
+.poster-manager .modal-footer .btn-secondary {
+  justify-content: center;
+}
+
 .poster-manager .btn-toolbar {
   display: flex;
   align-items: center;
@@ -1594,7 +1598,12 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .success-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 2rem;
+  flex: 1;
   text-align: center;
 }
 
