@@ -448,7 +448,6 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           {step === 0 && (
             <div className="welcome-screen">
               <div className="welcome-content">
-                <h2>Welcome to PosterFlow Setup</h2>
                 <p className="welcome-description">
                   PosterFlow automates poster management for your media library by syncing beautiful 
                   posters from community drives to an asset folder that can be uploaded to Plex or 

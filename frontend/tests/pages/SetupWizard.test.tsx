@@ -51,7 +51,7 @@ describe('SetupWizard', () => {
 
     expect(screen.getByText('Loading existing settings...')).toBeTruthy()
 
-    await screen.findByText('Welcome to PosterFlow Setup')
+    await screen.findByText('Start Setup Wizard')
     expect(screen.getByText('Start Setup Wizard')).toBeTruthy()
   })
 

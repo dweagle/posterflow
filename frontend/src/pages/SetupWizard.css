@@ -4,14 +4,14 @@
   justify-content: center;
   align-items: center;
   background: linear-gradient(135deg, #1e1e1e 0%, #121212 100%);
-  padding: 2rem;
+  padding: 1rem;
 }
 
 .setup-container {
   position: relative;
   background-color: #1e1e1e;
   border-radius: 8px;
-  padding: 3rem;
+  padding: 1.75rem;
   max-width: 600px;
   width: 100%;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
@@ -42,7 +42,7 @@
 
 .setup-header {
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .setup-header h1 {
@@ -68,7 +68,7 @@
 .setup-steps {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
   gap: 1rem;
 }
 
@@ -131,19 +131,19 @@
 
 .section-description {
   color: #aaa;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   font-size: 0.875rem;
 }
 
 .form-section h3 {
-  margin-top: 1.5rem;
-  margin-bottom: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 0.75rem;
   color: #64b5f6;
   font-size: 1rem;
 }
 
 .form-group {
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.875rem;
 }
 
 .form-group label {
@@ -197,7 +197,7 @@
 }
 
 .button-group-wrapper {
-  margin-top: 2rem;
+  margin-top: 1.25rem;
 }
 
 .button-group {
@@ -217,7 +217,7 @@
 .setup-wizard .btn-primary,
 .setup-wizard .btn-secondary {
   flex: 1;
-  padding: 0.875rem;
+  padding: 0.625rem;
   border-radius: 4px;
   font-size: 1rem;
   font-weight: 500;
@@ -269,8 +269,8 @@
   background-color: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 4px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
   max-height: 400px;
   overflow-y: auto;
 }
@@ -281,7 +281,7 @@
 }
 
 .instruction-step {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .instruction-step strong {
@@ -350,15 +350,15 @@
 }
 
 .server-section {
-  margin-top: 2rem;
-  margin-bottom: 2rem;
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
 }
 
 .server-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .server-header h3 {
@@ -459,8 +459,8 @@
 }
 
 .service-section {
-  margin-bottom: 2rem;
-  padding-bottom: 2rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
   border-bottom: 1px solid #424242;
 }
 
@@ -504,15 +504,15 @@
 }
 
 .server-section {
-  margin-top: 2rem;
-  margin-bottom: 2rem;
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
 }
 
 .server-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .server-header h3 {
@@ -538,16 +538,16 @@
   background-color: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 4px;
-  padding: 1.25rem;
-  margin-bottom: 1rem;
+  padding: 0.9rem;
+  margin-bottom: 0.75rem;
 }
 
 .instance-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid #424242;
 }
 
@@ -582,7 +582,7 @@
 }
 /* Welcome Screen Styles */
 .welcome-screen {
-  margin-top: 2rem;
+  margin-top: 1rem;
 }
 
 .welcome-content {
@@ -598,22 +598,22 @@
 .welcome-description {
   color: #aaa;
   line-height: 1.6;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   font-size: 1.05rem;
 }
 
 .welcome-options {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  margin-top: 2rem;
+  gap: 1rem;
+  margin-top: 1rem;
 }
 
 .welcome-option {
   background: #252525;
   border: 1px solid #333;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1rem;
   text-align: center;
   transition: all 0.2s;
 }
@@ -705,7 +705,7 @@
 }
 
 .setup-complete-list {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 1rem 0;
   padding-left: 1.2rem;
   color: #ccc;
 }
