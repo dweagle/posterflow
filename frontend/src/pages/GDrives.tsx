@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, updateDrive, createCustomDrive, deleteDrive, reloadDrives, Drive, getApiErrorMessage } from '../api/client'
 import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus } from 'lucide-react'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import './GDrives.css'
 
@@ -31,6 +31,18 @@ function GDrives() {
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
+  const [idTooltip, setIdTooltip] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const tooltipHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showIdTooltip = (id: number) => {
+    if (tooltipHideTimer.current) clearTimeout(tooltipHideTimer.current)
+    setIdTooltip(id)
+  }
+
+  const hideIdTooltip = () => {
+    tooltipHideTimer.current = setTimeout(() => setIdTooltip(null), 200)
+  }
 
   useEffect(() => {
     fetchDrives()
@@ -234,6 +246,32 @@ function GDrives() {
   const confirmDeleteDrive = (driveId: number, driveName: string, isDeprecated: boolean = false) => {
     setDeleteConfirm({show: true, driveId, driveName, isDeprecated})
     setDeleteFiles(false)
+  }
+
+  const handleCopyId = async (driveId: number, driveIdStr: string) => {
+    try {
+      await navigator.clipboard.writeText(driveIdStr)
+      setCopiedId(driveId)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      // Fallback for non-secure (HTTP) contexts where Clipboard API is unavailable
+      try {
+        const textArea = document.createElement('textarea')
+        textArea.value = driveIdStr
+        textArea.style.position = 'fixed'
+        textArea.style.left = '-9999px'
+        textArea.style.top = '-9999px'
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        ;(document as unknown as { execCommand(cmd: string): boolean }).execCommand('copy')
+        document.body.removeChild(textArea)
+        setCopiedId(driveId)
+        setTimeout(() => setCopiedId(null), 2000)
+      } catch (fallbackError) {
+        console.error('Failed to copy drive ID:', fallbackError)
+      }
+    }
   }
 
   const handleReloadDrives = async () => {
@@ -443,7 +481,7 @@ function GDrives() {
                 <h2 className="section-header">{type} Drives</h2>
                 <div className="drives-grid">
                   {typeDrives.map(drive => (
-                    <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
+                    <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
                       {drive.is_deprecated && (
                         <div className="deprecated-overlay">
                           <div className="deprecated-badge">⚠️ DEPRECATED</div>
@@ -467,14 +505,38 @@ function GDrives() {
                         </button>
                       )}
                       <div className="drive-header">
-                        <div className="drive-icon"><HardDriveDownload size={24} color="#4285F4" /></div>
+                        <div className="drive-icon"><HardDriveDownload size={18} color="#4285F4" /></div>
                         <div className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
                           {drive.is_custom ? 'Custom' : drive.style_type}
+                        </div>
+                        <div
+                          className="drive-id-wrapper"
+                          onMouseEnter={() => showIdTooltip(drive.id)}
+                          onMouseLeave={hideIdTooltip}
+                        >
+                          <button className="btn-drive-id-info" title="Show Drive ID">
+                            <Info size={13} />
+                          </button>
+                          {idTooltip === drive.id && (
+                            <div
+                              className="drive-id-tooltip"
+                              onMouseEnter={() => showIdTooltip(drive.id)}
+                              onMouseLeave={hideIdTooltip}
+                            >
+                              <span className="drive-id-tooltip-text">{drive.drive_id}</span>
+                              <button
+                                className="btn-copy-id"
+                                onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
+                                title="Copy to clipboard"
+                              >
+                                {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                       <h3>{drive.name}</h3>
                       <div className="drive-meta">
-                        <p className="drive-id">ID: {drive.drive_id.substring(0, 16)}...</p>
                         {drive.custom_path && (
                           <p className="custom-path">Path: {drive.custom_path}</p>
                         )}
@@ -550,7 +612,7 @@ function GDrives() {
         // Show ungrouped filtered drives
         <div className="drives-grid">
           {sortedDrives.map(drive => (
-            <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
+            <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
               {drive.is_deprecated && (
                 <div className="deprecated-overlay">
                   <div className="deprecated-badge">⚠️ DEPRECATED</div>
@@ -578,10 +640,34 @@ function GDrives() {
                 <div className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>
                   {drive.is_custom ? 'Custom' : drive.style_type}
                 </div>
+                <div
+                  className="drive-id-wrapper"
+                  onMouseEnter={() => showIdTooltip(drive.id)}
+                  onMouseLeave={hideIdTooltip}
+                >
+                  <button className="btn-drive-id-info" title="Show Drive ID">
+                    <Info size={13} />
+                  </button>
+                  {idTooltip === drive.id && (
+                    <div
+                      className="drive-id-tooltip"
+                      onMouseEnter={() => showIdTooltip(drive.id)}
+                      onMouseLeave={hideIdTooltip}
+                    >
+                      <span className="drive-id-tooltip-text">{drive.drive_id}</span>
+                      <button
+                        className="btn-copy-id"
+                        onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
+                        title="Copy to clipboard"
+                      >
+                        {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <h3>{drive.name}</h3>
               <div className="drive-meta">
-                <p className="drive-id">ID: {drive.drive_id.substring(0, 16)}...</p>
                 {drive.custom_path && (
                   <p className="custom-path">Path: {drive.custom_path}</p>
                 )}
