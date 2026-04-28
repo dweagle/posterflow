@@ -45,7 +45,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip uninstall -y pip
 
 # Create necessary directories
-RUN mkdir -p /config/logs /app/frontend/dist
+RUN mkdir -p /app/frontend/dist
 
 # Copy backend application code
 COPY --chown=posterflow:posterflow backend/ .
