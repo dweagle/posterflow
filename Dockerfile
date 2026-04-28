@@ -11,7 +11,6 @@ RUN npm run build
 # Stage 2: Final image with backend + frontend
 FROM python:3.12-slim-bookworm
 
-ARG BUILD_NUMBER
 ARG BRANCH
 
 # Use bash with pipefail for safer pipe handling
@@ -30,7 +29,6 @@ COPY --from=rclone/rclone:1.73.4 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
-ENV BUILD_NUMBER=${BUILD_NUMBER}
 ENV BRANCH=${BRANCH}
 
 # Create app user (UID/GID remapped at runtime via entrypoint using PUID/PGID env vars)
@@ -51,6 +49,9 @@ RUN mkdir -p /config/logs /app/frontend/dist
 
 # Copy backend application code
 COPY --chown=posterflow:posterflow backend/ .
+
+# Copy VERSION file for version display
+COPY --chown=posterflow:posterflow VERSION /VERSION
 
 # Copy built frontend from frontend-builder stage
 COPY --from=frontend-builder --chown=posterflow:posterflow /frontend/dist /app/frontend/dist

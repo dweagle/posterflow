@@ -72,10 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="${GITHUB_REF_NAME//\//-}"
-          BUILD_NUMBER="$(git rev-list --count HEAD)"
-
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -106,7 +103,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            BUILD_NUMBER=${{ steps.version.outputs.build_number }}
             BRANCH=${{ steps.version.outputs.branch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

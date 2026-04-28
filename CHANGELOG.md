@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-27
+### Added
+- In-app update check now compares against GitHub Releases instead of commit count, eliminating false update notifications from non-release commits
+- Version display simplified to `base.branch` format (e.g. `0.1.4.develop`)
+
+### Fixed
+- VERSION file now correctly copied into Docker image, resolving incorrect `0.1.0` version display
+- Application shutdown in testing mode no longer uses invalid `return` inside `finally` block
+
+### Changed
+- Workflow `BUILD_NUMBER` arg removed as commit count is no longer part of the version string
+
 ## [0.1.3] - 2026-04-27
 ### Added
 - Bulk add/remove functionality for drive styles in the Priority tab

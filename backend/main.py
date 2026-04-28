@@ -39,7 +39,6 @@ import ctypes
 import os
 import re
 import subprocess  # nosec B404 - used only for hardcoded git commands in version detection
-from urllib.parse import quote
 from urllib.request import urlopen
 
 # Set up logging
@@ -58,11 +57,10 @@ APP_BASE_VERSION = _load_app_base_version()
 
 
 def get_app_version() -> str:
-    """Get app version with optional branch/build suffix (DAPS-style)."""
-    ci_build = os.getenv("BUILD_NUMBER")
+    """Get app version with optional branch suffix."""
     ci_branch = os.getenv("BRANCH")
-    if ci_build and ci_branch:
-        return f"{APP_BASE_VERSION}.{ci_branch}{ci_build}"
+    if ci_branch:
+        return f"{APP_BASE_VERSION}.{ci_branch}"
 
     try:
         branch = (
@@ -74,41 +72,9 @@ def get_app_version() -> str:
             .decode()
             .strip()
         )
-        commit_count = (
-            subprocess.check_output(  # nosec B603 B607 - hardcoded git args, no user input
-                ["git", "rev-list", "--count", "HEAD"],
-                stderr=subprocess.DEVNULL,
-                cwd=Path(__file__).parent,
-            )
-            .decode()
-            .strip()
-        )
-        return f"{APP_BASE_VERSION}.{branch}{commit_count}"
+        return f"{APP_BASE_VERSION}.{branch}"
     except Exception:
         return APP_BASE_VERSION
-
-
-def _parse_version_string(version: str) -> tuple[str, str, int] | None:
-    parts = version.strip().split(".")
-    if len(parts) < 4:
-        return None
-
-    base_version = ".".join(parts[:3])
-    branch_and_build = ".".join(parts[3:])
-    match = re.search(r"(\d+)$", branch_and_build)
-    if not match:
-        return None
-
-    branch = branch_and_build[: match.start()]
-    if not branch:
-        return None
-
-    try:
-        build = int(match.group(1))
-    except ValueError:
-        return None
-
-    return base_version, branch, build
 
 
 def _get_remote_owner_repo() -> tuple[str, str] | None:
@@ -135,40 +101,8 @@ def _get_remote_owner_repo() -> tuple[str, str] | None:
     return None
 
 
-def _get_remote_build_count(owner: str, repo: str, branch: str) -> int | None:
-    url = f"https://api.github.com/repos/{owner}/{repo}/commits?sha={quote(branch)}&per_page=1"
-    try:
-        with urlopen(url, timeout=6) as response:  # nosec B310 - URL is hardcoded https:// prefix, path segments are quote()-escaped
-            link_header = response.headers.get("Link", "")
-    except Exception:
-        return None
-
-    if not link_header:
-        return 1
-
-    match = re.search(r"&page=(\d+)>; rel=\"last\"", link_header)
-    if not match:
-        return 1
-
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
-
-
-def _get_remote_base_version(owner: str, repo: str, branch: str) -> str | None:
-    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{quote(branch)}/VERSION"
-    try:
-        with urlopen(url, timeout=6) as response:  # nosec B310 - URL is hardcoded https:// prefix, path segments are quote()-escaped
-            content = response.read().decode("utf-8").strip()
-    except Exception:
-        return None
-
-    return content or None
-
-
-def _get_latest_release_notes(owner: str, repo: str) -> str | None:
-    """Fetch the body of the latest GitHub Release."""
+def _get_latest_release(owner: str, repo: str) -> tuple[str, str] | None:
+    """Fetch the tag name and body of the latest GitHub Release."""
     import json
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     try:
@@ -177,7 +111,17 @@ def _get_latest_release_notes(owner: str, repo: str) -> str | None:
     except Exception:
         return None
 
-    return data.get("body") or None
+    tag = data.get("tag_name", "").lstrip("v")
+    body = data.get("body") or ""
+    return (tag, body) if tag else None
+
+
+def _parse_semver(version: str) -> tuple[int, ...]:
+    """Parse a semantic version string into a comparable tuple."""
+    try:
+        return tuple(int(x) for x in version.lstrip("v").split(".")[:3])
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
 
 
 def get_version_update_status() -> dict[str, Any]:
@@ -191,11 +135,6 @@ def get_version_update_status() -> dict[str, Any]:
         "repo": None,
     }
 
-    parsed = _parse_version_string(local_full)
-    if not parsed:
-        return status
-
-    local_base, branch, local_build = parsed
     owner_repo = _get_remote_owner_repo()
     if not owner_repo:
         return status
@@ -204,17 +143,19 @@ def get_version_update_status() -> dict[str, Any]:
     status["repo"] = f"{owner}/{repo}"
     status["releases_url"] = f"https://github.com/{owner}/{repo}/releases"
 
-    remote_base = _get_remote_base_version(owner, repo, branch)
-    remote_build = _get_remote_build_count(owner, repo, branch)
-    if not remote_base or remote_build is None:
+    release = _get_latest_release(owner, repo)
+    if not release:
         return status
 
-    remote_full = f"{remote_base}.{branch}{remote_build}"
-    status["latest_version"] = remote_full
-    status["update_available"] = (remote_base == local_base and remote_build > local_build) or remote_base != local_base
+    latest_tag, release_notes = release
+    status["latest_version"] = latest_tag
+
+    local_semver = _parse_semver(APP_BASE_VERSION)
+    latest_semver = _parse_semver(latest_tag)
+    status["update_available"] = latest_semver > local_semver
 
     if status["update_available"]:
-        status["release_notes"] = _get_latest_release_notes(owner, repo)
+        status["release_notes"] = release_notes or None
 
     return status
 
@@ -364,55 +305,54 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if is_testing:
             log_info(LogTags.SHUTDOWN, "Testing mode enabled - skipping shutdown side effects")
             log_section_end(LogTags.SHUTDOWN, "Shutdown Complete")
-            return
-        
-        # Close all active WebSocket connections
-        try:
-            from api.jobs import _ws as job_ws
-            from api.logs import _ws as log_ws
+        else:
+            # Close all active WebSocket connections
+            try:
+                from api.jobs import _ws as job_ws
+                from api.logs import _ws as log_ws
+                
+                job_connections = job_ws.active_connections
+                log_connections = log_ws.active_connections
+                total_connections = len(job_connections) + len(log_connections)
+                if total_connections > 0:
+                    log_info(LogTags.SHUTDOWN, f"Closing {total_connections} WebSocket connection(s)...")
+                    
+                    # Close job WebSocket connections
+                    for ws in list(job_connections):
+                        try:
+                            await ws.close()
+                        except Exception as e:
+                            log_debug(LogTags.WEBSOCKET, f"Job WS already closed during shutdown: {e}")
+                    job_connections.clear()
+                    
+                    # Close log WebSocket connections
+                    for ws in list(log_connections):
+                        try:
+                            await ws.close()
+                        except Exception as e:
+                            log_debug(LogTags.WEBSOCKET, f"Log WS already closed during shutdown: {e}")
+                    log_connections.clear()
+                    
+                    log_success(LogTags.SHUTDOWN, "WebSocket connections closed")
+            except Exception as e:
+                log_error(LogTags.SHUTDOWN, f"Error closing WebSocket connections: {e}\\n{traceback.format_exc()}")
             
-            job_connections = job_ws.active_connections
-            log_connections = log_ws.active_connections
-            total_connections = len(job_connections) + len(log_connections)
-            if total_connections > 0:
-                log_info(LogTags.SHUTDOWN, f"Closing {total_connections} WebSocket connection(s)...")
-                
-                # Close job WebSocket connections
-                for ws in list(job_connections):
-                    try:
-                        await ws.close()
-                    except Exception as e:
-                        log_debug(LogTags.WEBSOCKET, f"Job WS already closed during shutdown: {e}")
-                job_connections.clear()
-                
-                # Close log WebSocket connections
-                for ws in list(log_connections):
-                    try:
-                        await ws.close()
-                    except Exception as e:
-                        log_debug(LogTags.WEBSOCKET, f"Log WS already closed during shutdown: {e}")
-                log_connections.clear()
-                
-                log_success(LogTags.SHUTDOWN, "WebSocket connections closed")
-        except Exception as e:
-            log_error(LogTags.SHUTDOWN, f"Error closing WebSocket connections: {e}\\n{traceback.format_exc()}")
-        
-        # Stop scheduler
-        try:
-            stop_scheduler()
-            log_success(LogTags.SHUTDOWN, "Scheduler stopped")
-        except Exception as e:
-            log_error(LogTags.SHUTDOWN, f"Error stopping scheduler: {e}\\n{traceback.format_exc()}")
+            # Stop scheduler
+            try:
+                stop_scheduler()
+                log_success(LogTags.SHUTDOWN, "Scheduler stopped")
+            except Exception as e:
+                log_error(LogTags.SHUTDOWN, f"Error stopping scheduler: {e}\\n{traceback.format_exc()}")
 
-        # Stop background job queue and cancel queued futures so stale jobs never start after shutdown
-        try:
-            from core.job_queue import job_queue
-            job_queue.shutdown(wait=False, cancel_futures=True)
-            log_success(LogTags.SHUTDOWN, "Job queue stopped")
-        except Exception as e:
-            log_error(LogTags.SHUTDOWN, f"Error stopping job queue: {e}\\n{traceback.format_exc()}")
-        
-        log_section_end(LogTags.SHUTDOWN, "Shutdown Complete")
+            # Stop background job queue and cancel queued futures so stale jobs never start after shutdown
+            try:
+                from core.job_queue import job_queue
+                job_queue.shutdown(wait=False, cancel_futures=True)
+                log_success(LogTags.SHUTDOWN, "Job queue stopped")
+            except Exception as e:
+                log_error(LogTags.SHUTDOWN, f"Error stopping job queue: {e}\\n{traceback.format_exc()}")
+            
+            log_section_end(LogTags.SHUTDOWN, "Shutdown Complete")
 
 # Create FastAPI app
 app = FastAPI(
