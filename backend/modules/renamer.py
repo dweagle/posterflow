@@ -47,21 +47,57 @@ def _build_renamer_section(items: list[dict[str, Any]], *, cap: int = 8) -> str:
     if not items:
         return "-"
 
+    # Discord field value limit is 1024 chars
+    BUDGET = 1000
     blocks: list[str] = []
+    used = 0
+    shown = 0
+
     for item in items[:cap]:
         title = str(item.get("title") or "Unknown")
         year = item.get("year")
         heading = f"{title} ({year})" if year else title
-        file_lines = []
-        for message in item.get("messages", []) or []:
+        messages = item.get("messages", []) or []
+        all_file_lines = []
+        for message in messages:
             target_name = _extract_target_name(str(message))
             if target_name:
-                file_lines.append(f"  {target_name}")
-        if not file_lines:
-            file_lines.append("  poster.jpg")
-        blocks.append("\n".join([heading, *file_lines]))
+                all_file_lines.append(f"  {target_name}")
+        if not all_file_lines:
+            all_file_lines = ["  poster.jpg"]
 
-    if len(items) > cap:
+        # Try to fit all files; if the full block won't fit in the remaining budget,
+        # trim file lines one at a time until it fits (or left with just the heading).
+        file_lines = list(all_file_lines)
+        trimmed = 0
+        while file_lines:
+            suffix = [f"  ...+{trimmed} more files"] if trimmed else []
+            block = "\n".join([heading, *file_lines, *suffix])
+            block_cost = len(block) + 2  # +2 for \n\n separator
+            if used + block_cost <= BUDGET:
+                break
+            file_lines.pop()
+            trimmed += 1
+        else:
+            # Even heading alone doesn't fit — stop here
+            remaining = len(items) - shown
+            blocks.append(f"...and {remaining} more")
+            break
+
+        suffix = [f"  ...+{trimmed} more files"] if trimmed else []
+        block = "\n".join([heading, *file_lines, *suffix])
+        block_cost = len(block) + 2
+
+        if used + block_cost > BUDGET:
+            remaining = len(items) - shown
+            blocks.append(f"...and {remaining} more")
+            break
+
+        blocks.append(block)
+        used += block_cost
+        shown += 1
+
+    if shown == cap and len(items) > cap:
         blocks.append(f"...and {len(items) - cap} more")
 
     return "```\n" + "\n\n".join(blocks) + "\n```"

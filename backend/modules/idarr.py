@@ -221,24 +221,31 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
             if str(op.get("status", "")).lower() == "success"
         ]
 
-        MAX_LIST = 20
+        BUDGET = 1000  # Discord field value limit is 1024 chars
         renamed_lines: list[str] = []
-        for op in renamed_ops[:MAX_LIST]:
+        used = 0
+        shown = 0
+        for op in renamed_ops:
             from_name = Path(str(op.get("from_path", ""))).name
             to_name = Path(str(op.get("to_path", ""))).name
             if from_name and to_name and from_name != to_name:
-                renamed_lines.append(f"• `{from_name}` → `{to_name}`")
+                line = f"• `{from_name}` → `{to_name}`"
             elif to_name:
-                renamed_lines.append(f"• `{to_name}`")
-
-        overflow = len(renamed_ops) - MAX_LIST
-        if overflow > 0:
-            renamed_lines.append(f"_...and {overflow} more_")
+                line = f"• `{to_name}`"
+            else:
+                continue
+            cost = len(line) + 1  # +1 for \n
+            remaining = len(renamed_ops) - shown
+            overflow_line = f"_...and {remaining} more_"
+            # Stop if this line + overflow hint won't fit
+            if used + cost + len(overflow_line) + 1 > BUDGET:
+                renamed_lines.append(overflow_line)
+                break
+            renamed_lines.append(line)
+            used += cost
+            shown += 1
 
         renamed_value = "\n".join(renamed_lines) if renamed_lines else "_None_"
-        # Truncate to Discord field limit (1024 chars)
-        if len(renamed_value) > 1020:
-            renamed_value = renamed_value[:1017] + "..."
 
         discord_fields = [
             {"name": "Renamed", "value": str(renamed_count), "inline": True},
