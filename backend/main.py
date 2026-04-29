@@ -77,7 +77,12 @@ def get_app_version() -> str:
         return APP_BASE_VERSION
 
 
-def _get_remote_owner_repo() -> tuple[str, str] | None:
+GITHUB_OWNER = "dweagle"
+GITHUB_REPO_NAME = "posterflow"
+
+
+def _get_remote_owner_repo() -> tuple[str, str]:
+    """Return the GitHub owner/repo, falling back to the hardcoded default."""
     try:
         remote = (
             subprocess.check_output(  # nosec B603 B607 - hardcoded git args, no user input
@@ -88,31 +93,34 @@ def _get_remote_owner_repo() -> tuple[str, str] | None:
             .decode()
             .strip()
         )
+        ssh_match = re.match(r"git@github\.com:([^/]+)/(.+?)(?:\.git)?$", remote)
+        https_match = re.match(r"https?://github\.com/([^/]+)/(.+?)(?:\.git)?$", remote)
+        if ssh_match:
+            return ssh_match.group(1), ssh_match.group(2)
+        if https_match:
+            return https_match.group(1), https_match.group(2)
     except Exception:
-        return None
+        pass
 
-    ssh_match = re.match(r"git@github\.com:([^/]+)/(.+?)(?:\.git)?$", remote)
-    https_match = re.match(r"https?://github\.com/([^/]+)/(.+?)(?:\.git)?$", remote)
-
-    if ssh_match:
-        return ssh_match.group(1), ssh_match.group(2)
-    if https_match:
-        return https_match.group(1), https_match.group(2)
-    return None
+    return GITHUB_OWNER, GITHUB_REPO_NAME
 
 
 def _get_latest_release(owner: str, repo: str) -> tuple[str, str] | None:
-    """Fetch the tag name and body of the latest GitHub Release."""
+    """Fetch the tag name and body of the most recent GitHub Release (including pre-releases)."""
     import json
-    url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    url = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=1"
     try:
         with urlopen(url, timeout=6) as response:  # nosec B310 - URL is hardcoded https:// prefix, path segments are quote()-escaped
             data = json.loads(response.read().decode("utf-8"))
     except Exception:
         return None
 
-    tag = data.get("tag_name", "").lstrip("v")
-    body = data.get("body") or ""
+    if not data:
+        return None
+
+    release = data[0]
+    tag = release.get("tag_name", "").lstrip("v")
+    body = release.get("body") or ""
     return (tag, body) if tag else None
 
 
@@ -135,11 +143,7 @@ def get_version_update_status() -> dict[str, Any]:
         "repo": None,
     }
 
-    owner_repo = _get_remote_owner_repo()
-    if not owner_repo:
-        return status
-
-    owner, repo = owner_repo
+    owner, repo = _get_remote_owner_repo()
     status["repo"] = f"{owner}/{repo}"
     status["releases_url"] = f"https://github.com/{owner}/{repo}/releases"
 
