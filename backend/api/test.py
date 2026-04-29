@@ -96,19 +96,21 @@ async def test_plex(config: PlexTestRequest, db: Session = Depends(get_db)) -> D
                 "version": media_container.get('version', 'Unknown')
             }
         elif response.status_code == 401:
-            raise HTTPException(status_code=401, detail="Invalid Plex token")
+            raise HTTPException(status_code=400, detail="Invalid Plex token - check your X-Plex-Token")
+        elif response.status_code == 404:
+            raise HTTPException(status_code=400, detail="URL not found - ensure the Plex URL is correct (e.g. http://localhost:32400)")
         else:
-            raise HTTPException(status_code=400, detail=f"Plex returned status code {response.status_code}")
+            raise HTTPException(status_code=400, detail=f"Plex returned unexpected status {response.status_code} - check URL and token")
 
     except HTTPException:
         raise
     except httpx.TimeoutException:
-        raise HTTPException(status_code=408, detail="Connection timeout - check URL")
+        raise HTTPException(status_code=408, detail="Connection timed out - check that the URL is reachable")
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to Plex - check URL and ensure it's reachable")
+        raise HTTPException(status_code=503, detail="Cannot connect to Plex - check the URL and that Plex is running")
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Plex request error: {str(e)}")
-        raise HTTPException(status_code=503, detail="Cannot connect to Plex - check URL and ensure it's reachable")
+        raise HTTPException(status_code=503, detail="Cannot connect to Plex - check the URL and that Plex is running")
     except ValueError as e:
         log_error(LogTags.API, f"Plex response parsing error: {str(e)}")
         raise HTTPException(status_code=500, detail="Invalid response from Plex server")
@@ -174,18 +176,22 @@ async def test_sonarr(config: ArrTestRequest) -> Dict[str, Any]:
                 "message": f"Connected to Sonarr v{data.get('version')}",
                 "version": data.get('version')
             }
+        elif response.status_code in (401, 403):
+            raise HTTPException(status_code=400, detail="Invalid API key - check Sonarr Settings → General → Security")
+        elif response.status_code == 404:
+            raise HTTPException(status_code=400, detail="URL not found - if Sonarr has a Base URL configured, include it (e.g. http://localhost:8989/sonarr)")
         else:
-            raise HTTPException(status_code=400, detail="Invalid Sonarr API key")
+            raise HTTPException(status_code=400, detail=f"Sonarr returned unexpected status {response.status_code} - check URL and API key")
 
     except HTTPException:
         raise
     except httpx.TimeoutException:
-        raise HTTPException(status_code=408, detail="Connection timeout - check URL")
+        raise HTTPException(status_code=408, detail="Connection timed out - check that the URL is reachable")
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to Sonarr - check URL")
+        raise HTTPException(status_code=503, detail="Cannot connect to Sonarr - check the URL and that Sonarr is running")
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Sonarr request error: {str(e)}")
-        raise HTTPException(status_code=503, detail="Cannot connect to Sonarr - check URL")
+        raise HTTPException(status_code=503, detail="Cannot connect to Sonarr - check the URL and that Sonarr is running")
     except Exception as e:
         log_error(LogTags.API, f"Sonarr test error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -208,18 +214,22 @@ async def test_radarr(config: ArrTestRequest) -> Dict[str, Any]:
                 "message": f"Connected to Radarr v{data.get('version')}",
                 "version": data.get('version')
             }
+        elif response.status_code in (401, 403):
+            raise HTTPException(status_code=400, detail="Invalid API key - check Radarr Settings → General → Security")
+        elif response.status_code == 404:
+            raise HTTPException(status_code=400, detail="URL not found - if Radarr has a Base URL configured, include it (e.g. http://localhost:7878/radarr)")
         else:
-            raise HTTPException(status_code=400, detail="Invalid Radarr API key")
+            raise HTTPException(status_code=400, detail=f"Radarr returned unexpected status {response.status_code} - check URL and API key")
 
     except HTTPException:
         raise
     except httpx.TimeoutException:
-        raise HTTPException(status_code=408, detail="Connection timeout - check URL")
+        raise HTTPException(status_code=408, detail="Connection timed out - check that the URL is reachable")
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to Radarr - check URL")
+        raise HTTPException(status_code=503, detail="Cannot connect to Radarr - check the URL and that Radarr is running")
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Radarr request error: {str(e)}")
-        raise HTTPException(status_code=503, detail="Cannot connect to Radarr - check URL")
+        raise HTTPException(status_code=503, detail="Cannot connect to Radarr - check the URL and that Radarr is running")
     except Exception as e:
         log_error(LogTags.API, f"Radarr test error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
