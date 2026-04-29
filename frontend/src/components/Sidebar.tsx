@@ -24,6 +24,7 @@ function Sidebar() {
   const [showReleaseNotes, setShowReleaseNotes] = useState(false)
   const [displayProgress, setDisplayProgress] = useState<number>(0)
   const lastDisplayedJobIdRef = useRef<number | null>(null)
+  const releaseNotesWrapperRef = useRef<HTMLDivElement | null>(null)
 
   const truncateText = (value: string | null, maxLength: number): string => {
     const normalized = String(value || '').trim()
@@ -97,6 +98,17 @@ function Sidebar() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!showReleaseNotes) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (releaseNotesWrapperRef.current && !releaseNotesWrapperRef.current.contains(e.target as Node)) {
+        setShowReleaseNotes(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showReleaseNotes])
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
@@ -107,7 +119,7 @@ function Sidebar() {
             <p className="inspired-byline">DAPS Reimagined</p>
             <p className="version">v{version}</p>
             {latestVersion && releasesUrl && (
-              <div className="version-update-wrapper">
+              <div className="version-update-wrapper" ref={releaseNotesWrapperRef}>
                 <button
                   className="version-update-badge"
                   onClick={() => setShowReleaseNotes(prev => !prev)}
