@@ -15,6 +15,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Discord notifications: message formatting optimized to respect character limits and improve readability
 - MainLayout: GitHub link position adjusted for better alignment without collision
 - Dockerfile: removed unnecessary directory creation that caused permissions issues
+- Update check: fixed update notification using github release
 
 ### Changed
 - API endpoints renamed from `/api/poster-manager` to `/api/posterflow` across backend and frontend
