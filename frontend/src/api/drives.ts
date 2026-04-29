@@ -8,6 +8,7 @@ export interface Drive {
   drive_id: string
   style_type: DriveStyleType
   subscribed: boolean
+  sync_enabled: boolean
   priority: number
   custom_path: string | null
   is_custom: boolean
@@ -22,6 +23,7 @@ export interface DriveSubscriptionResponse {
   drive: Drive
   removed_from_priority?: boolean
   restored_to_priority?: boolean
+  scan_job_id?: number | null
 }
 
 export const getDrives = async (): Promise<Drive[]> => {
@@ -36,7 +38,7 @@ export const unsubscribeDrive = async (driveId: number): Promise<DriveSubscripti
   return postData(`/api/drives/${driveId}/unsubscribe`)
 }
 
-export const updateDrive = async (driveId: number, updates: { priority?: number; custom_path?: string; style_type?: DriveStyleType; subscribed?: boolean; drive_id?: string }) => {
+export const updateDrive = async (driveId: number, updates: { priority?: number; custom_path?: string; style_type?: DriveStyleType; subscribed?: boolean; sync_enabled?: boolean; drive_id?: string }) => {
   return patchData(`/api/drives/${driveId}`, updates)
 }
 
@@ -47,6 +49,7 @@ export const createCustomDrive = async (drive: {
   custom_path?: string
   priority?: number
   subscribed?: boolean
+  sync_enabled?: boolean
 }) => {
   return postData('/api/drives/custom', drive)
 }

@@ -9,6 +9,7 @@ interface AddCustomDriveModalProps {
     drive_id: string
     custom_path: string | null
     subscribed: boolean
+    sync_enabled: boolean
   }) => void
 }
 
@@ -16,7 +17,7 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
   const [name, setName] = useState('')
   const [driveId, setDriveId] = useState('')
   const [customPath, setCustomPath] = useState('')
-  const [excludeFromSync, setExcludeFromSync] = useState(false)
+  const [syncEnabled, setSyncEnabled] = useState(true)
   const { showToast } = useToast()
 
   const handleAdd = () => {
@@ -25,16 +26,17 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
       return
     }
 
-    if (!excludeFromSync && !driveId.trim()) {
-      showToast('Google Drive ID is required when sync is enabled', 'error')
+    if (syncEnabled && !driveId.trim()) {
+      showToast('Google Drive ID is required when GDrive sync is enabled', 'error')
       return
     }
 
     onAdd({
       name,
-      drive_id: excludeFromSync ? '' : driveId.trim(),
+      drive_id: syncEnabled ? driveId.trim() : '',
       custom_path: customPath || null,
-      subscribed: true
+      subscribed: true,
+      sync_enabled: syncEnabled,
     })
     onClose()
   }
@@ -58,27 +60,28 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={excludeFromSync}
-                onChange={(e) => setExcludeFromSync(e.target.checked)}
+                checked={syncEnabled}
+                onChange={(e) => setSyncEnabled(e.target.checked)}
               />
-              Add as custom local folder only (no Google Drive sync)
+              Sync from Google Drive
             </label>
             <small>
-              When enabled, this creates a custom folder for manual posters and does not sync from Google Drive.
+              When enabled, rclone downloads posters from Google Drive into this folder.
+              Disable to create a local-only folder where you manually place posters.
             </small>
           </div>
 
           <div className="form-group">
-            <label>{excludeFromSync ? 'Folder Name *' : 'Drive Name *'}</label>
+            <label>{syncEnabled ? 'Drive Name *' : 'Folder Name *'}</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={excludeFromSync ? 'My Override Folder' : 'My Custom Posters'}
+              placeholder={syncEnabled ? 'My Custom Posters' : 'My Override Folder'}
             />
           </div>
 
-          {!excludeFromSync && (
+          {syncEnabled && (
             <div className="form-group">
               <label>Google Drive ID *</label>
               <input
@@ -92,24 +95,24 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
           )}
 
           <div className="form-group">
-            <label>{excludeFromSync ? 'Custom Folder Path (optional)' : 'Custom Sync Path (optional)'}</label>
+            <label>{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
             <input
               type="text"
               value={customPath}
               onChange={(e) => setCustomPath(e.target.value)}
               placeholder="e.g., Movies/Overrides"
             />
-            {excludeFromSync ? (
-              <>
-                <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
-                <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
-                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
-              </>
-            ) : (
+            {syncEnabled ? (
               <>
                 <small>Leave empty to sync into the default location: <code>{'<storage>/<style>/<drive name>'}</code>.</small>
                 <small><strong>Absolute path</strong> (starts with <code>/</code>): syncs directly into that folder, no subfolders added — e.g. <code>/media/posters/movies</code>.</small>
                 <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>overrides/movies</code> → <code>/config/posters/gdrive/overrides/movies</code>.</small>
+              </>
+            ) : (
+              <>
+                <small>Leave empty to use the default location inside your configured GDrive storage folder.</small>
+                <small><strong>Absolute path</strong> (starts with <code>/</code>): files go exactly there — e.g. <code>/media/posters/manual</code>.</small>
+                <small><strong>Relative path</strong> (no leading <code>/</code>): appended to your GDrive storage base — e.g. <code>manual/overrides</code> → <code>/config/posters/gdrive/manual/overrides</code>.</small>
               </>
             )}
           </div>

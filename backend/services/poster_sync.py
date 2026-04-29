@@ -50,10 +50,6 @@ class PosterSyncService:
             
             if not drive.subscribed:
                 return {"success": False, "error": "Drive not subscribed"}
-
-            is_local_only_custom = drive.is_custom and (
-                drive.drive_id.startswith("manual-") or not (drive.drive_id or '').strip()
-            )
             
             # Log section start
             log_section_start(LogTags.SYNC, f"Sync Starting: {drive.name}")
@@ -218,10 +214,10 @@ class PosterSyncService:
                 except Exception as e:
                     log_warning(LogTags.SYNC, f"Error updating progress: {str(e)}")
             
-            if is_local_only_custom:
+            if not drive.sync_enabled:
                 log_info(
                     LogTags.SYNC,
-                    f"Drive '{drive.name}' is local-folder-only; skipping Google Drive sync and scanning local files",
+                    f"Drive '{drive.name}' has GDrive sync disabled; skipping rclone and scanning local files only",
                     drive=drive.name,
                 )
                 result = {"success": True, "files_transferred": 0}

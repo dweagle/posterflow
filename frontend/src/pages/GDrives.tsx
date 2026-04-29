@@ -14,6 +14,7 @@ type CustomDriveModalInput = {
   drive_id: string
   custom_path: string | null
   subscribed: boolean
+  sync_enabled: boolean
 }
 
 function GDrives() {
@@ -93,6 +94,9 @@ function GDrives() {
       fetchDrives()
       if (result.restored_to_priority) {
         showToast('Subscribed. This drive was restored to its previous position in Poster Manager → Drive Priority.', 'info')
+      }
+      if (result.scan_job_id) {
+        showToast('Initial scan queued. Check Dashboard for progress.', 'info')
       }
     }, 'Error subscribing:')
   }
@@ -198,10 +202,11 @@ function GDrives() {
     })
   }
 
-  const handleSaveDrive = async (driveId: number, updates: { custom_path: string | null; subscribed?: boolean; drive_id?: string }) => {
+  const handleSaveDrive = async (driveId: number, updates: { custom_path: string | null; sync_enabled: boolean; drive_id?: string }) => {
     try {
       await updateDrive(driveId, {
         custom_path: updates.custom_path ?? undefined,
+        sync_enabled: updates.sync_enabled,
         drive_id: updates.drive_id,
       })
       fetchDrives()
@@ -220,6 +225,7 @@ function GDrives() {
         style_type: 'Custom',
         custom_path: drive.custom_path ?? undefined,
         subscribed: drive.subscribed,
+        sync_enabled: drive.sync_enabled,
       })
       fetchDrives()
       setShowAddModal(false)

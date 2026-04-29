@@ -16,6 +16,7 @@ class Drive(Base):
     drive_id = Column(String, nullable=False, unique=True, index=True)
     style_type = Column(String, nullable=False)  # "MM2K" or "CL2K"
     subscribed = Column(Boolean, default=False)
+    sync_enabled = Column(Boolean, default=True, nullable=False)  # If False, rclone is skipped but local folder is still scanned/indexed
     priority = Column(Integer, default=0)  # Higher = syncs first, used for overrides
     custom_path = Column(String, nullable=True)  # Custom sync path for this drive
     is_custom = Column(Boolean, default=False)  # True if user-added drive

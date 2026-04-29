@@ -9,11 +9,13 @@ import json
 from pydantic import BaseModel, ConfigDict, field_serializer
 from datetime import datetime, timezone
 
-from database import get_db
+from database import get_db, SessionLocal
 from models.drive import Drive
+from models.job import Job, JOB_STATUS_PENDING
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
+from core.job_queue import job_queue
 
 router = APIRouter(prefix="/api/drives", tags=["drives"])
 
@@ -139,6 +141,7 @@ class DriveSchema(BaseModel):
     drive_id: str
     style_type: str
     subscribed: bool
+    sync_enabled: bool
     priority: int
     custom_path: str | None
     is_custom: bool
@@ -166,6 +169,7 @@ class DriveUpdateRequest(BaseModel):
     custom_path: str | None = None
     style_type: DriveStyle | None = None
     subscribed: bool | None = None
+    sync_enabled: bool | None = None
     drive_id: str | None = None
 
 class CustomDriveRequest(BaseModel):
@@ -175,6 +179,7 @@ class CustomDriveRequest(BaseModel):
     custom_path: str | None = None
     priority: int = 0
     subscribed: bool = True
+    sync_enabled: bool = True
 
 @router.get("/", response_model=List[DriveSchema])
 async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
@@ -209,6 +214,7 @@ async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
             'drive_id': drive.drive_id,
             'style_type': drive.style_type,
             'subscribed': drive.subscribed,
+            'sync_enabled': drive.sync_enabled,
             'priority': drive.priority,
             'custom_path': drive.custom_path,
             'is_custom': drive.is_custom,
@@ -240,11 +246,35 @@ async def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[
     if restored_to_priority:
         log_message += " (restored to poster priority)"
     log_user_action(log_message)
+
+    # Auto-scan local folder for drives with GDrive sync disabled.
+    # This ensures any files already on disk are indexed immediately after subscribe.
+    scan_job_id: int | None = None
+    if not drive.sync_enabled:
+        from modules.sync import run_sync_one_job
+        captured_drive_id = drive.id
+        scan_job = Job(
+            job_type=f"gdrive_sync:{drive.name}",
+            status=JOB_STATUS_PENDING,
+            progress=0,
+            message=f"Queued initial scan for {drive.name}",
+        )
+        db.add(scan_job)
+        db.commit()
+        db.refresh(scan_job)
+        scan_job_id = scan_job.id
+        log_info(LogTags.DRIVES, f"Auto-scan queued for local-only drive '{drive.name}'", drive=drive.name, job_id=scan_job_id)
+        job_queue.submit(
+            lambda jid=scan_job_id, did=captured_drive_id: run_sync_one_job(did, jid, triggered_by="auto-scan"),
+            scan_job_id,
+        )
+
     drive_response = DriveSchema.model_validate(drive).model_dump(mode="json")
     return {
         "message": f"Subscribed to {drive.name}",
         "drive": drive_response,
         "restored_to_priority": restored_to_priority,
+        "scan_job_id": scan_job_id,
     }
 
 @router.post("/{drive_id}/unsubscribe")
@@ -298,6 +328,10 @@ async def update_drive(drive_id: int, request: DriveUpdateRequest, db: Session =
         drive.subscribed = request.subscribed
         changes.append(f"subscribed={request.subscribed}")
 
+    if request.sync_enabled is not None:
+        drive.sync_enabled = request.sync_enabled
+        changes.append(f"sync_enabled={request.sync_enabled}")
+
     if request.drive_id is not None:
         if not drive.is_custom:
             raise HTTPException(status_code=400, detail="Google Drive ID can only be changed for custom drives")
@@ -348,6 +382,7 @@ async def create_custom_drive(request: CustomDriveRequest, db: Session = Depends
         priority=request.priority,
         is_custom=True,
         subscribed=request.subscribed,
+        sync_enabled=request.sync_enabled,
     )
     
     db.add(drive)
