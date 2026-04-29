@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-28
+### Added
+- Drive cards: tooltip for drive ID with one-click copy functionality
+- Settings and Setup Wizard: additional URL configuration guidance for media server settings
+
+### Fixed
+- Discord notifications: message formatting optimized to respect character limits and improve readability
+- MainLayout: GitHub link position adjusted for better alignment without collision
+- Dockerfile: removed unnecessary directory creation that caused permissions issues
+
+### Changed
+- API endpoints renamed from `/api/poster-manager` to `/api/posterflow` across backend and frontend
+- Setup Wizard: styles updated for improved layout and consistency; welcome message revised
+
 ## [0.1.4] - 2026-04-27
 ### Added
 - In-app update check now compares against GitHub Releases instead of commit count, eliminating false update notifications from non-release commits
