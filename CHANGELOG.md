@@ -6,6 +6,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-29
+### Added
+- Drives: `sync_enabled` flag — per-drive toggle to enable/disable Google Drive rclone sync
+- Drives: subscribing to a sync-disabled drive now auto-queues an initial local folder scan to index existing files immediately
+- Drive modals: "Sync from Google Drive" checkbox now available for all drives (not just custom), with contextual warnings for community drives
+- Database migration: `sync_enabled` column added to `drives` table (existing `manual-` drives automatically set to disabled)
+
+### Changed
+- `AddCustomDriveModal`: checkbox logic inverted to `syncEnabled` (opt-in) with updated labels and help text
+- `DriveEditModal`: improved info text and added a warning when disabling sync on a non-custom community drive
+
 ## [0.1.5] - 2026-04-28
 ### Added
 - Drive cards: tooltip for drive ID with one-click copy functionality
