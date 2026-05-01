@@ -232,7 +232,7 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
         }
 
     class _FakePlexUploadService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def run_single_upload(self, **_kwargs):
@@ -424,7 +424,7 @@ def test_webhook_preupload_rename_pass_uses_targeted_scope(test_db, monkeypatch)
     captured_kwargs = {}
 
     class _FakePosterRenameService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **kwargs):
@@ -479,14 +479,14 @@ def test_webhook_preupload_rename_pass_runs_border_with_tmp_when_enabled(test_db
     captured_border_kwargs = {}
 
     class _FakePlexUploadService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def _discover_local_assets(self, _destination):
             return []
 
     class _FakePosterRenameService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **_kwargs):
@@ -496,7 +496,7 @@ def test_webhook_preupload_rename_pass_runs_border_with_tmp_when_enabled(test_db
             }
 
     class _FakeBorderReplacerService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def process_posters(self, **kwargs):
@@ -552,7 +552,7 @@ def test_webhook_preupload_rename_pass_always_runs_even_when_target_exists_in_de
     rename_called = {"value": False}
 
     class _FakePosterRenameService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **kwargs):
@@ -601,7 +601,7 @@ def test_webhook_preupload_rename_pass_runs_for_title_only_collection_name_overl
     rename_called = {"value": False}
 
     class _FakePosterRenameService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **_kwargs):
@@ -651,7 +651,7 @@ def test_webhook_preupload_fast_path_skips_when_exact_target_is_already_current(
     source_file = "/tmp/source/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}.jpg"
 
     class _FakePlexUploadService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def _discover_local_assets(self, _destination):
@@ -718,7 +718,7 @@ def test_webhook_preupload_fast_path_runs_when_source_changed_after_last_process
     source_file = "/tmp/source/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}.jpg"
 
     class _FakePlexUploadService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def _discover_local_assets(self, _destination):
@@ -784,7 +784,7 @@ def test_webhook_preupload_adopt_existing_skips_when_destination_has_target_asse
     rename_called = {"value": False}
 
     class _FakePlexUploadService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def _discover_local_assets(self, _destination):
@@ -798,7 +798,7 @@ def test_webhook_preupload_adopt_existing_skips_when_destination_has_target_asse
             ]
 
     class _FakePosterRenameService:
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def rename_posters(self, **_kwargs):
@@ -857,7 +857,7 @@ def test_webhook_background_job_completes_with_warning_when_no_local_assets(test
     class _FakePlexUploadService:
         run_calls = 0
 
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def is_single_target_fully_cached(self, **_kwargs):
@@ -944,7 +944,7 @@ def test_webhook_background_job_completes_without_retry_on_matched_zero_upload(t
         run_calls = 0
         clear_calls = 0
 
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def is_single_target_fully_cached(self, **_kwargs):
@@ -1261,7 +1261,7 @@ def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_
         run_calls = 0
         cache_checks = 0
 
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def is_single_target_fully_cached(self, **_kwargs):
@@ -1353,7 +1353,7 @@ def test_webhook_background_job_series_season_runs_season_and_show_posters(test_
     class _FakePlexUploadService:
         run_calls = []
 
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def is_single_target_fully_cached(self, **_kwargs):
@@ -1441,7 +1441,7 @@ def test_webhook_background_job_series_season_cache_gate_requires_both_targets(t
         cache_calls = []
         run_calls = 0
 
-        def __init__(self, _db):
+        def __init__(self, _db, **_kwargs):
             pass
 
         def is_single_target_fully_cached(self, **kwargs):

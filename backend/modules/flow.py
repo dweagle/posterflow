@@ -134,7 +134,7 @@ def _promote_child_progress_to_parent(
     return result_container["value"]
 
 
-def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optional[Callable[[], None]] = None, triggered_by: str = "manual") -> None:
+def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optional[Callable[[], None]] = None, triggered_by: str = "manual", config_override: Optional[dict] = None) -> None:
     """
     Execute the Flow workflow in a background thread.
     Shared orchestration used by poster manager entrypoints.
@@ -170,7 +170,9 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
 
         flow_setting = get_setting(db, "poster_flow_config")
 
-        if flow_setting:
+        if config_override is not None:
+            flow_config = config_override
+        elif flow_setting:
             flow_config = json.loads(flow_setting.value)
         else:
             flow_config = {

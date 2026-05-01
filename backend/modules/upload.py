@@ -73,6 +73,11 @@ SETTING_PLEX_UPLOAD_FILE_CACHE = "plex_upload_file_cache"
 SETTING_PLEX_UPLOAD_MANUAL_DRY_RUN = "plex_upload_manual_dry_run"
 SETTING_PLEX_UPLOAD_MANUAL_REAPPLY = "plex_upload_manual_reapply"
 SETTING_PLEX_UPLOAD_MANUAL_REMOVE_OVERLAY_LABEL = "plex_upload_manual_remove_overlay_label"
+SETTING_PLEX_UPLOAD_MANUAL_RENAME_BEFORE_UPLOAD = "plex_upload_manual_rename_before_upload"
+SETTING_PLEX_UPLOAD_MANUAL_SYNC_BEFORE_UPLOAD = "plex_upload_manual_sync_before_upload"
+SETTING_PLEX_UPLOAD_MANUAL_BORDER_BEFORE_UPLOAD = "plex_upload_manual_border_before_upload"
+SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS = "plex_upload_manual_upload_delay_ms"
+SETTING_PLEX_WEBHOOK_UPLOAD_DELAY_MS = "plex_webhook_upload_delay_ms"
 PLEX_WEBHOOK_DEDUPE_WINDOW_SECONDS = 600
 PLEX_WEBHOOK_RETRY_ATTEMPTS = 10
 PLEX_WEBHOOK_RETRY_DELAY_SECONDS = 30
@@ -705,6 +710,34 @@ def _get_manual_reapply_enabled(db: Session) -> bool:
 
 def _get_manual_remove_overlay_label_enabled(db: Session) -> bool:
     return _read_bool_setting(db, SETTING_PLEX_UPLOAD_MANUAL_REMOVE_OVERLAY_LABEL, default=False)
+
+
+def _get_manual_rename_before_upload_enabled(db: Session) -> bool:
+    return _read_bool_setting(db, SETTING_PLEX_UPLOAD_MANUAL_RENAME_BEFORE_UPLOAD, default=True)
+
+
+def _get_manual_sync_before_upload_enabled(db: Session) -> bool:
+    return _read_bool_setting(db, SETTING_PLEX_UPLOAD_MANUAL_SYNC_BEFORE_UPLOAD, default=False)
+
+
+def _get_manual_border_before_upload_enabled(db: Session) -> bool:
+    return _read_bool_setting(db, SETTING_PLEX_UPLOAD_MANUAL_BORDER_BEFORE_UPLOAD, default=False)
+
+
+def _get_manual_upload_delay_ms(db: Session) -> int:
+    s = get_setting(db, SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS)
+    try:
+        return max(0, int(s.value)) if s and s.value else 50
+    except (ValueError, TypeError):
+        return 50
+
+
+def _get_webhook_upload_delay_ms(db: Session) -> int:
+    s = get_setting(db, SETTING_PLEX_WEBHOOK_UPLOAD_DELAY_MS)
+    try:
+        return max(0, int(s.value)) if s and s.value else 50
+    except (ValueError, TypeError):
+        return 50
 
 
 def _utc_now_iso() -> str:
@@ -1468,7 +1501,7 @@ def run_plex_upload_background_job(
 
         log_section_start(LogTags.UPLOADER, f"Plex Upload Job {job_id}")
 
-        service = PlexUploadService(db)
+        service = PlexUploadService(db, upload_delay_ms=_get_manual_upload_delay_ms(db))
 
         callback_label = "Plex dry run" if dry_run else "Plex upload"
         callback_start = 10
@@ -1902,7 +1935,7 @@ def run_plex_webhook_background_job(
             source=parsed_payload.get("source"),
         )
 
-        service = PlexUploadService(db)
+        service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
 
         # For Radarr upgrade events, use the movieFile path to detect edition changes without
         # relying on Plex scan state (which may lag behind the actual file import).
@@ -2451,6 +2484,7 @@ def run_plex_single_manual_background_job(
         dry_run = bool(payload.get("dry_run", False))
         reapply = bool(payload.get("reapply", False))
         remove_overlay_label = bool(payload.get("remove_overlay_label", False))
+        rename_before_upload = bool(payload.get("rename_before_upload", True))
 
         update_job_state(
             db,
@@ -2471,11 +2505,15 @@ def run_plex_single_manual_background_job(
             "tvdb_id": payload.get("tvdb_id"),
             "imdb_id": payload.get("imdb_id"),
         }
-        preupload_summary = _run_webhook_preupload_rename_pass(db, job, preupload_payload, dry_run=dry_run)
-        if not isinstance(preupload_summary, dict):
-            preupload_summary = {}
+        preupload_summary: Dict[str, Any] = {}
+        if rename_before_upload:
+            preupload_summary = _run_webhook_preupload_rename_pass(db, job, preupload_payload, dry_run=dry_run)
+            if not isinstance(preupload_summary, dict):
+                preupload_summary = {}
+        else:
+            log_info(LogTags.UPLOADER, "Skipping rename pass before upload (rename_before_upload=False)")
 
-        service = PlexUploadService(db)
+        service = PlexUploadService(db, upload_delay_ms=_get_manual_upload_delay_ms(db))
         callback_start = max(35, int(job.progress or 0))
         callback_end = 95
         last_progress = int(job.progress or 0)

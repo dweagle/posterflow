@@ -33,8 +33,9 @@ class PlexUploadService:
     ERROR_INDEX_BUILD_FAILED = "Unable to build Plex index from configured instances/libraries."
     MESSAGE_NO_POSTER_ASSETS = "No poster assets found to upload."
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, upload_delay_ms: int = 50) -> None:
         self.db = db
+        self.upload_delay_ms = max(0, upload_delay_ms)
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
@@ -1196,7 +1197,7 @@ class PlexUploadService:
                     media_counts["seasons"] += 1
                     continue
                 season_obj.uploadPoster(filepath=file_path)
-                time.sleep(0.05)
+                time.sleep(self.upload_delay_ms / 2000.0)
                 if remove_overlay_label:
                     self._remove_overlay_label_if_present(season_obj, file_path=file_path)
                 uploaded += 1
@@ -1358,7 +1359,7 @@ class PlexUploadService:
                 media_counts[self._classify_plex_item(item)] += 1
                 continue
             item.uploadPoster(filepath=file_path)
-            time.sleep(0.1)
+            time.sleep(self.upload_delay_ms / 1000.0)
             if remove_overlay_label:
                 self._remove_overlay_label_if_present(item, file_path=file_path)
             uploaded += 1

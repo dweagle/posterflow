@@ -22,9 +22,11 @@ from models.job import (
     JOB_TYPE_PLEX_UPLOAD,
     JOB_TYPE_PLEX_UPLOAD_SINGLE,
     JOB_TYPE_PLEX_UPLOAD_WEBHOOK,
+    JOB_TYPE_POSTER_WORKFLOW,
     create_job,
     format_start_message,
 )
+from modules.flow import run_flow_background_job
 from models.drive import Drive
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
@@ -39,6 +41,11 @@ from modules.upload import (
     SETTING_PLEX_UPLOAD_MANUAL_DRY_RUN,
     SETTING_PLEX_UPLOAD_MANUAL_REAPPLY,
     SETTING_PLEX_UPLOAD_MANUAL_REMOVE_OVERLAY_LABEL,
+    SETTING_PLEX_UPLOAD_MANUAL_RENAME_BEFORE_UPLOAD,
+    SETTING_PLEX_UPLOAD_MANUAL_SYNC_BEFORE_UPLOAD,
+    SETTING_PLEX_UPLOAD_MANUAL_BORDER_BEFORE_UPLOAD,
+    SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS,
+    SETTING_PLEX_WEBHOOK_UPLOAD_DELAY_MS,
     SETTING_PLEX_WEBHOOK_ENABLED,
     SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL,
     SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD,
@@ -69,6 +76,11 @@ from modules.upload import (
     _get_manual_dry_run_enabled as get_manual_dry_run_enabled,
     _get_manual_reapply_enabled as get_manual_reapply_enabled,
     _get_manual_remove_overlay_label_enabled as get_manual_remove_overlay_label_enabled,
+    _get_manual_rename_before_upload_enabled as get_manual_rename_before_upload_enabled,
+    _get_manual_sync_before_upload_enabled as get_manual_sync_before_upload_enabled,
+    _get_manual_border_before_upload_enabled as get_manual_border_before_upload_enabled,
+    _get_manual_upload_delay_ms as get_manual_upload_delay_ms,
+    _get_webhook_upload_delay_ms as get_webhook_upload_delay_ms,
     _get_webhook_retry_attempts as get_webhook_retry_attempts,
     _get_webhook_retry_delay_seconds as get_webhook_retry_delay_seconds,
     _extract_season_number_from_file_name as extract_season_number_from_file_name,
@@ -109,6 +121,10 @@ def build_manual_settings_response(db: Session) -> Dict[str, Any]:
         "dry_run": get_manual_dry_run_enabled(db),
         "reapply": get_manual_reapply_enabled(db),
         "remove_overlay_label": get_manual_remove_overlay_label_enabled(db),
+        "sync_before_upload": get_manual_sync_before_upload_enabled(db),
+        "rename_before_upload": get_manual_rename_before_upload_enabled(db),
+        "border_before_upload": get_manual_border_before_upload_enabled(db),
+        "upload_delay_ms": get_manual_upload_delay_ms(db),
     }
 
 
@@ -120,6 +136,7 @@ def build_webhook_settings_response(db: Session) -> Dict[str, Any]:
         "adopt_existing_processed": is_webhook_adopt_existing_processed_enabled(db),
         "retry_attempts": get_webhook_retry_attempts(db),
         "retry_delay_seconds": get_webhook_retry_delay_seconds(db),
+        "upload_delay_ms": get_webhook_upload_delay_ms(db),
     }
 
 
@@ -257,6 +274,9 @@ class PlexUploadRunRequest(BaseModel):
     dry_run: bool = False
     reapply: bool = False
     remove_overlay_label: bool = False
+    sync_before_upload: bool = False
+    rename_before_upload: bool = False
+    border_before_upload: bool = False
 
 
 class PlexWebhookSettingsRequest(BaseModel):
@@ -267,6 +287,7 @@ class PlexWebhookSettingsRequest(BaseModel):
     adopt_existing_processed: bool = False
     retry_attempts: int = PLEX_WEBHOOK_RETRY_ATTEMPTS
     retry_delay_seconds: int = PLEX_WEBHOOK_RETRY_DELAY_SECONDS
+    upload_delay_ms: int = 50
 
 
 class PlexManualSettingsRequest(BaseModel):
@@ -274,6 +295,10 @@ class PlexManualSettingsRequest(BaseModel):
     dry_run: bool = True
     reapply: bool = False
     remove_overlay_label: bool = False
+    sync_before_upload: bool = False
+    rename_before_upload: bool = True
+    border_before_upload: bool = False
+    upload_delay_ms: int = 50
 
 
 class PlexLibraryConfigItem(BaseModel):
@@ -317,6 +342,7 @@ class PlexUploadSingleManualRequest(BaseModel):
     dry_run: bool = False
     reapply: bool = False
     remove_overlay_label: bool = False
+    rename_before_upload: bool = True
 
 
 @router.post("/plex-upload/run")
@@ -332,6 +358,34 @@ async def run_plex_upload(
         dry_run = payload.dry_run if payload else False
         reapply = payload.reapply if payload else False
         remove_overlay_label = payload.remove_overlay_label if payload else False
+        rename_before_upload = payload.rename_before_upload if payload else False
+        sync_before_upload = payload.sync_before_upload if payload else False
+        border_before_upload = payload.border_before_upload if payload else False
+
+        # Build a workflow config override from the pre-upload toggles.
+        run_workflow_first = sync_before_upload or rename_before_upload or border_before_upload
+        if run_workflow_first:
+            workflow_config = {
+                "sync_drives":       {"enabled": sync_before_upload,    "stop_on_error": True},
+                "rename_posters":    {"enabled": rename_before_upload,  "stop_on_error": True},
+                "border_replacer":   {"enabled": border_before_upload,  "stop_on_error": False},
+                "detect_unmatched": {"enabled": False, "stop_on_error": False},
+            }
+            workflow_job = create_job(
+                db,
+                job_type=JOB_TYPE_POSTER_WORKFLOW,
+                message="Plex pre-upload workflow queued…",
+            )
+            log_job_queued(LogTags.UPLOADER, "Plex pre-upload workflow", workflow_job.id)
+            job_queue.submit(
+                run_flow_background_job,
+                workflow_job.id,
+                workflow_job.id,
+                dry_run,
+                None,            # on_finish
+                "plex_upload",   # triggered_by
+                workflow_config, # config_override
+            )
 
         job = create_job(
             db,
@@ -856,6 +910,22 @@ async def save_plex_manual_settings(
             SETTING_PLEX_UPLOAD_MANUAL_REMOVE_OVERLAY_LABEL,
             bool_to_setting(payload.remove_overlay_label),
         )
+        upsert_setting(
+            db,
+            SETTING_PLEX_UPLOAD_MANUAL_RENAME_BEFORE_UPLOAD,
+            bool_to_setting(payload.rename_before_upload),
+        )
+        upsert_setting(
+            db,
+            SETTING_PLEX_UPLOAD_MANUAL_SYNC_BEFORE_UPLOAD,
+            bool_to_setting(payload.sync_before_upload),
+        )
+        upsert_setting(
+            db,
+            SETTING_PLEX_UPLOAD_MANUAL_BORDER_BEFORE_UPLOAD,
+            bool_to_setting(payload.border_before_upload),
+        )
+        upsert_setting(db, SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS, str(max(0, payload.upload_delay_ms)))
         db.commit()
 
         return {
@@ -914,6 +984,7 @@ async def save_plex_webhook_settings(
                 )
             ),
         )
+        upsert_setting(db, SETTING_PLEX_WEBHOOK_UPLOAD_DELAY_MS, str(max(0, payload.upload_delay_ms)))
 
         db.commit()
 

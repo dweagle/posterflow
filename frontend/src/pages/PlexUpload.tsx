@@ -44,6 +44,10 @@ type ManualSettingsSnapshot = {
   dry_run: boolean
   reapply: boolean
   remove_overlay_label: boolean
+  sync_before_upload: boolean
+  rename_before_upload: boolean
+  border_before_upload: boolean
+  upload_delay_ms: number
 }
 
 type AutomationSettingsSnapshot = {
@@ -53,6 +57,7 @@ type AutomationSettingsSnapshot = {
   webhook_adopt_existing_processed: boolean
   webhook_retry_attempts: number
   webhook_retry_delay_seconds: number
+  webhook_upload_delay_ms: number
   override_enabled: boolean
   override_configs: PlexUploadLibraryConfig[]
 }
@@ -77,10 +82,14 @@ const normalizeOverrideConfigs = (configs: PlexUploadLibraryConfig[]): PlexUploa
     .sort((left, right) => String(left.instance_name).localeCompare(String(right.instance_name)))
 }
 
-const createManualSnapshot = (dryRun: boolean, reapply: boolean, removeOverlayLabel: boolean): ManualSettingsSnapshot => ({
+const createManualSnapshot = (dryRun: boolean, reapply: boolean, removeOverlayLabel: boolean, syncBeforeUpload: boolean, renameBeforeUpload: boolean, borderBeforeUpload: boolean, uploadDelayMs: number): ManualSettingsSnapshot => ({
   dry_run: Boolean(dryRun),
   reapply: Boolean(reapply),
   remove_overlay_label: Boolean(removeOverlayLabel),
+  sync_before_upload: Boolean(syncBeforeUpload),
+  rename_before_upload: Boolean(renameBeforeUpload),
+  border_before_upload: Boolean(borderBeforeUpload),
+  upload_delay_ms: Number(uploadDelayMs) || 50,
 })
 
 const createAutomationSnapshot = (
@@ -90,6 +99,7 @@ const createAutomationSnapshot = (
   webhookAdoptExistingProcessed: boolean,
   webhookRetryAttempts: number,
   webhookRetryDelaySeconds: number,
+  webhookUploadDelayMs: number,
   overrideEnabled: boolean,
   overrideConfigs: PlexUploadLibraryConfig[],
 ): AutomationSettingsSnapshot => ({
@@ -99,6 +109,7 @@ const createAutomationSnapshot = (
   webhook_adopt_existing_processed: Boolean(webhookAdoptExistingProcessed),
   webhook_retry_attempts: Number(webhookRetryAttempts) || 10,
   webhook_retry_delay_seconds: Number(webhookRetryDelaySeconds) || 30,
+  webhook_upload_delay_ms: Number(webhookUploadDelayMs) || 50,
   override_enabled: Boolean(overrideEnabled),
   override_configs: normalizeOverrideConfigs(overrideConfigs),
 })
@@ -118,6 +129,10 @@ function PlexUpload() {
   const [dryRun, setDryRun] = useState(true)
   const [reapply, setReapply] = useState(false)
   const [removeOverlayLabel, setRemoveOverlayLabel] = useState(false)
+  const [syncBeforeUpload, setSyncBeforeUpload] = useState(false)
+  const [renameBeforeUpload, setRenameBeforeUpload] = useState(true)
+  const [borderBeforeUpload, setBorderBeforeUpload] = useState(false)
+  const [manualUploadDelayMs, setManualUploadDelayMs] = useState(50)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
   const [manualSettingsLoading, setManualSettingsLoading] = useState(false)
   const [manualSettingsSaving, setManualSettingsSaving] = useState(false)
@@ -132,6 +147,7 @@ function PlexUpload() {
   const [webhookAdoptExistingProcessed, setWebhookAdoptExistingProcessed] = useState(false)
   const [webhookRetryAttempts, setWebhookRetryAttempts] = useState(10)
   const [webhookRetryDelaySeconds, setWebhookRetryDelaySeconds] = useState(30)
+  const [webhookUploadDelayMs, setWebhookUploadDelayMs] = useState(50)
   const [webhookStatsLoading, setWebhookStatsLoading] = useState(false)
   const [webhookStatsResetting, setWebhookStatsResetting] = useState(false)
   const [webhookDedupeClearing, setWebhookDedupeClearing] = useState(false)
@@ -169,7 +185,7 @@ function PlexUpload() {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false)
   const [pendingTabChange, setPendingTabChange] = useState<PlexUploadTab | null>(null)
   const singleSourceSearchInputRef = useRef<HTMLInputElement | null>(null)
-  const manualBaselineRef = useRef<ManualSettingsSnapshot>(createManualSnapshot(dryRun, reapply, removeOverlayLabel))
+  const manualBaselineRef = useRef<ManualSettingsSnapshot>(createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs))
   const automationBaselineRef = useRef<AutomationSettingsSnapshot>(
     createAutomationSnapshot(
       webhookEnabled,
@@ -178,6 +194,7 @@ function PlexUpload() {
       webhookAdoptExistingProcessed,
       webhookRetryAttempts,
       webhookRetryDelaySeconds,
+      webhookUploadDelayMs,
       overrideEnabled,
       overrideConfigs,
     ),
@@ -254,6 +271,9 @@ function PlexUpload() {
         dry_run: dryRun,
         reapply,
         remove_overlay_label: removeOverlayLabel,
+        sync_before_upload: syncBeforeUpload,
+        rename_before_upload: renameBeforeUpload,
+        border_before_upload: borderBeforeUpload,
       })
       showToast(response.message || 'Plex upload job queued', 'success')
 
@@ -322,6 +342,7 @@ function PlexUpload() {
         dry_run: dryRun,
         reapply,
         remove_overlay_label: removeOverlayLabel,
+        rename_before_upload: renameBeforeUpload,
       })
       showToast(response.message || 'Single Plex upload job queued', 'success')
 
@@ -345,6 +366,7 @@ function PlexUpload() {
       const nextWebhookAdoptExistingProcessed = Boolean(settings.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(settings.retry_attempts) || 10
       const nextWebhookRetryDelaySeconds = Number(settings.retry_delay_seconds) || 30
+      const nextWebhookUploadDelayMs = Number(settings.upload_delay_ms) ?? 50
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)
@@ -352,6 +374,7 @@ function PlexUpload() {
       setWebhookAdoptExistingProcessed(nextWebhookAdoptExistingProcessed)
       setWebhookRetryAttempts(nextWebhookRetryAttempts)
       setWebhookRetryDelaySeconds(nextWebhookRetryDelaySeconds)
+      setWebhookUploadDelayMs(nextWebhookUploadDelayMs)
 
       automationBaselineRef.current = createAutomationSnapshot(
         nextWebhookEnabled,
@@ -360,6 +383,7 @@ function PlexUpload() {
         nextWebhookAdoptExistingProcessed,
         nextWebhookRetryAttempts,
         nextWebhookRetryDelaySeconds,
+        nextWebhookUploadDelayMs,
         automationBaselineRef.current.override_enabled,
         automationBaselineRef.current.override_configs,
       )
@@ -379,11 +403,19 @@ function PlexUpload() {
         Boolean(settings.dry_run),
         Boolean(settings.reapply),
         Boolean(settings.remove_overlay_label),
+        Boolean(settings.sync_before_upload ?? false),
+        Boolean(settings.rename_before_upload ?? true),
+        Boolean(settings.border_before_upload ?? false),
+        Number(settings.upload_delay_ms) ?? 50,
       )
 
       setDryRun(nextSnapshot.dry_run)
       setReapply(nextSnapshot.reapply)
       setRemoveOverlayLabel(nextSnapshot.remove_overlay_label)
+      setSyncBeforeUpload(nextSnapshot.sync_before_upload)
+      setRenameBeforeUpload(nextSnapshot.rename_before_upload)
+      setBorderBeforeUpload(nextSnapshot.border_before_upload)
+      setManualUploadDelayMs(nextSnapshot.upload_delay_ms)
       manualBaselineRef.current = nextSnapshot
     } catch (error) {
       console.error('Failed to load manual Plex Upload settings:', error)
@@ -401,17 +433,29 @@ function PlexUpload() {
         dry_run: dryRun,
         reapply,
         remove_overlay_label: removeOverlayLabel,
+        sync_before_upload: syncBeforeUpload,
+        rename_before_upload: renameBeforeUpload,
+        border_before_upload: borderBeforeUpload,
+        upload_delay_ms: manualUploadDelayMs,
       })
 
       const nextSnapshot = createManualSnapshot(
         Boolean(response.dry_run),
         Boolean(response.reapply),
         Boolean(response.remove_overlay_label),
+        Boolean(response.sync_before_upload ?? false),
+        Boolean(response.rename_before_upload ?? true),
+        Boolean(response.border_before_upload ?? false),
+        Number(response.upload_delay_ms) ?? 50,
       )
 
       setDryRun(nextSnapshot.dry_run)
       setReapply(nextSnapshot.reapply)
       setRemoveOverlayLabel(nextSnapshot.remove_overlay_label)
+      setSyncBeforeUpload(nextSnapshot.sync_before_upload)
+      setRenameBeforeUpload(nextSnapshot.rename_before_upload)
+      setBorderBeforeUpload(nextSnapshot.border_before_upload)
+      setManualUploadDelayMs(nextSnapshot.upload_delay_ms)
       manualBaselineRef.current = nextSnapshot
       setHasUnsavedManualSettings(false)
       showToast('Manual run settings saved', 'success')
@@ -548,6 +592,7 @@ function PlexUpload() {
         automationBaselineRef.current.webhook_adopt_existing_processed,
         automationBaselineRef.current.webhook_retry_attempts,
         automationBaselineRef.current.webhook_retry_delay_seconds,
+        automationBaselineRef.current.webhook_upload_delay_ms,
         nextOverrideEnabled,
         nextOverrideConfigs,
       )
@@ -620,6 +665,7 @@ function PlexUpload() {
         automationBaselineRef.current.webhook_adopt_existing_processed,
         automationBaselineRef.current.webhook_retry_attempts,
         automationBaselineRef.current.webhook_retry_delay_seconds,
+        automationBaselineRef.current.webhook_upload_delay_ms,
         nextOverrideEnabled,
         nextOverrideConfigs,
       )
@@ -732,6 +778,7 @@ function PlexUpload() {
         adopt_existing_processed: webhookAdoptExistingProcessed,
         retry_attempts: webhookRetryAttempts,
         retry_delay_seconds: webhookRetryDelaySeconds,
+        upload_delay_ms: webhookUploadDelayMs,
       })
       const nextWebhookEnabled = Boolean(response.enabled)
       const nextWebhookRemoveOverlayLabel = Boolean(response.remove_overlay_label)
@@ -739,6 +786,7 @@ function PlexUpload() {
       const nextWebhookAdoptExistingProcessed = Boolean(response.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(response.retry_attempts) || 10
       const nextWebhookRetryDelaySeconds = Number(response.retry_delay_seconds) || 30
+      const nextWebhookUploadDelayMs = Number(response.upload_delay_ms) ?? 50
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)
@@ -746,6 +794,7 @@ function PlexUpload() {
       setWebhookAdoptExistingProcessed(nextWebhookAdoptExistingProcessed)
       setWebhookRetryAttempts(nextWebhookRetryAttempts)
       setWebhookRetryDelaySeconds(nextWebhookRetryDelaySeconds)
+      setWebhookUploadDelayMs(nextWebhookUploadDelayMs)
 
       automationBaselineRef.current = createAutomationSnapshot(
         nextWebhookEnabled,
@@ -754,6 +803,7 @@ function PlexUpload() {
         nextWebhookAdoptExistingProcessed,
         nextWebhookRetryAttempts,
         nextWebhookRetryDelaySeconds,
+        nextWebhookUploadDelayMs,
         automationBaselineRef.current.override_enabled,
         automationBaselineRef.current.override_configs,
       )
@@ -835,9 +885,9 @@ function PlexUpload() {
       return
     }
 
-    const currentSnapshot = createManualSnapshot(dryRun, reapply, removeOverlayLabel)
+    const currentSnapshot = createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs)
     setHasUnsavedManualSettings(JSON.stringify(currentSnapshot) !== JSON.stringify(manualBaselineRef.current))
-  }, [manualSettingsReady, dryRun, reapply, removeOverlayLabel])
+  }, [manualSettingsReady, dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs])
 
   useEffect(() => {
     if (!toggleSettingsReady) {
@@ -851,6 +901,7 @@ function PlexUpload() {
       webhookAdoptExistingProcessed,
       webhookRetryAttempts,
       webhookRetryDelaySeconds,
+      webhookUploadDelayMs,
       overrideEnabled,
       overrideConfigs,
     )
@@ -864,6 +915,7 @@ function PlexUpload() {
     webhookAdoptExistingProcessed,
     webhookRetryAttempts,
     webhookRetryDelaySeconds,
+    webhookUploadDelayMs,
     overrideEnabled,
     overrideConfigs,
   ])
@@ -908,6 +960,10 @@ function PlexUpload() {
       setDryRun(baseline.dry_run)
       setReapply(baseline.reapply)
       setRemoveOverlayLabel(baseline.remove_overlay_label)
+      setSyncBeforeUpload(baseline.sync_before_upload)
+      setRenameBeforeUpload(baseline.rename_before_upload)
+      setBorderBeforeUpload(baseline.border_before_upload)
+      setManualUploadDelayMs(baseline.upload_delay_ms)
       setHasUnsavedManualSettings(false)
     } else if (activeTab === 'settings') {
       const baseline = automationBaselineRef.current
@@ -917,6 +973,7 @@ function PlexUpload() {
       setWebhookAdoptExistingProcessed(baseline.webhook_adopt_existing_processed)
       setWebhookRetryAttempts(baseline.webhook_retry_attempts)
       setWebhookRetryDelaySeconds(baseline.webhook_retry_delay_seconds)
+      setWebhookUploadDelayMs(baseline.webhook_upload_delay_ms)
       setOverrideEnabled(baseline.override_enabled)
       setOverrideConfigs(normalizeOverrideConfigs(baseline.override_configs))
       setHasUnsavedAutomationSettings(false)
@@ -1076,12 +1133,57 @@ function PlexUpload() {
                 <label className="plex-checkbox-row">
                   <input
                     type="checkbox"
+                    checked={syncBeforeUpload}
+                    onChange={(event) => setSyncBeforeUpload(event.target.checked)}
+                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                  />
+                  <span>Sync drives before upload</span>
+                </label>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={renameBeforeUpload}
+                    onChange={(event) => setRenameBeforeUpload(event.target.checked)}
+                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                  />
+                  <span>Rename posters before upload</span>
+                </label>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={borderBeforeUpload}
+                    onChange={(event) => setBorderBeforeUpload(event.target.checked)}
+                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                  />
+                  <span>Replace borders before upload</span>
+                </label>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
                     checked={reapply}
                     onChange={(event) => setReapply(event.target.checked)}
                     disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
                   />
                   <span>Reapply (clear upload cache before run; ignored during dry run)</span>
                 </label>
+
+                <div className="webhook-retry-row">
+                  <label className="plex-input-row">
+                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each uploadPoster call. Lower values are faster; increase if Plex returns errors. 0 = no delay.</span></span></span>
+                    <input
+                      type="number"
+                      className="no-spinner"
+                      min={0}
+                      max={2000}
+                      value={manualUploadDelayMs}
+                      onChange={(event) => setManualUploadDelayMs(Math.max(0, Number(event.target.value)))}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                  </label>
+                </div>
               </>
             )}
           </section>
@@ -1352,6 +1454,7 @@ function PlexUpload() {
                             <span>Retry attempts</span>
                             <input
                               type="number"
+                              className="no-spinner"
                               min={1}
                               max={20}
                               value={webhookRetryAttempts}
@@ -1364,10 +1467,24 @@ function PlexUpload() {
                             <span>Retry delay (seconds)</span>
                             <input
                               type="number"
+                              className="no-spinner"
                               min={1}
                               max={120}
                               value={webhookRetryDelaySeconds}
                               onChange={(event) => setWebhookRetryDelaySeconds(Number(event.target.value) || 1)}
+                              disabled={webhookLoading || webhookSaving}
+                            />
+                          </label>
+
+                          <label className="plex-input-row">
+                            <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each uploadPoster call. Lower values are faster; increase if Plex returns errors. 0 = no delay.</span></span></span>
+                            <input
+                              type="number"
+                              className="no-spinner"
+                              min={0}
+                              max={2000}
+                              value={webhookUploadDelayMs}
+                              onChange={(event) => setWebhookUploadDelayMs(Math.max(0, Number(event.target.value)))}
                               disabled={webhookLoading || webhookSaving}
                             />
                           </label>
@@ -1550,7 +1667,7 @@ function PlexUpload() {
                 </div>
                 <input
                   type="number"
-                  className="webhook-dedupe-input webhook-dedupe-number"
+                  className="webhook-dedupe-input webhook-dedupe-number no-spinner"
                   placeholder="Year"
                   value={webhookDedupeYear}
                   onChange={(event) => setWebhookDedupeYear(event.target.value)}
@@ -1559,7 +1676,7 @@ function PlexUpload() {
                 {webhookDedupeMediaType === 'series' && (
                   <input
                     type="number"
-                    className="webhook-dedupe-input webhook-dedupe-number"
+                    className="webhook-dedupe-input webhook-dedupe-number no-spinner"
                     placeholder="Season"
                     value={webhookDedupeSeason}
                     onChange={(event) => setWebhookDedupeSeason(event.target.value)}

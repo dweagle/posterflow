@@ -4,6 +4,9 @@ export interface PlexUploadRunOptions {
   dry_run?: boolean
   reapply?: boolean
   remove_overlay_label?: boolean
+  sync_before_upload?: boolean
+  rename_before_upload?: boolean
+  border_before_upload?: boolean
 }
 
 export interface PlexUploadRunResponse {
@@ -46,6 +49,7 @@ export interface PlexSingleUploadPayload {
   dry_run?: boolean
   reapply?: boolean
   remove_overlay_label?: boolean
+  rename_before_upload?: boolean
 }
 
 export interface PlexSearchItem {
@@ -75,6 +79,7 @@ export interface PlexWebhookSettings {
   adopt_existing_processed: boolean
   retry_attempts: number
   retry_delay_seconds: number
+  upload_delay_ms: number
 }
 
 export interface PlexWebhookSettingsPayload {
@@ -84,18 +89,27 @@ export interface PlexWebhookSettingsPayload {
   adopt_existing_processed: boolean
   retry_attempts: number
   retry_delay_seconds: number
+  upload_delay_ms: number
 }
 
 export interface PlexManualSettings {
   dry_run: boolean
   reapply: boolean
   remove_overlay_label: boolean
+  sync_before_upload: boolean
+  rename_before_upload: boolean
+  border_before_upload: boolean
+  upload_delay_ms: number
 }
 
 export interface PlexManualSettingsPayload {
   dry_run: boolean
   reapply: boolean
   remove_overlay_label: boolean
+  sync_before_upload: boolean
+  rename_before_upload: boolean
+  border_before_upload: boolean
+  upload_delay_ms: number
 }
 
 export interface PlexWebhookStats {
@@ -213,6 +227,9 @@ export const runPlexUpload = async (options?: PlexUploadRunOptions): Promise<Ple
         dry_run: options.dry_run ?? false,
         reapply: options.reapply ?? false,
         remove_overlay_label: options.remove_overlay_label ?? false,
+        sync_before_upload: options.sync_before_upload ?? false,
+        rename_before_upload: options.rename_before_upload ?? false,
+        border_before_upload: options.border_before_upload ?? false,
       }
     : undefined
   return postData('/api/posterflow/plex-upload/run', payload)

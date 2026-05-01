@@ -260,6 +260,55 @@
   border-color: #64b5f6;
 }
 
+/* Info tooltip */
+.info-tooltip {
+  position: relative;
+  display: inline;
+  cursor: default;
+  color: #64b5f6;
+  font-size: 0.8rem;
+  line-height: 1;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+.info-tooltip-text {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  transform: none;
+  background: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  white-space: normal;
+  width: 260px;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  line-height: 1.4;
+}
+
+.info-tooltip:hover .info-tooltip-text {
+  display: block;
+}
+
+/* Remove number input spinners */
+.plex-input-row input.no-spinner::-webkit-outer-spin-button,
+.plex-input-row input.no-spinner::-webkit-inner-spin-button,
+input.no-spinner::-webkit-outer-spin-button,
+input.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.plex-input-row input.no-spinner,
+input.no-spinner {
+  -moz-appearance: textfield;
+}
+
 .plex-run-btn {
   display: inline-flex;
   align-items: center;
@@ -715,6 +764,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.8rem;
+  align-items: flex-start;
 }
 
 .webhook-settings-card .webhook-retry-row {
