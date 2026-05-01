@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-30
+### Added
+- Plex upload: new per-upload settings for sync after upload, rename after upload, border replacement after upload, and configurable upload delay
+
+### Fixed
+- Modal footer: buttons are now center-aligned for consistent UI across all modals
+
 ## [0.1.6] - 2026-04-29
 ### Added
 - Drives: `sync_enabled` flag — per-drive toggle to enable/disable Google Drive rclone sync
