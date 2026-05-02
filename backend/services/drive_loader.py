@@ -6,8 +6,8 @@ from core.logging import LogTags, log_success, log_error, log_warning, log_info
 
 DrivesPayload = Dict[str, Any]
 
-# Remote URL for drives.json - update this with your actual repository
-REMOTE_DRIVES_URL = "https://raw.githubusercontent.com/dweagle/posterflow_drive_presets/main/drives.json"
+# Remote URL — points to drives.json in the posterflow repository
+REMOTE_DRIVES_URL = "https://raw.githubusercontent.com/dweagle/posterflow/develop/backend/assets/drives.json"
 
 # Timeout for remote requests (seconds)
 REQUEST_TIMEOUT = 10
@@ -117,13 +117,13 @@ def load_drives_data(remote_url: str = REMOTE_DRIVES_URL) -> DrivesPayload:
     Load drives data with dual-tier fallback approach:
     1. Try to fetch from remote URL (GitHub)
     2. Fall back to persistent cache if remote fails
-    
+
     Args:
         remote_url: The remote URL to fetch drives.json from
-        
+
     Returns:
         Dictionary containing drives data
-        
+
     Raises:
         RuntimeError: If both remote and cache fail
     """
@@ -131,13 +131,13 @@ def load_drives_data(remote_url: str = REMOTE_DRIVES_URL) -> DrivesPayload:
     data = fetch_remote_drives(remote_url)
     if data is not None:
         return data
-    
+
     # Try cached version
     log_warning(LogTags.DRIVES, "Remote failed, trying cached version...")
     data = load_from_cache()
     if data is not None:
         return data
-    
+
     # Both sources failed
     error_msg = f"Failed to load drives.json from both remote and cache. Check network connection or manually place drives.json in {CACHE_PATH}"
     log_error(LogTags.DRIVES, error_msg)

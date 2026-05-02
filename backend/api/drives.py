@@ -138,6 +138,7 @@ DriveStyle = Literal["CL2K", "MM2K", "Custom"]
 class DriveSchema(BaseModel):
     id: int
     name: str
+    display_name: str | None = None
     drive_id: str
     style_type: str
     subscribed: bool
@@ -211,6 +212,7 @@ async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
         drive_dict = {
             'id': drive.id,
             'name': drive.name,
+            'display_name': drive.display_name,
             'drive_id': drive.drive_id,
             'style_type': drive.style_type,
             'subscribed': drive.subscribed,
@@ -575,6 +577,7 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
             # Add new preset drive
             drive = Drive(
                 name=drive_data["name"],
+                display_name=drive_data.get("display_name"),
                 drive_id=drive_id,
                 style_type=drive_data["style_type"],
                 subscribed=False,
@@ -587,9 +590,11 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
             # Update existing drive
             changed = False
             
-            # Update name and style_type if they changed
-            if existing.name != drive_data["name"] or existing.style_type != drive_data["style_type"]:
+            # Update name, display_name, and style_type if they changed
+            new_display_name = drive_data.get("display_name")
+            if existing.name != drive_data["name"] or existing.style_type != drive_data["style_type"] or existing.display_name != new_display_name:
                 existing.name = drive_data["name"]
+                existing.display_name = new_display_name
                 existing.style_type = drive_data["style_type"]
                 changed = True
             

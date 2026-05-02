@@ -290,7 +290,7 @@ function Dashboard() {
     if (driveId !== null) {
       const drive = drives.find(d => d.id === driveId)
       if (drive) {
-        return drive.name
+        return drive.display_name || drive.name
       }
       if (driveGroup) {
         return `All ${driveGroup}`

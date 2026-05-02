@@ -439,7 +439,7 @@ export const useSettingsSchedules = ({
     let driveInfo = 'All Subscribed'
     if (isSyncSchedule && schedule.drive_id) {
       const drive = drives.find(d => d.id === schedule.drive_id)
-      driveInfo = drive ? drive.name : 'All Subscribed'
+      driveInfo = drive ? (drive.display_name || drive.name) : 'All Subscribed'
     } else if (isSyncSchedule && schedule.drive_group) {
       driveInfo = `All ${schedule.drive_group}`
     }

@@ -13,6 +13,7 @@ class Drive(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    display_name = Column(String, nullable=True)  # Optional friendly display name from drives.json
     drive_id = Column(String, nullable=False, unique=True, index=True)
     style_type = Column(String, nullable=False)  # "MM2K" or "CL2K"
     subscribed = Column(Boolean, default=False)

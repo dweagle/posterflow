@@ -541,7 +541,7 @@ function GDrives() {
                           )}
                         </div>
                       </div>
-                      <h3>{drive.name}</h3>
+                      <h3>{drive.display_name || drive.name}</h3>
                       <div className="drive-meta">
                         {drive.custom_path && (
                           <p className="custom-path">Path: {drive.custom_path}</p>
@@ -672,7 +672,7 @@ function GDrives() {
                   )}
                 </div>
               </div>
-              <h3>{drive.name}</h3>
+              <h3>{drive.display_name || drive.name}</h3>
               <div className="drive-meta">
                 {drive.custom_path && (
                   <p className="custom-path">Path: {drive.custom_path}</p>

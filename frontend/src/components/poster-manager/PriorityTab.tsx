@@ -114,7 +114,7 @@ function PriorityTab({
                         <div key={drive.id} className="drive-card-small mm2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
-                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
                             <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
                           </div>
                         </div>
@@ -133,7 +133,7 @@ function PriorityTab({
                         <div key={drive.id} className="drive-card-small cl2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
-                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
                             <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
                           </div>
                         </div>
@@ -152,7 +152,7 @@ function PriorityTab({
                         <div key={drive.id} className="drive-card-small custom" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
-                            <div className="drive-name" title={drive.name}>{drive.name}</div>
+                            <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
                             <div className="drive-count">{drive.poster_count.toLocaleString()}</div>
                           </div>
                         </div>
@@ -222,7 +222,7 @@ function PriorityTab({
                             <GripVertical size={16} className="drag-handle" />
                             <div className="priority-number">{index + 1}</div>
                             <div className="drive-info">
-                              <div className="drive-name" title={drive.name}>{drive.name}</div>
+                              <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
                             </div>
                             <div className="drive-poster-count">{drive.poster_count.toLocaleString()} posters</div>
                             <span className={`drive-badge drive-badge-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`}>

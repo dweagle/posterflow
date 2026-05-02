@@ -638,7 +638,7 @@ function MakerTools() {
                             <option value="">Select a synced drive...</option>
                             {availableDrives.map((drive) => (
                               <option key={drive.id} value={drive.id} disabled={disabledIds.has(drive.id)}>
-                                {drive.name} ({drive.style_type})
+                                {drive.display_name || drive.name} ({drive.style_type})
                               </option>
                             ))}
                           </select>

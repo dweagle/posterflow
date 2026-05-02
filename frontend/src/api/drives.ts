@@ -5,6 +5,7 @@ export type DriveStyleType = 'CL2K' | 'MM2K' | 'Custom'
 export interface Drive {
   id: number
   name: string
+  display_name: string | null
   drive_id: string
   style_type: DriveStyleType
   subscribed: boolean

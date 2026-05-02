@@ -220,7 +220,7 @@ function ScheduleEditModal({
                 <optgroup label="Individual Drives">
                   {drives.filter((d) => d.subscribed).map((drive) => (
                     <option key={drive.id} value={`drive_${drive.id}`}>
-                      {drive.name}
+                      {drive.display_name || drive.name}
                     </option>
                   ))}
                 </optgroup>
