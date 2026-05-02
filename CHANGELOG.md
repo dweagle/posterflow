@@ -6,6 +6,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-01
+### Fixed
+- Plex upload webhook: same-named movies from different years (e.g. "Hairspray (1988)" vs "Hairspray (2007)") no longer incorrectly share upload cache records — year-based filtering now prevents normalized-title collisions from causing silent upload skips
+- Plex upload webhook: flat-file destination assets (root-level files) now also carry year metadata, ensuring the year filter applies consistently across both folder-organized and flat-file layouts
+- Plex upload webhook rename-then-upload fast-path: destination asset presence check now also applies year filtering to prevent the rename pass being skipped when a same-named but different-year movie exists in the destination
+
 ## [0.1.7] - 2026-04-30
 ### Added
 - Plex upload: new per-upload settings for sync after upload, rename after upload, border replacement after upload, and configurable upload delay
