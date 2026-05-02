@@ -282,9 +282,9 @@ class PlexUploadRunRequest(BaseModel):
 class PlexWebhookSettingsRequest(BaseModel):
     """Payload for Plex webhook settings."""
     enabled: bool
-    remove_overlay_label: bool = False
-    rename_then_upload: bool = False
-    adopt_existing_processed: bool = False
+    remove_overlay_label: bool = True
+    rename_then_upload: bool = True
+    adopt_existing_processed: bool = True
     retry_attempts: int = PLEX_WEBHOOK_RETRY_ATTEMPTS
     retry_delay_seconds: int = PLEX_WEBHOOK_RETRY_DELAY_SECONDS
     upload_delay_ms: int = 50

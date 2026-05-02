@@ -699,7 +699,7 @@ def _extract_season_number_from_file_name(file_name: str) -> Optional[int]:
         return None
 
 def _is_webhook_enabled(db: Session) -> bool:
-    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_ENABLED)
+    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_ENABLED, default=True)
 
 
 def _read_bool_setting(db: Session, key: str, *, default: bool = False) -> bool:
@@ -754,15 +754,15 @@ def _utc_now_iso() -> str:
 
 
 def _is_webhook_remove_overlay_label_enabled(db: Session) -> bool:
-    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL)
+    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL, default=True)
 
 
 def _is_webhook_rename_then_upload_enabled(db: Session) -> bool:
-    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD)
+    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD, default=True)
 
 
 def _is_webhook_adopt_existing_processed_enabled(db: Session) -> bool:
-    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_ADOPT_EXISTING_PROCESSED)
+    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_ADOPT_EXISTING_PROCESSED, default=True)
 
 
 def _get_webhook_retry_attempts(db: Session) -> int:
