@@ -681,6 +681,13 @@ class PlexUploadService:
             if id_matched_assets:
                 local_assets = id_matched_assets
 
+        # Year-based filtering
+        if year is not None:
+            local_assets = [
+                a for a in local_assets
+                if a.get("folder_year") is None or a.get("folder_year") == year
+            ]
+
         # Disambiguate collections vs movies/shows that share a normalized media_key.
         # The convention (from the scanner) is: folder with a year = movie/show,
         # folder without a year = collection. Only applied when multiple assets match.
@@ -970,12 +977,16 @@ class PlexUploadService:
             media_title = stem[:idx]
             season_number = self._parse_season_number(lowered[idx + 1 :])
 
+        year_match = re.search(r'\((\d{4})\)', media_title)
+        folder_year: Optional[int] = int(year_match.group(1)) if year_match else None
+
         return {
             "path": str(file_path),
             "media_key": normalize_titles(media_title),
             "display_name": self._humanize_title(media_title),
             "asset_type": "season" if season_number is not None else "main",
             "season_number": season_number,
+            "folder_year": folder_year,
         }
 
     def _parse_season_number(self, value: str) -> Optional[int]:

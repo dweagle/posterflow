@@ -337,6 +337,15 @@ def _run_webhook_preupload_rename_pass(
             if str(asset.get("media_key") or "").strip() in title_keys
         ]
 
+        # Exclude assets whose folder_year differs from the webhook year to avoid
+        # false positives from normalized-title collisions (e.g. "Hairspray (2007)"
+        # satisfying a check for "Hairspray (1988)").
+        if isinstance(target_year, int):
+            matching_assets = [
+                a for a in matching_assets
+                if a.get("folder_year") is None or a.get("folder_year") == target_year
+            ]
+
         if not matching_assets:
             return False
 
