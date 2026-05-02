@@ -1026,6 +1026,7 @@
 /* Each poster item: exactly 1/10 of the track width */
 .poster-carousel-item {
   flex: 0 0 calc((100% - 9 * 0.5rem) / 10);
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1061,6 +1062,8 @@
   color: #666;
   text-align: center;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
