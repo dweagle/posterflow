@@ -273,14 +273,14 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
 
 
 def test_webhook_settings_default_disabled(client):
-    """Webhook settings should default to disabled when not configured."""
+    """Webhook settings should default to enabled with all options on when not configured."""
     response = client.get("/api/posterflow/plex-upload/webhook-settings")
     assert response.status_code == 200
     data = response.json()
-    assert data["enabled"] is False
-    assert data["remove_overlay_label"] is False
-    assert data["rename_then_upload"] is False
-    assert data["adopt_existing_processed"] is False
+    assert data["enabled"] is True
+    assert data["remove_overlay_label"] is True
+    assert data["rename_then_upload"] is True
+    assert data["adopt_existing_processed"] is True
     assert data["retry_attempts"] == 10
     assert data["retry_delay_seconds"] == 30
 

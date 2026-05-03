@@ -83,3 +83,9 @@ export const getJobLogContent = async (jobType: string, filename: string): Promi
 export const downloadJobLog = (jobType: string, filename: string): string => {
   return `${API_URL}/api/job-logs/${jobType}/${filename}/download`
 }
+
+export const connectJobLogLiveWS = (jobType: string): WebSocket => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port}/api/job-logs/${jobType}/live`
+  return new WebSocket(wsUrl)
+}

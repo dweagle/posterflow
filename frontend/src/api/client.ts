@@ -13,6 +13,7 @@ export {
   type Job,
   type JobLogFile,
   type JobLogs,
+  connectJobLogLiveWS,
   downloadJobLog,
   getJob,
   getJobLogContent,

@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import { getLogs, clearLogs, LogEntry, getJobLogs, getJobLogContent, downloadJobLog, JobLogs as JobLogsData, JobLogFile } from '../api/client'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { getLogs, clearLogs, LogEntry, getJobLogs, getJobLogContent, downloadJobLog, connectJobLogLiveWS, JobLogs as JobLogsData, JobLogFile } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { Trash2, RefreshCw, Download, FileText, ChevronDown, Monitor, Briefcase } from 'lucide-react'
+import { Trash2, RefreshCw, Download, FileText, ChevronDown, Monitor, Briefcase, Radio, X } from 'lucide-react'
 import './Logs.css'
 
 const LOGS_TAB_STORAGE_KEY = 'posterflow.logs.activeTab'
@@ -61,6 +61,13 @@ function Logs() {
     unmatched_assets: true,
     idarr: true,
   })
+
+  // Live-tail state
+  const [liveJobType, setLiveJobType] = useState<string | null>(null)
+  const [liveContent, setLiveContent] = useState<string>('')
+  const [liveConnected, setLiveConnected] = useState(false)
+  const liveWsRef = useRef<WebSocket | null>(null)
+  const liveContainerRef = useRef<HTMLDivElement | null>(null)
   
   const { showToast } = useToast()
 
@@ -167,7 +174,10 @@ function Logs() {
           message: message.message,
         }
         
-        setLogs(prev => [...prev, logEntry])
+        setLogs(prev => {
+          const updated = [...prev, logEntry]
+          return updated.length > 20000 ? updated.slice(-20000) : updated
+        })
       } catch (error) {
         console.error('Error parsing log message:', error)
       }
@@ -249,6 +259,68 @@ function Logs() {
     window.open(url, '_blank')
     showToast('Download started', 'success')
   }
+
+  const stopLiveTail = () => {
+    if (liveWsRef.current) {
+      liveWsRef.current.close()
+      liveWsRef.current = null
+    }
+    setLiveJobType(null)
+    setLiveContent('')
+    setLiveConnected(false)
+  }
+
+  const startLiveTail = (jobType: string) => {
+    // Stop any existing live session
+    if (liveWsRef.current) {
+      liveWsRef.current.close()
+      liveWsRef.current = null
+    }
+    setLiveContent('')
+    setLiveConnected(false)
+    setLiveJobType(jobType)
+    // Clear selected static log so the viewer panel shows live content
+    setSelectedLog(null)
+
+    const ws = connectJobLogLiveWS(jobType)
+    liveWsRef.current = ws
+
+    ws.onopen = () => setLiveConnected(true)
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'heartbeat') return
+        if (msg.type === 'content' || msg.type === 'reset') {
+          setLiveContent(msg.content ?? '')
+        } else if (msg.type === 'append') {
+          setLiveContent(prev => prev + (msg.content ?? ''))
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    ws.onerror = () => setLiveConnected(false)
+    ws.onclose = () => setLiveConnected(false)
+  }
+
+  // Auto-scroll live viewer to bottom when content updates
+  useEffect(() => {
+    if (liveContainerRef.current) {
+      liveContainerRef.current.scrollTop = liveContainerRef.current.scrollHeight
+    }
+  }, [liveContent])
+
+  // Clean up live WS on unmount or tab change
+  useEffect(() => {
+    return () => {
+      if (liveWsRef.current) {
+        liveWsRef.current.close()
+        liveWsRef.current = null
+      }
+    }
+  }, [activeTab])
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`
@@ -408,6 +480,11 @@ function Logs() {
     }
   }, [])
 
+  const filteredLogs = useMemo(
+    () => logs.filter(log => filter === 'all' || log.level === filter),
+    [logs, filter]
+  )
+
   return (
     <div className="page-container logs-page">
       <div className="logs-header">
@@ -513,13 +590,11 @@ function Logs() {
             >
               {loading ? (
                 <div className="logs-loading">Loading logs...</div>
-              ) : logs.length === 0 ? (
+              ) : filteredLogs.length === 0 ? (
                 <div className="no-logs">No logs found</div>
               ) : (
                 <div className="logs-list">
-                  {logs
-                    .filter(log => filter === 'all' || log.level === filter)
-                    .map((log, index) => (
+                  {filteredLogs.map((log, index) => (
                     <div key={index} className="log-entry">
                       <span className="log-timestamp">{log.timestamp}</span>
                       <span 
@@ -557,7 +632,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('workflow')}>
                   <span>Workflow</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['workflow'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'workflow' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'workflow' ? stopLiveTail() : startLiveTail('workflow') }}
+                      title={liveJobType === 'workflow' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'workflow' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['workflow'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['workflow'] && (
                   <div className="log-section-content">
@@ -596,7 +680,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('sync_one')}>
                   <span>Single Drive Sync</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['sync_one'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'sync_one' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'sync_one' ? stopLiveTail() : startLiveTail('sync_one') }}
+                      title={liveJobType === 'sync_one' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'sync_one' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['sync_one'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['sync_one'] && (
                   <div className="log-section-content">
@@ -635,7 +728,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('sync_all')}>
                   <span>Sync All Drives</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['sync_all'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'sync_all' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'sync_all' ? stopLiveTail() : startLiveTail('sync_all') }}
+                      title={liveJobType === 'sync_all' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'sync_all' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['sync_all'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['sync_all'] && (
                   <div className="log-section-content">
@@ -674,7 +776,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('poster_renamer')}>
                   <span>Poster Renamer</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['poster_renamer'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'poster_renamer' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'poster_renamer' ? stopLiveTail() : startLiveTail('poster_renamer') }}
+                      title={liveJobType === 'poster_renamer' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'poster_renamer' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['poster_renamer'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['poster_renamer'] && (
                   <div className="log-section-content">
@@ -713,7 +824,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('border_replacer')}>
                   <span>Border Replacer</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['border_replacer'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'border_replacer' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'border_replacer' ? stopLiveTail() : startLiveTail('border_replacer') }}
+                      title={liveJobType === 'border_replacer' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'border_replacer' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['border_replacer'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['border_replacer'] && (
                   <div className="log-section-content">
@@ -752,7 +872,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('unmatched_assets')}>
                   <span>Unmatched Assets</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['unmatched_assets'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'unmatched_assets' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'unmatched_assets' ? stopLiveTail() : startLiveTail('unmatched_assets') }}
+                      title={liveJobType === 'unmatched_assets' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'unmatched_assets' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['unmatched_assets'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['unmatched_assets'] && (
                   <div className="log-section-content">
@@ -791,7 +920,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('idarr')}>
                   <span>IDarr</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['idarr'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'idarr' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'idarr' ? stopLiveTail() : startLiveTail('idarr') }}
+                      title={liveJobType === 'idarr' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'idarr' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['idarr'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['idarr'] && (
                   <div className="log-section-content">
@@ -830,7 +968,16 @@ function Logs() {
               <div className="log-section">
                 <h2 onClick={() => toggleSection('plex_upload')}>
                   <span>Plex Upload</span>
-                  <ChevronDown size={18} className={`collapse-icon ${collapsedSections['plex_upload'] ? 'collapsed' : ''}`} />
+                  <div className="section-header-actions">
+                    <button
+                      className={`live-btn ${liveJobType === 'plex_upload' ? 'active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); liveJobType === 'plex_upload' ? stopLiveTail() : startLiveTail('plex_upload') }}
+                      title={liveJobType === 'plex_upload' ? 'Stop live view' : 'Live tail log'}
+                    >
+                      <Radio size={10} />{liveJobType === 'plex_upload' ? 'Stop' : 'Live'}
+                    </button>
+                    <ChevronDown size={18} className={`collapse-icon ${collapsedSections['plex_upload'] ? 'collapsed' : ''}`} />
+                  </div>
                 </h2>
                 {!collapsedSections['plex_upload'] && (
                   <div className="log-section-content">
@@ -868,7 +1015,25 @@ function Logs() {
             </div>
 
             <div className="log-viewer-panel">
-              {!selectedLog ? (
+              {liveJobType ? (
+                <>
+                  <div className="log-viewer-header">
+                    <div className="live-viewer-title">
+                      <Radio size={16} className={`live-icon ${liveConnected ? 'live-active' : 'live-inactive'}`} />
+                      <h3>{liveJobType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} — Live</h3>
+                      <span className={`live-status-badge ${liveConnected ? 'connected' : 'disconnected'}`}>
+                        {liveConnected ? 'Connected' : 'Disconnected'}
+                      </span>
+                    </div>
+                    <button className="btn-close-live" onClick={stopLiveTail} title="Close live view">
+                      <X size={16} /> Close
+                    </button>
+                  </div>
+                  <div className="log-viewer-content live-viewer-content" ref={liveContainerRef}>
+                    <pre>{liveContent || 'Waiting for log output...'}</pre>
+                  </div>
+                </>
+              ) : !selectedLog ? (
                 <div className="log-viewer-empty">
                   <FileText size={48} />
                   <p>Select a log file to view its contents</p>

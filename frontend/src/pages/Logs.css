@@ -298,7 +298,7 @@
 }
 
 .log-section h2 {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   color: #e0e0e0;
   margin: 0;
   padding: 0.75rem;
@@ -318,6 +318,7 @@
 
 .log-section h2 .collapse-icon {
   transition: transform 0.2s;
+  margin-left: 0.35rem;
 }
 
 .log-section h2 .collapse-icon.collapsed {
@@ -472,6 +473,124 @@
 
 .btn-download:hover {
   background: #229954;
+}
+
+/* Live tail button in section headers */
+.section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.5rem;
+}
+
+.live-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  background: transparent;
+  color: #64b5f6;
+  border: 1px solid rgba(100, 181, 246, 0.4);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.4;
+  opacity: 0.7;
+  letter-spacing: 0.03em;
+}
+
+.live-btn:hover {
+  background: rgba(100, 181, 246, 0.1);
+  border-color: #64b5f6;
+  opacity: 1;
+}
+
+.live-btn.active {
+  background: rgba(244, 67, 54, 0.1);
+  color: #ef5350;
+  border-color: rgba(239, 83, 80, 0.5);
+  opacity: 1;
+}
+
+.live-btn.active:hover {
+  background: rgba(244, 67, 54, 0.2);
+  border-color: #ef5350;
+}
+
+/* Live viewer panel */
+.live-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.live-viewer-title h3 {
+  margin: 0;
+}
+
+.live-icon {
+  flex-shrink: 0;
+}
+
+.live-icon.live-active {
+  color: #4caf50;
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+.live-icon.live-inactive {
+  color: #888;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.live-status-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.live-status-badge.connected {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  border: 1px solid #4caf50;
+}
+
+.live-status-badge.disconnected {
+  background: rgba(244, 67, 54, 0.1);
+  color: #ef5350;
+  border: 1px solid #ef5350;
+}
+
+.btn-close-live {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  background: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.btn-close-live:hover {
+  background: #383838;
+  color: #fff;
+}
+
+.live-viewer-content pre {
+  color: #c8e6c9;
 }
 
 .log-viewer-content {

@@ -245,11 +245,11 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
     
     # Job-specific tags (using actual tag names, not formatted versions)
     job_specific_tags = {
-        "sync_one": ["SYNC", "RCLONE", "SCANNER"],
-        "sync_all": ["SYNC-ALL", "SYNC", "RCLONE", "SCANNER"],
+        "sync_one": ["SYNC", "RCLONE"],
+        "sync_all": ["SYNC-ALL", "SYNC", "RCLONE"],
         "plex_upload": ["UPLOADER", "DATABASE", "API", "POSTER_RENAMER", "BORDER_REPLACER", "SCANNER"],
         "poster_renamer": ["POSTER_RENAMER", "SCANNER", "ARR"],
-        "border_replacer": ["BORDER_REPLACER", "SCANNER"],
+        "border_replacer": ["BORDER_REPLACER"],
         "unmatched_assets": ["UNMATCHED", "SCANNER", "ARR", "POSTER_RENAMER"],
         "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR"],
         "backup": ["BACKUP"],

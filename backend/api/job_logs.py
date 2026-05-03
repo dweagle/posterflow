@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pathlib import Path
 from typing import Any, Dict, List
 from core.config import settings
 from core.logging import log_warning, log_error, LogTags
 from fastapi.responses import FileResponse
+import asyncio
 
 router = APIRouter(prefix="/api/job-logs", tags=["job-logs"])
 
@@ -126,3 +127,84 @@ def download_job_log(job_type: str, filename: str) -> FileResponse:
         filename=filename,
         media_type="text/plain"
     )
+
+
+JOB_LOG_WS_HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+
+@router.websocket("/{job_type}/live")
+async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
+    """WebSocket endpoint for live-tailing the current job log file."""
+    valid_job_types = set(PRIMARY_JOB_TYPES)
+    if job_type not in valid_job_types:
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+
+    logs_dir = Path(settings.log_file).parent
+    log_file = logs_dir / job_type / f"{job_type}.log"
+
+    try:
+        last_heartbeat_time = asyncio.get_running_loop().time()
+
+        # Send existing content of the current log file
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                content = f.read()
+            if content:
+                try:
+                    await websocket.send_json({'type': 'content', 'content': content})
+                except Exception:
+                    return
+
+        # Tail for new content
+        last_position = log_file.stat().st_size if log_file.exists() else 0
+
+        while True:
+            await asyncio.sleep(0.5)
+            now = asyncio.get_running_loop().time()
+
+            if not log_file.exists():
+                if (now - last_heartbeat_time) >= JOB_LOG_WS_HEARTBEAT_INTERVAL_SECONDS:
+                    await websocket.send_json({'type': 'heartbeat', 'heartbeat': int(now)})
+                    last_heartbeat_time = now
+                continue
+
+            current_size = log_file.stat().st_size
+
+            # File was rotated (new job started) — reload from scratch
+            if current_size < last_position:
+                last_position = 0
+                with open(log_file, 'r') as f:
+                    content = f.read()
+                if content:
+                    try:
+                        await websocket.send_json({'type': 'reset', 'content': content})
+                        last_position = log_file.stat().st_size
+                        last_heartbeat_time = now
+                    except Exception:
+                        return
+                continue
+
+            # New content appended
+            if current_size > last_position:
+                with open(log_file, 'r') as f:
+                    f.seek(last_position)
+                    new_content = f.read()
+                    last_position = f.tell()
+
+                if new_content:
+                    try:
+                        await websocket.send_json({'type': 'append', 'content': new_content})
+                        last_heartbeat_time = now
+                    except Exception:
+                        return
+            elif (now - last_heartbeat_time) >= JOB_LOG_WS_HEARTBEAT_INTERVAL_SECONDS:
+                await websocket.send_json({'type': 'heartbeat', 'heartbeat': int(now)})
+                last_heartbeat_time = now
+
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        return
