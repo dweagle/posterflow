@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-03
+### Added
+- IDarr: "Auto-Upload to GDrive after Rename" toggle in Quick Add Files card — dependent on Auto-Rename toggle, persisted to database
+- IDarr: sidebar badge showing count of pending matches requiring attention
+- IDarr: toast notification when an IDarr job completes and pending matches are found
+- IDarr: pending matches list auto-refreshes when an IDarr job completes via WebSocket
+
 ## [0.1.9] - 2026-05-02
 ### Added
 - Job logs: live tailing via WebSocket with updated UI components
