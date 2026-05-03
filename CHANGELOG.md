@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-02
+### Added
+- Job logs: live tailing via WebSocket with updated UI components
+- Drives: `display_name` field added; `drives.json` moved into repository and scripts updated to use display name to prevent long names from overflowing
+
+### Fixed
+- Plex webhook settings: default values set to `true` in API and frontend
+- Poster carousel: item width and text overflow handling adjusted
+
 ## [0.1.8] - 2026-05-01
 ### Fixed
 - fix: fixed year-based filtering for asset matching in Plex upload process
