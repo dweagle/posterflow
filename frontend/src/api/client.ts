@@ -63,6 +63,7 @@ export {
   getMakerIdarrIgnoredTitles,
   getMakerIdarrLastRun,
   getMakerIdarrPendingCandidates,
+  getMakerIdarrPendingCount,
   getMakerIdarrPendingMatches,
   getPlexLibraries,
   getPlexLibraryConfigs,

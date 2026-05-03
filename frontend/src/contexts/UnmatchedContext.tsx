@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
-import { getUnmatchedStats, getMakerIdarrPendingMatches, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
+import { getUnmatchedStats, getMakerIdarrPendingCount, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
 
 interface JobUpdate {
   id: number
@@ -45,8 +45,8 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
 
   const refreshIdarrPendingCount = async () => {
     try {
-      const data = await getMakerIdarrPendingMatches()
-      setIdarrPendingCount(data.items.length)
+      const data = await getMakerIdarrPendingCount()
+      setIdarrPendingCount(data.count)
     } catch {
       // silent - sidebar badge is best-effort
     }

@@ -396,6 +396,10 @@ export const getMakerIdarrPendingMatches = async (syncTargetIndex?: number): Pro
   })
 }
 
+export const getMakerIdarrPendingCount = async (): Promise<{ count: number }> => {
+  return getData('/api/idarr/pending-matches/count')
+}
+
 export const clearMakerIdarrPendingMatches = async (syncTargetIndex?: number): Promise<{ success: boolean; deleted: number }> => {
   return postData('/api/idarr/pending-matches/clear-all', undefined, {
     params: syncTargetIndex === undefined ? undefined : { sync_target_index: syncTargetIndex },

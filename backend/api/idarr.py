@@ -828,6 +828,13 @@ async def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Ses
     return {}
 
 
+@router.get("/pending-matches/count")
+async def get_maker_idarr_pending_count(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return total count of pending matches across all sync targets (for sidebar badge)."""
+    count = db.query(IdarrPendingMatch).count()
+    return {"count": count}
+
+
 @router.get("/pending-matches")
 async def get_maker_idarr_pending_matches(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """List current IDarr pending matches from dedicated table."""
