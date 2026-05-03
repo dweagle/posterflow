@@ -33,6 +33,7 @@ class MakerIdarrConfig(BaseModel):
     sync_targets: list[dict[str, str]] = Field(default_factory=list)
     tmdb_api_key: str = ""
     auto_rename_quick_add: bool = True
+    auto_upload_quick_add: bool = False
     remove_non_image_files: bool = False
     show_unmatched: bool = False
     pending_matches: bool = False
@@ -170,7 +171,7 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
 
     data["sync_targets"] = sync_targets
 
-    for key in ("auto_rename_quick_add", "remove_non_image_files", "show_unmatched", "pending_matches", "skip_collections"):
+    for key in ("auto_rename_quick_add", "auto_upload_quick_add", "remove_non_image_files", "show_unmatched", "pending_matches", "skip_collections"):
         if key in payload:
             data[key] = env_bool(payload.get(key), getattr(defaults, key))
 

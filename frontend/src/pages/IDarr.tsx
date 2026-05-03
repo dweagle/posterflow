@@ -27,11 +27,13 @@ import {
   revealSensitiveSetting,
   replaceMakerIdarrIgnoredTitles,
   runMakerIdarrCacheMaintenance,
+  saveMakerIdarrConfig,
   startIdarr,
   uploadMakerIdarrFiles,
 } from '../api/client'
 import { API_URL } from '../api/http'
 import { useToast } from '../components/Toast'
+import { useUnmatched } from '../contexts/UnmatchedContext'
 import './IDarr.css'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
@@ -56,6 +58,7 @@ const DEFAULT_IDARR_CONFIG: MakerIdarrConfig = {
   sync_targets: [],
   tmdb_api_key: '',
   auto_rename_quick_add: true,
+  auto_upload_quick_add: false,
   remove_non_image_files: false,
   show_unmatched: false,
   pending_matches: false,
@@ -80,6 +83,7 @@ const cloneIdarrConfig = (value: MakerIdarrConfig): MakerIdarrConfig => ({
 const normalizeIdarrConfigForCompare = (value: MakerIdarrConfig) => ({
   tmdb_api_key: String(value.tmdb_api_key || ''),
   auto_rename_quick_add: Boolean(value.auto_rename_quick_add),
+  auto_upload_quick_add: Boolean(value.auto_upload_quick_add),
   remove_non_image_files: Boolean(value.remove_non_image_files),
   show_unmatched: Boolean(value.show_unmatched),
   pending_matches: Boolean(value.pending_matches),
@@ -224,6 +228,7 @@ function IDarr() {
     return 'IDarr'
   })
   const [config, setConfig] = useState<MakerIdarrConfig>(DEFAULT_IDARR_CONFIG)
+  const [configLoaded, setConfigLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [hasUnsavedSettings, setHasUnsavedSettings] = useState(false)
@@ -545,6 +550,7 @@ function IDarr() {
       setConfig(mergedConfig)
       originalConfigRef.current = cloneIdarrConfig(mergedConfig)
       setHasUnsavedSettings(false)
+      requestAnimationFrame(() => { setConfigLoaded(true) })
       const resolvedTargets = Array.isArray(mergedConfig.sync_targets) ? mergedConfig.sync_targets : []
       let resolvedIndex = 0
       if (resolvedTargets.length > 0) {
@@ -578,6 +584,26 @@ function IDarr() {
   useEffect(() => {
     void loadIDarrTabData()
   }, [])
+
+  // Auto-refresh pending matches when an IDarr job completes
+  const { jobs: wsJobs, refreshIdarrPendingCount } = useUnmatched()
+  const lastIdarrJobStatusRef = useRef<{ [key: number]: string }>({})
+  useEffect(() => {
+    wsJobs.forEach((job) => {
+      if (job.job_type !== 'idarr') return
+      const prev = lastIdarrJobStatusRef.current[job.id]
+      if ((job.status === 'completed' || job.status === 'failed') && prev !== job.status) {
+        void (async () => {
+          const items = await loadPendingMatches({ silent: true })
+          void refreshIdarrPendingCount()
+          if (job.status === 'completed' && items.length > 0) {
+            showToast(`IDarr run complete — ${items.length} pending match${items.length === 1 ? '' : 'es'} need attention`, 'info')
+          }
+        })()
+      }
+      lastIdarrJobStatusRef.current[job.id] = job.status
+    })
+  }, [wsJobs])
 
   useEffect(() => {
     if (activeTab !== 'IDarr' || !hasCompletedInitialLoadRef.current) {
@@ -684,7 +710,7 @@ function IDarr() {
       if (config.auto_rename_quick_add && response.uploaded_count > 0) {
         try {
           setRunning(true)
-          const job = await startIdarr(false, selectedSyncTargetIndex, response.uploaded)
+          const job = await startIdarr(false, selectedSyncTargetIndex, response.uploaded, config.auto_upload_quick_add)
           showToast(`IDarr auto-rename started for uploaded file(s) (Job ID: ${job.id})`, 'success')
           const refreshed = await getMakerIdarrLastRun(selectedSyncTargetIndex)
           setLastRun(refreshed && Object.keys(refreshed).length > 0 ? refreshed : null)
@@ -2369,17 +2395,39 @@ function IDarr() {
           <div className="settings-section idarr-upload-card">
             <div className="idarr-upload-card-header">
               <h2>Quick Add Files</h2>
-              <label className="idarr-upload-inline-toggle">
-                <span>Auto-Rename Single Item on Upload</span>
-                <span className="idarr-toggle-control">
-                  <input
-                    type="checkbox"
-                    checked={config.auto_rename_quick_add}
-                    onChange={(e) => updateConfig('auto_rename_quick_add', e.target.checked)}
-                  />
-                  <span className="idarr-toggle-slider" />
-                </span>
-              </label>
+              <div className="idarr-upload-toggles">
+                <label className="idarr-upload-inline-toggle">
+                  <span>Auto-Rename Single Item on Upload</span>
+                  <span className="idarr-toggle-control">
+                    <input
+                      type="checkbox"
+                      checked={config.auto_rename_quick_add}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        updateConfig('auto_rename_quick_add', next)
+                        void saveMakerIdarrConfig({ ...config, auto_rename_quick_add: next })
+                      }}
+                    />
+                    <span className="idarr-toggle-slider" />
+                  </span>
+                </label>
+                <label className={`idarr-upload-inline-toggle ${!config.auto_rename_quick_add ? 'idarr-toggle-disabled' : ''}`}>
+                  <span>Auto-Upload to GDrive after Rename</span>
+                  <span className="idarr-toggle-control">
+                    <input
+                      type="checkbox"
+                      checked={config.auto_upload_quick_add}
+                      disabled={!config.auto_rename_quick_add}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                        updateConfig('auto_upload_quick_add', next)
+                        void saveMakerIdarrConfig({ ...config, auto_upload_quick_add: next })
+                      }}
+                    />
+                    <span className="idarr-toggle-slider" />
+                  </span>
+                </label>
+              </div>
             </div>
             <p className="section-description">Drop poster-maker images here, or browse files to add them to the selected sync target folder.</p>
             <div
@@ -2466,7 +2514,7 @@ function IDarr() {
   )
 
   return (
-    <div className="page-container idarr-page">
+    <div className={`page-container idarr-page${configLoaded ? ' toggle-animations-enabled' : ''}`}>
       <div className="idarr-header">
         <h1>IDarr</h1>
         <p>Native in-app IDarr workflow tools</p>

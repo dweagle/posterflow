@@ -127,6 +127,7 @@ export interface MakerIdarrConfig {
   sync_targets: MakerIdarrSyncTarget[]
   tmdb_api_key: string
   auto_rename_quick_add: boolean
+  auto_upload_quick_add: boolean
   remove_non_image_files: boolean
   show_unmatched: boolean
   pending_matches: boolean

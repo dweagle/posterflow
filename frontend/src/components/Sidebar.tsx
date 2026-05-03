@@ -16,7 +16,7 @@ type VersionUpdateStatus = {
 
 function Sidebar() {
   const location = useLocation()
-  const { unmatchedCount, jobs } = useUnmatched()
+  const { unmatchedCount, idarrPendingCount, jobs } = useUnmatched()
   const [version, setVersion] = useState<string>('0.1.0')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [releasesUrl, setReleasesUrl] = useState<string>('')
@@ -180,6 +180,9 @@ function Sidebar() {
         <NavLink to="/IDarr" className={({ isActive }) => isActive ? 'active' : ''} data-label="IDarr" aria-label="IDarr">
           <span className="icon"><Fingerprint size={20} color="#66bb6a" /></span>
           <span className="nav-label">IDarr</span>
+          {idarrPendingCount > 0 && (
+            <span className="sidebar-badge">{idarrPendingCount}</span>
+          )}
         </NavLink>
 
         <NavLink to="/maker-tools" className={({ isActive }) => isActive ? 'active' : ''} data-label="Maker Tools" aria-label="Maker Tools">

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
-import { getUnmatchedStats, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
+import { getUnmatchedStats, getMakerIdarrPendingMatches, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
 
 interface JobUpdate {
   id: number
@@ -14,8 +14,10 @@ interface JobMessage {
 interface UnmatchedContextType {
   unmatchedStats: UnmatchedStats | null
   unmatchedCount: number
+  idarrPendingCount: number
   jobs: Job[]
   refreshStats: () => Promise<void>
+  refreshIdarrPendingCount: () => Promise<void>
 }
 
 const UnmatchedContext = createContext<UnmatchedContextType | undefined>(undefined)
@@ -23,6 +25,7 @@ const UnmatchedContext = createContext<UnmatchedContextType | undefined>(undefin
 export function UnmatchedProvider({ children }: { children: ReactNode }) {
   const [unmatchedStats, setUnmatchedStats] = useState<UnmatchedStats | null>(null)
   const [unmatchedCount, setUnmatchedCount] = useState<number>(0)
+  const [idarrPendingCount, setIdarrPendingCount] = useState<number>(0)
   const [jobs, setJobs] = useState<Job[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -37,6 +40,15 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
       setUnmatchedCount(newCount)
     } catch (error) {
       console.error('[UnmatchedContext] Failed to refresh stats:', error)
+    }
+  }
+
+  const refreshIdarrPendingCount = async () => {
+    try {
+      const data = await getMakerIdarrPendingMatches()
+      setIdarrPendingCount(data.items.length)
+    } catch {
+      // silent - sidebar badge is best-effort
     }
   }
 
@@ -73,6 +85,13 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
               // Refresh stats when unmatched detection completes (standalone or as part of workflow)
               refreshStats()
             }
+
+            // Refresh IDarr pending count when an IDarr job completes
+            if (job.job_type === 'idarr' &&
+                (job.status === 'completed' || job.status === 'failed') &&
+                previousStatus !== job.status) {
+              void refreshIdarrPendingCount()
+            }
             
             // Update tracked status
             lastJobStatusRef.current[jobKey] = job.status
@@ -103,6 +122,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Initial fetch
     refreshStats()
+    void refreshIdarrPendingCount()
     
     // Connect to WebSocket for job updates
     const connectTimeout = setTimeout(() => {
@@ -123,7 +143,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <UnmatchedContext.Provider value={{ unmatchedStats, unmatchedCount, jobs, refreshStats }}>
+    <UnmatchedContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, jobs, refreshStats, refreshIdarrPendingCount }}>
       {children}
     </UnmatchedContext.Provider>
   )
