@@ -74,7 +74,7 @@ function PriorityTab({
     if (b === preferredStyle) return 1
     return (styleCounts[b] ?? 0) - (styleCounts[a] ?? 0)
   })
-  const fallbackEntries = styleEntries.slice(1).filter(([, n]) => n > 0)
+  const fallbackEntries = styleEntries.slice(1).filter(([style, n]) => n > 0 && COMMUNITY_STYLES.includes(style))
   const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks[openFallbackStyle] ?? []) : []
 
   const handleDownload = (style: string, items: FallbackItem[]) => {

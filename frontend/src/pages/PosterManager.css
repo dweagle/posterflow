@@ -856,6 +856,11 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   gap: 0.75rem;
 }
 
+.style-usage-row .style-badge {
+  width: 5rem;
+  flex-shrink: 0;
+}
+
 .style-badge {
   display: inline-flex;
   align-items: center;
