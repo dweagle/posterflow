@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-03
+### Added
+- Settings → General: new **API Keys** section for centralised TMDB API key configuration
+
+### Changed
+- TMDB API key consolidated from IDarr config and Unmatched Assets into a single global setting; existing keys are auto-migrated on upgrade
+- IDarr and Unmatched Assets pages now link to Settings → General → API Keys instead of providing their own key fields
+
 ## [0.2.0] - 2026-05-03
 ### Added
 - IDarr: "Auto-Upload to GDrive after Rename" toggle in Quick Add Files card — dependent on Auto-Rename toggle, persisted to database
