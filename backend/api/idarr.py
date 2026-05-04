@@ -1525,6 +1525,7 @@ async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequ
 
     tmdb_api_key = _get_maker_idarr_tmdb_key(db)
     if not tmdb_api_key:
+        log_warning(LogTags.MODULE, "idarr TMDB search blocked: TMDB API key is not configured")
         raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
 
     endpoint = "/search/movie"

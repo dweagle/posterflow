@@ -1,6 +1,8 @@
-import { GripVertical, Minus, Plus, Save, Trash2 } from 'lucide-react'
-import { DragEvent } from 'react'
+import { Download, GripVertical, List, Minus, Plus, Save, Trash2 } from 'lucide-react'
+import { DragEvent, useState } from 'react'
 import { Drive } from '../../api/client'
+import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
+import PosterStyleModal from './PosterStyleModal'
 
 type PriorityTabProps = {
   hasUnsavedPriorityChanges: boolean
@@ -24,6 +26,8 @@ type PriorityTabProps = {
   onRemoveFromPriority: (driveId: number) => void
   onAddAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
   onRemoveAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
+  styleStats: PosterStyleStats | null
+  tmdbApiKeyConfigured: boolean
 }
 
 function PriorityTab({
@@ -48,7 +52,56 @@ function PriorityTab({
   onRemoveFromPriority,
   onAddAllStyle,
   onRemoveAllStyle,
+  styleStats,
+  tmdbApiKeyConfigured,
 }: PriorityTabProps) {
+  const PREVIEW_LIMIT = 5
+  const [openFallbackStyle, setOpenFallbackStyle] = useState<string | null>(null)
+
+  // Compute style usage data outside JSX for clean modal access
+  const styleCounts = styleStats?.style_counts ?? {}
+  const styleFallbacks = styleStats?.style_fallbacks ?? {}
+  const styleTotal = Object.values(styleCounts).reduce((a, b) => a + b, 0)
+  const priorityStyles = [...new Set(priorityList.map(d => d.style_type).filter(Boolean))]
+  const preferredStyle = priorityStyles.find(s => s && styleCounts[s] !== undefined) ?? Object.keys(styleCounts)[0] ?? ''
+  const styleEntries = Object.entries(styleCounts).sort(([a], [b]) => {
+    if (a === preferredStyle) return -1
+    if (b === preferredStyle) return 1
+    return (styleCounts[b] ?? 0) - (styleCounts[a] ?? 0)
+  })
+  const fallbackEntries = styleEntries.slice(1).filter(([, n]) => n > 0)
+  const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks[openFallbackStyle] ?? []) : []
+
+  const handleDownload = (style: string, items: FallbackItem[]) => {
+    const content = [
+      `# Missing ${preferredStyle} posters (used ${style} as fallback)`,
+      `# Generated: ${new Date().toLocaleString()}`,
+      `# Total: ${items.length}`,
+      '',
+      ...items.map(item => {
+        // Strip trailing (YYYY) from title if year is already appended separately
+        const cleanTitle = item.year
+          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+          : item.title
+        let line = item.year ? `${cleanTitle} (${item.year})` : cleanTitle
+        if (item.type === 'show' && item.season != null) {
+          line += item.season === 0 ? ' — Specials' : ` — Season ${item.season}`
+        }
+        if (item.type === 'collection') line += ' [Collection]'
+        return line
+      }),
+    ].join('\n')
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `missing-${preferredStyle.toLowerCase()}-posters.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const getCardDropIndex = (e: DragEvent<HTMLElement>, index: number) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const midpointY = rect.top + rect.height / 2
@@ -71,6 +124,91 @@ function PriorityTab({
       </div>
 
       <div className="priority-tab">
+        {styleStats && styleTotal > 0 && (
+          <div className="style-usage-panel">
+            <div className="style-usage-header">
+              <span className="style-usage-title">Last Rename — Style Usage</span>
+              <span className="style-usage-total">{styleTotal.toLocaleString()} items matched</span>
+            </div>
+            <div className="style-usage-bars">
+              {styleEntries.map(([style, count]) => {
+                const pct = styleTotal > 0 ? (count / styleTotal) * 100 : 0
+                const styleKey = style.toLowerCase().replace(/[^a-z0-9]/g, '')
+                return (
+                  <div key={style} className={`style-usage-row style-usage-${styleKey}`}>
+                    <span className={`style-badge style-${styleKey}`}>{style}</span>
+                    <div className="style-usage-bar-track">
+                      <div className="style-usage-bar-fill" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="style-usage-count">{count.toLocaleString()}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {fallbackEntries.length > 0 && preferredStyle && (
+              <div className="style-usage-fallback-note">
+                {fallbackEntries.map(([style, count]) => {
+                  const items: FallbackItem[] = styleFallbacks[style] ?? []
+                  const styleKey = style.toLowerCase().replace(/[^a-z0-9]/g, '')
+                  const preferredKey = preferredStyle.toLowerCase().replace(/[^a-z0-9]/g, '')
+                  return (
+                    <div key={style} className="style-usage-fallback-card">
+                      <div className="style-usage-fallback-card-header">
+                        <span className="style-usage-fallback-label">
+                          {count.toLocaleString()} item{count !== 1 ? 's' : ''} used{' '}
+                          <span className={`style-badge style-${styleKey}`}>{style}</span>{' '}
+                          instead of{' '}
+                          <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span>
+                        </span>
+                        <button className="style-usage-download-btn" onClick={() => handleDownload(style, items)} title="Download list">
+                          <Download size={13} />
+                          Download
+                        </button>
+                      </div>
+                      <div className="style-usage-preview-list">
+                        {items.slice(0, PREVIEW_LIMIT).map((item, i) => {
+                          const badgeClass = item.type === 'movie' ? 'movie' : item.type === 'collection' ? 'collection' : 'series'
+                          const badgeLabel = item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'
+                          const isSeasonItem = item.type === 'show' && item.season != null
+                          return (
+                            <div key={i} className="style-usage-preview-item">
+                              <span>{item.title}</span>
+                              {item.year && <span className="item-year">({item.year})</span>}
+                              {isSeasonItem ? (
+                                <span className="unmatched-cat-badge unmatched-cat-badge--season">
+                                  {item.season === 0 ? 'Specials' : `Season ${item.season}`}
+                                </span>
+                              ) : (
+                                <span className={`unmatched-cat-badge unmatched-cat-badge--${badgeClass}`}>{badgeLabel}</span>
+                              )}
+                            </div>
+                          )
+                        })}
+                        {items.length > PREVIEW_LIMIT && (
+                          <div className="style-usage-preview-more">+ {items.length - PREVIEW_LIMIT} more...</div>
+                        )}
+                      </div>
+                      <button className="card-view-all-btn" onClick={() => setOpenFallbackStyle(style)}>
+                        <List size={14} />
+                        View All {count.toLocaleString()} Items
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {openFallbackStyle && preferredStyle && (
+          <PosterStyleModal
+            preferredStyle={preferredStyle}
+            fallbackStyle={openFallbackStyle}
+            items={openFallbackItems}
+            tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+            onClose={() => setOpenFallbackStyle(null)}
+            onDownload={() => handleDownload(openFallbackStyle, openFallbackItems)}
+          />
+        )}
         <div className="priority-content">
           <div className="available-drives" onDragOver={onDragOver} onDrop={onDropInAvailable}>
             <div className="panel-header-row">

@@ -816,6 +816,218 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   gap: 2rem;
 }
 
+/* Style usage panel */
+.style-usage-panel {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.style-usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.style-usage-title {
+  color: #64b5f6;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.style-usage-total {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.style-usage-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.style-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.style-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  min-width: 3.5rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.style-mm2k {
+  background: #1a3a5c;
+  color: #64b5f6;
+  border: 1px solid #2e5f94;
+}
+
+.style-cl2k {
+  background: #1a3a2e;
+  color: #4caf50;
+  border: 1px solid #2e6641;
+}
+
+.style-custom {
+  background: #3a2e1a;
+  color: #ffb74d;
+  border: 1px solid #7a5e1a;
+}
+
+.style-unknown {
+  background: #2a2a2a;
+  color: #888;
+  border: 1px solid #444;
+}
+
+.style-usage-bar-track {
+  flex: 1;
+  height: 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.style-usage-row.style-usage-mm2k .style-usage-bar-fill {
+  height: 100%;
+  background: #64b5f6;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-cl2k .style-usage-bar-fill {
+  height: 100%;
+  background: #4caf50;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-custom .style-usage-bar-fill {
+  height: 100%;
+  background: #ffb74d;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.style-usage-row.style-usage-unknown .style-usage-bar-fill {
+  height: 100%;
+  background: #666;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.style-usage-count {
+  color: #ccc;
+  font-size: 0.85rem;
+  min-width: 2.5rem;
+  text-align: right;
+}
+
+.style-usage-fallback-note {
+  border-top: 1px solid #333;
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.style-usage-fallback-card {
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.style-usage-fallback-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.style-usage-fallback-label {
+  color: #aaa;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.style-usage-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.25rem 0;
+}
+
+.style-usage-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: #888;
+  padding: 0.1rem 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.style-usage-preview-item:last-child {
+  border-bottom: none;
+}
+
+.style-usage-preview-more {
+  font-size: 0.8rem;
+  color: #666;
+  padding: 0.15rem 0;
+}
+
+.style-usage-download-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #888;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.style-usage-download-btn:hover {
+  color: #64b5f6;
+  border-color: #64b5f6;
+}
+
+.style-fallback-modal-subtitle {
+  color: #aaa;
+  font-size: 0.875rem;
+  margin: 0 0 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
 .priority-header h2 {
   color: #fff;
   margin-bottom: 0.5rem;
@@ -872,6 +1084,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .style-badge {
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  vertical-align: middle;
 }
 
 .style-badge.style-mm2k {
@@ -1630,6 +1843,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   color: #64b5f6;
   margin: 0;
   font-size: 1.25rem;
@@ -1842,6 +2058,13 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   background-color: rgba(255, 107, 107, 0.1);
   border-radius: 4px;
   border-left: 3px solid #ff6b6b;
+}
+
+.item-seasons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem 0.5rem;
 }
 
 .unsaved-discard-btn {

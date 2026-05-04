@@ -511,16 +511,16 @@ function MakerTools() {
               <div className="maker-grid">
                 <div className="maker-card">
                   <h3>General</h3>
-                  <div className="setting-info-note">
-                    <span>TMDB API key is managed in </span>
+                  <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.8rem', color: '#888' }}>
+                    TMDB API key is managed in{' '}
                     <a
                       href="/settings"
                       onClick={(e) => { e.preventDefault(); navigate('/settings') }}
-                      className="settings-link"
+                      style={{ color: '#64b5f6' }}
                     >
                       Settings → General → API Keys
                     </a>
-                  </div>
+                  </p>
                   <label>
                     Lookahead Days
                     <input

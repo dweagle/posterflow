@@ -409,7 +409,7 @@ class PosterRenameService:
         asset_folders: bool = True,
         dry_run: bool = False,
         progress_callback: Optional[RenameProgressCallback] = None,
-    ) -> Tuple[MediaDict, List[str], List[str]]:
+    ) -> Tuple[MediaDict, List[str], List[str], Dict[str, tuple]]:
         """
         Rename matched assets to Plex-compatible filenames and handle folder structure.
         
@@ -422,11 +422,14 @@ class PosterRenameService:
             progress_callback: Optional callback function(current, total, item_name) for progress updates.
             
         Returns:
-            Tuple of (output dict, destination files copied/updated, source files processed).
+            Tuple of (output dict, destination files copied/updated, source files processed,
+            winning_source_files mapping dest_path -> (source_file_path, title, year, tmdb_type, season)).
         """
         output: MediaDict = {}
         renamed_files = []  # Destination files that were copied/updated
         processed_source_files = []  # Source files that were checked (copied or skipped if identical)
+        # dest_path -> (source_file_path, title, year, tmdb_type, season_num)
+        winning_source_files: Dict[str, tuple] = {}
         
         asset_types: List[str] = ["collections", "movies", "series"]
         log_info(LogTags.POSTER_RENAMER, "Renaming assets, please wait...")
@@ -473,6 +476,7 @@ class PosterRenameService:
                         file_extension = os.path.splitext(file)[1]
                         
                         # Handle season posters
+                        _season_num: Optional[int] = None
                         if re.search(r" - Season| - Specials", file_name):
                             try:
                                 season_number = (
@@ -480,6 +484,7 @@ class PosterRenameService:
                                     if "Season" in file_name
                                     else "00"
                                 ).zfill(2)
+                                _season_num = int(season_number)
                             except AttributeError:
                                 log_debug(
                                     LogTags.POSTER_RENAMER,
@@ -579,6 +584,8 @@ class PosterRenameService:
                                 )
 
                         written_dest_paths[new_file_path] = file_name
+                        _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
+                        winning_source_files[new_file_path] = (file, item["title"], item.get("year"), _tmdb_type, _season_num)
 
                     if progress_callback:
                         if item_had_changes:
@@ -598,7 +605,7 @@ class PosterRenameService:
             else:
                 log_debug(LogTags.POSTER_RENAMER, f"No {asset_type} to rename")
         
-        return output, renamed_files, processed_source_files
+        return output, renamed_files, processed_source_files, winning_source_files
 
     def get_media_from_instances(self, log_tag: str = LogTags.POSTER_RENAMER, setting_key: str = "poster_renamer_libraries") -> MediaDict:
         """
@@ -920,7 +927,7 @@ class PosterRenameService:
                     progress = 50 + int((current / total) * 50)
                     progress_callback("renaming", progress, 100, status_message)
             
-            output, renamed_files, processed_source_files = self.rename_files(
+            output, renamed_files, processed_source_files, winning_source_files = self.rename_files(
                 matched_assets,
                 actual_destination,  # Use actual_destination (may be tmp folder)
                 action_type,
@@ -950,6 +957,36 @@ class PosterRenameService:
                 "collections": len(output.get("collections", [])),
             }
             
+            # Build per-style breakdown from winning source files
+            from models.poster import Poster
+            from models.drive import Drive
+            from datetime import datetime, timezone
+
+            style_counts: Dict[str, int] = {}
+            style_fallbacks: Dict[str, List[Dict]] = {}  # style -> list of {title, year, type, season}
+
+            if winning_source_files:
+                for dest_path, entry in winning_source_files.items():
+                    src_file, title, year, tmdb_type, season = entry
+                    resolved_src = str(Path(src_file).resolve())
+                    poster = self.db.query(Poster).filter(Poster.file_path == resolved_src).first()
+                    if poster:
+                        drive = self.db.query(Drive).filter(Drive.drive_id == poster.drive_id).first()
+                        style = drive.style_type if drive else "Unknown"
+                    else:
+                        style = "Unknown"
+
+                    style_counts[style] = style_counts.get(style, 0) + 1
+                    style_fallbacks.setdefault(style, []).append({
+                        "title": title,
+                        "year": year,
+                        "type": tmdb_type,
+                        "season": season,
+                    })
+
+            stats["style_counts"] = style_counts
+            stats["style_fallbacks"] = style_fallbacks
+
             # Phase 6: Mark files as processed in DB (if not dry run)
             if not dry_run and processed_source_files:
                 if progress_callback:
@@ -960,10 +997,6 @@ class PosterRenameService:
                     f"Marking {len(processed_source_files)} source files as processed...",
                     count=len(processed_source_files)
                 )
-                
-                from models.poster import Poster
-                from models.drive import Drive
-                from datetime import datetime, timezone
                 
                 now = datetime.now(timezone.utc)
                 marked_count = 0

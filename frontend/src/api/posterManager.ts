@@ -200,3 +200,19 @@ export const runFlow = async (options?: FlowRunOptions): Promise<FlowResult> => 
   const payload = options?.dry_run ? { dry_run: true } : undefined
   return postData('/api/posterflow/flow/run', payload)
 }
+
+export interface FallbackItem {
+  title: string
+  year: number | null
+  type: 'movie' | 'show' | 'collection'
+  season?: number | null
+}
+
+export interface PosterStyleStats {
+  style_counts: Record<string, number>
+  style_fallbacks: Record<string, FallbackItem[]>
+}
+
+export const getPosterStats = async (): Promise<PosterStyleStats> => {
+  return getData('/api/posterflow/stats')
+}

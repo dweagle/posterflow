@@ -904,6 +904,7 @@ def run_maker_monitor_scan_internal(
 ) -> MakerMonitorRunResponse:
     effective_tmdb_key = _get_monitor_tmdb_key(db)
     if not effective_tmdb_key:
+        log_warning(LogTags.MODULE, "Maker Tools monitor blocked: TMDB API key is not configured")
         raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
     # Propagate the resolved key so all downstream helpers use the correct value
     resolved_config = resolved_config.model_copy(update={"tmdb_api_key": effective_tmdb_key})

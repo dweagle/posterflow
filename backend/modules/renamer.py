@@ -208,10 +208,11 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
 
         if result.get("stats") and not config_data.get("dry_run", False):
             stats = result["stats"]
+            style_counts = stats.get("style_counts", {})
             stats_json = json.dumps(stats)
             upsert_setting(db, "poster_renamer_stats", stats_json)
             db.commit()
-            log_info(LogTags.POSTER_RENAMER, f"Stored stats: {stats}")
+            log_info(LogTags.POSTER_RENAMER, f"Stored stats: matched={stats.get('total_matched', 0)}, movies={stats.get('movies', 0)}, series={stats.get('series', 0)}, collections={stats.get('collections', 0)}, styles={style_counts}")
 
         auto_run_border_override = config_data.get("auto_run_border")
         if isinstance(auto_run_border_override, bool):

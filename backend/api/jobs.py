@@ -479,6 +479,7 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
     _tmdb_setting = get_setting(db, "tmdb_api_key")
     global_tmdb_key = str(_tmdb_setting.value or "").strip() if _tmdb_setting else ""
     if not global_tmdb_key:
+        log_warning(LogTags.JOB, "idarr job blocked: TMDB API key is not configured")
         raise HTTPException(
             status_code=400,
             detail="TMDB API key is not configured. Add it in Settings → General → API Keys.",

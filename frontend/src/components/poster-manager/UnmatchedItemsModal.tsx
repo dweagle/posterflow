@@ -158,7 +158,9 @@ function UnmatchedItemsModal({
       setLoadingKeys((prev) => new Set(prev).add(key))
       try {
         const result = await searchUnmatchedTmdb({
-          title: item.title,
+          title: item.year
+            ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+            : item.title,
           year: item.year,
           type: item.tmdbType ?? getTmdbSearchType(modalType),
         })
@@ -288,7 +290,11 @@ function UnmatchedItemsModal({
                 <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
                   <div className="unmatched-item">
                     <div className="unmatched-item-meta">
-                      <span className="item-title">{item.title}</span>
+                      <span className="item-title">
+                        {item.year
+                          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+                          : item.title}
+                      </span>
                       {item.year && <span className="item-year">({item.year})</span>}
                       {item.category && (
                         <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
@@ -315,7 +321,7 @@ function UnmatchedItemsModal({
                       {isNoKey ? (
                         <div className="tmdb-candidates-warning">
                           <AlertCircle size={14} />
-                          <span>No TMDB API key configured. Close this modal and add it under <strong>Detection Configuration</strong> in the Unmatched Assets tab.</span>
+                          <span>No TMDB API key configured. Add it in <strong>Settings → General → API Keys</strong>.</span>
                         </div>
                       ) : isLoading ? (
                         <div className="tmdb-candidates-loading">

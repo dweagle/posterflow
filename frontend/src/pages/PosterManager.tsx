@@ -5,6 +5,7 @@ import {
   PosterConfig,
   getSettings,
 } from '../api/client'
+import { getPosterStats, PosterStyleStats } from '../api/posterManager'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import PosterManagerTabs, { PosterManagerTab } from '../components/poster-manager/PosterManagerTabs'
@@ -50,6 +51,7 @@ function PosterManager() {
   const [config, setConfig] = useState<PosterConfig | null>(null)
   const [showUnmatchedModal, setShowUnmatchedModal] = useState<UnmatchedModalType>(null)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
+  const [styleStats, setStyleStats] = useState<PosterStyleStats | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [renaming, setRenaming] = useState(false)
   const [detectingUnmatched, setDetectingUnmatched] = useState(false)
@@ -202,6 +204,12 @@ function PosterManager() {
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'priority') {
+      getPosterStats().then(setStyleStats).catch(() => setStyleStats(null))
+    }
+  }, [activeTab])
 
   const {
     showUnsavedModal,
@@ -373,6 +381,8 @@ function PosterManager() {
           onRemoveFromPriority={handleRemoveFromPriority}
           onAddAllStyle={handleAddAllStyle}
           onRemoveAllStyle={handleRemoveAllStyle}
+          styleStats={styleStats}
+          tmdbApiKeyConfigured={tmdbApiKeyConfigured}
         />
       )}
 

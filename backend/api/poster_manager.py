@@ -346,6 +346,8 @@ async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         collections = 0
         movies = 0
         series = 0
+        style_counts: Dict[str, Any] = {}
+        style_fallbacks: Dict[str, Any] = {}
 
         if stats_setting and stats_setting.value:
             try:
@@ -354,6 +356,8 @@ async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 collections = stored_stats.get("collections", 0)
                 movies = stored_stats.get("movies", 0)
                 series = stored_stats.get("series", 0)
+                style_counts = stored_stats.get("style_counts", {})
+                style_fallbacks = stored_stats.get("style_fallbacks", {})
             except json.JSONDecodeError:
                 pass
         else:
@@ -396,7 +400,9 @@ async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "collections": collections,
             "movies": movies,
             "series": series,
-            "last_scan": last_scan.isoformat() if last_scan else None
+            "last_scan": last_scan.isoformat() if last_scan else None,
+            "style_counts": style_counts,
+            "style_fallbacks": style_fallbacks,
         }
 
     except Exception as e:
@@ -689,9 +695,16 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
     if media_type not in {"movie", "show", "collection"}:
         raise HTTPException(status_code=400, detail="type must be one of: movie, show, collection")
 
+    # Strip trailing (YYYY) from title if year is already provided separately,
+    # so shows like "INVINCIBLE (2021)" don't get searched as "INVINCIBLE (2021)" + year=2021.
+    import re as _re
+    if year:
+        title = _re.sub(r'\s*\(\d{4}\)\s*$', '', title).strip()
+
     tmdb_api_key = _get_unmatched_tmdb_key(db)
     if not tmdb_api_key:
-        raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Poster Manager → Unmatched Assets → Detection Configuration.")
+        log_warning(LogTags.UNMATCHED, "Unmatched TMDB search blocked: TMDB API key is not configured")
+        raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
 
     if media_type == "show":
         endpoint = "/search/tv"
