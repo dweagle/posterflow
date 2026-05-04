@@ -6,6 +6,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-04
+### Changed
+- Priority tab: style usage stats now treat the first MM2K or CL2K drive in the priority list as the preferred style, so a custom drive at the top of the list no longer hijacks the preferred/fallback framing
+- Priority tab: fallback cards are now limited to MM2K and CL2K only — custom drive fallback entries are intentional overrides and no longer shown as a separate card
+- Priority tab: style badge widths in the bar chart are now fixed so all bars start at the same horizontal position regardless of label length (e.g. "CUSTOM" vs "MM2K")
+
 ## [0.2.4] - 2026-05-04
 ### Added
 - Poster Manager: style usage statistics — after each rename run, a per-style breakdown of how many posters came from each drive style is stored and surfaced in the Priority tab on the Poster Manager page
