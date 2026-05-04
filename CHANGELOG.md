@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-04
+### Fixed
+- IDarr: TMDB API key was not being injected into the job config when starting a run via the API or scheduler, causing all IDarr jobs to fail with "TMDB API key is required" after the 0.2.1 consolidation
+
 ## [0.2.2] - 2026-05-03
 ### Fixed
 - Poster Renamer: `tmp/` staging directory is now created with `exist_ok=True`, preventing a `FileNotFoundError` when the destination is an externally mounted Docker volume
