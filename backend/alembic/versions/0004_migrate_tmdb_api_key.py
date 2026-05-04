@@ -53,6 +53,18 @@ def upgrade() -> None:
                 except Exception:
                     pass
 
+        # Source 3: tmdb_api_key inside maker_tools_monitor_config JSON
+        if not migrated_key:
+            monitor_raw = get_value("maker_tools_monitor_config")
+            if monitor_raw:
+                try:
+                    cfg = json.loads(monitor_raw)
+                    embedded = str(cfg.get("tmdb_api_key") or "").strip()
+                    if embedded and embedded != "***masked***":
+                        migrated_key = embedded
+                except Exception:
+                    pass
+
         if migrated_key:
             conn.execute(settings.insert().values(key="tmdb_api_key", value=migrated_key))
 
@@ -69,6 +81,21 @@ def upgrade() -> None:
                 conn.execute(
                     settings.update()
                     .where(settings.c.key == "maker_tools_idarr_config")
+                    .values(value=json.dumps(cfg))
+                )
+        except Exception:
+            pass
+
+    # Strip tmdb_api_key field from maker_tools_monitor_config JSON
+    monitor_raw = get_value("maker_tools_monitor_config")
+    if monitor_raw:
+        try:
+            cfg = json.loads(monitor_raw)
+            if "tmdb_api_key" in cfg:
+                del cfg["tmdb_api_key"]
+                conn.execute(
+                    settings.update()
+                    .where(settings.c.key == "maker_tools_monitor_config")
                     .values(value=json.dumps(cfg))
                 )
         except Exception:

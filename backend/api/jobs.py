@@ -476,13 +476,14 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
     if not isinstance(config_data, dict):
         raise HTTPException(status_code=400, detail="idarr configuration payload is invalid.")
 
-    required = ["tmdb_api_key"]
-    missing = [key for key in required if not str(config_data.get(key, "")).strip()]
-    if missing:
+    _tmdb_setting = get_setting(db, "tmdb_api_key")
+    global_tmdb_key = str(_tmdb_setting.value or "").strip() if _tmdb_setting else ""
+    if not global_tmdb_key:
         raise HTTPException(
             status_code=400,
-            detail=f"idarr configuration missing required fields: {', '.join(missing)}",
+            detail="TMDB API key is not configured. Add it in Settings → General → API Keys.",
         )
+    config_data["tmdb_api_key"] = global_tmdb_key
 
     raw_targets = config_data.get("sync_targets")
     sync_targets = [item for item in raw_targets if isinstance(item, dict)] if isinstance(raw_targets, list) else []

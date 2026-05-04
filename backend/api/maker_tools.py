@@ -341,6 +341,12 @@ def _sanitize_monitor_config(payload: Any) -> MakerMonitorConfig:
     return MakerMonitorConfig(**{**defaults.model_dump(), **data})
 
 
+def _get_monitor_tmdb_key(db: Session) -> str:
+    """Return the TMDB API key from the global setting (Settings → General → API Keys)."""
+    setting = get_setting(db, "tmdb_api_key")
+    return str(setting.value or "").strip() if setting else ""
+
+
 def _get_monitor_config(db: Session) -> MakerMonitorConfig:
     setting = get_setting(db, SETTING_MAKER_MONITOR_CONFIG)
     if not setting or not setting.value:
@@ -737,6 +743,13 @@ def save_maker_monitor_config(config: MakerMonitorConfig, db: Session = Depends(
     normalized = _sanitize_monitor_config(config.model_dump())
 
     try:
+        # If a non-empty TMDB key was submitted, promote it to the global setting
+        # and strip it from the per-config JSON so the canonical location is Settings → General.
+        incoming_key = normalized.tmdb_api_key.strip()
+        if incoming_key:
+            upsert_setting(db, "tmdb_api_key", incoming_key)
+        normalized = normalized.model_copy(update={"tmdb_api_key": ""})
+
         upsert_setting(db, SETTING_MAKER_MONITOR_CONFIG, normalized.model_dump_json())
         db.commit()
         log_user_action(
@@ -889,8 +902,11 @@ def run_maker_monitor_scan_internal(
     notify_discord: bool,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> MakerMonitorRunResponse:
-    if not resolved_config.tmdb_api_key.strip():
-        raise HTTPException(status_code=400, detail="TMDB API key is required")
+    effective_tmdb_key = _get_monitor_tmdb_key(db)
+    if not effective_tmdb_key:
+        raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
+    # Propagate the resolved key so all downstream helpers use the correct value
+    resolved_config = resolved_config.model_copy(update={"tmdb_api_key": effective_tmdb_key})
     if not resolved_config.drive_ids:
         raise HTTPException(status_code=400, detail="At least one monitor drive is required")
 

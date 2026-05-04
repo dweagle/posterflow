@@ -225,7 +225,6 @@ def test_start_idarr_accepts_scoped_source_filenames(client, test_db, monkeypatc
     source_dir.mkdir(parents=True, exist_ok=True)
 
     payload = {
-        "tmdb_api_key": "tmdb-test-key",
         "sync_targets": [
             {
                 "label": "Drive 1",
@@ -235,6 +234,7 @@ def test_start_idarr_accepts_scoped_source_filenames(client, test_db, monkeypatc
         ],
     }
     test_db.add(Setting(key="maker_tools_idarr_config", value=json.dumps(payload)))
+    test_db.add(Setting(key="tmdb_api_key", value="tmdb-test-key"))
     test_db.commit()
 
     queued_payloads: list[dict] = []

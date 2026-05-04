@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, CircleHelp, Clapperboard, Eye, EyeOff, Monitor, Paintbrush, Play, Plus, Save, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { Check, CircleHelp, Clapperboard, Monitor, Paintbrush, Play, Plus, Save, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -9,7 +9,6 @@ import {
   getMakerMonitorLastResult,
   MakerMonitorConfig,
   MakerMonitorRunResponse,
-  revealSensitiveSetting,
   runMakerMonitor,
   saveMakerMonitorConfig,
 } from '../api/client'
@@ -49,8 +48,6 @@ const cloneMonitorConfig = (value: MakerMonitorConfig): MakerMonitorConfig => ({
 })
 
 function MakerTools() {
-  const MASKED_VALUE = '***masked***'
-
   const navigate = useNavigate()
   const activeTab = 'monitor'
   const [drives, setDrives] = useState<Drive[]>([])
@@ -65,7 +62,6 @@ function MakerTools() {
   const [resultTab, setResultTab] = useState<ResultTab>('')
   const [discoveryTab, setDiscoveryTab] = useState<DiscoveryTab>('series')
   const [modalDiscoveryLanguagesInput, setModalDiscoveryLanguagesInput] = useState('en, ko, ja, zh, es')
-  const [showTmdbApiKey, setShowTmdbApiKey] = useState(false)
   const { showToast } = useToast()
   const { jobs } = useUnmatched()
   const completionHandledRef = useRef(false)
@@ -515,46 +511,16 @@ function MakerTools() {
               <div className="maker-grid">
                 <div className="maker-card">
                   <h3>General</h3>
-                  <label>
-                    TMDB API Key
-                    <div className="input-with-toggle">
-                      <input
-                        type={showTmdbApiKey ? 'text' : 'password'}
-                        value={modalConfig.tmdb_api_key}
-                        onChange={(event) => setModalConfig((previous) => ({ ...previous, tmdb_api_key: event.target.value }))}
-                        placeholder="Enter TMDB API key"
-                      />
-                      <button
-                        type="button"
-                        className="toggle-visibility"
-                        onClick={async () => {
-                          const willShow = !showTmdbApiKey
-                          if (willShow && modalConfig.tmdb_api_key === MASKED_VALUE) {
-                            try {
-                              const response = await revealSensitiveSetting({
-                                setting_key: 'maker_tools_monitor_config',
-                                field: 'tmdb_api_key',
-                              })
-                              const revealedValue = String(response.value || '')
-                              if (!revealedValue) {
-                                showToast('No saved TMDB API key available to reveal', 'error')
-                                return
-                              }
-                              setModalConfig((previous) => ({ ...previous, tmdb_api_key: revealedValue }))
-                            } catch (error) {
-                              showToast(getApiErrorMessage(error, 'Failed to reveal TMDB API key'), 'error')
-                              return
-                            }
-                          }
-                          setShowTmdbApiKey((prev) => !prev)
-                        }}
-                        title={showTmdbApiKey ? 'Hide' : 'Show'}
-                        aria-label={showTmdbApiKey ? 'Hide TMDB API key' : 'Show TMDB API key'}
-                      >
-                        {showTmdbApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    </div>
-                  </label>
+                  <div className="setting-info-note">
+                    <span>TMDB API key is managed in </span>
+                    <a
+                      href="/settings"
+                      onClick={(e) => { e.preventDefault(); navigate('/settings') }}
+                      className="settings-link"
+                    >
+                      Settings → General → API Keys
+                    </a>
+                  </div>
                   <label>
                     Lookahead Days
                     <input

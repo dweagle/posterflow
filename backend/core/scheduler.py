@@ -315,6 +315,7 @@ def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bo
         scheduled_config_data["sync_target_index"] = selected_target_index
         scheduled_config_data["scope_token"] = resolve_idarr_scope_token(selected_target, selected_target_index)
         scheduled_config_data["sync_after_run"] = sync_after_run
+        scheduled_config_data["tmdb_api_key"] = tmdb_api_key
 
         _queue_pending_job(
             db,

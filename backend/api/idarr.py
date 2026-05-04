@@ -700,6 +700,14 @@ async def save_maker_idarr_config(config: MakerIdarrConfig, db: Session = Depend
                     target["scope_token"] = existing_scope_token
 
         sanitized_config = _sanitize_maker_idarr_config(incoming_payload)
+
+        # If a non-empty TMDB key was submitted, promote it to the global setting
+        # and strip it from the per-config JSON so the canonical location is Settings → General.
+        incoming_key = sanitized_config.tmdb_api_key.strip()
+        if incoming_key:
+            upsert_setting(db, "tmdb_api_key", incoming_key)
+        sanitized_config = sanitized_config.model_copy(update={"tmdb_api_key": ""})
+
         upsert_setting(db, SETTING_MAKER_IDARR_CONFIG, sanitized_config.model_dump_json())
         db.commit()
         log_user_action("Saved Maker Tools IDarr configuration")
@@ -1517,7 +1525,7 @@ async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequ
 
     tmdb_api_key = _get_maker_idarr_tmdb_key(db)
     if not tmdb_api_key:
-        raise HTTPException(status_code=400, detail="TMDB API key is not configured in IDarr settings")
+        raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
 
     endpoint = "/search/movie"
     query_params: dict[str, Any] = {"query": title, "include_adult": "false"}

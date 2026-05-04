@@ -54,7 +54,11 @@ def test_idarr_config_save_and_get_round_trip(client, test_db):
     assert data["sync_targets"][0]["source_dir"] == "/tmp/output"
     assert isinstance(data["sync_targets"][0].get("scope_token"), str)
     assert data["sync_targets"][0]["scope_token"].strip()
-    assert data["tmdb_api_key"] == "tmdb-key"
+    # tmdb_api_key is promoted to the global setting on save and stripped from the config JSON
+    assert data["tmdb_api_key"] == ""
+    global_key = test_db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
+    assert global_key is not None
+    assert global_key.value == "tmdb-key"
     assert data["auto_rename_quick_add"] is False
     assert data["frequency_days"] == 15
     assert data["tvdb_frequency"] == 5
