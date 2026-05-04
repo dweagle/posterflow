@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-03
+### Fixed
+- Poster Renamer: `tmp/` staging directory is now created with `exist_ok=True`, preventing a `FileNotFoundError` when the destination is an externally mounted Docker volume
+- Poster Renamer: plain copy fallback (tmp → destination) now runs when border replacer is enabled but fails or is misconfigured, instead of silently leaving files in the staging folder
+- Unmatched Assets: stale stats cache is now cleared when the destination directory is missing, so the UI reflects the actual state instead of showing outdated data
+- Unmatched Assets: empty stats are now saved to the database when no asset files are found (e.g. folder was deleted), preventing a forever-cached non-empty result
+- Frontend: unmatched stats now refresh when an unmatched/workflow job transitions to `failed` (previously only refreshed on `completed`)
+
 ## [0.2.1] - 2026-05-03
 ### Added
 - Settings → General: new **API Keys** section for centralised TMDB API key configuration
