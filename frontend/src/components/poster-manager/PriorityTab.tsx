@@ -62,8 +62,13 @@ function PriorityTab({
   const styleCounts = styleStats?.style_counts ?? {}
   const styleFallbacks = styleStats?.style_fallbacks ?? {}
   const styleTotal = Object.values(styleCounts).reduce((a, b) => a + b, 0)
+  const COMMUNITY_STYLES = ['MM2K', 'CL2K']
   const priorityStyles = [...new Set(priorityList.map(d => d.style_type).filter(Boolean))]
-  const preferredStyle = priorityStyles.find(s => s && styleCounts[s] !== undefined) ?? Object.keys(styleCounts)[0] ?? ''
+  const preferredStyle =
+    priorityStyles.find(s => COMMUNITY_STYLES.includes(s ?? '') && styleCounts[s ?? ''] !== undefined) ??
+    priorityStyles.find(s => s && styleCounts[s] !== undefined) ??
+    Object.keys(styleCounts)[0] ??
+    ''
   const styleEntries = Object.entries(styleCounts).sort(([a], [b]) => {
     if (a === preferredStyle) return -1
     if (b === preferredStyle) return 1
