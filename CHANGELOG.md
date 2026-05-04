@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-05-04
+### Added
+- Poster Manager: style usage statistics — after each rename run, a per-style breakdown of how many posters came from each drive style is stored and surfaced in the Priority tab on the Poster Manager page
+- Poster Manager: **Style Usage** modal showing poster counts and fallback item lists per drive style, accessible from the Priority tab
+- Poster Manager: download button for the missing posters list on Priority tab
+
+### Fixed
+- TMDB search: trailing `(YYYY)` is now stripped from the title when a year is also supplied separately, preventing double-year searches for shows with a year in their name in Sonarr/Radarr (e.g. "INVINCIBLE (2021)" + year 2021)
+- Various: added log warnings when TMDB API key is missing in IDarr, Jobs, Maker Tools, and Poster Manager modules instead of silently failing
+
 ## [0.2.3] - 2026-05-04
 ### Fixed
 - IDarr: TMDB API key was not being injected into the job config when starting a run via the API or scheduler, causing all IDarr jobs to fail with "TMDB API key is required" after the 0.2.1 consolidation
