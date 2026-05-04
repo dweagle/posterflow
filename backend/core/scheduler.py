@@ -263,7 +263,8 @@ def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bo
             log_warning(LogTags.SCHEDULER, "Skipping scheduled IDarr run: maker_tools_idarr_config payload is invalid")
             return
 
-        tmdb_api_key = str(config_data.get("tmdb_api_key") or "").strip()
+        tmdb_setting = get_setting_value(db, "tmdb_api_key", "")
+        tmdb_api_key = str(tmdb_setting or "").strip()
         if not tmdb_api_key:
             log_warning(LogTags.SCHEDULER, "Skipping scheduled IDarr run: tmdb_api_key is missing")
             return

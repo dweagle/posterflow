@@ -65,6 +65,7 @@ export const useSettingsCore = ({
   const [rcloneSettings, setRcloneSettings] = useState<RcloneSettings>(defaultRcloneSettings)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [uploadingServiceAccount, setUploadingServiceAccount] = useState(false)
+  const [tmdbApiKey, setTmdbApiKey] = useState('')
 
   const fetchSettings = async (): Promise<SettingsCoreSnapshot | null> => {
     try {
@@ -76,6 +77,10 @@ export const useSettingsCore = ({
         google_service_account_file: settings.google_service_account_file || '',
       }
       setRcloneSettings(nextRcloneSettings)
+
+      const tmdbKey = (settings.tmdb_api_key || '').trim()
+      // tmdb_api_key is sensitive so it comes back masked if set; treat masked as configured
+      setTmdbApiKey(tmdbKey === '***masked***' ? '***masked***' : tmdbKey)
 
       const plexInstances = parseInstances(settings.plex_instances, 'Plex')
       const sonarrInstances = parseInstances(settings.sonarr_instances, 'Sonarr')
@@ -170,6 +175,25 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSaveTmdbApiKey = async (): Promise<boolean> => {
+    const valueToSave = tmdbApiKey.trim()
+    if (!valueToSave || valueToSave === '***masked***') {
+      return false
+    }
+    try {
+      setSaving(true)
+      await saveBulkSettings({ tmdb_api_key: valueToSave })
+      showToast('TMDB API key saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving TMDB API key:', error)
+      showToast('Failed to save TMDB API key', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleUploadServiceAccount = async (file: File) => {
     try {
       setUploadingServiceAccount(true)
@@ -200,5 +224,8 @@ export const useSettingsCore = ({
     confirmSaveRclone,
     handleUploadServiceAccount,
     uploadingServiceAccount,
+    tmdbApiKey,
+    setTmdbApiKey,
+    handleSaveTmdbApiKey,
   }
 }

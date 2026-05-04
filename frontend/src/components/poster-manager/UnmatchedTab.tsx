@@ -1,5 +1,4 @@
-import { AlertCircle, Download, Eye, EyeOff, List, RefreshCw, Save, Search } from 'lucide-react'
-import { useState } from 'react'
+import { AlertCircle, Download, List, RefreshCw, Save, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
 
@@ -20,11 +19,9 @@ type UnmatchedTabProps = {
   unmatchedIgnoreRootFoldersText: string
   unmatchedIgnoreCollectionsText: string
   unmatchedIgnoreUnmonitored: boolean
-  unmatchedTmdbApiKey: string
   onSetUnmatchedIgnoreRootFoldersText: (value: string) => void
   onSetUnmatchedIgnoreCollectionsText: (value: string) => void
   onSetUnmatchedIgnoreUnmonitored: (value: boolean) => void
-  onSetUnmatchedTmdbApiKey: (value: string) => void
   onOpenModal: (type: 'movies' | 'series' | 'seasons' | 'collections' | 'all') => void
 }
 
@@ -45,15 +42,12 @@ function UnmatchedTab({
   unmatchedIgnoreRootFoldersText,
   unmatchedIgnoreCollectionsText,
   unmatchedIgnoreUnmonitored,
-  unmatchedTmdbApiKey,
   onSetUnmatchedIgnoreRootFoldersText,
   onSetUnmatchedIgnoreCollectionsText,
   onSetUnmatchedIgnoreUnmonitored,
-  onSetUnmatchedTmdbApiKey,
   onOpenModal,
 }: UnmatchedTabProps) {
   const navigate = useNavigate()
-  const [showTmdbKey, setShowTmdbKey] = useState(false)
 
   const openSchedulingSettings = () => {
     localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
@@ -357,29 +351,10 @@ function UnmatchedTab({
             </label>
 
             <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>TMDB API Key</label>
-            <div className="tmdb-key-input-row">
-              <input
-                type={showTmdbKey ? 'text' : 'password'}
-                className="settings-input tmdb-key-input"
-                value={unmatchedTmdbApiKey}
-                onChange={(e) => onSetUnmatchedTmdbApiKey(e.target.value)}
-                placeholder="Enter your TMDB API key"
-              />
-              <button
-                className="tmdb-key-toggle"
-                type="button"
-                onClick={() => setShowTmdbKey((v) => !v)}
-                title={showTmdbKey ? 'Hide key' : 'Show key'}
-              >
-                {showTmdbKey ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-            <small>
-              Used to search TMDB when viewing unmatched items. Get your key at{' '}
-              <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
-                themoviedb.org
-              </a>.
-            </small>
+            <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.8rem', color: '#888' }}>
+              Configured globally in{' '}
+              <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
+            </p>
           </div>
 
           <div className="field-group">

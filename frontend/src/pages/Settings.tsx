@@ -214,6 +214,26 @@ function Settings() {
   const [hasUnsavedNotifications, setHasUnsavedNotifications] = useState(false)
   const [testingDiscord, setTestingDiscord] = useState(false)
   const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
+  const [showTmdbKey, setShowTmdbKey] = useState(false)
+
+  const handleToggleTmdbKeyVisibility = async () => {
+    const willShow = !showTmdbKey
+    if (willShow && tmdbApiKey === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'tmdb_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved TMDB API key available to reveal', 'error')
+          return
+        }
+        setTmdbApiKey(revealedValue)
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal TMDB API key'), 'error')
+        return
+      }
+    }
+    setShowTmdbKey((prev) => !prev)
+  }
   
   // Field visibility state for sensitive data
   const [showClientId, setShowClientId] = useState(false)
@@ -384,6 +404,9 @@ function Settings() {
     confirmSaveRclone,
     handleUploadServiceAccount,
     uploadingServiceAccount,
+    tmdbApiKey,
+    setTmdbApiKey,
+    handleSaveTmdbApiKey,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -686,6 +709,48 @@ function Settings() {
 
       {activeTab === 'basic' && (
         <>
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <h2>API Keys</h2>
+            </div>
+            <div className="setting-item api-key-setting">
+              <div className="setting-info">
+                <label>TMDB API Key</label>
+                <p className="setting-description">
+                  Used by Unmatched Assets and IDarr to search The Movie Database. Get a free key at{' '}
+                  <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                    themoviedb.org
+                  </a>.
+                </p>
+              </div>
+              <div className="notification-webhook-row api-key-control">
+                <div className="input-with-toggle">
+                  <input
+                    type={showTmdbKey ? 'text' : 'password'}
+                    value={tmdbApiKey === MASKED_VALUE ? '' : tmdbApiKey}
+                    onChange={(e) => setTmdbApiKey(e.target.value)}
+                    placeholder={tmdbApiKey === MASKED_VALUE ? '••••••••••••••••' : 'Enter your TMDB API key'}
+                  />
+                  <button
+                    className="toggle-visibility"
+                    type="button"
+                    onClick={handleToggleTmdbKeyVisibility}
+                    title={showTmdbKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showTmdbKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <button
+                  className="btn-primary btn-inline-save"
+                  onClick={handleSaveTmdbApiKey}
+                  disabled={saving}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="settings-section">
             <div className="settings-section-header">
               <h2>Logging</h2>

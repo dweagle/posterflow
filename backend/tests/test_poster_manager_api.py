@@ -39,7 +39,7 @@ def test_unmatched_tmdb_search_rejects_missing_api_key(client):
 
 def test_unmatched_tmdb_search_rejects_empty_title(client, test_db):
     """Should return 400 when title is empty."""
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     response = client.post(
@@ -52,7 +52,7 @@ def test_unmatched_tmdb_search_rejects_empty_title(client, test_db):
 
 def test_unmatched_tmdb_search_rejects_invalid_type(client, test_db):
     """Should return 400 when type is not movie/show/collection."""
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     response = client.post(
@@ -65,7 +65,7 @@ def test_unmatched_tmdb_search_rejects_invalid_type(client, test_db):
 
 def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
     """Should return candidates sorted by score with correct fields."""
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     mock_results = [
@@ -109,7 +109,7 @@ def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
 
 def test_unmatched_tmdb_search_show_maps_to_tv_endpoint(client, test_db):
     """Should call /search/tv endpoint for show type."""
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     mock_resp = MagicMock()
@@ -142,7 +142,7 @@ def test_unmatched_tmdb_search_show_maps_to_tv_endpoint(client, test_db):
 def test_unmatched_tmdb_search_returns_502_on_tmdb_failure(client, test_db):
     """Should return 502 when TMDB API call fails."""
     import requests as real_requests
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     with patch("api.poster_manager.http_requests.get") as mock_get:
@@ -159,7 +159,7 @@ def test_unmatched_tmdb_search_returns_502_on_tmdb_failure(client, test_db):
 
 def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
     """Collections should not call /external_ids endpoint."""
-    test_db.add(Setting(key="unmatched_tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
     test_db.commit()
 
     mock_resp = MagicMock()

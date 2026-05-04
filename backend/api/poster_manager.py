@@ -46,7 +46,7 @@ SETTING_POSTER_DRIVE_PRIORITY = "poster_drive_priority"
 SETTING_AUTO_RUN_BORDER = "auto_run_border"
 SETTING_BORDER_REPLACER_MODE = "border_replacer_mode"
 SETTING_POSTER_FLOW_CONFIG = "poster_flow_config"
-SETTING_UNMATCHED_TMDB_API_KEY = "unmatched_tmdb_api_key"
+SETTING_TMDB_API_KEY = "tmdb_api_key"
 
 # Global lock to prevent multiple flow executions
 _flow_lock = threading.Lock()
@@ -571,8 +571,8 @@ class UnmatchedTmdbSearchRequest(BaseModel):
 
 
 def _get_unmatched_tmdb_key(db: Session) -> str:
-    """Get TMDB API key from the unmatched assets setting."""
-    setting = get_setting(db, SETTING_UNMATCHED_TMDB_API_KEY)
+    """Get global TMDB API key."""
+    setting = get_setting(db, SETTING_TMDB_API_KEY)
     if not setting or not setting.value:
         return ""
     return setting.value.strip()

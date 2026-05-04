@@ -38,11 +38,9 @@ export const usePosterManagerLibraries = ({
   const [unmatchedIgnoreRootFoldersText, setUnmatchedIgnoreRootFoldersText] = useState('')
   const [unmatchedIgnoreCollectionsText, setUnmatchedIgnoreCollectionsText] = useState('')
   const [unmatchedIgnoreUnmonitored, setUnmatchedIgnoreUnmonitored] = useState(false)
-  const [unmatchedTmdbApiKey, setUnmatchedTmdbApiKey] = useState('')
   const [originalUnmatchedIgnoreRootFolders, setOriginalUnmatchedIgnoreRootFolders] = useState<string[]>([])
   const [originalUnmatchedIgnoreCollections, setOriginalUnmatchedIgnoreCollections] = useState<string[]>([])
   const [originalUnmatchedIgnoreUnmonitored, setOriginalUnmatchedIgnoreUnmonitored] = useState(false)
-  const [originalUnmatchedTmdbApiKey, setOriginalUnmatchedTmdbApiKey] = useState('')
   const [hasUnsavedUnmatchedSettings, setHasUnsavedUnmatchedSettings] = useState(false)
 
   const parseStringArraySetting = (raw: string | undefined): string[] => {
@@ -83,21 +81,17 @@ export const usePosterManagerLibraries = ({
       JSON.stringify(currentCollections) !== JSON.stringify(originalUnmatchedIgnoreCollections)
     const hasUnmonitoredChange =
       unmatchedIgnoreUnmonitored !== originalUnmatchedIgnoreUnmonitored
-    const hasTmdbKeyChange =
-      unmatchedTmdbApiKey !== originalUnmatchedTmdbApiKey
 
     setHasUnsavedUnmatchedSettings(
-      hasRootChanges || hasCollectionChanges || hasUnmonitoredChange || hasTmdbKeyChange
+      hasRootChanges || hasCollectionChanges || hasUnmonitoredChange
     )
   }, [
     unmatchedIgnoreRootFoldersText,
     unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
-    unmatchedTmdbApiKey,
     originalUnmatchedIgnoreRootFolders,
     originalUnmatchedIgnoreCollections,
     originalUnmatchedIgnoreUnmonitored,
-    originalUnmatchedTmdbApiKey,
   ])
 
   const fetchLibraryConfigs = async () => {
@@ -144,17 +138,14 @@ export const usePosterManagerLibraries = ({
       const rootFolders = parseStringArraySetting(settings.unmatched_ignore_root_folders)
       const collections = parseStringArraySetting(settings.unmatched_ignore_collections)
       const ignoreUnmonitored = parseBooleanSetting(settings.unmatched_ignore_unmonitored)
-      const tmdbApiKey = (settings.unmatched_tmdb_api_key || '').trim()
 
       setUnmatchedIgnoreRootFoldersText(rootFolders.join(', '))
       setUnmatchedIgnoreCollectionsText(collections.join(', '))
       setUnmatchedIgnoreUnmonitored(ignoreUnmonitored)
-      setUnmatchedTmdbApiKey(tmdbApiKey)
 
       setOriginalUnmatchedIgnoreRootFolders(rootFolders)
       setOriginalUnmatchedIgnoreCollections(collections)
       setOriginalUnmatchedIgnoreUnmonitored(ignoreUnmonitored)
-      setOriginalUnmatchedTmdbApiKey(tmdbApiKey)
 
       originalLibrarySelectionRef.current = new Set(finalSelection)
     } catch (error) {
@@ -191,7 +182,6 @@ export const usePosterManagerLibraries = ({
         settingsToSave['unmatched_ignore_root_folders'] = JSON.stringify(parsedRootFolders)
         settingsToSave['unmatched_ignore_collections'] = JSON.stringify(parsedCollections)
         settingsToSave['unmatched_ignore_unmonitored'] = unmatchedIgnoreUnmonitored ? 'true' : 'false'
-        settingsToSave['unmatched_tmdb_api_key'] = unmatchedTmdbApiKey.trim()
       }
 
       if (activeTab === 'rename') {
@@ -207,7 +197,6 @@ export const usePosterManagerLibraries = ({
         setOriginalUnmatchedIgnoreRootFolders(parseListInput(unmatchedIgnoreRootFoldersText))
         setOriginalUnmatchedIgnoreCollections(parseListInput(unmatchedIgnoreCollectionsText))
         setOriginalUnmatchedIgnoreUnmonitored(unmatchedIgnoreUnmonitored)
-        setOriginalUnmatchedTmdbApiKey(unmatchedTmdbApiKey.trim())
       }
 
       if (activeTab === 'rename') {
@@ -233,7 +222,6 @@ export const usePosterManagerLibraries = ({
     setUnmatchedIgnoreRootFoldersText(originalUnmatchedIgnoreRootFolders.join(', '))
     setUnmatchedIgnoreCollectionsText(originalUnmatchedIgnoreCollections.join(', '))
     setUnmatchedIgnoreUnmonitored(originalUnmatchedIgnoreUnmonitored)
-    setUnmatchedTmdbApiKey(originalUnmatchedTmdbApiKey)
     setHasUnsavedLibraryChanges(false)
   }
 
@@ -243,14 +231,12 @@ export const usePosterManagerLibraries = ({
     unmatchedIgnoreRootFoldersText,
     unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
-    unmatchedTmdbApiKey,
     hasUnsavedUnmatchedSettings,
     fetchLibraryConfigs,
     toggleLibrarySelection,
     setUnmatchedIgnoreRootFoldersText,
     setUnmatchedIgnoreCollectionsText,
     setUnmatchedIgnoreUnmonitored,
-    setUnmatchedTmdbApiKey,
     saveRenameSettings,
     resetLibrarySettingsToOriginal,
   }

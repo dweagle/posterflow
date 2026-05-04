@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Eye, EyeOff, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw } from 'lucide-react'
+import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import IDarrTabs, { IDarrTab } from '../components/IDarr/IDarrTabs'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -24,7 +24,6 @@ import {
   getMakerIdarrLastRun,
   getMakerIdarrPendingMatches,
   importMakerIdarrIgnoredTitles,
-  revealSensitiveSetting,
   replaceMakerIdarrIgnoredTitles,
   runMakerIdarrCacheMaintenance,
   saveMakerIdarrConfig,
@@ -207,8 +206,6 @@ const parseIgnoredTitlesEditorText = (content: string): string[] => {
 }
 
 function IDarr() {
-  const MASKED_VALUE = '***masked***'
-
   type PendingActionConfirm = { type: 'run'; dryRun: boolean } | { type: 'sync' } | { type: 'run_and_sync' } | null
   type MaintenanceActionType = 'revert_last_run' | 'purge_stale' | 'prune_unmatched' | 'clear_pending' | 'clear_all_cache'
   type MaintenanceActionConfirm = {
@@ -237,7 +234,6 @@ function IDarr() {
   const [running, setRunning] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [selectedSyncTargetIndex, setSelectedSyncTargetIndex] = useState(0)
-  const [showTmdbApiKey, setShowTmdbApiKey] = useState(false)
   const [frequencyDaysInput, setFrequencyDaysInput] = useState(String(DEFAULT_IDARR_CONFIG.frequency_days))
   const [tvdbFrequencyInput, setTvdbFrequencyInput] = useState(String(DEFAULT_IDARR_CONFIG.tvdb_frequency))
   const [limitInput, setLimitInput] = useState('')
@@ -660,7 +656,7 @@ function IDarr() {
   const canRun = useMemo(() => {
     const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
     const selectedTarget = syncTargets[selectedSyncTargetIndex]
-    return Boolean(selectedTarget && String(selectedTarget.source_dir || '').trim() && config.tmdb_api_key.trim())
+    return Boolean(selectedTarget && String(selectedTarget.source_dir || '').trim())
   }, [config, selectedSyncTargetIndex])
 
   const canSync = useMemo(() => {
@@ -1324,48 +1320,10 @@ function IDarr() {
           <div className="settings-grid idarr-settings-grid">
             <div className="field-group">
               <label>TMDB API Key</label>
-              <div className="input-with-toggle">
-                <input
-                  type={showTmdbApiKey ? 'text' : 'password'}
-                  value={config.tmdb_api_key}
-                  onChange={(e) => updateConfig('tmdb_api_key', e.target.value)}
-                  placeholder="TMDB API key"
-                />
-                <button
-                  type="button"
-                  className="toggle-visibility"
-                  onClick={async () => {
-                    const willShow = !showTmdbApiKey
-                    if (willShow && config.tmdb_api_key === MASKED_VALUE) {
-                      try {
-                        const response = await revealSensitiveSetting({
-                          setting_key: 'maker_tools_idarr_config',
-                          field: 'tmdb_api_key',
-                        })
-                        const revealedValue = String(response.value || '')
-                        if (!revealedValue) {
-                          showToast('No saved TMDB API key available to reveal', 'error')
-                          return
-                        }
-                        originalConfigRef.current = cloneIdarrConfig({
-                          ...originalConfigRef.current,
-                          tmdb_api_key: revealedValue,
-                        })
-                        updateConfig('tmdb_api_key', revealedValue)
-                      } catch (error) {
-                        showToast(getApiErrorMessage(error, 'Failed to reveal TMDB API key'), 'error')
-                        return
-                      }
-                    }
-                    setShowTmdbApiKey((prev) => !prev)
-                  }}
-                  title={showTmdbApiKey ? 'Hide' : 'Show'}
-                  aria-label={showTmdbApiKey ? 'Hide TMDB API key' : 'Show TMDB API key'}
-                >
-                  {showTmdbApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              <small>Required for TMDB lookups, candidate matching, and metadata enrichment.</small>
+              <p className="setting-description" style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
+                Configured globally in{' '}
+                <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
+              </p>
             </div>
             <div className="field-group">
               <label>Cache Frequency Days</label>

@@ -653,8 +653,8 @@ def _merge_ignored_items(existing_items: list[dict[str, Any]], incoming_items: l
 
 
 def _get_maker_idarr_tmdb_key(db: Session) -> str:
-    config = load_runtime_config(db)
-    return str(config.tmdb_api_key or "").strip()
+    setting = get_setting(db, "tmdb_api_key")
+    return str(setting.value or "").strip() if setting else ""
 
 
 def load_runtime_config(db: Session) -> MakerIdarrConfig:

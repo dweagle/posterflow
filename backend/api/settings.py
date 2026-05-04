@@ -26,6 +26,7 @@ SENSITIVE_PLAIN_KEYS: set[str] = {
     "google_client_secret",
     "google_token",
     "discord_notifications_webhook_url",
+    "tmdb_api_key",
     # App password – hash and salt must never leave the backend
     "app_password_hash",
     "app_password_salt",
@@ -37,7 +38,6 @@ SENSITIVE_JSON_KEYS: Dict[str, List[str]] = {
     "plex_instances": ["api_key"],
     "radarr_instances": ["api_key"],
     "sonarr_instances": ["api_key"],
-    "maker_tools_idarr_config": ["tmdb_api_key"],
     "maker_tools_monitor_config": ["tmdb_api_key"],
 }
 
@@ -72,7 +72,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "unmatched_ignore_root_folders",
     "unmatched_ignore_collections",
     "unmatched_ignore_unmonitored",
-    "unmatched_tmdb_api_key",
+    "tmdb_api_key",
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",

@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { 
   Drive,
-  PosterConfig
+  PosterConfig,
+  getSettings,
 } from '../api/client'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
@@ -48,6 +49,7 @@ function PosterManager() {
   })
   const [config, setConfig] = useState<PosterConfig | null>(null)
   const [showUnmatchedModal, setShowUnmatchedModal] = useState<UnmatchedModalType>(null)
+  const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   const [drives, setDrives] = useState<Drive[]>([])
   const [renaming, setRenaming] = useState(false)
   const [detectingUnmatched, setDetectingUnmatched] = useState(false)
@@ -174,14 +176,12 @@ function PosterManager() {
     unmatchedIgnoreRootFoldersText,
     unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
-    unmatchedTmdbApiKey,
     hasUnsavedUnmatchedSettings,
     fetchLibraryConfigs,
     toggleLibrarySelection,
     setUnmatchedIgnoreRootFoldersText,
     setUnmatchedIgnoreCollectionsText,
     setUnmatchedIgnoreUnmonitored,
-    setUnmatchedTmdbApiKey,
     saveRenameSettings,
     resetLibrarySettingsToOriginal,
   } = usePosterManagerLibraries({
@@ -193,6 +193,15 @@ function PosterManager() {
     setHasUnsavedBorderChanges,
     showToast,
   })
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        const key = (s.tmdb_api_key || '').trim()
+        setTmdbApiKeyConfigured(key.length > 0)
+      })
+      .catch(() => {})
+  }, [])
 
   const {
     showUnsavedModal,
@@ -384,12 +393,10 @@ function PosterManager() {
           unmatchedIgnoreRootFoldersText={unmatchedIgnoreRootFoldersText}
           unmatchedIgnoreCollectionsText={unmatchedIgnoreCollectionsText}
           unmatchedIgnoreUnmonitored={unmatchedIgnoreUnmonitored}
-          unmatchedTmdbApiKey={unmatchedTmdbApiKey}
           hasUnsavedUnmatchedSettings={hasUnsavedUnmatchedSettings}
           onSetUnmatchedIgnoreRootFoldersText={setUnmatchedIgnoreRootFoldersText}
           onSetUnmatchedIgnoreCollectionsText={setUnmatchedIgnoreCollectionsText}
           onSetUnmatchedIgnoreUnmonitored={setUnmatchedIgnoreUnmonitored}
-          onSetUnmatchedTmdbApiKey={setUnmatchedTmdbApiKey}
           onOpenModal={setShowUnmatchedModal}
         />
       )}
@@ -399,7 +406,7 @@ function PosterManager() {
           modalType={showUnmatchedModal}
           unmatchedStats={unmatchedStats}
           modalDisplayLimit={MODAL_DISPLAY_LIMIT}
-          tmdbApiKeyConfigured={!!unmatchedTmdbApiKey.trim()}
+          tmdbApiKeyConfigured={tmdbApiKeyConfigured}
           onClose={() => setShowUnmatchedModal(null)}
           onDownloadList={downloadUnmatchedList}
         />
