@@ -353,14 +353,26 @@ class UnmatchedAssetsService:
                          source_dirs=source_dirs, error=str(e))
                 if progress_callback:
                     progress_callback("error", 0, 100, f"Scan failed: {e}")
-                return self._empty_result()
+                empty = self._empty_result()
+                try:
+                    self._save_results(empty["summary"], empty["unmatched"])
+                except Exception:
+                    pass
+                return empty
             
             scan_time = time.time() - scan_start
 
             if not assets_dict:
-                log_warning(LogTags.UNMATCHED, "No assets found in source directories", 
+                log_warning(LogTags.UNMATCHED, "No assets found in source directories — destination folder is empty or missing", 
                           source_dirs=source_dirs)
-                return self._empty_result()
+                empty = self._empty_result()
+                try:
+                    self._save_results(empty["summary"], empty["unmatched"])
+                except Exception:
+                    pass
+                if progress_callback:
+                    progress_callback("completed", 100, 100, "No poster assets found in destination folder")
+                return empty
 
             # assets_dict is a list of asset dictionaries, not a dict
             total_assets = len(assets_dict)

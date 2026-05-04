@@ -80,9 +80,10 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
             // Detect transition to completed status
             // Watch for both standalone "Unmatched Detection" and "Poster Workflow" (which may include unmatched detection)
             if ((job.job_type === 'Unmatched Detection' || job.job_type === 'Poster Workflow') && 
-                job.status === 'completed' && 
-                previousStatus !== 'completed') {
-              // Refresh stats when unmatched detection completes (standalone or as part of workflow)
+                (job.status === 'completed' || job.status === 'failed') && 
+                previousStatus !== job.status) {
+              // Refresh stats when unmatched detection finishes (success or failure)
+              // so the UI never shows stale cached data after a failed run
               refreshStats()
             }
 

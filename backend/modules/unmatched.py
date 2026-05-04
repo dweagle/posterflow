@@ -84,6 +84,16 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
 
         from pathlib import Path
         if not Path(destination_dir).exists():
+            # Clear stale cached stats so the UI reflects reality (empty/gone folder)
+            # instead of showing data from the last successful run
+            try:
+                unmatched_service = UnmatchedAssetsService(db)
+                empty = unmatched_service._empty_result()
+                upsert_setting(db, "poster_unmatched_stats", json.dumps(empty))
+                db.commit()
+                log_warning(LogTags.UNMATCHED, "Cleared stale unmatched stats cache — destination folder no longer exists")
+            except Exception as clear_err:
+                log_warning(LogTags.UNMATCHED, f"Could not clear stale stats cache: {clear_err}")
             raise Exception(f"Destination directory does not exist: {destination_dir}. Run 'Rename Posters' first to create organized posters.")
 
         update_job_state(db, job, message="Fetching media from instances...", progress=8)

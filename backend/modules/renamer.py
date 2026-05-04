@@ -223,6 +223,8 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
 
         skip_border_post_processing = bool(config_data.get("skip_border_post_processing", False))
 
+        border_ran_successfully = False
+
         if not skip_border_post_processing and auto_run_border_enabled:
             try:
                 log_section_start(LogTags.BORDER_REPLACER, "Auto-Running Border Replacer")
@@ -296,10 +298,11 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                             changed=changed,
                             skipped=skipped
                         )
+                        border_ran_successfully = True
                     else:
                         log_warning(
                             LogTags.BORDER_REPLACER,
-                            f"Auto-run completed with warnings: {border_result.get('error', 'Unknown error')}"
+                            f"Auto-run completed with warnings: {border_result.get('error', 'Unknown error')} — falling back to plain copy"
                         )
                 else:
                     log_warning(LogTags.BORDER_REPLACER, f"Tmp directory not found: {source_dir}")
@@ -307,17 +310,24 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
             except Exception as e:
                 log_error(
                     LogTags.BORDER_REPLACER,
-                    f"Auto-run border replacer failed: {e}\n{traceback.format_exc()}",
+                    f"Auto-run border replacer failed: {e}\n{traceback.format_exc()} — falling back to plain copy",
                     error=str(e)
                 )
-        elif not skip_border_post_processing:
+
+        # Copy from tmp/ to final destination when:
+        #   - Border replacer is disabled (normal no-border path)
+        #   - Border replacer was enabled but failed (fallback to ensure files always land in destination)
+        if not skip_border_post_processing and not border_ran_successfully:
             if not config_data.get("dry_run", False):
                 try:
                     import filecmp
                     tmp_dir = os.path.join(dest_dir, "tmp")
 
                     if os.path.exists(tmp_dir):
-                        log_info(LogTags.POSTER_RENAMER, "Border replacer disabled - copying changed files to final destination")
+                        if auto_run_border_enabled:
+                            log_info(LogTags.POSTER_RENAMER, "Border replacer failed — falling back to plain copy from tmp/ to final destination")
+                        else:
+                            log_info(LogTags.POSTER_RENAMER, "Border replacer disabled - copying changed files to final destination")
                         update_job_state(db, job, message="Copying files to final destination...")
 
                         copied_count = 0

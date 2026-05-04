@@ -764,9 +764,18 @@ class PosterRenameService:
             
             # Create destination directory if it doesn't exist
             if not os.path.exists(actual_destination):
+                # When using tmp/ staging, the parent (destination_dir) must already exist.
+                # We cannot create a volume mount point — that must be configured in Docker.
+                if use_temp_folder:
+                    parent_dir = destination_dir
+                    if not os.path.exists(parent_dir):
+                        raise FileNotFoundError(
+                            f"Destination directory does not exist: {parent_dir}\n"
+                            "Please ensure the destination folder is created and mounted correctly in Docker."
+                        )
                 log_info(LogTags.POSTER_RENAMER, f"Creating destination directory: {actual_destination}")
                 if not dry_run:
-                    os.makedirs(actual_destination)
+                    os.makedirs(actual_destination, exist_ok=True)
             
             if dry_run:
                 log_info(LogTags.POSTER_RENAMER, "DRY RUN - NO CHANGES WILL BE MADE")
