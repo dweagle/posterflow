@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-05
+### Added
+- Poster Manager Workflow: new **Upload to Plex** step (step 4) — automatically uploads changed posters to Plex after sync, rename, and border replacement complete. Uses hash-based change detection so only new or updated posters are uploaded. Disabled by default.
+- Poster Manager Workflow: Plex Upload step now runs before Detect Unmatched Assets (order: Sync → Rename → Border Replacer → Upload to Plex → Detect Unmatched)
+- Discord Notifications: new **mention** and **webhook URL** configuration options per notification type, allowing different webhooks and role/user pings for different events
+- Settings → Maintenance: database cleanup now shows detailed reasons for each orphaned record, making it easier to understand what will be removed before confirming
+- Maker Tools: added description for the **Enable New Releases** discovery option
+
+### Fixed
+- IDarr: sidebar pending count now updates correctly after items are resolved
+- Sidebar: release notes display and version tracking improvements — changelog is fetched from the backend and the "what's new" badge is cleared after viewing
+
 ## [0.2.5] - 2026-05-04
 ### Changed
 - Priority tab: style usage stats now treat the first MM2K or CL2K drive in the priority list as the preferred style, so a custom drive at the top of the list no longer hijacks the preferred/fallback framing
