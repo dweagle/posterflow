@@ -217,6 +217,7 @@ function IDarr() {
   } | null
 
   const navigate = useNavigate()
+  const { jobs: wsJobs, refreshIdarrPendingCount } = useUnmatched()
   const [activeTab, setActiveTab] = useState<IDarrTab>(() => {
     const savedTab = localStorage.getItem(IDARR_TAB_STORAGE_KEY)
     if (savedTab && isIDarrTab(savedTab)) {
@@ -431,6 +432,7 @@ function IDarr() {
       const response = await getMakerIdarrPendingMatches(requestedIndex)
       const items = response.items || []
       setPendingItems(items)
+      void refreshIdarrPendingCount()
       return items
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load pending matches'), 'error')
@@ -582,7 +584,6 @@ function IDarr() {
   }, [])
 
   // Auto-refresh pending matches when an IDarr job completes
-  const { jobs: wsJobs, refreshIdarrPendingCount } = useUnmatched()
   const lastIdarrJobStatusRef = useRef<{ [key: number]: string }>({})
   useEffect(() => {
     wsJobs.forEach((job) => {
