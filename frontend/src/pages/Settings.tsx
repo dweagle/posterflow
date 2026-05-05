@@ -883,6 +883,9 @@ function Settings() {
 
           <div className="notification-webhook-group">
             <label>Discord Webhook URL</label>
+            <p className="notification-global-description">
+              These settings apply globally to all features below. Individual features can override the webhook URL and mention settings independently.
+            </p>
             <div className="notification-webhook-row">
               <div className="input-with-toggle">
                 <input
@@ -944,6 +947,8 @@ function Settings() {
               </div>
             )}
           </div>
+
+          <div className="notification-section-divider" />
 
           <div className="notification-feature-list">
             {DISCORD_NOTIFICATION_FEATURE_ORDER.map((featureKey) => {

@@ -251,7 +251,7 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
         "poster_renamer": ["POSTER_RENAMER", "SCANNER", "ARR"],
         "border_replacer": ["BORDER_REPLACER"],
         "unmatched_assets": ["UNMATCHED", "SCANNER", "ARR", "POSTER_RENAMER"],
-        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR"],
+        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR", "UPLOADER"],
         "backup": ["BACKUP"],
         "idarr": ["IDARR", "RCLONE"],
     }
