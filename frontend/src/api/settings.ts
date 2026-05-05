@@ -18,11 +18,18 @@ export interface DiscordNotificationFeatureConfig {
   on_error: boolean
   include_summary: boolean
   include_details: boolean
+  webhook_url?: string
+  mention?: string
+  mention_on_error?: boolean
+  mention_on_success?: boolean
 }
 
 export interface DiscordNotificationConfig {
   enabled: boolean
   webhook_url: string
+  mention?: string
+  mention_on_error?: boolean
+  mention_on_success?: boolean
   features: Record<string, DiscordNotificationFeatureConfig>
 }
 

@@ -150,11 +150,18 @@ const defaultDiscordFeatureConfig = (): DiscordNotificationFeatureConfig => ({
   on_error: true,
   include_summary: true,
   include_details: true,
+  webhook_url: '',
+  mention: '',
+  mention_on_error: true,
+  mention_on_success: false,
 })
 
 const defaultDiscordConfig = (): DiscordNotificationConfig => ({
   enabled: false,
   webhook_url: '',
+  mention: '',
+  mention_on_error: true,
+  mention_on_success: false,
   features: DISCORD_NOTIFICATION_FEATURE_ORDER.reduce<Record<string, DiscordNotificationFeatureConfig>>((accumulator, key) => {
     accumulator[key] = defaultDiscordFeatureConfig()
     return accumulator
@@ -169,6 +176,9 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
 
   normalized.enabled = !!config.enabled
   normalized.webhook_url = config.webhook_url || ''
+  normalized.mention = config.mention ?? ''
+  normalized.mention_on_error = config.mention_on_error ?? true
+  normalized.mention_on_success = config.mention_on_success ?? false
 
   if (config.features) {
     DISCORD_NOTIFICATION_FEATURE_ORDER.forEach((key) => {
@@ -183,6 +193,10 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
         on_error: candidate.on_error ?? defaults.on_error,
         include_summary: candidate.include_summary ?? defaults.include_summary,
         include_details: candidate.include_details ?? defaults.include_details,
+        webhook_url: candidate.webhook_url ?? '',
+        mention: candidate.mention ?? '',
+        mention_on_error: candidate.mention_on_error ?? true,
+        mention_on_success: candidate.mention_on_success ?? false,
       }
     })
   }
@@ -214,6 +228,7 @@ function Settings() {
   const [hasUnsavedNotifications, setHasUnsavedNotifications] = useState(false)
   const [testingDiscord, setTestingDiscord] = useState(false)
   const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
+  const [showFeatureWebhooks, setShowFeatureWebhooks] = useState<Record<string, boolean>>({})
   const [showTmdbKey, setShowTmdbKey] = useState(false)
 
   const handleToggleTmdbKeyVisibility = async () => {
@@ -688,6 +703,52 @@ function Settings() {
     setShowDiscordWebhook((prev) => !prev)
   }
 
+  const handleToggleFeatureWebhookVisibility = async (featureKey: string) => {
+    const isCurrentlyShown = showFeatureWebhooks[featureKey]
+    const willShow = !isCurrentlyShown
+    const currentWebhook = discordConfig.features[featureKey]?.webhook_url ?? ''
+
+    if (willShow && currentWebhook === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({
+          setting_key: 'discord_notifications_features',
+          field: 'webhook_url',
+          instance_name: featureKey,
+        })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast(`No saved webhook URL for ${featureKey}`, 'error')
+          return
+        }
+        discordBaselineRef.current = normalizeDiscordConfig({
+          ...discordBaselineRef.current,
+          features: {
+            ...discordBaselineRef.current.features,
+            [featureKey]: {
+              ...discordBaselineRef.current.features[featureKey],
+              webhook_url: revealedValue,
+            },
+          },
+        })
+        setDiscordConfig((prev) => ({
+          ...prev,
+          features: {
+            ...prev.features,
+            [featureKey]: {
+              ...prev.features[featureKey],
+              webhook_url: revealedValue,
+            },
+          },
+        }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal feature webhook URL'), 'error')
+        return
+      }
+    }
+
+    setShowFeatureWebhooks((prev) => ({ ...prev, [featureKey]: !prev[featureKey] }))
+  }
+
   return (
     <div className={`page-container settings ${toggleAnimationsEnabled ? 'toggle-animations-enabled' : ''}`}>
       <div className="settings-title-row">
@@ -781,10 +842,21 @@ function Settings() {
       {activeTab === 'notifications' && (
         <div className="settings-section">
           <div className="settings-section-header">
-            <h2>Discord Notifications</h2>
-            <p className="setting-description">
-              Configure one Discord webhook and choose which PosterFlow areas send notifications.
-            </p>
+            <div>
+              <h2>Discord Notifications</h2>
+              <p className="setting-description">
+                Configure one Discord webhook and choose which PosterFlow areas send notifications.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`btn-save ${hasUnsavedNotifications ? 'btn-unsaved' : ''}`}
+              onClick={handleSaveDiscordNotifications}
+              disabled={saving || !hasUnsavedNotifications}
+              title={hasUnsavedNotifications ? 'Save changes' : 'No changes to save'}
+            >
+              {saving ? 'Saving...' : 'Save Notification Settings'}
+            </button>
           </div>
 
           <div className="setting-item">
@@ -843,52 +915,157 @@ function Settings() {
             </div>
           </div>
 
+          <div className="notification-global-mention">
+            <label>Global Ping Target</label>
+            <input
+              type="text"
+              value={discordConfig.mention ?? ''}
+              onChange={(event) => setDiscordConfig((prev) => ({ ...prev, mention: event.target.value }))}
+              placeholder="@here, @everyone, <@USER_ID>, <@&ROLE_ID> — applies to all features without their own target"
+            />
+            {(discordConfig.mention ?? '').trim() && (
+              <div className="notification-mention-triggers">
+                <label className="notification-mention-trigger-label">
+                  <input
+                    type="checkbox"
+                    checked={discordConfig.mention_on_error ?? true}
+                    onChange={(event) => setDiscordConfig((prev) => ({ ...prev, mention_on_error: event.target.checked }))}
+                  />
+                  Ping on error
+                </label>
+                <label className="notification-mention-trigger-label">
+                  <input
+                    type="checkbox"
+                    checked={discordConfig.mention_on_success ?? false}
+                    onChange={(event) => setDiscordConfig((prev) => ({ ...prev, mention_on_success: event.target.checked }))}
+                  />
+                  Ping on success
+                </label>
+              </div>
+            )}
+          </div>
+
           <div className="notification-feature-list">
             {DISCORD_NOTIFICATION_FEATURE_ORDER.map((featureKey) => {
               const feature = discordConfig.features[featureKey]
+              const featureWebhookVisible = showFeatureWebhooks[featureKey] ?? false
+              const featureWebhookValue = feature?.webhook_url ?? ''
               return (
-                <div className="setting-item" key={featureKey}>
-                  <div className="setting-info">
-                    <label>{DISCORD_NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
+                <div className="notification-feature-item" key={featureKey}>
+                  <div className="setting-item">
+                    <div className="setting-info">
+                      <label>{DISCORD_NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
+                    </div>
+                    <div className="setting-control">
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={feature.enabled}
+                          onChange={(event) => setDiscordConfig((prev) => ({
+                            ...prev,
+                            features: {
+                              ...prev.features,
+                              [featureKey]: {
+                                ...prev.features[featureKey],
+                                enabled: event.target.checked,
+                                on_success: true,
+                                on_error: true,
+                                include_summary: true,
+                                include_details: true,
+                              },
+                            },
+                          }))}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
                   </div>
-                  <div className="setting-control">
-                    <label className="toggle-switch">
+                  <div className="notification-feature-webhook">
+                    <div className="input-with-toggle">
                       <input
-                        type="checkbox"
-                        checked={feature.enabled}
+                        type={featureWebhookVisible ? 'text' : 'password'}
+                        value={featureWebhookValue}
                         onChange={(event) => setDiscordConfig((prev) => ({
                           ...prev,
                           features: {
                             ...prev.features,
                             [featureKey]: {
                               ...prev.features[featureKey],
-                              enabled: event.target.checked,
-                              on_success: true,
-                              on_error: true,
-                              include_summary: true,
-                              include_details: true,
+                              webhook_url: event.target.value,
                             },
                           },
                         }))}
+                        placeholder="Override webhook URL (optional)"
                       />
-                      <span className="toggle-slider"></span>
-                    </label>
+                      <button
+                        type="button"
+                        className="toggle-visibility"
+                        onClick={() => handleToggleFeatureWebhookVisibility(featureKey)}
+                        title={featureWebhookVisible ? 'Hide' : 'Show'}
+                        aria-label={featureWebhookVisible ? 'Hide feature webhook URL' : 'Show feature webhook URL'}
+                      >
+                        {featureWebhookVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="notification-feature-mention">
+                    <input
+                      type="text"
+                      value={feature?.mention ?? ''}
+                      onChange={(event) => setDiscordConfig((prev) => ({
+                        ...prev,
+                        features: {
+                          ...prev.features,
+                          [featureKey]: {
+                            ...prev.features[featureKey],
+                            mention: event.target.value,
+                          },
+                        },
+                      }))}
+                      placeholder="Ping target: @here, @everyone, <@USER_ID>, <@&ROLE_ID>"
+                    />
+                    {(feature?.mention ?? '').trim() && (
+                      <div className="notification-mention-triggers">
+                        <label className="notification-mention-trigger-label">
+                          <input
+                            type="checkbox"
+                            checked={feature?.mention_on_error ?? true}
+                            onChange={(event) => setDiscordConfig((prev) => ({
+                              ...prev,
+                              features: {
+                                ...prev.features,
+                                [featureKey]: {
+                                  ...prev.features[featureKey],
+                                  mention_on_error: event.target.checked,
+                                },
+                              },
+                            }))}
+                          />
+                          Ping on error
+                        </label>
+                        <label className="notification-mention-trigger-label">
+                          <input
+                            type="checkbox"
+                            checked={feature?.mention_on_success ?? false}
+                            onChange={(event) => setDiscordConfig((prev) => ({
+                              ...prev,
+                              features: {
+                                ...prev.features,
+                                [featureKey]: {
+                                  ...prev.features[featureKey],
+                                  mention_on_success: event.target.checked,
+                                },
+                              },
+                            }))}
+                          />
+                          Ping on success
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
             })}
-          </div>
-
-          <div className="notification-actions">
-            <button
-              type="button"
-              className={`btn-save ${hasUnsavedNotifications ? 'btn-unsaved' : ''}`}
-              onClick={handleSaveDiscordNotifications}
-              disabled={saving || !hasUnsavedNotifications}
-              title={hasUnsavedNotifications ? 'Save changes' : 'No changes to save'}
-            >
-              {saving ? 'Saving...' : 'Save Notification Settings'}
-            </button>
           </div>
         </div>
       )}

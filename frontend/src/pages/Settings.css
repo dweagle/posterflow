@@ -50,6 +50,14 @@
 
 .settings-section-header {
   margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.settings-section-header > div {
+  flex: 1;
 }
 
 .settings-section h2 {
@@ -170,24 +178,25 @@
 }
 
 .notification-webhook-group {
-  margin: 1rem 0 1.5rem;
+  margin: 0.5rem 0 0.75rem;
 }
 
 .notification-webhook-group label {
   display: block;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
   color: #fff;
   font-weight: 500;
+  font-size: 0.9rem;
 }
 
 .notification-webhook-group input {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem;
   background-color: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 6px;
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 .notification-webhook-group input:focus {
@@ -246,7 +255,133 @@
 }
 
 .notification-feature-list {
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.notification-global-mention {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.notification-global-mention label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.notification-global-mention input[type="text"] {
+  width: 100%;
+  max-width: 560px;
+  height: 32px;
+  padding: 0 0.75rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+}
+
+.notification-global-mention input[type="text"]::placeholder {
+  color: #555;
+  font-style: italic;
+}
+
+.notification-global-mention input[type="text"]:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.notification-global-mention .notification-mention-triggers {
+  margin-top: 0.35rem;
+}
+
+.notification-feature-item {
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.notification-feature-item:last-child {
+  border-bottom: none;
+}
+
+.notification-feature-item .setting-item {
+  border-bottom: none;
+  padding: 0.4rem 0 0.2rem;
+}
+
+.notification-feature-item .setting-info label {
+  font-size: 0.875rem;
+  margin-bottom: 0;
+}
+
+.notification-feature-webhook {
+  padding: 0 0 0.4rem 0;
+}
+
+.notification-feature-webhook .input-with-toggle {
+  max-width: 480px;
+}
+
+.notification-feature-webhook input {
+  font-size: 0.8rem;
+  height: 28px;
+  color: #aaa;
+}
+
+.notification-feature-webhook input::placeholder {
+  color: #555;
+  font-style: italic;
+}
+
+.notification-feature-webhook .toggle-visibility {
+  height: 28px;
+}
+
+.notification-feature-mention {
+  padding: 0 0 0.5rem 0;
+}
+
+.notification-feature-mention input[type="text"] {
+  width: 100%;
+  max-width: 480px;
+  height: 28px;
+  padding: 0 0.6rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 0.8rem;
+}
+
+.notification-feature-mention input[type="text"]::placeholder {
+  color: #555;
+  font-style: italic;
+}
+
+.notification-feature-mention input[type="text"]:focus {
+  outline: none;
+  border-color: #64b5f6;
+  color: #fff;
+}
+
+.notification-mention-triggers {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: 0.3rem;
+}
+
+.notification-mention-trigger-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #888;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.notification-mention-trigger-label input[type="checkbox"] {
+  accent-color: #64b5f6;
+  cursor: pointer;
 }
 
 .notification-feature-card {
@@ -289,7 +424,7 @@
 }
 
 .notification-actions {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   display: flex;
   gap: 0.75rem;
   justify-content: flex-end;
@@ -748,7 +883,7 @@
 }
 
 .btn-save {
-  padding: 0.875rem 1.5rem;
+  padding: 0.75rem 1.5rem;
   background-color: #4caf50;
   color: #fff;
   border: none;
@@ -1151,10 +1286,20 @@
   min-width: fit-content;
   max-width: max-content;
   width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.settings .btn-secondary:hover {
+.settings .btn-secondary:hover:not(:disabled) {
   background: #333;
+}
+
+.settings .btn-secondary:disabled {
+  background: #2a2a2a;
+  color: #666;
+  cursor: not-allowed;
+  border-color: #333;
 }
 
 /* Icon spacing inside buttons */

@@ -39,6 +39,7 @@ SENSITIVE_JSON_KEYS: Dict[str, List[str]] = {
     "radarr_instances": ["api_key"],
     "sonarr_instances": ["api_key"],
     "maker_tools_monitor_config": ["tmdb_api_key"],
+    "discord_notifications_features": ["webhook_url"],
 }
 
 NON_REVEALABLE_KEYS: set[str] = {
@@ -211,11 +212,18 @@ class DiscordNotificationFeatureConfig(BaseModel):
     on_error: bool = True
     include_summary: bool = True
     include_details: bool = True
+    webhook_url: str = ""
+    mention: str = ""
+    mention_on_error: bool = True
+    mention_on_success: bool = False
 
 
 class DiscordNotificationConfigRequest(BaseModel):
     enabled: bool = False
     webhook_url: str = ""
+    mention: str = ""
+    mention_on_error: bool = True
+    mention_on_success: bool = False
     features: Dict[str, DiscordNotificationFeatureConfig]
 
 
@@ -271,6 +279,9 @@ async def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict
     enabled_raw = get_setting(db, "discord_notifications_enabled")
     webhook_raw = get_setting(db, "discord_notifications_webhook_url")
     features_raw = get_setting(db, "discord_notifications_features")
+    mention_raw = get_setting(db, "discord_notifications_mention")
+    mention_on_error_raw = get_setting(db, "discord_notifications_mention_on_error")
+    mention_on_success_raw = get_setting(db, "discord_notifications_mention_on_success")
 
     enabled = (
         enabled_raw.value.strip().lower() == "true"
@@ -278,6 +289,17 @@ async def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict
         else False
     )
     webhook_url = webhook_raw.value if webhook_raw and webhook_raw.value else ""
+    mention = mention_raw.value.strip() if mention_raw and mention_raw.value else ""
+    mention_on_error = (
+        mention_on_error_raw.value.strip().lower() != "false"
+        if mention_on_error_raw and mention_on_error_raw.value
+        else True
+    )
+    mention_on_success = (
+        mention_on_success_raw.value.strip().lower() == "true"
+        if mention_on_success_raw and mention_on_success_raw.value
+        else False
+    )
 
     features: Dict[str, Any] | None = None
     if features_raw and features_raw.value:
@@ -291,7 +313,16 @@ async def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict
     return {
         "enabled": enabled,
         "webhook_url": MASKED_VALUE if webhook_url else webhook_url,
-        "features": _normalize_discord_features(features),
+        "mention": mention,
+        "mention_on_error": mention_on_error,
+        "mention_on_success": mention_on_success,
+        "features": {
+            fkey: {
+                **fval,
+                "webhook_url": MASKED_VALUE if fval.get("webhook_url") else fval.get("webhook_url", ""),
+            }
+            for fkey, fval in _normalize_discord_features(features).items()
+        },
     }
 
 
@@ -316,8 +347,35 @@ async def save_discord_notification_config(
 
     features = _normalize_discord_features(payload.features)
 
+    # Restore masked per-feature webhook URLs from the database
+    existing_features_setting = get_setting(db, "discord_notifications_features")
+    existing_features: Dict[str, Any] = {}
+    if existing_features_setting and existing_features_setting.value:
+        try:
+            parsed_existing = json.loads(existing_features_setting.value)
+            if isinstance(parsed_existing, dict):
+                existing_features = parsed_existing
+        except json.JSONDecodeError:
+            pass
+
+    for fkey, fval in features.items():
+        fwh = fval.get("webhook_url", "")
+        if fwh == MASKED_VALUE:
+            old_webhook = existing_features.get(fkey, {}).get("webhook_url", "")
+            fval["webhook_url"] = old_webhook
+        elif fwh and not _is_valid_discord_webhook(fwh):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid Discord webhook URL for feature '{fkey}'",
+            )
+        else:
+            fval["webhook_url"] = fwh.strip() if fwh else ""
+
     upsert_setting(db, "discord_notifications_enabled", "true" if payload.enabled else "false")
     upsert_setting(db, "discord_notifications_webhook_url", webhook_url)
+    upsert_setting(db, "discord_notifications_mention", payload.mention.strip())
+    upsert_setting(db, "discord_notifications_mention_on_error", "true" if payload.mention_on_error else "false")
+    upsert_setting(db, "discord_notifications_mention_on_success", "true" if payload.mention_on_success else "false")
     upsert_setting(db, "discord_notifications_features", json.dumps(features))
 
     try:
@@ -442,6 +500,17 @@ async def reveal_sensitive_setting(
             raise HTTPException(status_code=500, detail="Stored setting JSON is invalid")
 
         if isinstance(parsed, dict):
+            # dict-of-dicts: instance_name is used as the sub-key (e.g. feature key)
+            if payload.instance_name:
+                sub_dict = parsed.get(payload.instance_name.strip())
+                if not isinstance(sub_dict, dict):
+                    raise HTTPException(status_code=404, detail="Requested item was not found")
+                return {
+                    "setting_key": setting_key,
+                    "field": field,
+                    "instance_name": payload.instance_name.strip(),
+                    "value": str(sub_dict.get(field) or ""),
+                }
             return {
                 "setting_key": setting_key,
                 "field": field,
