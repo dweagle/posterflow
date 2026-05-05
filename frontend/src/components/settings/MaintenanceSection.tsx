@@ -81,15 +81,32 @@ function MaintenanceSection({
                   </h4>
                   <div className="orphaned-records-table">
                     <div className="orphaned-record-header">
-                      <span>File</span>
-                      <span>Drive</span>
+                      <span>File / Location</span>
+                      <span>Drive / Reason</span>
                     </div>
-                    {orphanedRecords.map((record) => (
-                      <div key={record.id} className="orphaned-record-row">
-                        <span className="orphaned-record-file" title={record.file_path}>{record.file_name}</span>
-                        <span className="orphaned-record-drive">{record.drive_name}</span>
-                      </div>
-                    ))}
+                    {orphanedRecords.map((record) => {
+                      const parentDir = record.file_path
+                        .replace(/\\/g, '/')
+                        .split('/')
+                        .slice(0, -1)
+                        .join('/')
+                      return (
+                        <div key={record.id} className="orphaned-record-row">
+                          <div className="orphaned-record-file-cell">
+                            <span className="orphaned-record-file" title={record.file_path}>{record.file_name}</span>
+                            <span className="orphaned-record-path" title={record.file_path}>{parentDir}</span>
+                          </div>
+                          <div className="orphaned-record-drive-cell">
+                            <span className="orphaned-record-drive">{record.drive_name}</span>
+                            {record.reason && (
+                              <span className={`orphaned-reason-badge orphaned-reason-${record.reason.toLowerCase().replace(/\s+/g, '-')}`}>
+                                {record.reason}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

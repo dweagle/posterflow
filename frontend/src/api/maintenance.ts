@@ -31,6 +31,7 @@ export interface DatabaseStats {
     file_path: string
     drive_id: string
     drive_name: string
+    reason?: string
     downloaded_at: string | null
     last_processed: string | null
   }>
@@ -40,6 +41,7 @@ export interface DatabaseStats {
     file_path: string
     drive_id: string
     drive_name: string
+    reason?: string
     downloaded_at: string | null
     last_processed: string | null
   }>

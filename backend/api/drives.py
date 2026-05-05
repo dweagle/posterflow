@@ -13,6 +13,7 @@ from database import get_db, SessionLocal
 from models.drive import Drive
 from models.job import Job, JOB_STATUS_PENDING
 from models.poster import Poster
+from models.schedule import Schedule
 from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
@@ -431,6 +432,12 @@ async def delete_drive(
     # Delete poster records from database
     poster_count = db.query(Poster).filter(Poster.drive_id == drive.drive_id).count()
     db.query(Poster).filter(Poster.drive_id == drive.drive_id).delete()
+
+    # Delete schedules that target this specific drive (they would fire against a missing drive)
+    schedule_count = db.query(Schedule).filter(Schedule.drive_id == drive.id).count()
+    if schedule_count:
+        db.query(Schedule).filter(Schedule.drive_id == drive.id).delete()
+        log_info(LogTags.DRIVES, f"Deleted {schedule_count} schedule(s) targeting removed drive: {drive_name}")
     
     # Delete files if requested
     files_deleted = False
@@ -453,11 +460,14 @@ async def delete_drive(
         log_msg += " and poster files"
     if removed_from_priority:
         log_msg += " (removed from poster priority)"
+    if schedule_count:
+        log_msg += f" ({schedule_count} schedule(s) removed)"
     log_user_action(log_msg)
     
     return {
         "message": f"Deleted {drive_name}",
         "poster_records_deleted": poster_count,
+        "schedules_deleted": schedule_count,
         "files_deleted": files_deleted
     }
 

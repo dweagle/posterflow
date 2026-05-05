@@ -12,6 +12,7 @@ import os
 from database import get_db
 from models.poster import Poster
 from models.drive import Drive
+from models.schedule import Schedule
 from core.logging import LogTags, log_info, log_success, log_warning, log_user_action
 
 router = APIRouter(prefix="/api/database", tags=["database"])
@@ -31,12 +32,13 @@ async def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> 
     try:
         log_info(LogTags.DATABASE, "Starting cleanup preview...")
         
-        # Build drive id -> name map for friendly labels
+        # Build drive id -> Drive object map for state checks
         drives = db.query(Drive).all()
-        drive_id_to_name = {d.drive_id: d.name for d in drives}
+        drive_id_to_drive: Dict[str, Drive] = {d.drive_id: d for d in drives}
 
-        # Get all poster records
-        all_records = db.query(Poster).all()
+        # Exclude internal tracking records (e.g. border replacer cache entries).
+        # These are not real poster inventory and are managed separately.
+        all_records = db.query(Poster).filter(Poster.drive_id != "border_processed").all()
         
         orphaned = []
         by_drive_name: Dict[str, int] = {}
@@ -44,13 +46,27 @@ async def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> 
         # Check each record
         for poster in all_records:
             if not os.path.exists(poster.file_path):
-                drive_name = drive_id_to_name.get(poster.drive_id, f"Unknown ({poster.drive_id})")
+                drive = drive_id_to_drive.get(poster.drive_id)
+
+                if drive is None:
+                    drive_name = poster.drive_id or "Unknown"
+                    reason = "Drive record missing"
+                elif not drive.subscribed:
+                    drive_name = drive.name
+                    reason = "Drive unsubscribed"
+                elif drive.is_deprecated:
+                    drive_name = drive.name
+                    reason = "Drive deprecated"
+                else:
+                    drive_name = drive.name
+                    reason = "File deleted from disk"
                 orphaned.append({
                     'id': poster.id,
                     'file_name': os.path.basename(poster.file_path),
                     'file_path': poster.file_path,
                     'drive_id': poster.drive_id,
                     'drive_name': drive_name,
+                    'reason': reason,
                     'downloaded_at': poster.downloaded_at.isoformat() if poster.downloaded_at else None,
                     'last_processed': poster.last_processed.isoformat() if poster.last_processed else None
                 })
@@ -108,8 +124,8 @@ async def execute_cleanup(
         log_user_action("Database cleanup requested", confirm=confirm)
         log_info(LogTags.DATABASE, "Starting database cleanup...")
         
-        # Get all poster records
-        all_records = db.query(Poster).all()
+        # Exclude internal tracking records — they are not user poster inventory
+        all_records = db.query(Poster).filter(Poster.drive_id != "border_processed").all()
         
         deleted_ids = []
         deleted_paths = []
@@ -196,6 +212,15 @@ async def database_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         # Check for orphaned records
         all_records = db.query(Poster).all()
         orphaned = sum(1 for p in all_records if not os.path.exists(p.file_path))
+
+        # Check for schedules pointing to deleted drives
+        all_drive_ids = {d.id for d in db.query(Drive.id).all()}
+        dangling_schedules = (
+            db.query(Schedule)
+            .filter(Schedule.drive_id != None)
+            .all()
+        )
+        dangling_schedule_count = sum(1 for s in dangling_schedules if s.drive_id not in all_drive_ids)
         
         return {
             'total_records': total,
@@ -212,7 +237,8 @@ async def database_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
             'health': {
                 'orphaned_records': orphaned,
                 'healthy_records': total - orphaned,
-                'orphan_percentage': round((orphaned / total * 100), 2) if total > 0 else 0
+                'orphan_percentage': round((orphaned / total * 100), 2) if total > 0 else 0,
+                'dangling_schedules': dangling_schedule_count,
             }
         }
         
