@@ -131,6 +131,7 @@ class FlowConfig(BaseModel):
     rename_posters: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
     detect_unmatched: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
     border_replacer: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=True)
+    plex_upload: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=False)
 
 
 class FlowRunRequest(BaseModel):
@@ -809,6 +810,7 @@ async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "rename_posters": {"enabled": True, "stop_on_error": True},
             "detect_unmatched": {"enabled": True, "stop_on_error": True},
             "border_replacer": {"enabled": False, "stop_on_error": True},
+            "plex_upload": {"enabled": False, "stop_on_error": False},
         }
         flow_setting = get_setting(db, SETTING_POSTER_FLOW_CONFIG)
 

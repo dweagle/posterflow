@@ -135,10 +135,32 @@ function FlowTab({
           )}
         </div>
 
-        <div className={`flow-job-card ${!flowConfig.detect_unmatched.enabled ? 'disabled' : ''}`}>
+        <div className={`flow-job-card ${!flowConfig.plex_upload.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
               <span className="job-number">4</span>
+              <span className="job-title">Upload to Plex</span>
+            </div>
+            <label className="toggle-switch">
+              <input type="checkbox" checked={flowConfig.plex_upload.enabled} onChange={(e) => onChangeFlowConfig('plex_upload', 'enabled', e.target.checked)} />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          <p className="job-description">Upload organized posters to your Plex libraries. Automatically re-uploads when a better style poster (e.g. CL2K over MM2K) replaces an existing one.</p>
+          {flowConfig.plex_upload.enabled && (
+            <div className="job-options">
+              <label className="checkbox-option">
+                <input type="checkbox" checked={flowConfig.plex_upload.stop_on_error} onChange={(e) => onChangeFlowConfig('plex_upload', 'stop_on_error', e.target.checked)} />
+                <span>Stop workflow if this step fails</span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        <div className={`flow-job-card ${!flowConfig.detect_unmatched.enabled ? 'disabled' : ''}`}>
+          <div className="job-header">
+            <div className="job-header-left">
+              <span className="job-number">5</span>
               <span className="job-title">Detect Unmatched Assets</span>
             </div>
             <label className="toggle-switch">
