@@ -576,7 +576,10 @@ function MakerTools() {
                       checked={Boolean(modalConfig.enable_discovery)}
                       onChange={(event) => setModalConfig((previous) => ({ ...previous, enable_discovery: event.target.checked }))}
                     />
-                    Enable New Releases discovery
+                    <span>
+                      Enable New Releases discovery
+                      <small className="muted" style={{ display: 'block', marginTop: '2px' }}>Monitor upcoming movie and TV show releases. Adds a tab alongside monitored drives for browsing new and upcoming TMDB titles.</small>
+                    </span>
                   </label>
                 </div>
 
