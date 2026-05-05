@@ -105,23 +105,37 @@ def _get_remote_owner_repo() -> tuple[str, str]:
     return GITHUB_OWNER, GITHUB_REPO_NAME
 
 
-def _get_latest_release(owner: str, repo: str) -> tuple[str, str] | None:
-    """Fetch the tag name and body of the most recent GitHub Release (including pre-releases)."""
+def _get_missed_releases(owner: str, repo: str, since_version: str, limit: int = 10) -> list[dict[str, str]]:
+    """Return up to `limit` releases newer than since_version, ordered newest-first."""
     import json
-    url = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=1"
-    try:
-        with urlopen(url, timeout=6) as response:  # nosec B310 - URL is hardcoded https:// prefix, path segments are quote()-escaped
-            data = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return None
-
-    if not data:
-        return None
-
-    release = data[0]
-    tag = release.get("tag_name", "").lstrip("v")
-    body = release.get("body") or ""
-    return (tag, body) if tag else None
+    results: list[dict[str, str]] = []
+    base_semver = _parse_semver(since_version)
+    page = 1
+    while page <= 3 and len(results) < limit:  # max 3 pages (60 releases) as a safety cap
+        url = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=20&page={page}"
+        try:
+            with urlopen(url, timeout=6) as response:  # nosec B310
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            break
+        if not data:
+            break
+        found_older = False
+        for release in data:
+            tag = release.get("tag_name", "").lstrip("v")
+            if not tag:
+                continue
+            if _parse_semver(tag) > base_semver:
+                results.append({"version": tag, "notes": release.get("body") or ""})
+                if len(results) >= limit:
+                    break
+            else:
+                found_older = True
+                break
+        if found_older or len(results) >= limit:
+            break
+        page += 1
+    return results
 
 
 def _parse_semver(version: str) -> tuple[int, ...]:
@@ -138,6 +152,7 @@ def get_version_update_status() -> dict[str, Any]:
         "current_version": local_full,
         "latest_version": None,
         "update_available": False,
+        "versions_behind": 0,
         "releases_url": None,
         "release_notes": None,
         "repo": None,
@@ -147,11 +162,11 @@ def get_version_update_status() -> dict[str, Any]:
     status["repo"] = f"{owner}/{repo}"
     status["releases_url"] = f"https://github.com/{owner}/{repo}/releases"
 
-    release = _get_latest_release(owner, repo)
-    if not release:
+    missed = _get_missed_releases(owner, repo, APP_BASE_VERSION)
+    if not missed:
         return status
 
-    latest_tag, release_notes = release
+    latest_tag = missed[0]["version"]  # list is newest-first
     status["latest_version"] = latest_tag
 
     local_semver = _parse_semver(APP_BASE_VERSION)
@@ -159,7 +174,16 @@ def get_version_update_status() -> dict[str, Any]:
     status["update_available"] = latest_semver > local_semver
 
     if status["update_available"]:
-        status["release_notes"] = release_notes or None
+        status["versions_behind"] = len(missed)
+        if len(missed) == 1:
+            status["release_notes"] = missed[0]["notes"] or None
+        else:
+            parts: list[str] = []
+            for r in missed:
+                parts.append(f"### v{r['version']}")
+                if r["notes"].strip():
+                    parts.append(r["notes"].strip())
+            status["release_notes"] = "\n\n".join(parts) or None
 
     return status
 

@@ -119,6 +119,20 @@
   margin: 0.15rem 0;
 }
 
+.sidebar-header .release-notes-version-heading {
+  color: #64b5f6;
+  font-weight: 600;
+  margin: 0.5rem 0 0.1rem;
+  border-top: 1px solid #2a2a2a;
+  padding-top: 0.4rem;
+}
+
+.sidebar-header .release-notes-version-heading:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
 .sidebar-nav {
   flex: 1;
   padding: 1rem 0;

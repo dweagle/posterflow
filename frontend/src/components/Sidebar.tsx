@@ -10,6 +10,7 @@ type VersionUpdateStatus = {
   current_version: string
   latest_version: string | null
   update_available: boolean
+  versions_behind: number
   releases_url: string | null
   release_notes: string | null
 }
@@ -19,6 +20,7 @@ function Sidebar() {
   const { unmatchedCount, idarrPendingCount, jobs } = useUnmatched()
   const [version, setVersion] = useState<string>('0.1.0')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
+  const [versionsBehind, setVersionsBehind] = useState<number>(0)
   const [releasesUrl, setReleasesUrl] = useState<string>('')
   const [releaseNotes, setReleaseNotes] = useState<string | null>(null)
   const [showReleaseNotes, setShowReleaseNotes] = useState(false)
@@ -79,9 +81,11 @@ function Sidebar() {
         }
         if (payload.update_available && payload.latest_version) {
           setLatestVersion(payload.latest_version)
+          setVersionsBehind(payload.versions_behind ?? 1)
           setReleaseNotes(payload.release_notes ?? null)
         } else {
           setLatestVersion(null)
+          setVersionsBehind(0)
           setReleaseNotes(null)
         }
         if (payload.releases_url) {
@@ -130,12 +134,16 @@ function Sidebar() {
                 {showReleaseNotes && (
                   <div className="release-notes-popover">
                     <div className="release-notes-header">
-                      <span>What's New in {latestVersion}</span>
+                      <span>{versionsBehind > 1 ? `${versionsBehind} versions behind` : `What's New in ${latestVersion}`}</span>
                       <a href={releasesUrl} target="_blank" rel="noopener noreferrer">View on GitHub</a>
                     </div>
                     <div className="release-notes-body">
                       {releaseNotes
-                        ? releaseNotes.split('\n').map((line, i) => <p key={i}>{line}</p>)
+                        ? releaseNotes.split('\n').map((line, i) =>
+                            line.startsWith('### ')
+                              ? <p key={i} className="release-notes-version-heading">{line.slice(4)}</p>
+                              : line.trim() ? <p key={i}>{line}</p> : null
+                          )
                         : <p>See GitHub releases for details.</p>
                       }
                     </div>
