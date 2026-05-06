@@ -22,6 +22,7 @@ interface FormData {
   google_client_secret: string
   google_refresh_token: string
   google_service_account_file: string
+  tmdb_api_key: string
   poster_destination: string
   gdrive_storage_path: string
   plex_instances: ServerInstance[]
@@ -49,6 +50,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showClientId, setShowClientId] = useState(false)
   const [showClientSecret, setShowClientSecret] = useState(false)
   const [showRefreshToken, setShowRefreshToken] = useState(false)
+  const [showTmdbKey, setShowTmdbKey] = useState(false)
 
   const MASKED_VALUE = '***masked***'
 
@@ -89,6 +91,26 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     setShowRefreshToken((prev) => !prev)
   }
+
+  const handleToggleTmdbKeyVisibility = async () => {
+    const willShow = !showTmdbKey
+    if (willShow && formData.tmdb_api_key === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'tmdb_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved TMDB API key available to reveal', 'error')
+          return
+        }
+        setFormData((prev) => ({ ...prev, tmdb_api_key: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal TMDB API key'), 'error')
+        return
+      }
+    }
+    setShowTmdbKey((prev) => !prev)
+  }
+
   const [showPlexTokens, setShowPlexTokens] = useState<Record<number, boolean>>({})
   const [showSonarrKeys, setShowSonarrKeys] = useState<Record<number, boolean>>({})
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
@@ -100,6 +122,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     google_client_secret: '',
     google_refresh_token: '',
     google_service_account_file: '',
+    tmdb_api_key: '',
     poster_destination: '',
     gdrive_storage_path: '',
     plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
@@ -117,6 +140,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           google_client_secret: settings.google_client_secret || '',
           google_refresh_token: settings.google_token || settings.google_refresh_token || '',
           google_service_account_file: settings.google_service_account_file || '',
+          tmdb_api_key: settings.tmdb_api_key || '',
           poster_destination: settings.poster_destination || '',
           gdrive_storage_path: settings.gdrive_storage_path || '',
           plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
@@ -368,9 +392,25 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleSaveStep4 = async () => {
     setIsSaving(true)
     try {
+      const keyToSave = formData.tmdb_api_key.trim() === MASKED_VALUE ? '' : formData.tmdb_api_key.trim()
+      if (keyToSave) {
+        await saveSettings({ tmdb_api_key: keyToSave })
+      }
+      setStep(5)
+    } catch (error) {
+      console.error('Error saving settings:', error)
+      showToast('Error saving settings. Please try again.', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveStep5 = async () => {
+    setIsSaving(true)
+    try {
       const posterDestination = formData.poster_destination.trim() || DEFAULT_POSTER_DESTINATION
       await saveSettings({ poster_destination: posterDestination })
-      setStep(5)
+      setStep(6)
     } catch (error) {
       console.error('Error saving settings:', error)
       showToast('Error saving settings. Please try again.', 'error')
@@ -439,8 +479,9 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className={`step ${step === 1 ? 'active' : ''}`}><span className="step-number">1</span><span className="step-label">Google Drive</span></div>
                 <div className={`step ${step === 2 ? 'active' : ''}`}><span className="step-number">2</span><span className="step-label">Storage</span></div>
                 <div className={`step ${step === 3 ? 'active' : ''}`}><span className="step-number">3</span><span className="step-label">Media Servers</span></div>
-                <div className={`step ${step === 4 ? 'active' : ''}`}><span className="step-number">4</span><span className="step-label">Destination</span></div>
-                <div className={`step ${step === 5 ? 'active' : ''}`}><span className="step-number">5</span><span className="step-label">Finish</span></div>
+                <div className={`step ${step === 4 ? 'active' : ''}`}><span className="step-number">4</span><span className="step-label">TMDB</span></div>
+                <div className={`step ${step === 5 ? 'active' : ''}`}><span className="step-number">5</span><span className="step-label">Destination</span></div>
+                <div className={`step ${step === 6 ? 'active' : ''}`}><span className="step-number">6</span><span className="step-label">Finish</span></div>
               </div>
             )}
 
@@ -1100,22 +1141,33 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
           {step === 4 && (
             <div className="form-section">
-              <h2>Destination Folder Setup</h2>
+              <h2>TMDB API Key</h2>
               <p className="section-description">
-                Choose where organized posters will be written on disk.
+                Enter your TMDB API key. This is used for metadata lookups in IDarr, Unmatched Assets, and other features.
               </p>
 
               <div className="form-group">
-                <label>Destination Directory (possibly kometa's asset directory)</label>
-                <input
-                  type="text"
-                  name="poster_destination"
-                  value={formData.poster_destination}
-                  onChange={(e) => updateGoogleCreds('poster_destination', e.target.value)}
-                  placeholder="ex. /kometa/config/assets"
-                />
-                <small>Leave blank to use default: <code>{DEFAULT_POSTER_DESTINATION}</code></small>
-                <small className="destination-warning">⚠️ Where organized and renamed posters will be saved. Must be a mounted volume in your Docker container</small>
+                <label>TMDB API Key</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showTmdbKey ? 'text' : 'password'}
+                    name="tmdb_api_key"
+                    value={formData.tmdb_api_key}
+                    onChange={(e) => updateGoogleCreds('tmdb_api_key', e.target.value)}
+                    placeholder="Enter your TMDB API key"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={handleToggleTmdbKeyVisibility}
+                    title={showTmdbKey ? 'Hide' : 'Show'}
+                  >
+                    {showTmdbKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <small>Get your API key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">themoviedb.org/settings/api</a></small>
+                <small>This step is optional — you can add or update your TMDB key later in Settings.</small>
               </div>
 
               <div className="button-group">
@@ -1136,6 +1188,42 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
           {step === 5 && (
             <div className="form-section">
+              <h2>Destination Folder Setup</h2>
+              <p className="section-description">
+                Choose where organized posters will be written on disk.
+              </p>
+
+              <div className="form-group">
+                <label>Destination Directory (possibly kometa's asset directory)</label>
+                <input
+                  type="text"
+                  name="poster_destination"
+                  value={formData.poster_destination}
+                  onChange={(e) => updateGoogleCreds('poster_destination', e.target.value)}
+                  placeholder="ex. /kometa/config/assets"
+                />
+                <small>Leave blank to use default: <code>{DEFAULT_POSTER_DESTINATION}</code></small>
+                <small className="destination-warning">⚠️ Where organized and renamed posters will be saved. Must be a mounted volume in your Docker container</small>
+              </div>
+
+              <div className="button-group">
+                <button type="button" className="btn-secondary" onClick={() => setStep(4)}>
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleSaveStep5}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save & Continue'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="form-section">
               <h2>Setup Complete</h2>
               <p className="section-description">
                 You're ready to enter PosterFlow. Here are recommended next steps once you open the app:
@@ -1151,7 +1239,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               </ul>
 
               <div className="button-group">
-                <button type="button" className="btn-secondary" onClick={() => setStep(4)}>
+                <button type="button" className="btn-secondary" onClick={() => setStep(5)}>
                   Back
                 </button>
                 <button
