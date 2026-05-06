@@ -182,17 +182,25 @@
   grid-column: 1 / -1;
 }
 
-/* Top row: fixed height so card never grows with content */
+/* Top row: schedule is fixed height and scrolls; poster cards stretch to match */
 .schedule-stat-card {
   grid-row: 1;
   grid-column: 1;
   height: 175px;
 }
 
-.poster-stats-card {
+.poster-drives-card {
   grid-row: 1;
   grid-column: 2;
-  height: 175px;
+  min-width: 0;
+  overflow: visible;
+}
+
+.poster-activity-card {
+  grid-row: 1;
+  grid-column: 3;
+  min-width: 0;
+  overflow: visible;
 }
 
 .active-jobs-header {
@@ -516,26 +524,77 @@
   border: 1px solid rgba(156, 39, 176, 0.32);
 }
 
-/* Compact poster stats for fixed-height card */
-.poster-stats-card h3 {
-  margin-bottom: 0.2rem;
+/* Compact poster stats for fixed-height cards */
+.poster-drives-card h3,
+.poster-activity-card h3 {
+  margin-bottom: 0.55rem;
 }
 
-/* Flat 10-column grid for perfect cross-column row alignment */
-.poster-stats-grid {
+/* Single table grid: badge | drives | posters */
+.poster-stats-table {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  column-gap: 0.5rem;
+  row-gap: 0.28rem;
+  align-items: center;
+}
+
+.pst-col-head {
+  color: #666;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: right;
+}
+
+.pst-total-label {
+  color: #888;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.pst-total-val {
+  color: #64b5f6;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pst-sep {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: #2c2c2c;
+  margin: 0.05rem 0;
+}
+
+.pst-val {
+  color: #ccc;
+  font-size: 0.76rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Badges in the stats table: fixed width so all three are identical */
+.poster-drives-card .stat-badge {
+  font-size: 0.72rem !important;
+  width: 3.6rem;
+  box-sizing: border-box !important;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Activity grid: label | Today | Week | Month */
+.poster-activity-grid {
   display: grid;
   grid-template-columns:
-    auto                 /* badge/section label */
-    minmax(0, 1fr)       /* drives count */
-    2px                  /* divider */
-    auto                 /* badge/section label */
-    minmax(0, 1fr)       /* posters count */
-    2px                  /* divider */
-    minmax(0, 1.2fr)     /* activity label */
-    minmax(0, 1fr)       /* Today */
-    minmax(0, 1fr)       /* Week */
-    minmax(0, 1fr);      /* Month */
-  column-gap: 0.4rem;
+    auto                       /* activity label */
+    minmax(min-content, 1fr)   /* Today */
+    minmax(min-content, 1fr)   /* Week */
+    minmax(min-content, 1fr);  /* Month */
+  column-gap: 0.5rem;
   row-gap: 0.18rem;
   align-items: center;
   flex: 1;
@@ -569,6 +628,7 @@
   font-size: 0.78rem;
   font-weight: 700;
   text-align: right;
+  white-space: nowrap;
 }
 
 .psg-col-head {
@@ -581,6 +641,7 @@
 
 .psg-val {
   color: #ccc;
+  white-space: nowrap;
   font-size: 0.76rem;
   text-align: right;
 }
@@ -1163,11 +1224,11 @@
 
 .dashboard-three-col-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   grid-template-rows: auto auto;
   gap: 1rem;
   margin-bottom: 2rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* ================================================
@@ -1272,13 +1333,41 @@
    Responsive adjustments
    ================================================ */
 
+/* Medium screens: schedule full width on row 1, two poster cards split row 2 */
+@media (max-width: 1100px) {
+  .dashboard-three-col-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .schedule-stat-card {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .poster-drives-card {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .poster-activity-card {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .active-jobs-bar {
+    grid-row: 3;
+  }
+}
+
+/* Small screens: single column, all cards stack */
 @media (max-width: 980px) {
   .dashboard-three-col-grid {
     grid-template-columns: 1fr;
   }
 
   .schedule-stat-card,
-  .poster-stats-card,
+  .poster-drives-card,
+  .poster-activity-card,
   .active-jobs-bar {
     grid-column: 1 !important;
     grid-row: auto !important;

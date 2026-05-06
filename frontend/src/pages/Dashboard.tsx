@@ -725,52 +725,57 @@ function Dashboard() {
           )}
         </div>
 
-        {/* Poster Stats */}
-        <div className="stat-card poster-stats-card">
+        {/* Poster Stats – drives & counts */}
+        <div className="stat-card poster-drives-card">
           <h3>Poster Stats</h3>
-          <div className="poster-stats-grid">
+          <div className="poster-stats-table">
+            {/* Column headers */}
+            <span />
+            <span className="pst-col-head">Drives</span>
+            <span className="pst-col-head">Posters</span>
+            {/* Totals row */}
+            <span className="pst-total-label">Total</span>
+            <span className="pst-total-val">{stats?.drives.subscribed || 0} / {stats?.drives.total || 0}</span>
+            <span className="pst-total-val">{stats?.subscribed_posters || 0}</span>
+            {/* Separator */}
+            <span className="pst-sep" />
+            {/* CL2K */}
+            <span className="stat-badge cl2k">CL2K</span>
+            <span className="pst-val">{driveCountsByType.synced.cl2k} / {driveCountsByType.subscribed.cl2k}</span>
+            <span className="pst-val">{stats?.posters_by_type.cl2k || 0}</span>
+            {/* MM2K */}
+            <span className="stat-badge mm2k">MM2K</span>
+            <span className="pst-val">{driveCountsByType.synced.mm2k} / {driveCountsByType.subscribed.mm2k}</span>
+            <span className="pst-val">{stats?.posters_by_type.mm2k || 0}</span>
+            {/* Custom */}
+            <span className="stat-badge custom">Custom</span>
+            <span className="pst-val">{driveCountsByType.synced.custom} / {driveCountsByType.subscribed.custom}</span>
+            <span className="pst-val">{stats?.posters_by_type.custom || 0}</span>
+          </div>
+        </div>
+
+        {/* Poster Activity – new/replaced/deleted over time */}
+        <div className="stat-card poster-activity-card">
+          <h3>Poster Activity</h3>
+          <div className="poster-activity-grid">
             {/* Header row */}
-            <span className="psg-section-label">Synced Drives</span>
-            <span className="psg-section-total">{stats?.drives.subscribed || 0} / {stats?.drives.total || 0}</span>
-            <span className="psg-divider" />
-            <span className="psg-section-label">Posters</span>
-            <span className="psg-section-total">{stats?.subscribed_posters || 0}</span>
-            <span className="psg-divider" />
             <span />
             <span className="psg-col-head">Today</span>
             <span className="psg-col-head">Week</span>
             <span className="psg-col-head">Month</span>
             {/* Row separator */}
             <span className="psg-row-sep" />
-            {/* CL2K row */}
-            <span><span className="stat-badge cl2k">CL2K</span></span>
-            <span className="psg-val">{driveCountsByType.synced.cl2k} / {driveCountsByType.subscribed.cl2k}</span>
-            <span className="psg-divider" />
-            <span><span className="stat-badge cl2k">CL2K</span></span>
-            <span className="psg-val">{stats?.posters_by_type.cl2k || 0}</span>
-            <span className="psg-divider" />
+            {/* New Synced row */}
             <span className="psg-act-label">New Synced</span>
             <span className="psg-act-val">{activityStats?.synced_new_today ?? '—'}</span>
             <span className="psg-act-val">{activityStats?.synced_new_week ?? '—'}</span>
             <span className="psg-act-val">{activityStats?.synced_new_month ?? '—'}</span>
-            {/* MM2K row */}
-            <span><span className="stat-badge mm2k">MM2K</span></span>
-            <span className="psg-val">{driveCountsByType.synced.mm2k} / {driveCountsByType.subscribed.mm2k}</span>
-            <span className="psg-divider" />
-            <span><span className="stat-badge mm2k">MM2K</span></span>
-            <span className="psg-val">{stats?.posters_by_type.mm2k || 0}</span>
-            <span className="psg-divider" />
+            {/* Replaced row */}
             <span className="psg-act-label">Replaced</span>
             <span className="psg-act-val">{activityStats?.synced_replaced_today ?? '—'}</span>
             <span className="psg-act-val">{activityStats?.synced_replaced_week ?? '—'}</span>
             <span className="psg-act-val">{activityStats?.synced_replaced_month ?? '—'}</span>
-            {/* Custom row */}
-            <span><span className="stat-badge custom">Custom</span></span>
-            <span className="psg-val">{driveCountsByType.synced.custom} / {driveCountsByType.subscribed.custom}</span>
-            <span className="psg-divider" />
-            <span><span className="stat-badge custom">Custom</span></span>
-            <span className="psg-val">{stats?.posters_by_type.custom || 0}</span>
-            <span className="psg-divider" />
+            {/* Deleted row */}
             <span className="psg-act-label">Deleted</span>
             <span className="psg-act-val">{activityStats?.synced_deleted_today ?? '—'}</span>
             <span className="psg-act-val">{activityStats?.synced_deleted_week ?? '—'}</span>
