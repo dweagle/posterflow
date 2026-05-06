@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-05
+### Added
+- Setup Wizard: added a step for entry of TMDB API key during setup.
+
+### Changed
+- Setup Wizard: old steps 4 (Destination) and 5 (Finish) renumbered to 5 and 6 to accommodate the new TMDB step
+- Dashboard: poster stats section refactored for improved readability and layout on narrow/small screens
+- Dashboard: quick actions and poster coverage cards refactored for better layout on small screens
+
 ## [0.2.6] - 2026-05-05
 ### Added
 - Poster Manager Workflow: new **Upload to Plex** step (step 4) — automatically uploads changed posters to Plex after sync, rename, and border replacement complete. Uses hash-based change detection so only new or updated posters are uploaded. Disabled by default.
