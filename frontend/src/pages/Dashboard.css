@@ -13,9 +13,9 @@
 }
 
 .dashboard-header-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .dashboard > p {
@@ -96,7 +96,7 @@
 
 .poster-coverage-card .coverage-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.85rem;
 }
 
@@ -399,6 +399,7 @@
 .quick-action-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   background-color: #5c6882;
@@ -453,7 +454,21 @@
   color: #E8ECEF;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .dashboard-header-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .poster-coverage-card .coverage-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-header-actions {
+    grid-template-columns: 1fr;
+  }
+
   .quick-action-btn {
     padding: 0.4rem 0.75rem;
     font-size: 0.82rem;
