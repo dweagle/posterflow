@@ -43,6 +43,7 @@ def _default_feature_config() -> Dict[str, Any]:
         "mention": "",
         "mention_on_error": True,
         "mention_on_success": False,
+        "mention_on_info": False,
     }
 
 
@@ -243,15 +244,18 @@ def send_discord_notification(
         mention_str = str(feature_config.get("mention") or "").strip()
         mention_on_err = bool(feature_config.get("mention_on_error", True))
         mention_on_ok = bool(feature_config.get("mention_on_success", False))
+        mention_on_info = bool(feature_config.get("mention_on_info", False))
         # Fall back to global mention when the feature has no override
         if not mention_str:
             mention_str = str(config.get("mention") or "").strip()
             mention_on_err = bool(config.get("mention_on_error", True))
             mention_on_ok = bool(config.get("mention_on_success", False))
+            mention_on_info = bool(config.get("mention_on_info", False))
         if mention_str:
             should_mention = (
                 (event_type == "error" and mention_on_err)
                 or (event_type == "success" and mention_on_ok)
+                or (event_type == "info" and mention_on_info)
             )
             if should_mention:
                 content, allowed_mentions = _build_mention_payload(mention_str)
@@ -354,15 +358,18 @@ def send_discord_workflow_summary(
         mention_str = str(feature_config.get("mention") or "").strip()
         mention_on_err = bool(feature_config.get("mention_on_error", True))
         mention_on_ok = bool(feature_config.get("mention_on_success", False))
+        mention_on_info = bool(feature_config.get("mention_on_info", False))
         # Fall back to global mention when the workflow feature has no override
         if not mention_str:
             mention_str = str(config.get("mention") or "").strip()
             mention_on_err = bool(config.get("mention_on_error", True))
             mention_on_ok = bool(config.get("mention_on_success", False))
+            mention_on_info = bool(config.get("mention_on_info", False))
         if mention_str:
             should_mention = any(
                 (str(spec.get("event_type") or "") == "error" and mention_on_err)
                 or (str(spec.get("event_type") or "") == "success" and mention_on_ok)
+                or (str(spec.get("event_type") or "") == "info" and mention_on_info)
                 for spec in embeds
             )
             if should_mention:

@@ -188,22 +188,6 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         if dry_run:
             log_info(LogTags.WORKFLOW, "Dry run enabled - no changes will be made")
 
-        send_discord_notification(
-            db,
-            feature_key="workflow",
-            event_type="success",
-            title="Workflow Started",
-            description=(
-                f"Workflow job #{job_id} started"
-                + (" (dry run)." if dry_run else ".")
-            ),
-            fields=[
-                {"name": "Job ID", "value": str(job_id), "inline": True},
-                {"name": "Mode", "value": "Dry Run" if dry_run else "Live", "inline": True},
-            ],
-            color=0x64B5F6,
-        )
-
         results = {
             "success": True,
             "jobs_run": [],

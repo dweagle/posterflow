@@ -22,6 +22,7 @@ export interface DiscordNotificationFeatureConfig {
   mention?: string
   mention_on_error?: boolean
   mention_on_success?: boolean
+  mention_on_info?: boolean
 }
 
 export interface DiscordNotificationConfig {
@@ -30,6 +31,7 @@ export interface DiscordNotificationConfig {
   mention?: string
   mention_on_error?: boolean
   mention_on_success?: boolean
+  mention_on_info?: boolean
   features: Record<string, DiscordNotificationFeatureConfig>
 }
 

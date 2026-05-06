@@ -133,6 +133,43 @@ const DISCORD_NOTIFICATION_FEATURE_ORDER = [
   'system_errors',
 ]
 
+const DISCORD_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info'; label: string }[]> = {
+  workflow: [
+    { type: 'success', label: 'Success - Per-step summary embed — one embed per step that ran (sync, renamer, border, plex, unmatched), each showing its own result' },
+    { type: 'error', label: 'Error - Step failed — included in the summary as an error embed for that step' },
+    { type: 'error', label: 'Error - Workflow crashed — sent if the entire workflow throws before finishing' },
+  ],
+  sync: [
+    { type: 'success', label: 'Success - Sync completed — drive name, files added / replaced / deleted' },
+    { type: 'error', label: 'Error - Sync failed — error message' },
+  ],
+  poster_renamer: [
+    { type: 'success', label: 'Success - Rename completed — posters matched, movies / series / collections list' },
+    { type: 'error', label: 'Error - Rename failed — error message' },
+  ],
+  unmatched_assets: [
+    { type: 'info', label: 'Info- Scan completed — total missing posters, movies / shows / seasons count' },
+    { type: 'error', label: 'Error - Detection failed — error message' },
+  ],
+  plex_upload: [
+    { type: 'success', label: 'Success - Full upload completed — movies / shows / seasons / collections uploaded' },
+    { type: 'success', label: 'Success - Webhook upload — item uploaded (media type, title, count)' },
+    { type: 'error', label: 'Error - Upload failed — error message' },
+    { type: 'info', label: 'Info - Webhook: no local assets found for target item (no ping)' },
+  ],
+  idarr: [
+    { type: 'success', label: 'Success - IDarr completed — files renamed, unresolved count' },
+    { type: 'error', label: 'Error - IDarr failed — error message' },
+  ],
+  maker_monitor: [
+    { type: 'info', label: 'Info - Posters needed report — upcoming seasons, premieres found, posters needed' },
+    { type: 'error', label: 'Error - Maker Monitor failed — error message' },
+  ],
+  system_errors: [
+    { type: 'error', label: 'Error - Major error from any feature — source and error message' },
+  ],
+}
+
 const DISCORD_NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
   workflow: 'Workflow Start/End',
   sync: 'Google Drive Sync Summary',
@@ -154,6 +191,7 @@ const defaultDiscordFeatureConfig = (): DiscordNotificationFeatureConfig => ({
   mention: '',
   mention_on_error: true,
   mention_on_success: false,
+  mention_on_info: false,
 })
 
 const defaultDiscordConfig = (): DiscordNotificationConfig => ({
@@ -162,6 +200,7 @@ const defaultDiscordConfig = (): DiscordNotificationConfig => ({
   mention: '',
   mention_on_error: true,
   mention_on_success: false,
+  mention_on_info: false,
   features: DISCORD_NOTIFICATION_FEATURE_ORDER.reduce<Record<string, DiscordNotificationFeatureConfig>>((accumulator, key) => {
     accumulator[key] = defaultDiscordFeatureConfig()
     return accumulator
@@ -179,6 +218,7 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
   normalized.mention = config.mention ?? ''
   normalized.mention_on_error = config.mention_on_error ?? true
   normalized.mention_on_success = config.mention_on_success ?? false
+  normalized.mention_on_info = config.mention_on_info ?? false
 
   if (config.features) {
     DISCORD_NOTIFICATION_FEATURE_ORDER.forEach((key) => {
@@ -197,6 +237,7 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
         mention: candidate.mention ?? '',
         mention_on_error: candidate.mention_on_error ?? true,
         mention_on_success: candidate.mention_on_success ?? false,
+        mention_on_info: candidate.mention_on_info ?? false,
       }
     })
   }
@@ -886,6 +927,30 @@ function Settings() {
             <p className="notification-global-description">
               These settings apply globally to all features below. Individual features can override the webhook URL and mention settings independently.
             </p>
+            <details className="feature-events-disclosure global-events-disclosure">
+              <summary className="feature-events-summary">How does it work?</summary>
+              <ul className="feature-events-list">
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Each enabled feature below sends notifications to this webhook URL.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Features with their own webhook URL override send to that channel instead.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Global Ping Target is used as a fallback — only if a feature has no ping target of its own.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>If a feature has its own ping target, its own "Ping on error / success / info" toggles are used instead of the global ones.</li>
+              </ul>
+              <div className="feature-events-divider" />
+              <p className="feature-events-subheading">Finding your Webhook URL</p>
+              <ul className="feature-events-list">
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>1.</span>In Discord, open <strong>Server Settings</strong> → <strong>Integrations</strong> → <strong>Webhooks</strong>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>2.</span>Click <strong>New Webhook</strong>, pick a channel, then click <strong>Copy Webhook URL</strong>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>3.</span>Paste the URL here. It starts with <code>https://discord.com/api/webhooks/…</code></li>
+              </ul>
+              <div className="feature-events-divider" />
+              <p className="feature-events-subheading">Finding User IDs &amp; Role IDs</p>
+              <ul className="feature-events-list">
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>1.</span>Enable <strong>Developer Mode</strong> in Discord: <em>User Settings → Advanced → Developer Mode</em>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>2.</span><strong>User ID:</strong> Right-click a user → <em>Copy User ID</em>. Use as <code>{'<@USER_ID>'}</code>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>3.</span><strong>Role ID:</strong> Right-click a role in <em>Server Settings → Roles</em> → <em>Copy Role ID</em>. Use as <code>{'<@&ROLE_ID>'}</code>.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>4.</span>Use <code>@here</code> or <code>@everyone</code> to ping all online / all members in the channel.</li>
+              </ul>
+            </details>
             <div className="notification-webhook-row">
               <div className="input-with-toggle">
                 <input
@@ -944,6 +1009,14 @@ function Settings() {
                   />
                   Ping on success
                 </label>
+                <label className="notification-mention-trigger-label">
+                  <input
+                    type="checkbox"
+                    checked={discordConfig.mention_on_info ?? false}
+                    onChange={(event) => setDiscordConfig((prev) => ({ ...prev, mention_on_info: event.target.checked }))}
+                  />
+                  Ping on info
+                </label>
               </div>
             )}
           </div>
@@ -960,6 +1033,19 @@ function Settings() {
                   <div className="setting-item">
                     <div className="setting-info">
                       <label>{DISCORD_NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
+                      {DISCORD_FEATURE_EVENTS[featureKey] && (
+                        <details className="feature-events-disclosure">
+                          <summary className="feature-events-summary">What gets sent?</summary>
+                          <ul className="feature-events-list">
+                            {DISCORD_FEATURE_EVENTS[featureKey].map((event, index) => (
+                              <li key={index} className={`feature-event-item feature-event-${event.type}`}>
+                                <span className="feature-event-icon">{event.type === 'success' ? '✓' : event.type === 'info' ? 'ℹ' : '✗'}</span>
+                                {event.label}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </div>
                     <div className="setting-control">
                       <label className="toggle-switch">
@@ -985,6 +1071,7 @@ function Settings() {
                       </label>
                     </div>
                   </div>
+                  <div className="notification-feature-inputs-row">
                   <div className="notification-feature-webhook">
                     <div className="input-with-toggle">
                       <input
@@ -1065,8 +1152,26 @@ function Settings() {
                           />
                           Ping on success
                         </label>
+                        <label className="notification-mention-trigger-label">
+                          <input
+                            type="checkbox"
+                            checked={feature?.mention_on_info ?? false}
+                            onChange={(event) => setDiscordConfig((prev) => ({
+                              ...prev,
+                              features: {
+                                ...prev.features,
+                                [featureKey]: {
+                                  ...prev.features[featureKey],
+                                  mention_on_info: event.target.checked,
+                                },
+                              },
+                            }))}
+                          />
+                          Ping on info
+                        </label>
                       </div>
                     )}
+                  </div>
                   </div>
                 </div>
               )

@@ -177,7 +177,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
             send_discord_notification(
                 db,
                 feature_key="unmatched_assets",
-                event_type="success",
+                event_type="info",
                 title="Unmatched Assets Summary",
                 description=f"{unmatched_count:,} total assets missing posters",
                 fields=[
@@ -186,7 +186,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
                     {"name": "Shows", "value": str(shows_missing), "inline": True},
                     {"name": "Seasons", "value": str(seasons_missing), "inline": True},
                 ],
-                color=0x4CAF50,
+                color=0x64B5F6,
             )
 
     except Exception as e:

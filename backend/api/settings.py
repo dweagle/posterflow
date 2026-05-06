@@ -216,6 +216,7 @@ class DiscordNotificationFeatureConfig(BaseModel):
     mention: str = ""
     mention_on_error: bool = True
     mention_on_success: bool = False
+    mention_on_info: bool = False
 
 
 class DiscordNotificationConfigRequest(BaseModel):
@@ -224,6 +225,7 @@ class DiscordNotificationConfigRequest(BaseModel):
     mention: str = ""
     mention_on_error: bool = True
     mention_on_success: bool = False
+    mention_on_info: bool = False
     features: Dict[str, DiscordNotificationFeatureConfig]
 
 

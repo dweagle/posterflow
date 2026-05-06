@@ -764,28 +764,6 @@ def save_maker_monitor_config(config: MakerMonitorConfig, db: Session = Depends(
         raise HTTPException(status_code=500, detail="Failed to save monitor configuration")
 
 
-def _send_monitor_start_notification(db: Session, config: MakerMonitorConfig, selected_drives: list[Drive]) -> None:
-    folders = "\n".join(
-        f"• {drive.name} ({str(drive.style_type or '').strip().upper() or 'CUSTOM'})" for drive in selected_drives
-    ) or "• None"
-
-    fields: list[dict[str, Any]] = [
-        {"name": "Scanning My Folders", "value": folders, "inline": True},
-        {"name": "Timeframe", "value": f"Next {config.lookahead_days} Days", "inline": True},
-        {"name": "Display", "value": "All Items", "inline": True},
-    ]
-
-    send_discord_notification(
-        db,
-        feature_key="maker_monitor",
-        event_type="start",
-        title="Season Monitor Started",
-        fields=fields,
-        color=5093631,
-        footer_text="Season Monitor Script",
-    )
-
-
 def _send_monitor_library_report_notification(db: Session, library_result: MakerMonitorLibraryResult) -> None:
     shows_to_report = sorted(library_result.shows, key=lambda item: item.date)
     needed_count = sum(1 for item in library_result.shows if not item.poster_exists)

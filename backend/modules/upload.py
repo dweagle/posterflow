@@ -1650,11 +1650,38 @@ def run_plex_upload_background_job(
                     f"- {instance_name} / {library_name} ({section_type}) | items={items}, collections={collections}",
                 )
 
+        mode_label = "Dry Run" if dry_run else "Live"
+        send_discord_notification(
+            db,
+            feature_key="plex_upload",
+            event_type="success",
+            title="Plex Upload Completed",
+            description=f"{uploaded_count:,} poster(s) uploaded ({mode_label.lower()})",
+            fields=[
+                {"name": "Movies", "value": str(movies_uploaded), "inline": True},
+                {"name": "Shows", "value": str(shows_uploaded), "inline": True},
+                {"name": "Seasons", "value": str(seasons_uploaded), "inline": True},
+                {"name": "Collections", "value": str(collections_uploaded), "inline": True},
+                {"name": "Matched", "value": f"{matched_count:,}/{scanned_count:,}", "inline": True},
+                {"name": "Mode", "value": mode_label, "inline": True},
+            ],
+            color=0x4CAF50,
+        )
+
         log_section_end(LogTags.UPLOADER, "Plex Upload Complete")
         success = True
 
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Plex upload job failed: {e}\n{traceback.format_exc()}")
+        send_discord_notification(
+            db,
+            feature_key="plex_upload",
+            event_type="error",
+            title="Plex Upload Failed",
+            description=str(e),
+            fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
+            color=0xF44336,
+        )
         send_major_error_notification(
             db,
             source="plex_upload.full",
