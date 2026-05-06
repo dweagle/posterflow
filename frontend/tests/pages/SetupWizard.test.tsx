@@ -147,6 +147,9 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByRole('heading', { name: 'TMDB API Key' })
+
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
 
     await user.type(screen.getByPlaceholderText(/ex\. \/kometa\/config\/assets/i), '/kometa/config/assets')
@@ -223,6 +226,9 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('checkbox', { name: /I don't have Plex/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Sonarr/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
+
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+    await screen.findByRole('heading', { name: 'TMDB API Key' })
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
