@@ -579,7 +579,14 @@ class IdarrRunner:
 
             is_series = any(SEASON_REGEX.search(str(asset["file_path"].stem)) for asset in group_assets) or bool(group_tvdb_id)
             is_collection = group_year is None and not is_series
-            if cache_type == "collection":
+
+            if is_series and cache_type == "movie":
+                group_tmdb_id = None
+                group_imdb_id = None
+
+            if is_series:
+                group_type = "tv_series"
+            elif cache_type == "collection":
                 group_type = "collection"
             elif cache_type == "tv_series":
                 group_type = "tv_series"
@@ -587,8 +594,6 @@ class IdarrRunner:
                 group_type = "movie"
             elif COLLECTION_REGEX.search(base_lower) or is_collection:
                 group_type = "collection"
-            elif is_series:
-                group_type = "tv_series"
             else:
                 group_type = "movie"
 
