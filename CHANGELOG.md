@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-05-06
+### Added
+- Discord Notifications: new **Ping on info** toggle for global and per-feature ping targets — allows pinging on informational notifications separately from success and error
+- Discord Notifications: **"What gets sent?"** collapsible disclosure added to each feature row, showing the event types and descriptions for every notification that feature can send
+- Discord Notifications: **"How does it work?"** collapsible disclosure on the global webhook section, now includes step-by-step instructions for finding your webhook URL, user IDs, and role IDs
+- Discord Notifications: webhook URL and ping target inputs now display side-by-side on wide screens and stack on narrow screens
+- Plex Upload: added success Discord notification on full upload completion (movies / shows / seasons / collections uploaded count)
+- Plex Upload: added error Discord notification when a full upload job crashes
+
+### Fixed
+- IDarr Runner: asset type classification for series now correctly distinguishes between series, seasons, and episodes
+
 ## [0.2.7] - 2026-05-05
 ### Added
 - Setup Wizard: added a step for entry of TMDB API key during setup.
