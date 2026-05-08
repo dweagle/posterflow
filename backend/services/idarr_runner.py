@@ -2343,7 +2343,8 @@ class IdarrRunner:
                     }
             except Exception as exc:
                 enrichment_stats["errors"] += 1
-                log_warning(LogTags.IDARR, f"TMDB enrichment failed for '{asset.get('title', 'unknown')}': {exc}")
+                _safe_msg = re.sub(r"api_key=[^&\s]+", "api_key=***", str(exc))
+                log_warning(LogTags.IDARR, f"TMDB enrichment failed for '{asset.get('title', 'unknown')}': {_safe_msg}")
 
             asset["_cache_touch"] = network_lookup_performed
             if bool(asset.get("has_id")):

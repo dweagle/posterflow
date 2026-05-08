@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw } from 'lucide-react'
+import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import IDarrTabs, { IDarrTab } from '../components/IDarr/IDarrTabs'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -1551,7 +1551,14 @@ function IDarr() {
                     />
                   </div>
                   <div className="field-group">
-                    <label>Sync Folder</label>
+                    <label>Sync Folder
+                      <span className="idarr-info-icon-wrap">
+                        <Info size={13} className="idarr-info-icon" />
+                        <span className="idarr-info-tooltip">
+                          Must be an absolute path (starting with /) — use the container-side path of any volume you've mounted, e.g. /config/idarr/sync/cl2k. Relative paths will fail, e.g. sync/cl2k.
+                        </span>
+                      </span>
+                    </label>
                     <input
                       type="text"
                       value={target.source_dir || ''}

@@ -758,7 +758,18 @@ async def upload_maker_idarr_files(
         raise HTTPException(status_code=400, detail="Selected sync target is missing source_dir.")
 
     source_dir = Path(source_dir_value)
-    source_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        source_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        log_error(
+            LogTags.API,
+            f"IDarr upload failed: cannot create or access source_dir '{source_dir_value}': {exc}\n{traceback.format_exc()}",
+            source_dir=source_dir_value,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot create or access source folder '{source_dir_value}'. Ensure it is an absolute path and the container has write permission.",
+        )
 
     uploaded: list[str] = []
     skipped: list[str] = []
