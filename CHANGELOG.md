@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-05-07
+### Added
+- IDarr: **Sync Folder** input now shows an info tooltip explaining that an absolute container-side path is required (e.g. `/config/idarr/sync/cl2k`), preventing silent failures from relative paths
+
+### Fixed
+- IDarr: file upload endpoint now returns a clear HTTP 400 error with an actionable message when the sync folder cannot be created or accessed (e.g. bad path, permission denied), instead of crashing with an unhandled exception
+- IDarr Runner: TMDB API key is now redacted from error log messages during enrichment failures, preventing accidental key leakage in logs
+
 ## [0.2.8] - 2026-05-06
 ### Added
 - Discord Notifications: new **Ping on info** toggle for global and per-feature ping targets — allows pinging on informational notifications separately from success and error
