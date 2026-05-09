@@ -38,6 +38,7 @@ from alembic import command
 import ctypes
 import os
 import re
+import setproctitle
 import subprocess  # nosec B404 - used only for hardcoded git commands in version detection
 from urllib.request import urlopen
 
@@ -201,16 +202,19 @@ def run_database_migrations() -> None:
 
 
 def set_process_name(name: str) -> None:
-    """Set Linux process name for system monitors (comm field, max 15 chars)."""
+    """Set the process title for resource monitors.
+
+    - argv[0] via setproctitle (htop, GNOME System Monitor, ps aux)
+    - kernel comm name via prctl PR_SET_NAME (/proc/self/comm, max 15 chars)
+    """
+    setproctitle.setproctitle(name)
     try:
         libc = ctypes.CDLL("libc.so.6")
-        pr_set_name = 15
-        encoded_name = name.encode("utf-8")[:15]
-        result = libc.prctl(pr_set_name, ctypes.c_char_p(encoded_name), 0, 0, 0)
+        result = libc.prctl(15, ctypes.c_char_p(name.encode("utf-8")[:15]), 0, 0, 0)
         if result != 0:
-            log_debug(LogTags.STARTUP, f"Failed to set process name to '{name}'")
+            log_debug(LogTags.STARTUP, f"prctl returned non-zero setting process name to '{name}'")
     except Exception as e:
-        log_debug(LogTags.STARTUP, f"Process name setup skipped: {e}")
+        log_debug(LogTags.STARTUP, f"prctl process name skipped: {e}")
 
 
 @asynccontextmanager
