@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-05-08
+### Changed
+- Memory usage is reduced after large jobs (sync, rename, etc.) by releasing freed memory back to the OS when a job finishes
+- Rclone output is no longer buffered in full during syncs, reducing peak memory during large transfers
+- Log viewer no longer reads the entire log file on connect — only the last 200 KB is loaded
+
+### Fixed
+- Plex Upload: internal caches are now cleared at the end of every upload job so stale data doesn't carry over into the next run
+
 ## [0.2.9] - 2026-05-07
 ### Added
 - IDarr: **Sync Folder** input now shows an info tooltip explaining that an absolute container-side path is required (e.g. `/config/idarr/sync/cl2k`), preventing silent failures from relative paths
