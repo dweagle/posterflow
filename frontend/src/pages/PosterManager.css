@@ -41,11 +41,7 @@
   background-color: #3D4556;
   border-radius: 8px;
   margin-bottom: 2rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: #5c6882 #3D4556;
+  flex-wrap: wrap;
 }
 
 .poster-manager .toolbar > div:first-child {
@@ -64,24 +60,6 @@
   color: #aaa;
   margin: 0;
   font-size: 0.9rem;
-}
-
-.poster-manager .toolbar::-webkit-scrollbar {
-  height: 6px;
-}
-
-.poster-manager .toolbar::-webkit-scrollbar-track {
-  background: #3D4556;
-  border-radius: 3px;
-}
-
-.poster-manager .toolbar::-webkit-scrollbar-thumb {
-  background: #5c6882;
-  border-radius: 3px;
-}
-
-.poster-manager .toolbar::-webkit-scrollbar-thumb:hover {
-  background: #6c7892;
 }
 
 .poster-manager .action-buttons {
@@ -189,6 +167,7 @@
 /* Tabs - consistent with Settings */
 .poster-manager-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
   border-bottom: 2px solid #333;
@@ -3191,17 +3170,55 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   font-weight: 600;
 }
 
-/* Responsive flow layout */
+/* Medium screens: switch to 3-column grid so 6 tabs split evenly 3+3 */
+@media (max-width: 1000px) {
+  .poster-manager-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .poster-manager-tabs button {
+    padding: 0.55rem 0.75rem;
+    font-size: 0.875rem;
+    justify-content: center;
+  }
+}
+
+/* Small screens: 2 columns so tabs are 2+2+2 */
+@media (max-width: 480px) {
+  .poster-manager-tabs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .poster-manager-tabs button {
+    font-size: 0.8rem;
+    padding: 0.5rem;
+  }
+}
+
 @media (max-width: 768px) {
   .flow-header {
     flex-direction: column;
     align-items: stretch;
     gap: 1rem;
   }
-  
-  .flow-header .action-buttons {
+
+  .poster-manager .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+
+  /* Uniform action buttons — max 2 per row, centered, no text overflow */
+  .flow-header .action-buttons,
+  .poster-manager .action-buttons {
     width: 100%;
-    justify-content: flex-end;
+  }
+
+  .flow-header .action-buttons .btn-toolbar,
+  .poster-manager .action-buttons .btn-toolbar {
+    flex: 1 1 calc(50% - 0.25rem);
+    justify-content: center;
   }
   
   .job-description {

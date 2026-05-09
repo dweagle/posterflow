@@ -88,13 +88,13 @@ input, textarea, select {
   display: inline-flex !important;
   align-items: center !important;
   gap: 0.38rem !important;
-  padding: 0.78rem 1.5rem !important;
+  padding: 0.78rem 1.5rem;
   background: transparent !important;
   color: var(--pf-tab-text) !important;
   border: none !important;
   border-bottom: 2px solid transparent !important;
   margin-bottom: -2px !important;
-  font-size: 0.95rem !important;
+  font-size: 0.95rem;
   font-weight: 500 !important;
   line-height: 1 !important;
   transition: all 0.2s !important;
