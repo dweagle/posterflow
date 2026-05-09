@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-05-08
+### Fixed
+- Plex Upload: Discord notifications (success and error) are no longer sent when the upload step runs as part of the Poster Manager workflow — only the workflow-level notification fires
+
 ## [0.2.10] - 2026-05-08
 ### Changed
 - Memory usage is reduced after large jobs (sync, rename, etc.) by releasing freed memory back to the OS when a job finishes
