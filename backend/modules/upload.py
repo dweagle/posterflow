@@ -1696,6 +1696,12 @@ def run_plex_upload_background_job(
             failure_context="plex upload",
         )
     finally:
+        try:
+            service.invalidate_preflight_cache()
+            service.invalidate_local_assets_cache()
+            service.invalidate_arr_availability_cache()
+        except Exception:
+            pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
 
@@ -2496,6 +2502,12 @@ def run_plex_webhook_background_job(
             failure_context="plex webhook",
         )
     finally:
+        try:
+            service.invalidate_preflight_cache()
+            service.invalidate_local_assets_cache()
+            service.invalidate_arr_availability_cache()
+        except Exception:
+            pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
 
@@ -2661,6 +2673,12 @@ def run_plex_single_manual_background_job(
             failure_context="plex single upload",
         )
     finally:
+        try:
+            service.invalidate_preflight_cache()
+            service.invalidate_local_assets_cache()
+            service.invalidate_arr_availability_cache()
+        except Exception:
+            pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
 

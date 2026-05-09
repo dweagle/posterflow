@@ -133,8 +133,12 @@ async def websocket_logs(websocket: WebSocket) -> None:
         # Send initial logs (last 1000 lines)
         if log_file.exists():
             with open(log_file, 'r') as f:
-                all_lines = f.readlines()
-                recent_lines = all_lines[-1000:] if len(all_lines) > 1000 else all_lines
+                f.seek(0, 2)
+                end_pos = f.tell()
+                f.seek(max(0, end_pos - 200_000))
+                if end_pos > 200_000:
+                    f.readline()
+                recent_lines = f.readlines()[-1000:]
                 
                 for line in recent_lines:
                     match = re.match(log_pattern, line.strip())

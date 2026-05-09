@@ -2,11 +2,12 @@ import subprocess  # nosec B404
 import json
 import re
 import shutil
+from collections import deque
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.logging import LogTags, log_success, log_error, log_warning, log_info, log_debug
 from core.config import settings
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 SyncProgressCallback = Callable[[str, int, int, str, int], None]
 BatchProgressCallback = Callable[[int, str, str, int, int, str, int], None]
@@ -208,15 +209,38 @@ scope = drive.readonly
                 universal_newlines=True
             )
             
-            output_lines = []
+            recent_lines: Deque[str] = deque(maxlen=50)
             files_transferred = 0
             files_checked = 0
             transfer_total = 0
+            _stat_transferred = 0
+            _stat_transfer_size = ""
+            _stat_elapsed = ""
             
             # Stream output and log rclone messages
             for line in process.stdout:
-                output_lines.append(line)
+                recent_lines.append(line)
                 line_stripped = line.strip()
+
+                # Track summary stats inline (avoids buffering all output lines)
+                if 'Transferred:' in line and '/' in line:
+                    if any(u in line for u in ('MiB', 'KiB', 'GiB')):
+                        try:
+                            _stat_transfer_size = line.split('Transferred:')[1].strip().split('/')[0].strip()
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            parts = line.split('Transferred:')[1].strip().split('/')[0].strip().split()[0]
+                            if parts.isdigit():
+                                _stat_transferred = int(parts)
+                        except Exception:
+                            pass
+                elif 'Elapsed time:' in line:
+                    try:
+                        _stat_elapsed = line.split('Elapsed time:')[1].strip()
+                    except Exception:
+                        pass
                 
                 # Log rclone's INFO messages (file operations)
                 if 'INFO  :' in line:
@@ -343,42 +367,13 @@ scope = drive.readonly
             process.wait()
             
             if process.returncode == 0:
-                # Parse rclone's statistics and format them nicely
-                transferred = 0
-                checked = 0
-                transfer_size = ""
-                elapsed_time = ""
-                
-                for line in output_lines:
-                    # File transfer count (not bytes)
-                    if 'Transferred:' in line and '/' in line and 'MiB' not in line and 'KiB' not in line and 'GiB' not in line:
-                        try:
-                            parts = line.split('Transferred:')[1].strip().split('/')[0].strip().split()[0]
-                            transferred = int(parts)
-                        except Exception as parse_error:
-                            log_debug(LogTags.RCLONE, f"Failed to parse transferred file count: {parse_error}")
-                    # Bytes transferred with speed
-                    elif 'Transferred:' in line and ('MiB' in line or 'KiB' in line or 'GiB' in line):
-                        try:
-                            # Extract size like "25.993 MiB"
-                            parts = line.split('Transferred:')[1].strip()
-                            transfer_size = parts.split('/')[0].strip()
-                        except Exception as parse_error:
-                            log_debug(LogTags.RCLONE, f"Failed to parse transfer size: {parse_error}")
-                    # Checked files
-                    elif 'Checks:' in line and '/' in line:
-                        try:
-                            parts = line.split('Checks:')[1].strip().split('/')[0].strip()
-                            checked = int(parts)
-                        except Exception as parse_error:
-                            log_debug(LogTags.RCLONE, f"Failed to parse checks count: {parse_error}")
-                    # Elapsed time
-                    elif 'Elapsed time:' in line:
-                        try:
-                            elapsed_time = line.split('Elapsed time:')[1].strip()
-                        except Exception as parse_error:
-                            log_debug(LogTags.RCLONE, f"Failed to parse elapsed time: {parse_error}")
-                
+                # Use stats tracked inline during streaming
+                # Prefer the rclone stats summary count; fall back to per-file INFO count
+                transferred = max(files_transferred, _stat_transferred)
+                checked = files_checked
+                transfer_size = _stat_transfer_size
+                elapsed_time = _stat_elapsed
+
                 # Format completion summary
                 summary_parts = []
                 if transferred > 0:
@@ -396,7 +391,7 @@ scope = drive.readonly
                 log_success(LogTags.RCLONE, f"Completed: {summary}")
                 return {"success": True, "files_transferred": transferred}
             else:
-                error_output = ''.join(output_lines[-20:])  # Last 20 lines
+                error_output = ''.join(recent_lines)  # Last 50 lines (capped by deque)
                 log_error(LogTags.RCLONE, f"Failed: '{display_name}' - {error_output}")
                 return {"success": False, "files_transferred": 0}
                 
@@ -490,7 +485,7 @@ scope = drive.readonly
                 universal_newlines=True,
             )
 
-            output_lines: List[str] = []
+            recent_lines: Deque[str] = deque(maxlen=50)
             files_uploaded = 0
             total_files = sum(1 for path in local_path.rglob("*") if path.is_file())
             checks_re = re.compile(r"Checks:\s*([\d,]+)\s*/\s*([\d,]+)")
@@ -503,7 +498,7 @@ scope = drive.readonly
                     log_warning(LogTags.RCLONE, f"Upload progress callback error: {callback_error}")
 
             for line in process.stdout:
-                output_lines.append(line)
+                recent_lines.append(line)
 
                 checks_match = checks_re.search(line)
                 if checks_match and progress_callback:
@@ -592,7 +587,7 @@ scope = drive.readonly
                 log_success(LogTags.RCLONE, f"Upload complete to '{display_name}' ({sync_mode})")
                 return {"success": True, "mode": sync_mode, "files_uploaded": files_uploaded}
 
-            error_output = ''.join(output_lines[-20:]).strip()
+            error_output = ''.join(recent_lines).strip()
             log_error(LogTags.RCLONE, f"Upload failed to '{display_name}': {error_output}")
             return {"success": False, "mode": sync_mode, "error": error_output}
         except Exception as e:

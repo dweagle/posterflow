@@ -2,11 +2,27 @@
 Job queue manager for limiting concurrent sync operations.
 Uses a thread pool executor to manage concurrent jobs.
 """
+import gc
+import ctypes
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional
 from core.logging import log_debug
 from core.config import settings
+
+
+def _trim_process_memory() -> None:
+    """Run GC and ask glibc to return freed heap pages to the OS.
+
+    Python's allocator keeps freed memory in its own pool (never returns it to
+    the OS) unless malloc_trim() is called.  After large jobs (poster renamer,
+    sync-all, etc.) this causes RSS to stay pinned at peak usage indefinitely.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 class JobQueueManager:
     """Manages concurrent job execution with a thread pool."""
@@ -47,6 +63,7 @@ class JobQueueManager:
                 with self.lock:
                     self.active_jobs -= 1
                 log_debug("QUEUE", f"Job {job_id} completed ({self.active_jobs}/{self.max_concurrent} slots active)")
+                _trim_process_memory()
 
         # Submit inside lock to prevent race with shutdown()
         with self.lock:

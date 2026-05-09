@@ -30,6 +30,8 @@ COPY --from=rclone/rclone:1.73.4 /usr/local/bin/rclone /usr/local/bin/rclone
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
 ENV BRANCH=${BRANCH}
+# Limit glibc memory arenas to reduce fragmentation and improve malloc_trim effectiveness
+ENV MALLOC_ARENA_MAX=2
 
 # Create app user (UID/GID remapped at runtime via entrypoint using PUID/PGID env vars)
 RUN groupadd -g 1000 posterflow && \
