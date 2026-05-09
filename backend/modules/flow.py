@@ -483,6 +483,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     False,   # dry_run
                     False,   # reapply
                     remove_overlay_label,
+                    True,    # skip_discord: sub-module notifications suppressed in workflow
                 )
                 child_ok, child_message = _get_child_result(db, plex_child.id)
 
