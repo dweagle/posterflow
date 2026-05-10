@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-05-10
+### Changed
+- Plex Upload: file mtime is now stored in upload records — a fast `stat()` check skips the sha256 file read for unchanged posters, eliminating multi-GB page cache accumulation on large upload runs
+- Plex Upload: page cache is evicted after each poster is uploaded so memory pressure stays low throughout the job
+- Border Replacer / Poster Renamer: page cache is evicted after PIL reads each image file, reducing residual memory after large batches
+- Plex Upload / Poster Sync: stale record pruning now queries only the columns needed and deletes in a single batch instead of row-by-row
+
 ## [0.2.12] - 2026-05-09
 ### Added
 - IDarr: new **Force Sync** option — when enabled, the drive sync runs after an IDarr job even if no files were renamed, useful for ensuring the drive is always up to date
