@@ -1775,7 +1775,11 @@ function IDarr() {
             <input
               type="checkbox"
               checked={Boolean(config.force_sync_after_run)}
-              onChange={(e) => updateConfig('force_sync_after_run', e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked
+                updateConfig('force_sync_after_run', next)
+                void saveMakerIdarrConfig({ ...config, force_sync_after_run: next })
+              }}
             />
             <span className="idarr-toggle-slider" />
           </span>
