@@ -12,12 +12,7 @@ from core.config import settings
 
 
 def _trim_process_memory() -> None:
-    """Run GC and ask glibc to return freed heap pages to the OS.
-
-    Python's allocator keeps freed memory in its own pool (never returns it to
-    the OS) unless malloc_trim() is called.  After large jobs (poster renamer,
-    sync-all, etc.) this causes RSS to stay pinned at peak usage indefinitely.
-    """
+    """Run GC and call malloc_trim(0) to return freed heap pages to the OS after large jobs."""
     gc.collect()
     try:
         ctypes.CDLL("libc.so.6").malloc_trim(0)

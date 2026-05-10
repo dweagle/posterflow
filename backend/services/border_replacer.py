@@ -38,6 +38,15 @@ except ImportError as e:
     )
 
 
+def _drop_file_cache(path: str) -> None:
+    """Advise the kernel to evict a file's pages from the page cache."""
+    try:
+        with open(path, "rb") as f:
+            os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+    except (AttributeError, OSError, Exception):
+        pass
+
+
 class BorderReplacerService:
     """Service for applying or removing borders from poster images."""
 
@@ -428,6 +437,8 @@ class BorderReplacerService:
         try:
             with Image.open(input_file) as image:
                 width, height = image.size
+                # PIL has read the file — evict input pages from page cache.
+                _drop_file_cache(input_file)
 
                 # Remove existing border by cropping
                 cropped_image = image.crop(
@@ -466,19 +477,26 @@ class BorderReplacerService:
 
                     try:
                         if not filecmp.cmp(final_path, tmp_path):
+                            _drop_file_cache(tmp_path)
+                            _drop_file_cache(final_path)
                             final_image.save(final_path)
+                            _drop_file_cache(final_path)
                             os.remove(tmp_path)
                             return True
                         else:
+                            _drop_file_cache(tmp_path)
+                            _drop_file_cache(final_path)
                             os.remove(tmp_path)
                             return False
                     except Exception:
+                        _drop_file_cache(tmp_path)
                         os.remove(tmp_path)
                         raise
                 else:
                     # Create directory if needed
                     os.makedirs(os.path.dirname(final_path), exist_ok=True)
                     final_image.save(final_path)
+                    _drop_file_cache(final_path)
                     return True
 
         except UnidentifiedImageError as e:
@@ -524,6 +542,8 @@ class BorderReplacerService:
         try:
             with Image.open(input_file) as image:
                 width, height = image.size
+                # PIL has read the file — evict input pages from page cache.
+                _drop_file_cache(input_file)
 
                 if not exclude:
                     # Remove top, left, right borders, add black bottom border
@@ -566,18 +586,25 @@ class BorderReplacerService:
 
                     try:
                         if not filecmp.cmp(final_path, tmp_path):
+                            _drop_file_cache(tmp_path)
+                            _drop_file_cache(final_path)
                             final_image.save(final_path)
+                            _drop_file_cache(final_path)
                             os.remove(tmp_path)
                             return True
                         else:
+                            _drop_file_cache(tmp_path)
+                            _drop_file_cache(final_path)
                             os.remove(tmp_path)
                             return False
                     except Exception:
+                        _drop_file_cache(tmp_path)
                         os.remove(tmp_path)
                         raise
                 else:
                     os.makedirs(os.path.dirname(final_path), exist_ok=True)
                     final_image.save(final_path)
+                    _drop_file_cache(final_path)
                     return True
 
         except UnidentifiedImageError as e:

@@ -195,8 +195,8 @@ scope = drive.readonly
                     *auth_args,
                     '--fast-list',  # Faster for large folders
                     '--tpslimit=8',  # Limit API calls to 8/sec to avoid rate limits
-                    '--size-only',  # DAPS-style: Only compare file sizes (fast)
-                    '--no-update-modtime',  # DAPS-style: Preserve original mtimes for change detection
+                    '--size-only',  # Compare by size only (fast)
+                    '--no-update-modtime',  # Preserve original mtimes for filecmp change detection
                     '--check-first',  # Check all files before transferring
                     '--stats', '1s',  # Show stats every 1 second
                     '--stats-log-level', 'NOTICE',  # Log stats at NOTICE level

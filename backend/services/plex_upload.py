@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import time
 import traceback
@@ -56,6 +57,9 @@ class PlexUploadService:
 
     def invalidate_arr_availability_cache(self) -> None:
         self._arr_availability_cache = {}
+
+    def invalidate_record_cache(self) -> None:
+        self._record_cache = {}
 
     @staticmethod
     def _empty_media_upload_counts() -> Dict[str, int]:
@@ -1208,6 +1212,7 @@ class PlexUploadService:
                     media_counts["seasons"] += 1
                     continue
                 season_obj.uploadPoster(filepath=file_path)
+                self._drop_file_cache(file_path)
                 time.sleep(self.upload_delay_ms / 2000.0)
                 if remove_overlay_label:
                     self._remove_overlay_label_if_present(season_obj, file_path=file_path)
@@ -1370,6 +1375,7 @@ class PlexUploadService:
                 media_counts[self._classify_plex_item(item)] += 1
                 continue
             item.uploadPoster(filepath=file_path)
+            self._drop_file_cache(file_path)
             time.sleep(self.upload_delay_ms / 1000.0)
             if remove_overlay_label:
                 self._remove_overlay_label_if_present(item, file_path=file_path)
@@ -1924,17 +1930,61 @@ class PlexUploadService:
             self._record_cache[file_path] = None
             return self._empty_record()
 
-        # If a hash is stored, verify the local file hasn't changed since last upload.
-        # Records without a hash are accepted as-is (treated as valid without comparison).
+        # Fast mtime pre-check: a single stat() call (no file read) tells us whether
+        # the file has changed since last upload. If mtime matches, skip sha256 entirely.
+        # This avoids reading thousands of poster files on every upload run, which was
+        # the primary cause of multi-GB page cache accumulation.
+        stored_mtime = db_record.file_mtime
+        if stored_mtime is not None:
+            try:
+                current_mtime = os.stat(file_path).st_mtime
+                if current_mtime == stored_mtime:
+                    # File unchanged — trust the cached record without reading the file.
+                    result = db_record.to_dict()
+                    try:
+                        self.db.expunge(db_record)
+                    except Exception:
+                        pass
+                    self._record_cache[file_path] = result
+                    return dict(result)
+            except OSError:
+                pass
+
+        # mtime not stored or mtime changed — fall back to sha256 comparison.
         stored_hash = db_record.file_hash
         if stored_hash is not None:
             current_hash = self._compute_file_hash(file_path)
             if current_hash is not None and current_hash != stored_hash:
                 # File contents have changed — treat like a fresh file.
+                try:
+                    self.db.expunge(db_record)
+                except Exception:
+                    pass
                 self._record_cache[file_path] = None
                 return self._empty_record()
 
         result = db_record.to_dict()
+
+        # Hash matched but mtime wasn't stored yet — write it now so future runs
+        # can use the fast mtime pre-check and skip the sha256 file read entirely.
+        # Without this, already-cached files (which never go through _mark_uploaded)
+        # would fall through to sha256 on every run indefinitely.
+        if stored_mtime is None:
+            try:
+                current_mtime = os.stat(file_path).st_mtime
+                db_record.file_mtime = current_mtime
+                self.db.commit()
+                result["file_mtime"] = current_mtime
+            except (OSError, Exception):
+                pass
+
+        # Evict the ORM object from the session identity map immediately after extracting
+        # the data we need. This prevents thousands of PlexUploadRecord objects from
+        # accumulating in the identity map across a full upload run (one per poster file).
+        try:
+            self.db.expunge(db_record)
+        except Exception:
+            pass
         self._record_cache[file_path] = result
         return dict(result)
 
@@ -1951,11 +2001,31 @@ class PlexUploadService:
         try:
             h = hashlib.sha256()
             with open(file_path, "rb") as f:
+                fd = f.fileno()
+                # Hint to the kernel: sequential read ahead is helpful.
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_SEQUENTIAL)
+                except (AttributeError, OSError):
+                    pass
                 for chunk in iter(lambda: f.read(65536), b""):
                     h.update(chunk)
+                # Drop from page cache — avoid accumulation across thousands of poster files.
+                try:
+                    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                except (AttributeError, OSError):
+                    pass
             return h.hexdigest()
         except Exception:
             return None
+
+    @staticmethod
+    def _drop_file_cache(file_path: str) -> None:
+        """Advise the kernel to evict a file's pages from the page cache after upload."""
+        try:
+            with open(file_path, "rb") as f:
+                os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+        except (AttributeError, OSError, Exception):
+            pass
 
     def _mark_uploaded(
         self,
@@ -1981,10 +2051,15 @@ class PlexUploadService:
             media_types.add(media_type)
 
         file_hash = self._compute_file_hash(file_path)
+        try:
+            file_mtime: Optional[float] = os.stat(file_path).st_mtime
+        except OSError:
+            file_mtime = None
 
         db_record = self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).first()
         if db_record:
             db_record.file_hash = file_hash
+            db_record.file_mtime = file_mtime
             db_record.uploaded_to_libraries = json.dumps(sorted(libraries))
             db_record.uploaded_to_library_keys = json.dumps(sorted(library_keys))
             db_record.uploaded_editions = json.dumps(sorted(editions))
@@ -1993,6 +2068,7 @@ class PlexUploadService:
             db_record = PlexUploadRecord(
                 file_path=file_path,
                 file_hash=file_hash,
+                file_mtime=file_mtime,
                 uploaded_to_libraries=json.dumps(sorted(libraries)),
                 uploaded_to_library_keys=json.dumps(sorted(library_keys)),
                 uploaded_editions=json.dumps(sorted(editions)),
@@ -2010,19 +2086,21 @@ class PlexUploadService:
         }
         if file_hash is not None:
             updated["file_hash"] = file_hash
+        if file_mtime is not None:
+            updated["file_mtime"] = file_mtime
         self._record_cache[file_path] = updated
 
     def _persist_upload_cache(self) -> None:
         """Prune DB records for local files that no longer exist on disk."""
-        db_records = self.db.query(PlexUploadRecord).all()
+        rows = self.db.query(PlexUploadRecord.file_path).all()
         stale_paths: list[str] = []
         existing_path_count = 0
 
-        for record in db_records:
-            if Path(record.file_path).exists():
+        for row in rows:
+            if Path(row.file_path).exists():
                 existing_path_count += 1
             else:
-                stale_paths.append(record.file_path)
+                stale_paths.append(row.file_path)
 
         if not stale_paths:
             return
@@ -2031,13 +2109,15 @@ class PlexUploadService:
             log_warning(
                 LogTags.UPLOADER,
                 "Skipping stale Plex upload record pruning: file paths are not resolvable in this runtime",
-                total_records=len(db_records),
+                total_records=len(rows),
                 stale_candidates=len(stale_paths),
             )
             return
 
+        self.db.query(PlexUploadRecord).filter(
+            PlexUploadRecord.file_path.in_(stale_paths)
+        ).delete(synchronize_session=False)
         for path in stale_paths:
-            self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == path).delete()
             self._record_cache.pop(path, None)
 
         self.db.commit()

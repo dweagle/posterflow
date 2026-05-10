@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Float, Integer, String
 from sqlalchemy.sql import func
 
 from database import Base
@@ -27,7 +27,8 @@ class PlexUploadRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     file_path = Column(String, unique=True, nullable=False, index=True)
-    file_hash = Column(String, nullable=True)  # sha256 hex; None for migrated legacy entries
+    file_hash = Column(String, nullable=True)    # sha256 hex; None for migrated legacy entries
+    file_mtime = Column(Float, nullable=True)    # st_mtime at upload time; used as fast pre-check
     uploaded_to_libraries = Column(String, nullable=True)       # JSON list of library names
     uploaded_to_library_keys = Column(String, nullable=True)    # JSON list of stable library keys
     uploaded_editions = Column(String, nullable=True)           # JSON list of edition titles

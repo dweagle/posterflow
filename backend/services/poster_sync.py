@@ -80,27 +80,30 @@ class PosterSyncService:
                 except Exception as e:
                     log_warning(LogTags.SYNC, f"Could not scan folder before sync: {e}", drive=drive.name)
             
-            # Get DB records for this drive
-            db_records = self.db.query(Poster).filter(Poster.drive_id == drive.drive_id).all()
-            
-            # Find records for files that don't exist on disk
-            records_to_delete = []
-            for record in db_records:
-                if record.file_name not in existing_files_on_disk:
-                    records_to_delete.append(record)
-            
+            # Get lightweight (id, file_name) pairs — avoid loading full ORM objects
+            # into the session identity map for potentially 50k+ records.
+            db_name_ids = (
+                self.db.query(Poster.id, Poster.file_name)
+                .filter(Poster.drive_id == drive.drive_id)
+                .all()
+            )
+
+            # Find IDs for records whose files don't exist on disk
+            ids_to_delete = [
+                r.id for r in db_name_ids if r.file_name not in existing_files_on_disk
+            ]
+
             # Delete those records so rclone re-downloads count as "added"
-            if records_to_delete:
+            if ids_to_delete:
                 log_info(
                     LogTags.SYNC,
-                    f"Pre-sync cleanup: Removing {len(records_to_delete)} DB records for missing files",
-                    drive=drive.name, 
-                    missing_count=len(records_to_delete)
+                    f"Pre-sync cleanup: Removing {len(ids_to_delete)} DB records for missing files",
+                    drive=drive.name,
+                    missing_count=len(ids_to_delete)
                 )
-                for record in records_to_delete:
-                    self.db.delete(record)
+                self.db.query(Poster).filter(Poster.id.in_(ids_to_delete)).delete(synchronize_session=False)
                 self.db.commit()
-                log_debug(LogTags.SYNC, "Cleared records for files to be re-downloaded", drive=drive.name, deleted=len(records_to_delete))
+                log_debug(LogTags.SYNC, "Cleared records for files to be re-downloaded", drive=drive.name, deleted=len(ids_to_delete))
             
             local_folder.mkdir(parents=True, exist_ok=True)
             
@@ -681,27 +684,30 @@ class PosterSyncService:
                 except Exception as e:
                     log_warning(LogTags.SYNC, f"Could not scan folder before sync: {e}", drive=drive_name)
             
-            # Get DB records for this drive
-            db_records = self.db.query(Poster).filter(Poster.drive_id == drive_id).all()
-            
-            # Find records for files that don't exist on disk
-            records_to_delete = []
-            for record in db_records:
-                if record.file_name not in existing_files_on_disk:
-                    records_to_delete.append(record)
-            
+            # Get lightweight (id, file_name) pairs — avoid loading full ORM objects
+            # into the session identity map for potentially 50k+ records.
+            db_name_ids = (
+                self.db.query(Poster.id, Poster.file_name)
+                .filter(Poster.drive_id == drive_id)
+                .all()
+            )
+
+            # Find IDs for records whose files don't exist on disk
+            ids_to_delete = [
+                r.id for r in db_name_ids if r.file_name not in existing_files_on_disk
+            ]
+
             # Delete those records so rclone re-downloads count as "added"
-            if records_to_delete:
+            if ids_to_delete:
                 log_info(
                     LogTags.SYNC,
-                    f"Pre-sync cleanup: Removing {len(records_to_delete)} DB records for missing files",
-                    drive=drive_name, 
-                    missing_count=len(records_to_delete)
+                    f"Pre-sync cleanup: Removing {len(ids_to_delete)} DB records for missing files",
+                    drive=drive_name,
+                    missing_count=len(ids_to_delete)
                 )
-                for record in records_to_delete:
-                    self.db.delete(record)
+                self.db.query(Poster).filter(Poster.id.in_(ids_to_delete)).delete(synchronize_session=False)
                 self.db.commit()
-                log_debug(LogTags.SYNC, "Cleared records for files to be re-downloaded", drive=drive_name, deleted=len(records_to_delete))
+                log_debug(LogTags.SYNC, "Cleared records for files to be re-downloaded", drive=drive_name, deleted=len(ids_to_delete))
         
         # Phase 2: Sync drives (5-65%)
         if progress_callback:

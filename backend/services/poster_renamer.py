@@ -391,7 +391,14 @@ class PosterRenameService:
         """
         try:
             if action_type == "copy":
-                shutil.copy(file, new_file_path)
+                # copy2 preserves mtime so filecmp shallow stat-check short-circuits on re-runs.
+                shutil.copy2(file, new_file_path)
+                # Drop source from page cache — won't be needed again this run.
+                try:
+                    with open(file, "rb") as f:
+                        os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+                except (AttributeError, OSError, Exception):
+                    pass
             elif action_type == "move":
                 shutil.move(file, new_file_path)
             elif action_type == "hardlink":
@@ -531,6 +538,8 @@ class PosterRenameService:
                         if os.path.lexists(new_file_path):
                             existing_file = os.path.join(dest_dir, new_file_name)
                             try:
+                                # filecmp short-circuits on matching size+mtime (copy2 preserves mtime).
+                                # os.utime() below syncs mtime for unchanged files so next run is stat-only.
                                 if not filecmp.cmp(file, existing_file):
                                     if file_name != new_file_name:
                                         messages.append(
@@ -550,7 +559,13 @@ class PosterRenameService:
                                             source=file_name, dest=new_file_name
                                         )
                                 else:
-                                    # Destination exists and is identical - considered processed
+                                    # Identical — sync mtime so next run's stat-check short-circuits.
+                                    if not dry_run:
+                                        try:
+                                            src_stat = os.stat(file)
+                                            os.utime(existing_file, (src_stat.st_atime, src_stat.st_mtime))
+                                        except OSError:
+                                            pass
                                     processed_source_files.append(file)
                             except FileNotFoundError:
                                 if not dry_run:
