@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-05-09
+### Added
+- IDarr: new **Force Sync** option — when enabled, the drive sync runs after an IDarr job even if no files were renamed, useful for ensuring the drive is always up to date
+- IDarr: **Run and Sync** button and IDarr schedule configuration both support the new force sync flag
+- Process names for the API and worker threads are now set via `setproctitle`, making them easier to identify in system process lists
+
+### Changed
+- Poster Manager: Top page tabs and Workflow tab page refined for better readability on narrow screens (More narrow screen improvements coming across app.)
+
 ## [0.2.11] - 2026-05-08
 ### Fixed
 - Plex Upload: Discord notifications (success and error) are no longer sent when the upload step runs as part of the Poster Manager workflow — only the workflow-level notification fires
