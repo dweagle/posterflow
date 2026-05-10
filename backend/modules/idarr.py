@@ -273,10 +273,14 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
         success = True
         log_section_end(LogTags.IDARR, f"IDarr Job Completed (job_id={job_id})")
 
-        # Queue personal drive sync if requested and files were actually renamed
-        if bool(config_data.get("sync_after_run")) and not bool(config_data.get("dry_run")) and renamed_count > 0:
+        # Queue personal drive sync if requested and files were actually renamed (or forced)
+        _sync_after = bool(config_data.get("sync_after_run"))
+        _force_sync = bool(config_data.get("force_sync_after_run"))
+        if _sync_after and not bool(config_data.get("dry_run")) and (renamed_count > 0 or _force_sync):
+            if _force_sync and renamed_count == 0:
+                log_info(LogTags.IDARR, "sync_after_run: forcing personal sync even though no files were renamed", job_id=job_id)
             _queue_idarr_sync_after_run(db, config_data, job_id)
-        elif bool(config_data.get("sync_after_run")) and not bool(config_data.get("dry_run")) and renamed_count == 0:
+        elif _sync_after and not bool(config_data.get("dry_run")) and renamed_count == 0:
             log_info(LogTags.IDARR, "sync_after_run: skipping personal sync — no files were renamed", job_id=job_id)
 
     except Exception as exc:

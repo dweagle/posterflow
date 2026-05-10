@@ -144,6 +144,7 @@ export interface MakerIdarrConfig {
   limit: number | null
   frequency_days: number
   tvdb_frequency: number
+  force_sync_after_run: boolean
 }
 
 export interface MakerIdarrSyncTarget {

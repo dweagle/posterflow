@@ -33,12 +33,14 @@ export const startIdarr = async (
   syncTargetIndex?: number,
   sourceFilenames?: string[],
   syncAfterRun: boolean = false,
+  forceSyncAfterRun: boolean = false,
 ): Promise<Job> => {
   return postData('/api/jobs/idarr', {
     dry_run: dryRun,
     sync_target_index: syncTargetIndex,
     source_filenames: Array.isArray(sourceFilenames) && sourceFilenames.length > 0 ? sourceFilenames : undefined,
     sync_after_run: syncAfterRun,
+    force_sync_after_run: forceSyncAfterRun,
   })
 }
 

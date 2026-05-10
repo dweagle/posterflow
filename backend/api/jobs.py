@@ -195,6 +195,7 @@ class StartIdarrRequest(BaseModel):
     sync_target_index: int | None = None
     source_filenames: list[str] | None = None
     sync_after_run: bool = False
+    force_sync_after_run: bool = False
 
 
 def _sanitize_source_filenames(raw_values: list[str] | None) -> list[str]:
@@ -516,6 +517,7 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
     config_data["sync_target_index"] = requested_index
     config_data["scope_token"] = resolve_idarr_scope_token(selected_target, requested_index)
     config_data["sync_after_run"] = bool(request.sync_after_run)
+    config_data["force_sync_after_run"] = bool(request.force_sync_after_run)
     if source_filenames:
         config_data["source_filenames"] = source_filenames
 
@@ -526,6 +528,7 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
         source_dir=source_dir,
         source_filenames_count=len(source_filenames),
         sync_after_run=request.sync_after_run,
+        force_sync_after_run=request.force_sync_after_run,
     )
 
     job = _create_job(

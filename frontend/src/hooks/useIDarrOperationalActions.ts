@@ -83,7 +83,7 @@ export const useIDarrOperationalActions = ({
       setRunning(true)
       await saveMakerIdarrConfig(config)
       onConfigPersisted?.()
-      const job = await startIdarr(false, selectedSyncTargetIndex, undefined, true)
+      const job = await startIdarr(false, selectedSyncTargetIndex, undefined, true, Boolean(config.force_sync_after_run))
       showToast(`IDarr run & sync started (Job ID: ${job.id})`, 'success')
       const refreshed = await getMakerIdarrLastRun(selectedSyncTargetIndex)
       setLastRun(refreshed && Object.keys(refreshed).length > 0 ? refreshed : null)

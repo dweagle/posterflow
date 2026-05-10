@@ -91,6 +91,34 @@ function ScheduleEditModal({
     updateScheduleField('job_config', JSON.stringify(existing))
   }
 
+  const idarrForceSync = useMemo(() => {
+    const raw = String(editingSchedule?.schedule.job_config || '').trim()
+    if (!raw) return false
+    try {
+      const parsed = JSON.parse(raw)
+      return Boolean(parsed?.force_sync_after_run)
+    } catch {
+      return false
+    }
+  }, [editingSchedule?.schedule.job_config])
+
+  const updateIdarrForceSync = (value: boolean) => {
+    const raw = String(editingSchedule?.schedule.job_config || '').trim()
+    let existing: Record<string, unknown> = {}
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+          existing = parsed as Record<string, unknown>
+        }
+      } catch {
+        // ignore malformed
+      }
+    }
+    existing.force_sync_after_run = value
+    updateScheduleField('job_config', JSON.stringify(existing))
+  }
+
   if (!editingSchedule) {
     return null
   }
@@ -183,6 +211,26 @@ function ScheduleEditModal({
                 </span>
               </div>
               <p className="field-hint">When enabled, IDarr will automatically sync the processed folder to your personal drive after each run.</p>
+            </div>
+          )}
+
+          {isIdarrSchedule && idarrSyncAfterRun && (
+            <div className="form-group">
+              <label>Force Sync Even With No Changes</label>
+              <div className="schedule-toggle">
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={idarrForceSync}
+                    onChange={(e) => updateIdarrForceSync(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+                <span className="toggle-label">
+                  {idarrForceSync ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <p className="field-hint">When enabled, the personal drive sync will run even if no files were renamed during the IDarr run.</p>
             </div>
           )}
 

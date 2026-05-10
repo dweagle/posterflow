@@ -65,6 +65,7 @@ const DEFAULT_IDARR_CONFIG: MakerIdarrConfig = {
   limit: null,
   frequency_days: 30,
   tvdb_frequency: 7,
+  force_sync_after_run: false,
 }
 
 const cloneIdarrConfig = (value: MakerIdarrConfig): MakerIdarrConfig => ({
@@ -90,6 +91,7 @@ const normalizeIdarrConfigForCompare = (value: MakerIdarrConfig) => ({
   limit: value.limit === null ? null : Number(value.limit),
   frequency_days: Number(value.frequency_days || 30),
   tvdb_frequency: Number(value.tvdb_frequency || 7),
+  force_sync_after_run: Boolean(value.force_sync_after_run),
   sync_targets: Array.isArray(value.sync_targets)
     ? value.sync_targets.map((target) => ({
       scope_token: String(target.scope_token || ''),
@@ -1516,6 +1518,7 @@ function IDarr() {
         <div className="idarr-settings-group idarr-settings-group-sync-targets">
           <h3>Personal Drive Sync Targets</h3>
           <p className="section-description">Each target includes a personal Drive folder ID and its own local sync folder.</p>
+
           <div className="idarr-sync-target-list">
             {(config.sync_targets || []).map((target, index) => (
               <div key={`sync-target-${index}`} className="idarr-sync-target-row">
@@ -1756,6 +1759,30 @@ function IDarr() {
       )}
     </div>
   )
+
+  const renderSyncOptionsCard = () => {
+    if (config.sync_targets.length === 0) return null
+    return (
+      <div className="settings-section idarr-sync-options-card">
+        <h2>Run &amp; Sync Options</h2>
+        <p className="section-description">Controls behaviour of the Run &amp; Sync button.</p>
+        <label className="idarr-toggle-row">
+          <span className="idarr-toggle-label-text">
+            <strong>Force Sync on Run &amp; Sync</strong>
+            <small>When off, the sync is skipped if no files were renamed. When on, the sync always runs regardless.</small>
+          </span>
+          <span className="idarr-toggle-control">
+            <input
+              type="checkbox"
+              checked={Boolean(config.force_sync_after_run)}
+              onChange={(e) => updateConfig('force_sync_after_run', e.target.checked)}
+            />
+            <span className="idarr-toggle-slider" />
+          </span>
+        </label>
+      </div>
+    )
+  }
 
   const renderRunAndCacheActionsSection = () => (
     <div className="settings-section run-cache-actions-section">
@@ -2442,8 +2469,11 @@ function IDarr() {
           {renderPendingMatchesSection()}
         </div>
         <div className="idarr-side-column">
-          {renderRunAndCacheActionsSection()}
-          {renderIgnoredTitlesSection()}
+          {renderSyncOptionsCard()}
+          <div className="idarr-side-lower">
+            {renderRunAndCacheActionsSection()}
+            {renderIgnoredTitlesSection()}
+          </div>
         </div>
       </div>
     </>

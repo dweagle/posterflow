@@ -226,7 +226,7 @@ def run_border_replacer_for_schedule() -> None:
     _run_scheduled_operation("Scheduled border replacer failed", _submit)
 
 
-def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bool = False) -> None:
+def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bool = False, force_sync_after_run: bool = False) -> None:
     """Wrapper for scheduled IDarr runs."""
 
     def _submit(db: Session) -> None:
@@ -315,6 +315,7 @@ def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bo
         scheduled_config_data["sync_target_index"] = selected_target_index
         scheduled_config_data["scope_token"] = resolve_idarr_scope_token(selected_target, selected_target_index)
         scheduled_config_data["sync_after_run"] = sync_after_run
+        scheduled_config_data["force_sync_after_run"] = force_sync_after_run
         scheduled_config_data["tmdb_api_key"] = tmdb_api_key
 
         _queue_pending_job(
@@ -408,13 +409,15 @@ def update_schedules() -> None:
             elif schedule.job_type == 'idarr':
                 job_func = run_idarr_for_schedule
                 schedule_sync_after = False
+                schedule_force_sync = False
                 if schedule.job_config:
                     try:
                         jc = json.loads(schedule.job_config)
                         schedule_sync_after = bool(jc.get("sync_after_run", False))
+                        schedule_force_sync = bool(jc.get("force_sync_after_run", False))
                     except Exception:
                         pass
-                job_args = [schedule.drive_group, schedule_sync_after]
+                job_args = [schedule.drive_group, schedule_sync_after, schedule_force_sync]
             elif schedule.job_type == 'maker_monitor':
                 job_func = run_maker_monitor_for_schedule
                 job_args = []
