@@ -2027,7 +2027,7 @@ def test_plex_upload_ambiguous_no_id_asset_is_skipped(test_db, monkeypatch):
 
     monkeypatch.setattr("services.plex_upload.log_info", _capture_info)
 
-    uploaded, matched, raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2056,7 +2056,7 @@ def test_plex_upload_no_id_asset_prefers_collection_when_type_unknown(test_db):
         "collections": {"alien": [_FakePlexItem("collection", "Alien Collection", None, "Movies")]},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2088,7 +2088,7 @@ def test_plex_upload_no_id_asset_prefers_collection_over_arr_movie_hint(test_db)
         "shows": {},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2136,7 +2136,7 @@ def test_plex_upload_no_id_asset_falls_back_to_collection_when_untyped_only(test
         "collections": {"middleearth": [_FakePlexItem("collection", "Middle Earth", None, "Movies")]},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2167,7 +2167,7 @@ def test_plex_upload_matches_show_by_tvdb_id_when_title_key_misses(test_db):
         "collections": {},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2226,7 +2226,7 @@ def test_movie_cache_uses_library_keys_not_legacy_library_name(test_db):
     ))
     test_db.commit()
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2285,7 +2285,7 @@ def test_movie_default_edition_cache_is_scoped_per_library_key(test_db):
     ))
     test_db.commit()
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts = service._upload_asset(
+    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
         asset,
         index,
         dry_run=True,
@@ -2855,3 +2855,76 @@ def test_resolve_target_media_type_explicit_movie_filter_not_redirected(test_db)
 
     assert result == "movie", f"expected 'movie' but got {result!r} (reason={reason})"
     assert reason is None
+
+
+def test_upload_asset_season_missing_in_plex_returns_seasons_missing_flag(test_db):
+    """When the show exists in Plex but the season hasn't scanned yet,
+    _upload_asset should return seasons_missing=1 so the retry loop knows
+    to wait rather than treating it as already up-to-date."""
+    service = PlexUploadService(test_db)
+
+    class _ShowWithNoSeasons(_FakePlexItem):
+        def seasons(self):
+            return []  # show present, season not yet scanned
+
+    asset = {
+        "media_key": "legendofkorra2012",
+        "asset_type": "season",
+        "season_number": 1,
+        "path": "/tmp/organized/The Legend of Korra (2012)/Season01.jpg",
+        "display_name": "The Legend of Korra (2012)",
+    }
+    index = {
+        "movies": {},
+        "shows": {"legendofkorra2012": [_ShowWithNoSeasons("show", "The Legend of Korra", 2012, "TV Shows")]},
+        "collections": {},
+    }
+
+    uploaded, matched, _raw, _unique, _counts, seasons_missing = service._upload_asset(
+        asset,
+        index,
+        dry_run=False,
+    )
+
+    assert uploaded == 0
+    assert matched is True  # show was found in Plex
+    assert seasons_missing == 1  # season not yet scanned — should trigger retry
+
+
+def test_upload_asset_season_present_in_plex_returns_zero_seasons_missing(test_db):
+    """When the show and season both exist in Plex, seasons_missing should be 0."""
+    service = PlexUploadService(test_db)
+
+    class _FakeSeason:
+        def __init__(self, index):
+            self.index = index
+
+        def uploadPoster(self, filepath):
+            pass
+
+    class _ShowWithSeason(_FakePlexItem):
+        def seasons(self):
+            return [_FakeSeason(1)]
+
+    asset = {
+        "media_key": "legendofkorra2012",
+        "asset_type": "season",
+        "season_number": 1,
+        "path": "/tmp/organized/The Legend of Korra (2012)/Season01.jpg",
+        "display_name": "The Legend of Korra (2012)",
+    }
+    index = {
+        "movies": {},
+        "shows": {"legendofkorra2012": [_ShowWithSeason("show", "The Legend of Korra", 2012, "TV Shows")]},
+        "collections": {},
+    }
+
+    uploaded, matched, _raw, _unique, _counts, seasons_missing = service._upload_asset(
+        asset,
+        index,
+        dry_run=True,
+    )
+
+    assert uploaded == 1
+    assert matched is True
+    assert seasons_missing == 0

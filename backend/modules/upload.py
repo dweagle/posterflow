@@ -2225,6 +2225,7 @@ def run_plex_webhook_background_job(
                 "candidate_matches_unique": 0,
                 "skipped": 0,
                 "errors": 0,
+                "plex_seasons_missing": 0,
             }
 
             for target in webhook_targets:
@@ -2344,6 +2345,22 @@ def run_plex_webhook_background_job(
 
             if uploaded_count > 0:
                 break
+
+            plex_seasons_missing = int(stats.get("plex_seasons_missing", 0))
+            if matched_count > 0 and plex_seasons_missing > 0 and attempt < attempts:
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Webhook found show in Plex but season not yet scanned; retrying in {delay_seconds}s",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    title=title,
+                    media_type=media_type,
+                    season_number=season_number,
+                    matched=matched_count,
+                    plex_seasons_missing=plex_seasons_missing,
+                )
+                time.sleep(delay_seconds)
+                continue
 
             if matched_count > 0:
                 log_info(

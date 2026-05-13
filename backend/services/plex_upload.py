@@ -79,6 +79,7 @@ class PlexUploadService:
             "would_upload": 0,
             "skipped": 0,
             "errors": 0,
+            "plex_seasons_missing": 0,
         }
 
     def _no_assets_result(self, message: str) -> Dict[str, Any]:
@@ -141,7 +142,7 @@ class PlexUploadService:
         for asset_index, asset in enumerate(local_assets, start=1):
             progress_message = ""
             try:
-                uploaded_count, matched, raw_candidates, unique_candidates, media_counts = self._upload_asset(
+                uploaded_count, matched, raw_candidates, unique_candidates, media_counts, seasons_missing = self._upload_asset(
                     asset,
                     index,
                     dry_run,
@@ -161,6 +162,8 @@ class PlexUploadService:
                     stats["uploaded"] += uploaded_count
                 if uploaded_count == 0:
                     stats["skipped"] += 1
+                if seasons_missing:
+                    stats["plex_seasons_missing"] = int(stats.get("plex_seasons_missing", 0)) + seasons_missing
 
                 file_name = Path(str(asset.get("path") or "")).name
                 upload_label = "would upload" if dry_run else "uploaded"
@@ -1157,7 +1160,7 @@ class PlexUploadService:
         media_type_filter: Optional[str] = None,
         arr_availability: Optional[Dict[str, Any]] = None,
         remove_overlay_label: bool = False,
-    ) -> Tuple[int, bool, int, int, Dict[str, int]]:
+    ) -> Tuple[int, bool, int, int, Dict[str, int], int]:
         media_key = asset["media_key"]
         file_path = asset["path"]
         asset_label = self._asset_label(asset)
@@ -1177,7 +1180,7 @@ class PlexUploadService:
             shows = self._dedupe_plex_items(shows_raw)
             if not shows:
                 log_debug(LogTags.UPLOADER, f"No show match for season asset: {asset_label}", file=file_path)
-                return 0, False, 0, 0, media_counts
+                return 0, False, 0, 0, media_counts, 0
 
             uploaded = 0
             cached_skips = 0
@@ -1250,7 +1253,8 @@ class PlexUploadService:
                         f"No Season {int(season_number):02} found in {libraries_text} for {asset.get('display_name', media_key)}",
                         file=file_path,
                     )
-            return uploaded, True, len(shows_raw), len(shows), media_counts
+                    return uploaded, True, len(shows_raw), len(shows), media_counts, 1
+            return uploaded, True, len(shows_raw), len(shows), media_counts, 0
 
         inferred_filter, resolution_reason = self._resolve_target_media_type(
             asset,
@@ -1268,9 +1272,9 @@ class PlexUploadService:
                     file=file_path,
                 )
                 ambiguous_raw_candidates = len(movies_raw) + len(shows_raw)
-                return 0, False, ambiguous_raw_candidates, 0, media_counts
+                return 0, False, ambiguous_raw_candidates, 0, media_counts, 0
             log_info(LogTags.UPLOADER, f"No Plex match for asset: {asset_label}", file=file_path)
-            return 0, False, 0, 0, media_counts
+            return 0, False, 0, 0, media_counts, 0
 
         available, unavailable_reason = self._asset_has_arr_availability(
             asset,
@@ -1283,7 +1287,7 @@ class PlexUploadService:
                 f"Skipping unavailable asset: {asset_label} ({unavailable_reason})",
                 file=file_path,
             )
-            return 0, False, 0, 0, media_counts
+            return 0, False, 0, 0, media_counts, 0
         candidate_groups: List[List[Any]] = []
         if inferred_filter == "movie":
             candidate_groups = [movies_raw]
@@ -1310,7 +1314,7 @@ class PlexUploadService:
                 f"movies_raw={len(movies_raw)}, shows_raw={len(shows_raw)}, collections_raw={len(collections_raw)})",
                 file=file_path,
             )
-            return 0, False, raw_candidate_count, 0, media_counts
+            return 0, False, raw_candidate_count, 0, media_counts, 0
 
         uploaded = 0
         for item in matched_items:
@@ -1408,7 +1412,7 @@ class PlexUploadService:
                 )
             log_info(LogTags.UPLOADER, f"Uploaded {item_label}", file=file_path, asset=asset_label)
 
-        return uploaded, True, raw_candidate_count, len(matched_items), media_counts
+        return uploaded, True, raw_candidate_count, len(matched_items), media_counts, 0
 
     def _remove_overlay_label_if_present(self, item: Any, *, file_path: str) -> None:
         try:
