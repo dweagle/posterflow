@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-05-12
+### Fixed
+- Plex Upload: fixed a race condition where a season pack webhook fired before Plex finished scanning the season folder — the show would match in Plex but the season entry didn't exist yet, causing the job to exit silently with no upload; the job now retries until the season appears
+
 ## [0.2.13] - 2026-05-10
 ### Changed
 - Plex Upload: file mtime is now stored in upload records — a fast `stat()` check skips the sha256 file read for unchanged posters, eliminating multi-GB page cache accumulation on large upload runs
