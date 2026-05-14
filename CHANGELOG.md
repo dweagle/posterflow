@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-13
+### Added
+- Poster Manager: TMDB search results in the Unmatched Assets modal and Poster Style fallback modal now include a copy title button.
+
+### Changed
+- UI: app-wide responsive layout refactor — all major pages (Dashboard, GDrives, IDarr, Logs, Maker Tools, Settings, Poster Manager) and the Sidebar now adapt cleanly to narrow screens
+- Poster Manager: tabs and inner components (Flow, Renamer, Border, Unmatched, Priority, Settings) refactored with a shared Toolbar component for consistent narrow-screen layout
+- Poster Manager: TMDB link row shows the full URL with Open / Copy / Title action buttons alongside it.  Buttons wrap to next line on narrow screens.
+
 ## [0.2.14] - 2026-05-12
 ### Fixed
 - Plex Upload: fixed a race condition where a season pack webhook fired before Plex finished scanning the season folder — the show would match in Plex but the season entry didn't exist yet, causing the job to exit silently with no upload; the job now retries until the season appears
