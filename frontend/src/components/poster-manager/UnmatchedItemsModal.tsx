@@ -121,6 +121,7 @@ function UnmatchedItemsModal({
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [copiedLink, setCopiedLink] = useState<string | null>(null)
+  const [copiedTitle, setCopiedTitle] = useState<string | null>(null)
   const [noKeyItems, setNoKeyItems] = useState<Set<string>>(new Set())
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
@@ -204,7 +205,36 @@ function UnmatchedItemsModal({
         showToast('Failed to copy link', 'error')
       }
     }
-  }, [])
+  }, [showToast])
+
+  const handleCopyTitle = useCallback(async (candidate: TmdbCandidate, key: string) => {
+    const text = candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedTitle(key)
+      setTimeout(() => setCopiedTitle(null), 2000)
+      showToast('Title copied')
+    } catch {
+      try {
+        const el = document.createElement('textarea')
+        el.value = text
+        el.style.position = 'fixed'
+        el.style.left = '-9999px'
+        el.style.top = '-9999px'
+        document.body.appendChild(el)
+        el.focus()
+        el.select()
+        ;(document as unknown as { execCommand(cmd: string): boolean }).execCommand('copy')
+        document.body.removeChild(el)
+        setCopiedTitle(key)
+        setTimeout(() => setCopiedTitle(null), 2000)
+        showToast('Title copied')
+      } catch (fallbackError) {
+        console.error('Failed to copy title:', fallbackError)
+        showToast('Failed to copy title', 'error')
+      }
+    }
+  }, [showToast])
 
   if (!modalType || !unmatchedStats?.unmatched) return null
 
@@ -335,6 +365,7 @@ function UnmatchedItemsModal({
                         candidates.map((candidate, cidx) => {
                           const link = getTmdbLink(candidate)
                           const isCopied = copiedLink === link
+                          const isTitleCopied = copiedTitle === link
                           const previewSrc = candidate.poster_url
                             ? candidate.poster_url.replace('/w185/', '/w342/')
                             : null
@@ -374,6 +405,7 @@ function UnmatchedItemsModal({
                                     title="Open in TMDB"
                                   >
                                     <ExternalLink size={13} />
+                                    <span>Open</span>
                                   </a>
                                   <button
                                     type="button"
@@ -383,6 +415,15 @@ function UnmatchedItemsModal({
                                   >
                                     {isCopied ? <Check size={13} /> : <Copy size={13} />}
                                     <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`tmdb-copy-btn${isTitleCopied ? ' copied' : ''}`}
+                                    onClick={() => handleCopyTitle(candidate, link)}
+                                    title={isTitleCopied ? 'Copied!' : 'Copy title & year'}
+                                  >
+                                    {isTitleCopied ? <Check size={13} /> : <Copy size={13} />}
+                                    <span>{isTitleCopied ? 'Copied' : 'Title'}</span>
                                   </button>
                                 </div>
                               </div>

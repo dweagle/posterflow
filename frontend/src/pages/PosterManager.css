@@ -2273,7 +2273,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   background: #2e3a50;
   border: 1px solid #3d4e66;
   border-radius: 6px;
-  padding: 0.6rem;
+  padding: 0.75rem;
+  min-height: 72px;
 }
 
 .tmdb-candidate-item:hover {
@@ -2298,8 +2299,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .tmdb-candidate-poster {
-  width: 40px;
-  height: 60px;
+  width: 44px;
+  height: 66px;
   object-fit: cover;
   border-radius: 4px;
   flex-shrink: 0;
@@ -2342,7 +2343,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
 .tmdb-candidate-title-row {
@@ -2395,6 +2397,18 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 550px) {
+  .tmdb-candidate-link-row {
+    flex-wrap: wrap;
+  }
+
+  .tmdb-candidate-link-row .tmdb-link-text {
+    width: 100%;
+    flex: none;
+  }
 }
 
 .unmatched-cat-badge {
@@ -2444,14 +2458,22 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .tmdb-icon-btn {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #424242;
   border-radius: 4px;
-  color: #888;
-  transition: color 0.2s;
+  background: #2a2a2a;
+  color: #aaa;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
   flex-shrink: 0;
+  transition: all 0.2s;
+  text-decoration: none;
 }
 
 .tmdb-icon-btn:hover {
+  border-color: #64b5f6;
   color: #64b5f6;
 }
 

@@ -23,6 +23,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
   const [isNoKey, setIsNoKey] = useState(false)
   const [copiedLink, setCopiedLink] = useState<string | null>(null)
+  const [copiedTitle, setCopiedTitle] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   // Strip trailing (YYYY) from title when year is already provided separately,
@@ -93,6 +94,35 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
     }
   }, [showToast])
 
+  const handleCopyTitle = useCallback(async (candidate: TmdbCandidate, key: string) => {
+    const text = candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedTitle(key)
+      setTimeout(() => setCopiedTitle(null), 2000)
+      showToast('Title copied')
+    } catch {
+      try {
+        const el = document.createElement('textarea')
+        el.value = text
+        el.style.position = 'fixed'
+        el.style.left = '-9999px'
+        el.style.top = '-9999px'
+        document.body.appendChild(el)
+        el.focus()
+        el.select()
+        ;(document as unknown as { execCommand(cmd: string): boolean }).execCommand('copy')
+        document.body.removeChild(el)
+        setCopiedTitle(key)
+        setTimeout(() => setCopiedTitle(null), 2000)
+        showToast('Title copied')
+      } catch (err) {
+        console.error('Failed to copy title:', err)
+        showToast('Failed to copy title', 'error')
+      }
+    }
+  }, [showToast])
+
   return (
     <div className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
       <div className="unmatched-item">
@@ -145,6 +175,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
             candidates.map((candidate, cidx) => {
               const link = getTmdbLink(candidate)
               const isCopied = copiedLink === link
+              const isTitleCopied = copiedTitle === link
               const previewSrc = candidate.poster_url
                 ? candidate.poster_url.replace('/w185/', '/w342/')
                 : null
@@ -184,6 +215,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                         title="Open in TMDB"
                       >
                         <ExternalLink size={13} />
+                        <span>Open</span>
                       </a>
                       <button
                         type="button"
@@ -193,6 +225,15 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                       >
                         {isCopied ? <Check size={13} /> : <Copy size={13} />}
                         <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`tmdb-copy-btn${isTitleCopied ? ' copied' : ''}`}
+                        onClick={() => handleCopyTitle(candidate, link)}
+                        title={isTitleCopied ? 'Copied!' : 'Copy title & year'}
+                      >
+                        {isTitleCopied ? <Check size={13} /> : <Copy size={13} />}
+                        <span>{isTitleCopied ? 'Copied' : 'Title'}</span>
                       </button>
                     </div>
                   </div>
