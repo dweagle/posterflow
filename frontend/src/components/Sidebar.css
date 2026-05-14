@@ -316,6 +316,7 @@
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     z-index: 100;
+    overflow: visible;
   }
 
   .sidebar.sidebar--open {
@@ -364,5 +365,12 @@
 
   .sidebar-job-mini {
     display: block;
+  }
+
+  .sidebar-header .release-notes-popover {
+    left: 0;
+    top: calc(100% + 0.25rem);
+    margin-left: 0;
+    width: 220px;
   }
 }
