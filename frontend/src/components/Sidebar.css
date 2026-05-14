@@ -5,7 +5,7 @@
   flex-direction: column;
   border-right: 1px solid #333;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar-header {
