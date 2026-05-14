@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle, Eye, Save, Waves, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { FlowConfig, FlowResult } from '../../api/client'
+import Toolbar from './Toolbar'
 
 type FlowTabProps = {
   flowConfig: FlowConfig
@@ -41,32 +42,28 @@ function FlowTab({
 
   return (
     <div className="flow-container">
-      <div className="flow-header">
-        <div>
-          <h2>Poster Workflow</h2>
-          <p>Configure and run the complete poster management workflow</p>
-        </div>
-        <div className="action-buttons">
+      <Toolbar title="Poster Workflow" description="Configure and run the complete poster management workflow">
+        <div className="btn-pair">
           <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
             Scheduling
           </button>
           <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings}>
             Discord
           </button>
-          <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={!hasUnsavedFlowChanges || saving} title={hasUnsavedFlowChanges ? 'Save changes' : 'No changes to save'}>
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-          <button className="btn-toolbar" onClick={() => onRunFlow(true)} disabled={flowRunning} title="Dry run workflow">
-            <Eye size={16} />
-            Dry Run
-          </button>
-          <button className="btn-toolbar run-flow-btn" onClick={() => onRunFlow(false)} disabled={flowRunning}>
-            <Waves size={16} />
-            {flowRunning ? 'Running...' : 'Run Workflow'}
-          </button>
         </div>
-      </div>
+        <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={!hasUnsavedFlowChanges || saving} title={hasUnsavedFlowChanges ? 'Save changes' : 'No changes to save'}>
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button className="btn-toolbar" onClick={() => onRunFlow(true)} disabled={flowRunning} title="Dry run workflow">
+          <Eye size={16} />
+          Dry Run
+        </button>
+        <button className="btn-toolbar btn-primary run-flow-btn" onClick={() => onRunFlow(false)} disabled={flowRunning}>
+          <Waves size={16} />
+          {flowRunning ? 'Running...' : 'Run Workflow'}
+        </button>
+      </Toolbar>
 
       <div className="flow-jobs">
         <div className={`flow-job-card ${!flowConfig.sync_drives.enabled ? 'disabled' : ''}`}>

@@ -21,54 +21,71 @@
 
 .idarr-page .toolbar {
   display: flex;
-  justify-content: space-between;
+  flex-direction: row;
   align-items: center;
+  justify-content: space-between;
   gap: 1.5rem;
   padding: 0.75rem;
   background-color: #3D4556;
   border-radius: 8px;
   margin-bottom: 2rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: #5c6882 #3D4556;
 }
 
-.idarr-page .toolbar > div:first-child {
+.idarr-page .toolbar-title {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .idarr-page .toolbar h2 {
   color: #64b5f6;
   margin: 0;
   font-size: 1.25rem;
+  white-space: nowrap;
 }
 
-.idarr-page .toolbar p {
-  color: #aaa;
-  margin: 0;
-  font-size: 0.9rem;
+.idarr-page .toolbar-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  color: #888;
+  transition: color 0.2s;
 }
 
-.idarr-page .toolbar::-webkit-scrollbar {
-  height: 6px;
+.idarr-page .toolbar-info:hover {
+  color: #64b5f6;
 }
 
-.idarr-page .toolbar::-webkit-scrollbar-track {
-  background: #3D4556;
-  border-radius: 3px;
+.idarr-page .toolbar-info svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
-.idarr-page .toolbar::-webkit-scrollbar-thumb {
-  background: #5c6882;
-  border-radius: 3px;
+.idarr-page .toolbar-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: #252525;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: #ccc;
+  font-size: 0.85rem;
+  width: 300px;
+  max-width: 90vw;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+  white-space: normal;
 }
 
-.idarr-page .toolbar::-webkit-scrollbar-thumb:hover {
-  background: #6c7892;
+.idarr-page .toolbar-info:hover .toolbar-tooltip {
+  opacity: 1;
 }
 
 .idarr-page .action-buttons {
@@ -76,6 +93,156 @@
   gap: 0.5rem;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.idarr-page .btn-pair {
+  display: flex;
+  gap: 0.5rem;
+  width: 185px;
+  flex-shrink: 0;
+}
+
+.idarr-page .btn-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  min-width: 185px;
+  background-color: #5c6882;
+  color: #E8ECEF;
+  border: none;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.idarr-page .btn-toolbar:hover:not(:disabled) {
+  background-color: #6c7892;
+}
+
+.idarr-page .btn-toolbar.btn-primary {
+  background-color: #5B89C4;
+  color: #fff;
+}
+
+.idarr-page .btn-toolbar.btn-primary:hover:not(:disabled) {
+  background-color: #6c9bd4;
+}
+
+.idarr-page .btn-toolbar.btn-unsaved {
+  background-color: #ef5350;
+  color: #fff;
+}
+
+.idarr-page .btn-toolbar.btn-unsaved:hover:not(:disabled) {
+  background-color: #e53935;
+}
+
+.idarr-page .btn-toolbar:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.idarr-page .btn-toolbar.btn-toolbar-link {
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #424242;
+  color: #fff;
+  padding: 0.45rem 0.25rem;
+  font-size: 0.85rem;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+.idarr-page .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
+  background: #555;
+}
+
+/* Collapse toolbar to column on medium screens */
+@media (max-width: 1300px) {
+  .idarr-page .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .idarr-page .toolbar-title {
+    width: 100%;
+  }
+
+  .idarr-page .action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 185px);
+    justify-content: start;
+    width: 100%;
+  }
+
+  .idarr-page .btn-pair {
+    width: 185px;
+  }
+}
+
+/* Mobile: full-width single column */
+@media (max-width: 550px) {
+  .idarr-page .toolbar {
+    padding: 0.5rem;
+  }
+
+  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
+  .idarr-page .toolbar-tooltip {
+    display: none;
+  }
+
+  .idarr-page .action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .idarr-page .btn-pair {
+    width: 100%;
+  }
+
+  /* Prevent fixed min-widths from overflowing at narrowest screens */
+  .idarr-page .btn-toolbar {
+    min-width: 0;
+  }
+
+  .idarr-page .pending-filter-buttons .btn-toolbar,
+  .idarr-page .pending-item-actions-primary .btn-toolbar,
+  .idarr-page .pending-section-header .action-buttons .btn-toolbar,
+  .idarr-page .ignored-section-header .action-buttons .btn-toolbar {
+    width: 100%;
+  }
+
+  /* Absolute-positioned tooltip inflates scrollWidth */
+  .idarr-info-icon-wrap:hover .idarr-info-tooltip {
+    display: none;
+  }
+
+  .idarr-page .pending-section-header {
+    flex-wrap: wrap;
+  }
+
+  .idarr-page .pending-filter-buttons {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  /* Reorder cards: pending first, Quick Add last */
+  .idarr-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .idarr-pending-card        { order: 1; }
+  .idarr-sync-options-card   { order: 2; }
+  .run-cache-actions-section { order: 3; }
+  .idarr-ignored-card        { order: 4; }
+  .idarr-upload-card         { order: 10; }
 }
 
 .idarr-page .pending-actions {
@@ -275,53 +442,8 @@
 }
 
 @keyframes idarr-button-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.idarr-page .btn-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: #5c6882;
-  color: #E8ECEF;
-  border: none;
-  border-radius: 4px;
-  transition: none;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  flex-shrink: 0;
-  flex-grow: 0;
-  min-width: fit-content;
-  max-width: max-content;
-  width: auto;
-}
-
-.idarr-page.toggle-animations-enabled .btn-toolbar {
-  transition: all 0.2s;
-}
-
-.idarr-page .btn-toolbar:hover:not(:disabled) {
-  background-color: #6c7892;
-}
-
-.idarr-page .btn-toolbar.btn-toolbar-link {
-  border: 1px solid #4b5563;
-  border-radius: 6px;
-  background: #424242;
-  color: #fff;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.85rem;
-}
-
-.idarr-page .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
-  background: #555;
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .idarr-page .btn-toolbar.btn-primary {
@@ -1074,34 +1196,15 @@
 .idarr-layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  grid-template-rows: auto 1fr;
   gap: 1rem;
+  align-items: start;
 }
 
-.idarr-main-column {
-  display: grid;
-  grid-template-rows: subgrid;
-  grid-column: 1;
-  grid-row: 1 / 3;
-  gap: 1rem;
-  min-width: 0;
-}
-
-.idarr-side-column {
-  display: grid;
-  grid-template-rows: subgrid;
-  grid-column: 2;
-  grid-row: 1 / 3;
-  gap: 1rem;
-  min-width: 0;
-}
-
-.idarr-side-lower {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-width: 0;
-}
+.idarr-upload-card          { grid-column: 1; grid-row: 1; }
+.idarr-pending-card         { grid-column: 1; grid-row: 2 / 4; align-self: stretch; display: flex; flex-direction: column; }
+.idarr-sync-options-card    { grid-column: 2; grid-row: 1; }
+.run-cache-actions-section  { grid-column: 2; grid-row: 2; }
+.idarr-ignored-card         { grid-column: 2; grid-row: 3; }
 
 .idarr-layout .settings-section {
   margin-bottom: 0;
@@ -1514,9 +1617,13 @@
     grid-template-columns: 1fr;
   }
 
-  .idarr-main-column,
-  .idarr-side-column {
-    grid-template-rows: auto;
+  .idarr-upload-card,
+  .idarr-pending-card,
+  .idarr-sync-options-card,
+  .run-cache-actions-section,
+  .idarr-ignored-card {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
 

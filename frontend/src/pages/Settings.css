@@ -29,6 +29,14 @@
   width: auto;
 }
 
+@media (max-width: 550px) {
+  .btn-rerun-setup {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.78rem;
+    gap: 0.35rem;
+  }
+}
+
 .btn-rerun-setup:hover {
   background: #333;
   border-color: #64b5f6;
@@ -49,7 +57,7 @@
 }
 
 .settings-section-header {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -58,6 +66,18 @@
 
 .settings-section-header > div {
   flex: 1;
+}
+
+@media (max-width: 550px) {
+  .settings-section-header {
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .settings-section .settings-section-header h2 {
+    margin-bottom: 0;
+  }
 }
 
 .settings-section h2 {
@@ -168,9 +188,23 @@
 
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
   border-bottom: 2px solid #333;
+}
+
+@media (max-width: 550px) {
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+  }
+
+  .settings-tabs button {
+    justify-content: center;
+    width: 100%;
+  }
 }
 
 .settings-tabs button .tab-icon {
@@ -629,6 +663,7 @@ details[open] .feature-events-summary::before {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 2px solid #333;
@@ -648,22 +683,20 @@ details[open] .feature-events-summary::before {
   justify-content: start;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 550px) {
   .server-cards-grid {
-    grid-template-columns: 360px;
-    justify-content: center;
-  }
-}
-
-@media (max-width: 480px) {
-  .server-cards-grid {
-    grid-template-columns: 320px;
+    grid-template-columns: 1fr;
+    justify-content: stretch;
   }
   .server-card {
-    width: 320px !important;
+    height: auto;
+    min-height: 180px;
   }
   .summary-days {
     grid-template-columns: 1fr !important;
+  }
+  .server-section-header {
+    flex-wrap: wrap;
   }
 }
 
@@ -674,7 +707,7 @@ details[open] .feature-events-summary::before {
   transition: all 0.2s;
   display: flex;
   flex-direction: column;
-  width: 360px;
+  min-width: 0;
   height: 300px;
 }
 
@@ -1506,53 +1539,6 @@ details[open] .feature-events-summary::before {
 .settings .btn-danger svg {
   margin-right: 0.5rem;
   flex-shrink: 0;
-}
-
-/* Fixed Modal Size (schedule editor only) */
-.schedule-edit-modal .modal-body {
-  min-height: 500px;
-  max-height: 600px;
-}
-
-
-
-/* Compact Form Elements in Modal */
-.modal-body .form-group {
-  margin-bottom: 1rem;
-}
-
-.modal-body .form-group label {
-  font-size: 0.9rem;
-  margin-bottom: 0.4rem;
-}
-
-.modal-body .field-hint {
-  font-size: 0.8rem;
-  margin-top: 0.3rem;
-}
-
-.modal-body .schedule-type-buttons {
-  gap: 0.5rem;
-}
-
-.modal-body .schedule-type-btn {
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-}
-
-.modal-body .day-toggle-buttons {
-  gap: 0.4rem;
-}
-
-.modal-body .day-toggle-btn {
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-}
-
-.modal-body input[type="text"],
-.modal-body input[type="number"] {
-  padding: 0.6rem;
-  font-size: 0.9rem;
 }
 
 /* Fixed Modal Size - No Resizing (schedule editor only) */

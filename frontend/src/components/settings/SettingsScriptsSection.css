@@ -274,3 +274,64 @@
   justify-content: flex-end;
   padding-top: 0.5rem;
 }
+
+@media (max-width: 550px) {
+  .scripts-table-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .scripts-table-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .scripts-logging-label {
+    white-space: normal;
+  }
+
+  /* Collapse 5-column grid: job+toggle on first row, selects stacked below */
+  .scripts-table-row--header {
+    display: none;
+  }
+
+  .scripts-table-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto auto;
+    gap: 0.4rem 0.75rem;
+    padding: 0.75rem;
+  }
+
+  /* Job label spans full width as a header for the card */
+  .scripts-table-row > .scripts-job-label {
+    grid-column: 1;
+    grid-row: 1;
+    font-weight: 600;
+  }
+
+  /* Toggle sits top-right */
+  .scripts-table-row > .scripts-toggle-cell {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+  }
+
+  /* Three select spans each take full width below */
+  .scripts-table-row > span:nth-child(3) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .scripts-table-row > span:nth-child(4) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
+  .scripts-table-row > span:nth-child(5) {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+}

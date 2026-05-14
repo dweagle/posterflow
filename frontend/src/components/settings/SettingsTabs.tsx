@@ -28,7 +28,7 @@ function SettingsTabs({ activeTab, onTabChange }: SettingsTabsProps) {
       </button>
       <button className={activeTab === 'rclone' ? 'active' : ''} onClick={() => onTabChange('rclone')}>
         <Cloud size={16} className="tab-icon" />
-        Rclone Configuration
+        Rclone
       </button>
       <button className={activeTab === 'backup' ? 'active' : ''} onClick={() => onTabChange('backup')}>
         <Database size={16} className="tab-icon" />

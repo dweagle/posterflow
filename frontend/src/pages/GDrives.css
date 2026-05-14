@@ -17,115 +17,157 @@
   display: flex;
   flex-direction: row;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   margin-bottom: 2rem;
   padding: 0.5rem 0.75rem;
   background-color: #3D4556;
   border-radius: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex-wrap: nowrap;
-  /* Smooth scrolling for touch devices */
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: #5c6882 #3D4556;
+  flex-wrap: wrap;
 }
 
-/* Custom scrollbar styling for webkit browsers */
-.gdrives .toolbar::-webkit-scrollbar {
-  height: 6px;
-}
-
-.gdrives .toolbar::-webkit-scrollbar-track {
-  background: #3D4556;
-  border-radius: 3px;
-}
-
-.gdrives .toolbar::-webkit-scrollbar-thumb {
-  background: #5c6882;
-  border-radius: 3px;
-}
-
-.gdrives .toolbar::-webkit-scrollbar-thumb:hover {
-  background: #6c7892;
-}
-
-.gdrives .gdrives .filter-buttons {
-  display: flex;
-  flex-direction: row;
-  gap: 0.5rem;
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-}
-
-.gdrives .gdrives .filter-buttons button {
-  padding: 0.5rem 1rem;
-  background-color: #5c6882;
-  color: #E8ECEF;
-  border-radius: 4px;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.gdrives .filter-buttons button:hover {
-  background-color: #6c7892;
-}
-
-.gdrives .filter-buttons button.active {
-  background-color: #5B89C4;
-  color: #fff;
-}
-
-.gdrives .sort-dropdown {
+.gdrives .toolbar-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
 }
 
-.gdrives .gdrives .sort-dropdown label {
-  color: #aaa;
-  font-size: 0.9rem;
+.gdrives .toolbar-title h2 {
+  color: #64b5f6;
+  margin: 0;
+  font-size: 1.25rem;
   white-space: nowrap;
 }
 
-.gdrives .gdrives .sort-dropdown select {
-  padding: 0.5rem 0.75rem;
-  background-color: #5c6882;
-  color: #E8ECEF;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  outline: none;
+.gdrives .toolbar-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  color: #888;
+  transition: color 0.2s;
 }
 
-.gdrives .sort-dropdown select:hover {
-  background-color: #6c7892;
+.gdrives .toolbar-info:hover {
+  color: #64b5f6;
 }
 
-.gdrives .sort-dropdown select:focus {
-  background-color: #5B89C4;
-  box-shadow: 0 0 0 2px rgba(91, 137, 196, 0.3);
-}
-
-.gdrives .toolbar-divider {
-  width: 1px;
-  height: 28px;
-  background-color: #444;
-  margin: 0 0.25rem;
+.gdrives .toolbar-info svg {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
+}
+
+.gdrives .toolbar-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: #252525;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: #ccc;
+  font-size: 0.85rem;
+  width: 300px;
+  max-width: 90vw;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+  white-space: normal;
+}
+
+.gdrives .toolbar-info:hover .toolbar-tooltip {
+  opacity: 1;
+}
+
+.gdrives .toolbar-filters,
+.gdrives .sort-dropdown,
+.gdrives .filter-buttons,
+.gdrives .toolbar-divider {
+  display: none; /* No longer used in toolbar */
 }
 
 .gdrives .action-buttons {
   display: flex;
   gap: 0.5rem;
-  margin-left: auto;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* Drives controls bar: filter pills + sort, sits above the drive cards */
+.gdrives .drives-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.gdrives .drives-controls .filter-buttons {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
   flex-wrap: nowrap;
+}
+
+.gdrives .drives-controls .filter-buttons button {
+  padding: 0.4rem 0.9rem;
+  background-color: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gdrives .drives-controls .filter-buttons button:hover {
+  background-color: #333;
+  border-color: #555;
+  color: #fff;
+}
+
+.gdrives .drives-controls .filter-buttons button.active {
+  background-color: #5B89C4;
+  border-color: #5B89C4;
+  color: #fff;
+}
+
+.gdrives .drives-controls .sort-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.gdrives .drives-controls .sort-dropdown label {
+  color: #aaa;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.gdrives .drives-controls .sort-dropdown select {
+  padding: 0.4rem 0.6rem;
+  background-color: #2a2a2a;
+  color: #fff;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.gdrives .drives-controls .sort-dropdown select:hover {
+  background-color: #333;
+  border-color: #555;
+}
+
+.gdrives .drives-controls .sort-dropdown select:focus {
+  border-color: #64b5f6;
+  box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.2);
 }
 
 /* Bulk Actions Bar */
@@ -173,79 +215,40 @@
   transform: scale(0.98);
 }
 
-/* Responsive: make buttons slightly smaller on narrow screens */
-@media (max-width: 900px) {
-  .gdrives .btn-toolbar {
-    padding: 0.45rem 0.75rem;
-    font-size: 0.8rem;
-  }
-  
-  .gdrives .filter-buttons button {
-    padding: 0.45rem 0.85rem;
-    font-size: 0.85rem;
-  }
-}
-
-/* Very narrow screens: even more compact */
-@media (max-width: 600px) {
-  .gdrives .toolbar {
-    padding: 0.5rem;
-    gap: 0.75rem;
-    flex-wrap: nowrap;
-  }
-  
-  .gdrives .btn-toolbar {
-    padding: 0.4rem 0.65rem;
-    font-size: 0.75rem;
-  }
-  
-  .gdrives .filter-buttons {
-    gap: 0.4rem;
-    flex-wrap: nowrap;
-  }
-  
-  .gdrives .filter-buttons button {
-    padding: 0.4rem 0.7rem;
-    font-size: 0.8rem;
-  }
-
-  .bulk-actions {
-    flex-direction: column;
-    gap: 0.75rem;
-    align-items: stretch;
-  }
-
-  .bulk-action-group {
-    justify-content: space-between;
-    width: 100%;
-  }
-}
-
 .gdrives .btn-toolbar {
-  padding: 0.5rem 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  min-width: 185px;
   border-radius: 4px;
-  font-weight: 500;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   transition: all 0.2s;
   white-space: nowrap;
   color: #fff;
+}
+
+.gdrives .btn-pair {
+  display: flex;
+  gap: 0.5rem;
+  width: 185px;
   flex-shrink: 0;
-  flex-grow: 0;
-  min-width: fit-content;
-  max-width: max-content;
-  width: auto;
 }
 
 .gdrives .btn-toolbar.btn-toolbar-link {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.25rem;
   border: 1px solid #4b5563;
   border-radius: 6px;
   background: #424242;
   color: #fff;
-  padding: 0.45rem 0.65rem;
+  padding: 0.45rem 0.25rem;
   font-size: 0.85rem;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
 }
 
 .gdrives .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
@@ -256,15 +259,15 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  background-color: #D16B5A;
+  background-color: #5c6882;
 }
 
 .gdrives .btn-toolbar.btn-reload:hover:not(:disabled) {
-  background-color: #dc7b6a;
+  background-color: #6c7892;
 }
 
 .gdrives .btn-toolbar.btn-reload:disabled {
-  background-color: #5c6882;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -272,11 +275,11 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  background-color: #4A9E8E;
+  background-color: #5c6882;
 }
 
 .gdrives .btn-toolbar.btn-add-custom:hover {
-  background-color: #5aae9e;
+  background-color: #6c7892;
 }
 
 .gdrives .btn-toolbar.btn-sync-all {
@@ -293,6 +296,80 @@
 .gdrives .btn-toolbar.btn-sync-all:disabled {
   background-color: #666;
   cursor: not-allowed;
+}
+
+/* Collapse toolbar to column on medium screens */
+@media (max-width: 1100px) {
+  .gdrives .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .gdrives .action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 185px);
+    justify-content: start;
+    width: 100%;
+  }
+
+  .gdrives .btn-pair {
+    width: 185px;
+  }
+}
+
+/* Mobile: full-width single column */
+@media (max-width: 550px) {
+  .gdrives .toolbar {
+    padding: 0.5rem;
+  }
+
+  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
+  .gdrives .toolbar-tooltip {
+    display: none;
+  }
+
+  .gdrives .action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .gdrives .btn-pair {
+    width: 100%;
+  }
+
+  .gdrives .drives-controls {
+    gap: 0.5rem;
+  }
+
+  .gdrives .drives-controls .filter-buttons {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  .gdrives .drives-controls .filter-buttons button {
+    flex: 1;
+  }
+
+  .gdrives .drives-controls .sort-dropdown {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .gdrives .drives-controls .sort-dropdown select {
+    flex: 1;
+  }
+
+  .bulk-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .bulk-action-group {
+    justify-content: space-between;
+    width: 100%;
+  }
 }
 
 /* Drive sections with headers */

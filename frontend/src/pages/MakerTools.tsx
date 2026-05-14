@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, CircleHelp, Clapperboard, Monitor, Paintbrush, Play, Plus, Save, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { Check, CircleHelp, Clapperboard, Info, Monitor, Paintbrush, Play, Plus, Save, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -344,17 +344,22 @@ function MakerTools() {
 
       <div className="maker-tools-panel">
         <div className="toolbar">
-          <div>
+          <div className="toolbar-title">
             <h2>Season Premieres Monitor</h2>
-            <p>Tracks upcoming season premieres and highlights missing posters. Results appear below and persist after refresh.</p>
+            <div className="toolbar-info">
+              <Info size={16} />
+              <div className="toolbar-tooltip">Tracks upcoming season premieres and highlights missing posters. Results appear below and persist after refresh.</div>
+            </div>
           </div>
           <div className="action-buttons">
-            <button className="btn-toolbar" type="button" onClick={openSchedulingSettings} disabled={saving || loading || running || isMonitorJobActive}>
-              Scheduling
-            </button>
-            <button className="btn-toolbar" type="button" onClick={openNotificationSettings} disabled={saving || loading || running || isMonitorJobActive}>
-              Discord
-            </button>
+            <div className="btn-pair">
+              <button className="btn-toolbar btn-toolbar-link" type="button" onClick={openSchedulingSettings} disabled={saving || loading || running || isMonitorJobActive}>
+                Scheduling
+              </button>
+              <button className="btn-toolbar btn-toolbar-link" type="button" onClick={openNotificationSettings} disabled={saving || loading || running || isMonitorJobActive}>
+                Discord
+              </button>
+            </div>
             <button className="btn-toolbar" type="button" onClick={openConfigModal} disabled={saving || loading || running || isMonitorJobActive}>
               <SlidersHorizontal size={16} /> Configure
             </button>

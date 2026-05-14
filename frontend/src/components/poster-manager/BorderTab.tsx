@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Eye, Play, Save, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import Toolbar from './Toolbar'
 
 type HolidayPreset = {
   name: string
@@ -236,37 +237,33 @@ function BorderTab({
 
   return (
     <>
-      <div className="toolbar">
-        <div>
-          <h2>Border Replacer</h2>
-          <p>Apply or remove borders from poster images</p>
-        </div>
-        <div className="action-buttons">
+      <Toolbar title="Border Replacer" description="Apply or remove borders from poster images">
+        <div className="btn-pair">
           <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
             Scheduling
           </button>
           <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings}>
             Discord
           </button>
-          <button
-            className={`btn-toolbar ${hasUnsavedBorderChanges ? 'btn-unsaved' : ''}`}
-            onClick={onSaveSettings}
-            disabled={!hasUnsavedBorderChanges || saving}
-            title={hasUnsavedBorderChanges ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-          <button className="btn-toolbar" onClick={() => onRunBorderReplacer(true)} disabled={runningBorderReplacer} title="Dry run border replacer">
-            <Eye size={16} />
-            Dry Run
-          </button>
-          <button className="btn-toolbar btn-primary" onClick={() => onRunBorderReplacer(false)} disabled={runningBorderReplacer}>
-            <Play size={16} />
-            {runningBorderReplacer ? 'Running...' : 'Run Border Replacer'}
-          </button>
         </div>
-      </div>
+        <button
+          className={`btn-toolbar ${hasUnsavedBorderChanges ? 'btn-unsaved' : ''}`}
+          onClick={onSaveSettings}
+          disabled={!hasUnsavedBorderChanges || saving}
+          title={hasUnsavedBorderChanges ? 'Save changes' : 'No changes to save'}
+        >
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button className="btn-toolbar" onClick={() => onRunBorderReplacer(true)} disabled={runningBorderReplacer} title="Dry run border replacer">
+          <Eye size={16} />
+          Dry Run
+        </button>
+        <button className="btn-toolbar btn-primary" onClick={() => onRunBorderReplacer(false)} disabled={runningBorderReplacer}>
+          <Play size={16} />
+          {runningBorderReplacer ? 'Running...' : 'Run Border Replacer'}
+        </button>
+      </Toolbar>
 
       <div className="settings-section">
         <h2>Border Configuration</h2>

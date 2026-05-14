@@ -40,27 +40,51 @@
   padding: 0.75rem;
   background-color: #3D4556;
   border-radius: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
   margin-bottom: 0;
 }
 
-.maker-tools-page .toolbar > div:first-child {
+.maker-tools-page .toolbar-title {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .maker-tools-page .toolbar h2 {
   color: #64b5f6;
   margin: 0;
   font-size: 1.25rem;
+  white-space: nowrap;
 }
 
-.maker-tools-page .toolbar p {
+.maker-tools-page .toolbar-info {
+  position: relative;
+  display: flex;
+  align-items: center;
   color: #aaa;
-  margin: 0;
-  font-size: 0.9rem;
+  cursor: default;
+}
+
+.maker-tools-page .toolbar-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 280px;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+  color: #ccc;
+  line-height: 1.45;
+  z-index: 50;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.maker-tools-page .toolbar-info:hover .toolbar-tooltip {
+  display: block;
 }
 
 .maker-tools-page .action-buttons {
@@ -70,22 +94,11 @@
   gap: 0.5rem;
 }
 
-.maker-tools-page .toolbar::-webkit-scrollbar {
-  height: 6px;
-}
-
-.maker-tools-page .toolbar::-webkit-scrollbar-track {
-  background: #3D4556;
-  border-radius: 3px;
-}
-
-.maker-tools-page .toolbar::-webkit-scrollbar-thumb {
-  background: #5c6882;
-  border-radius: 3px;
-}
-
-.maker-tools-page .toolbar::-webkit-scrollbar-thumb:hover {
-  background: #6c7892;
+.maker-tools-page .btn-pair {
+  display: flex;
+  gap: 0.5rem;
+  width: 185px;
+  flex-shrink: 0;
 }
 
 .maker-tools-page .modal-overlay {
@@ -267,11 +280,11 @@
   margin: 0;
 }
 
-.maker-checkbox-row {
-  display: flex !important;
-  flex-direction: row !important;
+.maker-card label.maker-checkbox-row {
+  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 0.5rem !important;
+  gap: 0.5rem;
 }
 
 .maker-checkbox-row input {
@@ -328,16 +341,32 @@
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  border: 1px solid #4b5563;
+  border: none;
   border-radius: 6px;
-  background: #424242;
-  color: #fff;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.85rem;
+  background: #5c6882;
+  color: #E8ECEF;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  min-width: 185px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.maker-tools-page .btn-toolbar.btn-toolbar-link {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  border: 1px solid #4b5563;
+  background: #424242;
+  padding: 0.45rem 0.25rem;
+  font-size: 0.85rem;
+}
+
 .maker-tools-page .btn-toolbar:hover:not(:disabled) {
+  background: #6c7892;
+}
+
+.maker-tools-page .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
   background: #555;
 }
 
@@ -591,6 +620,27 @@
   border-color: rgba(255, 255, 255, 0.25);
 }
 
+@media (max-width: 1300px) {
+  .maker-tools-page .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .maker-tools-page .toolbar-title {
+    width: 100%;
+  }
+
+  .maker-tools-page .action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 185px);
+    gap: 0.5rem;
+  }
+
+  .maker-tools-page .btn-pair {
+    width: 185px;
+  }
+}
+
 @media (max-width: 1200px) {
   .maker-grid {
     grid-template-columns: 1fr;
@@ -619,15 +669,33 @@
     grid-template-columns: 1fr;
   }
 
-  .maker-library-stats {
-    grid-template-columns: 1fr;
-  }
-
   .maker-show-item {
     flex-direction: column;
   }
 
   .maker-badges {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 550px) {
+  .maker-tools-page .action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .maker-tools-page .btn-pair {
+    width: 100%;
+  }
+
+  .maker-tools-page .btn-toolbar {
+    min-width: 0;
+  }
+
+  .maker-tools-page .toolbar-info:hover .toolbar-tooltip {
+    display: none;
+  }
+
+  .maker-library-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

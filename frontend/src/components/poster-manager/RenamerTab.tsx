@@ -1,6 +1,7 @@
 import { Eye, Play, Save } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig } from '../../api/client'
+import Toolbar from './Toolbar'
 
 type RenamerTabProps = {
   hasUnsavedLibraryChanges: boolean
@@ -43,43 +44,39 @@ function RenamerTab({
 
   return (
     <>
-      <div className="toolbar">
-        <div>
-          <h2>Poster Renamer</h2>
-          <p>Organize and rename poster files from multiple sources</p>
-        </div>
-        <div className="action-buttons">
+      <Toolbar title="Poster Renamer" description="Organize and rename poster files from multiple sources">
+        <div className="btn-pair">
           <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
             Scheduling
           </button>
           <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings}>
             Discord
           </button>
-          <button
-            className={`btn-toolbar ${(hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'btn-unsaved' : ''}`}
-            onClick={onSaveSettings}
-            disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges) || saving || libraryConfigs.length === 0}
-            title={libraryConfigs.length === 0 ? 'Configure libraries in Settings first' : ((hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'Save changes' : 'No changes to save')}
-          >
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-          <button className="btn-toolbar" onClick={() => onRunRename(true)} disabled={renaming} title="Dry run poster renamer">
-            <Eye size={16} />
-            Dry Run
-          </button>
-          <button className="btn-toolbar btn-primary" onClick={() => onRunRename(false)} disabled={renaming}>
-            <Play size={16} />
-            {renaming ? 'Starting...' : 'Rename Posters'}
-          </button>
         </div>
-      </div>
+        <button
+          className={`btn-toolbar ${(hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'btn-unsaved' : ''}`}
+          onClick={onSaveSettings}
+          disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges) || saving || libraryConfigs.length === 0}
+          title={libraryConfigs.length === 0 ? 'Configure libraries in Settings first' : ((hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'Save changes' : 'No changes to save')}
+        >
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button className="btn-toolbar" onClick={() => onRunRename(true)} disabled={renaming} title="Dry run poster renamer">
+          <Eye size={16} />
+          Dry Run
+        </button>
+        <button className="btn-toolbar btn-primary" onClick={() => onRunRename(false)} disabled={renaming}>
+          <Play size={16} />
+          {renaming ? 'Starting...' : 'Rename Posters'}
+        </button>
+      </Toolbar>
 
-      <div className="settings-section">
-        <h2>Rename Configuration</h2>
-        <p className="section-description">Select which Plex libraries to process and configure border replacer options.</p>
+      <div className="renamer-layout-row">
+        <div className="settings-section renamer-config-card">
+          <h2>Rename Configuration</h2>
+          <p className="section-description">Configure border replacer options for standalone rename runs.</p>
 
-        <div className="settings-grid library-layout">
           <div className="field-group">
             <label>Auto-Run Border Replacer</label>
             <div className="toggle-field">
@@ -92,9 +89,13 @@ function RenamerTab({
             <small>When enabled, border replacer runs automatically after renaming posters (uses Poster Renamer incremental/full mode setting on Border Replacer page)</small>
             <small className="standalone-warning">⚠️ Standalone runs only. To disable Border Replacer in the Workflow, toggle it off/on on the Workflow page.</small>
           </div>
+        </div>
+
+        <div className="settings-section renamer-library-card">
+          <h2>Library Selection</h2>
+          <p className="section-description">Select which Plex libraries to process during rename.</p>
 
           <div className="field-group">
-            <label>Library Selection</label>
             {libraryConfigs.length === 0 ? (
               <div className="empty-state">
                 <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>

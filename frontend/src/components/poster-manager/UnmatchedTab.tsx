@@ -1,6 +1,7 @@
 import { AlertCircle, Download, List, RefreshCw, Save, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
+import Toolbar from './Toolbar'
 
 type UnmatchedTabProps = {
   unmatchedStats: UnmatchedStats | null
@@ -63,49 +64,45 @@ function UnmatchedTab({
 
   return (
     <>
-      <div className="toolbar">
-        <div>
-          <h2>Unmatched Assets</h2>
-          <p>Media in your library without matching posters in the organized folder</p>
-        </div>
-        <div className="action-buttons">
+      <Toolbar title="Unmatched Assets" description="Media in your library without matching posters in the organized folder">
+        <div className="btn-pair">
           <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
             Scheduling
           </button>
           <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings}>
             Discord
           </button>
-          <button
-            className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-            onClick={onSaveSettings}
-            disabled={saving || !hasUnsavedChanges}
-            title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-          <button className="btn-toolbar btn-primary" onClick={onDetectUnmatched} disabled={detectingUnmatched}>
-            <RefreshCw size={16} />
-            {detectingUnmatched ? 'Detecting...' : 'Detect Unmatched'}
-          </button>
-          {unmatchedStats && unmatchedStats.last_run && (
-            <>
-              <button
-                className="btn-toolbar btn-primary"
-                onClick={() => onOpenModal('all')}
-                title="View and search missing items"
-              >
-                <Search size={16} />
-                View / Search
-              </button>
-              <button className="btn-toolbar" onClick={onDownloadReport} title="Download complete report of all unmatched items">
-                <Download size={16} />
-                Download Report
-              </button>
-            </>
-          )}
         </div>
-      </div>
+        <button
+          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
+          onClick={onSaveSettings}
+          disabled={saving || !hasUnsavedChanges}
+          title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
+        >
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button className="btn-toolbar btn-primary" onClick={onDetectUnmatched} disabled={detectingUnmatched}>
+          <RefreshCw size={16} />
+          {detectingUnmatched ? 'Detecting...' : 'Detect Unmatched'}
+        </button>
+        {unmatchedStats && unmatchedStats.last_run && (
+          <>
+            <button
+              className="btn-toolbar btn-primary"
+              onClick={() => onOpenModal('all')}
+              title="View and search missing items"
+            >
+              <Search size={16} />
+              View / Search
+            </button>
+            <button className="btn-toolbar" onClick={onDownloadReport} title="Download complete report of all unmatched items">
+              <Download size={16} />
+              Download Report
+            </button>
+          </>
+        )}
+      </Toolbar>
 
       {unmatchedStats && unmatchedStats.last_run ? (
         <div className="unmatched-tab-content">
@@ -313,13 +310,12 @@ function UnmatchedTab({
         </div>
       )}
 
-      <div className="settings-section" style={{ marginTop: '2rem' }}>
-        <h2>Detection Configuration</h2>
-        <p className="section-description">Select which Plex libraries to check for missing posters and configure detection options.</p>
+      <div className="renamer-layout-row" style={{ marginTop: '2rem' }}>
+        <div className="settings-section renamer-config-card">
+          <h2>Detection Settings</h2>
+          <p className="section-description">Configure which items to include or exclude from unmatched detection.</p>
 
-        <div className="settings-grid library-layout">
           <div className="field-group">
-            <label>Detection Settings</label>
             <textarea
               rows={2}
               className="unmatched-settings-textarea"
@@ -351,14 +347,18 @@ function UnmatchedTab({
             </label>
 
             <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>TMDB API Key</label>
-            <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.8rem', color: '#888' }}>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
               Configured globally in{' '}
               <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
             </p>
           </div>
+        </div>
+
+        <div className="settings-section renamer-library-card">
+          <h2>Library Selection</h2>
+          <p className="section-description">Select which Plex libraries to scan for missing posters.</p>
 
           <div className="field-group">
-            <label>Library Selection</label>
             {libraryConfigs.length === 0 ? (
               <div className="empty-state">
                 <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>

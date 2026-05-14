@@ -25,3 +25,43 @@
 .github-link:hover {
   color: #fff;
 }
+
+.sidebar-toggle {
+  display: none;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 99;
+}
+
+@media (max-width: 550px) {
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    width: 36px;
+    height: 36px;
+    background: #2a2a2a;
+    border: 1px solid #424242;
+    border-radius: 6px;
+    color: #ccc;
+    cursor: pointer;
+    z-index: 10;
+    transition: color 0.2s, background-color 0.2s;
+  }
+
+  .sidebar-toggle:hover {
+    background: #333;
+    color: #fff;
+  }
+
+  .content {
+    padding: 4rem 1rem 1rem;
+  }
+}

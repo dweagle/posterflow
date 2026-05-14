@@ -364,66 +364,33 @@ function GDrives() {
       </div>
 
       <div className="toolbar">
-        <div className="filter-buttons">
-        <button 
-          className={filter === 'all' ? 'active' : ''} 
-          onClick={() => setFilter('all')}
-        >
-          All
-        </button>
-        <button 
-          className={filter === 'CL2K' ? 'active' : ''} 
-          onClick={() => setFilter('CL2K')}
-        >
-          CL2K
-        </button>
-        <button 
-          className={filter === 'MM2K' ? 'active' : ''} 
-          onClick={() => setFilter('MM2K')}
-        >
-          MM2K
-        </button>
-        <button 
-          className={filter === 'custom' ? 'active' : ''} 
-          onClick={() => setFilter('custom')}
-        >
-          Custom
-        </button>
+        <div className="toolbar-title">
+          <h2>Google Drives</h2>
+          <div className="toolbar-info">
+            <Info size={16} />
+            <div className="toolbar-tooltip">
+              Subscribe to community poster collections from Google Drive. Use <strong>Scheduling</strong> to automate syncs, <strong>Configure</strong> to set your local storage path, and <strong>Reload</strong> to refresh the community drive list.
+            </div>
+          </div>
         </div>
-
-        <div className="sort-dropdown">
-          <label htmlFor="sort-select">Sort:</label>
-          <select 
-            id="sort-select"
-            value={sortBy} 
-            onChange={(e) => setSortBy(e.target.value)}
-          >
-            <option value="name-asc">Name (A-Z)</option>
-            <option value="name-desc">Name (Z-A)</option>
-            <option value="posters-desc">Most Posters</option>
-            <option value="posters-asc">Fewest Posters</option>
-            <option value="subscribed">Subscribed First</option>
-            <option value="unsubscribed">Unsubscribed First</option>
-          </select>
-        </div>
-
-        <div className="toolbar-divider"></div>
 
         <div className="action-buttons">
-          <button
-            className="btn-toolbar btn-toolbar-link"
-            onClick={openSchedulingSettings}
-            title="Open scheduling settings"
-          >
-            Scheduling
-          </button>
-          <button
-            className="btn-toolbar btn-toolbar-link"
-            onClick={openNotificationSettings}
-            title="Open Discord notification settings"
-          >
-            Discord
-          </button>
+          <div className="btn-pair">
+            <button
+              className="btn-toolbar btn-toolbar-link"
+              onClick={openSchedulingSettings}
+              title="Open scheduling settings"
+            >
+              Scheduling
+            </button>
+            <button
+              className="btn-toolbar btn-toolbar-link"
+              onClick={openNotificationSettings}
+              title="Open Discord notification settings"
+            >
+              Discord
+            </button>
+          </div>
           <button
             className="btn-toolbar btn-toolbar-link"
             onClick={() => setShowStorageModal(true)}
@@ -475,6 +442,51 @@ function GDrives() {
           <span className="bulk-label">Custom:</span>
           <button className="btn-bulk" onClick={() => handleBulkSubscribe('custom')}>Subscribe All</button>
           <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('custom')}>Unsubscribe All</button>
+        </div>
+      </div>
+
+      {/* Drives controls: filter + sort */}
+      <div className="drives-controls">
+        <div className="filter-buttons">
+          <button 
+            className={filter === 'all' ? 'active' : ''} 
+            onClick={() => setFilter('all')}
+          >
+            All
+          </button>
+          <button 
+            className={filter === 'CL2K' ? 'active' : ''} 
+            onClick={() => setFilter('CL2K')}
+          >
+            CL2K
+          </button>
+          <button 
+            className={filter === 'MM2K' ? 'active' : ''} 
+            onClick={() => setFilter('MM2K')}
+          >
+            MM2K
+          </button>
+          <button 
+            className={filter === 'custom' ? 'active' : ''} 
+            onClick={() => setFilter('custom')}
+          >
+            Custom
+          </button>
+        </div>
+        <div className="sort-dropdown">
+          <label htmlFor="sort-select">Sort:</label>
+          <select 
+            id="sort-select"
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value)}
+          >
+            <option value="name-asc">Name (A-Z)</option>
+            <option value="name-desc">Name (Z-A)</option>
+            <option value="posters-desc">Most Posters</option>
+            <option value="posters-asc">Fewest Posters</option>
+            <option value="subscribed">Subscribed First</option>
+            <option value="unsubscribed">Unsubscribed First</option>
+          </select>
         </div>
       </div>
 

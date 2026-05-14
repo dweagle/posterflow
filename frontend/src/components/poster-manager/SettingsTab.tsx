@@ -1,5 +1,6 @@
 import { Save } from 'lucide-react'
 import { PosterConfig } from '../../api/client'
+import Toolbar from './Toolbar'
 
 type SettingsTabProps = {
   config: PosterConfig | null
@@ -18,23 +19,17 @@ function SettingsTab({
 }: SettingsTabProps) {
   return (
     <>
-      <div className="toolbar">
-        <div>
-          <h2>Poster Manager Settings</h2>
-          <p>Configure how PosterFlow organizes and renames your poster files</p>
-        </div>
-        <div className="action-buttons">
-          <button
-            className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-            onClick={onSaveConfig}
-            disabled={!hasUnsavedChanges || saving}
-            title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
-          >
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
-      </div>
+      <Toolbar title="Poster Manager Settings" description="Configure how PosterFlow organizes and renames your poster files">
+        <button
+          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
+          onClick={onSaveConfig}
+          disabled={!hasUnsavedChanges || saving}
+          title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
+        >
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </Toolbar>
 
       {config && (
         <div className="settings-section">

@@ -1,4 +1,5 @@
 import { Download, GripVertical, List, Minus, Plus, Save, Trash2 } from 'lucide-react'
+import Toolbar from './Toolbar'
 import { DragEvent, useState } from 'react'
 import { Drive } from '../../api/client'
 import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
@@ -115,18 +116,12 @@ function PriorityTab({
 
   return (
     <>
-      <div className="toolbar">
-        <div>
-          <h2>Configure Drive Priority</h2>
-          <p>Select which poster styles to use and set their priority order. Higher priority drives will override lower ones.</p>
-        </div>
-        <div className="action-buttons">
-          <button className={`btn-toolbar ${hasUnsavedPriorityChanges ? 'btn-unsaved' : ''}`} onClick={onSavePriority} disabled={!hasUnsavedPriorityChanges || saving}>
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Settings'}
-          </button>
-        </div>
-      </div>
+      <Toolbar title="Configure Drive Priority" description="Select which poster styles to use and set their priority order. Higher priority drives will override lower ones.">
+        <button className={`btn-toolbar ${hasUnsavedPriorityChanges ? 'btn-unsaved' : ''}`} onClick={onSavePriority} disabled={!hasUnsavedPriorityChanges || saving}>
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </Toolbar>
 
       <div className="priority-tab">
         {styleStats && styleTotal > 0 && (

@@ -16,6 +16,7 @@ function Dashboard() {
   const [recentPosters, setRecentPosters] = useState<RecentSyncedPoster[]>([])
   const [posterFilter, setPosterFilter] = useState<'all' | 'movie' | 'season' | 'collection'>('all')
   const [carouselPage, setCarouselPage] = useState(0)
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth)
   const [expandedPoster, setExpandedPoster] = useState<RecentSyncedPoster | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [idarrTargets, setIdarrTargets] = useState<MakerIdarrSyncTarget[]>([])
@@ -361,7 +362,13 @@ function Dashboard() {
     return 'movie'
   }
 
-  const POSTERS_PER_PAGE = 10
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const POSTERS_PER_PAGE = windowWidth <= 550 ? 2 : windowWidth <= 980 ? 5 : 10
   const filteredPosters = posterFilter === 'all'
     ? recentPosters
     : recentPosters.filter(p => getPosterMediaType(p) === posterFilter)

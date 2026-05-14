@@ -15,7 +15,7 @@ type VersionUpdateStatus = {
   release_notes: string | null
 }
 
-function Sidebar() {
+function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
   const { unmatchedCount, idarrPendingCount, jobs } = useUnmatched()
   const [version, setVersion] = useState<string>('0.1.0')
@@ -114,7 +114,7 @@ function Sidebar() {
   }, [showReleaseNotes])
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar${isOpen ? ' sidebar--open' : ''}`}>
       <div className="sidebar-header">
         <div className="logo-container">
           <img src={posterFlowIcon} alt="PosterFlow" className="logo-icon" />

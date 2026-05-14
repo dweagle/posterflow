@@ -1585,7 +1585,7 @@ function IDarr() {
   )
 
   const renderPendingMatchesSection = () => (
-    <div className="settings-section">
+    <div className="settings-section idarr-pending-card">
       <div className="pending-section-header">
         <h2>Pending Matches</h2>
         <div className="action-buttons">
@@ -1694,7 +1694,7 @@ function IDarr() {
   )
 
   const renderIgnoredTitlesSection = () => (
-    <div className="settings-section">
+    <div className="settings-section idarr-ignored-card">
       <div className="pending-section-header ignored-section-header">
         <h2>Ignored Titles</h2>
         <div className="action-buttons">
@@ -2344,17 +2344,22 @@ function IDarr() {
   const renderIDarrTabContent = () => (
     <>
       <div className="toolbar">
-        <div>
+        <div className="toolbar-title">
           <h2>IDarr</h2>
-          <p>Run native in-app IDarr processing from the UI</p>
+          <div className="toolbar-info">
+            <Info size={16} />
+            <div className="toolbar-tooltip">Run native in-app IDarr processing from the UI. Configure sync targets and TMDB settings in the Settings tab.</div>
+          </div>
         </div>
         <div className="action-buttons">
-          <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading || running || syncing}>
-            Scheduling
-          </button>
-          <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings} disabled={saving || loading || running || syncing}>
-            Discord
-          </button>
+          <div className="btn-pair">
+            <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading || running || syncing}>
+              Scheduling
+            </button>
+            <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings} disabled={saving || loading || running || syncing}>
+              Discord
+            </button>
+          </div>
           {config.sync_targets.length > 0 && (
             <select
               value={selectedSyncTargetIndex}
@@ -2378,7 +2383,7 @@ function IDarr() {
           </button>
           <button className="btn-toolbar" onClick={openSyncConfirmation} disabled={syncing || loading || !canSync}>
             <UploadCloud size={16} />
-            {syncing ? 'Starting Personal Sync...' : 'Sync to Personal Drive'}
+            {syncing ? 'Starting Sync...' : 'Sync to Drive'}
           </button>
           <button className="btn-toolbar btn-primary" onClick={openRunAndSyncConfirmation} disabled={running || syncing || loading || !canRun || !canSync}>
             <Play size={16} />
@@ -2388,8 +2393,7 @@ function IDarr() {
       </div>
 
       <div className="idarr-layout">
-        <div className="idarr-main-column">
-          <div className="settings-section idarr-upload-card">
+        <div className="settings-section idarr-upload-card">
             <div className="idarr-upload-card-header">
               <h2>Quick Add Files</h2>
               <div className="idarr-upload-toggles">
@@ -2470,15 +2474,10 @@ function IDarr() {
               />
             </div>
           </div>
-          {renderPendingMatchesSection()}
-        </div>
-        <div className="idarr-side-column">
-          {renderSyncOptionsCard()}
-          <div className="idarr-side-lower">
-            {renderRunAndCacheActionsSection()}
-            {renderIgnoredTitlesSection()}
-          </div>
-        </div>
+        {renderPendingMatchesSection()}
+        {renderSyncOptionsCard()}
+        {renderRunAndCacheActionsSection()}
+        {renderIgnoredTitlesSection()}
       </div>
     </>
   )
@@ -2486,17 +2485,22 @@ function IDarr() {
   const renderSettingsTabContent = () => (
     <>
       <div className="toolbar">
-        <div>
+        <div className="toolbar-title">
           <h2>Settings</h2>
-          <p>Configure your IDarr workflow options</p>
+          <div className="toolbar-info">
+            <Info size={16} />
+            <div className="toolbar-tooltip">Configure your IDarr workflow options, including TMDB API key, sync targets, and processing behaviour.</div>
+          </div>
         </div>
         <div className="action-buttons">
-          <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading}>
-            Scheduling
-          </button>
-          <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings} disabled={saving || loading}>
-            Discord
-          </button>
+          <div className="btn-pair">
+            <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading}>
+              Scheduling
+            </button>
+            <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings} disabled={saving || loading}>
+              Discord
+            </button>
+          </div>
           <button
             className={`btn-toolbar ${hasUnsavedSettings ? 'btn-unsaved' : ''}`}
             onClick={handleSave}

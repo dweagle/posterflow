@@ -69,12 +69,14 @@
   display: flex;
   justify-content: space-between;
   margin-bottom: 1.25rem;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .step {
-  flex: 1;
-  padding: 0.75rem 0.5rem 0.5rem;
+  flex: 1 1 60px;
+  min-width: 0;
+  padding: 0.75rem 0.35rem 0.5rem;
   background-color: #2a2a2a;
   border-radius: 6px;
   color: #666;
@@ -106,6 +108,9 @@
   text-align: center;
   line-height: 1.3;
   color: #777;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  width: 100%;
 }
 
 .step.active {
@@ -438,19 +443,6 @@
   background-color: #c62828;
 }
 
-.alternate-method {
-  border-top: 1px solid #424242;
-  padding-top: 1rem;
-  margin-top: 0.5rem;
-}
-
-.alternate-method strong {
-  color: #888 !important;
-  font-size: 0.875rem;
-}
-
-/* ... existing styles ... */
-
 .auto-save-notice {
   display: block;
   color: #4caf50;
@@ -503,83 +495,6 @@
   color: #f44336;
 }
 
-.server-section {
-  margin-top: 1.25rem;
-  margin-bottom: 1.25rem;
-}
-
-.server-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.server-header h3 {
-  margin: 0;
-  color: #64b5f6;
-  font-size: 1rem;
-}
-
-.setup-wizard .btn-add {
-  padding: 0.5rem 1rem;
-  background-color: #64b5f6;
-  color: #fff;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  transition: background-color 0.2s;
-}
-
-.setup-wizard .btn-add:hover {
-  background-color: #42a5f5;
-}
-
-.instance-group {
-  background-color: #2a2a2a;
-  border: 1px solid #424242;
-  border-radius: 4px;
-  padding: 0.9rem;
-  margin-bottom: 0.75rem;
-}
-
-.instance-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.65rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #424242;
-}
-
-.instance-number {
-  color: #64b5f6;
-  font-weight: 500;
-  font-size: 0.875rem;
-}
-
-.setup-wizard .btn-remove {
-  padding: 0.25rem 0.5rem;
-  background-color: #d32f2f;
-  color: #fff;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  transition: background-color 0.2s;
-}
-
-.setup-wizard .btn-remove:hover {
-  background-color: #c62828;
-}
-
-.alternate-method {
-  border-top: 1px solid #424242;
-  padding-top: 1rem;
-  margin-top: 0.5rem;
-}
-
-.alternate-method strong {
-  color: #888 !important;
-  font-size: 0.875rem;
-}
 /* Welcome Screen Styles */
 .welcome-screen {
   margin-top: 1rem;
