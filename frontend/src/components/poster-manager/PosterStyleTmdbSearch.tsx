@@ -156,6 +156,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
       )}
 
       {isExpanded && (
+        <>
         <div className="tmdb-candidates-panel">
           {isNoKey ? (
             <div className="tmdb-candidates-warning">
@@ -242,6 +243,13 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
             })
           )}
         </div>
+        {!isNoKey && (
+          <p className="tmdb-attribution" style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: '#666' }}>
+            This product uses the TMDB API but is not endorsed or certified by TMDB.{' '}
+            <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>themoviedb.org</a>
+          </p>
+        )}
+        </>
       )}
 
       {previewUrl && (

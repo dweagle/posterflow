@@ -2,7 +2,8 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench } from 'lucide-react'
 import { useUnmatched } from '../contexts/UnmatchedContext'
-import { formatJobType } from '../api/client'
+import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, type MakerIdarrConfig } from '../api/client'
+import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
 import './Sidebar.css'
 
@@ -18,6 +19,11 @@ type VersionUpdateStatus = {
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
   const { unmatchedCount, idarrPendingCount, jobs } = useUnmatched()
+  const { showToast } = useToast()
+  const [isDragOverIdarr, setIsDragOverIdarr] = useState(false)
+  const [idarrPickerFiles, setIdarrPickerFiles] = useState<File[] | null>(null)
+  const [idarrPickerConfig, setIdarrPickerConfig] = useState<MakerIdarrConfig | null>(null)
+  const [idarrPickerSelectedIndex, setIdarrPickerSelectedIndex] = useState(0)
   const [version, setVersion] = useState<string>('0.1.0')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [versionsBehind, setVersionsBehind] = useState<number>(0)
@@ -42,6 +48,89 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const currentRunningJob = runningJobs[0] || null
   const isDashboardRoute = location.pathname === '/'
   const showMiniProgress = Boolean(currentRunningJob) && !isDashboardRoute
+
+  const handleIdarrDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!isDragOverIdarr) setIsDragOverIdarr(true)
+    }
+  }
+
+  const handleIdarrDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOverIdarr(false)
+  }
+
+  const handleIdarrDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOverIdarr(false)
+    const dataFiles = e.dataTransfer?.files
+    if (!dataFiles?.length) return
+    const files = Array.from(dataFiles)
+
+    void (async () => {
+      try {
+        const config = await getMakerIdarrConfig()
+        const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
+        if (!syncTargets.length) {
+          showToast('No IDarr sync targets configured', 'error')
+          return
+        }
+
+        // Use stored sync target index preference if available
+        const storedKey = 'posterflow.idarr.selectedSyncTarget'
+        const storedValue = localStorage.getItem(storedKey)
+        let resolvedIndex = -1
+        if (storedValue) {
+          resolvedIndex = syncTargets.findIndex((t) => {
+            const scopeToken = String(t.scope_token || '').trim()
+            if (scopeToken) return `scope:${scopeToken}` === storedValue
+            return `${String(t.personal_drive_id || '')}::${String(t.source_dir || '')}::${String(t.label || '')}` === storedValue
+          })
+        }
+
+        // If no stored preference matched and there are multiple targets, show picker
+        if (resolvedIndex < 0 && syncTargets.length > 1) {
+          setIdarrPickerConfig(config)
+          setIdarrPickerFiles(files)
+          setIdarrPickerSelectedIndex(0)
+          return
+        }
+
+        const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
+        await performIdarrUpload(config, syncTargetIndex, files)
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to upload files to IDarr'), 'error')
+      }
+    })()
+  }
+
+  const performIdarrUpload = async (config: MakerIdarrConfig, syncTargetIndex: number, files: File[]) => {
+    const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
+    const selectedTarget = syncTargets[syncTargetIndex]
+    if (!String(selectedTarget?.source_dir || '').trim()) {
+      showToast('Selected IDarr sync target has no Sync Folder configured', 'error')
+      return
+    }
+    try {
+      const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
+      const skippedMessage = response.skipped_count > 0 ? `, ${response.skipped_count} skipped` : ''
+      showToast(`IDarr: uploaded ${response.uploaded_count} file(s)${skippedMessage}`, 'success')
+      if (config.auto_rename_quick_add && response.uploaded_count > 0) {
+        try {
+          const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
+          showToast(`IDarr auto-rename started (Job ID: ${job.id})`, 'success')
+        } catch (error) {
+          showToast(getApiErrorMessage(error, 'Files uploaded, but failed to start IDarr auto-rename'), 'error')
+        }
+      }
+      window.dispatchEvent(new CustomEvent('idarr-sidebar-upload-complete', { detail: { syncTargetIndex } }))
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to upload files to IDarr'), 'error')
+    }
+  }
 
   useEffect(() => {
     if (!currentRunningJob) {
@@ -114,6 +203,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   }, [showReleaseNotes])
 
   return (
+    <>
     <div className={`sidebar${isOpen ? ' sidebar--open' : ''}`}>
       <div className="sidebar-header">
         <div className="logo-container">
@@ -185,7 +275,15 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
         </NavLink>
         
         
-        <NavLink to="/IDarr" className={({ isActive }) => isActive ? 'active' : ''} data-label="IDarr" aria-label="IDarr">
+        <NavLink
+          to="/IDarr"
+          className={({ isActive }) => [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')}
+          data-label="IDarr"
+          aria-label="IDarr"
+          onDragOver={handleIdarrDragOver}
+          onDragLeave={handleIdarrDragLeave}
+          onDrop={handleIdarrDrop}
+        >
           <span className="icon"><Fingerprint size={20} color="#66bb6a" /></span>
           <span className="nav-label">IDarr</span>
           {idarrPendingCount > 0 && (
@@ -225,6 +323,68 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
         </div>
       )}
     </div>
+
+      {idarrPickerFiles && idarrPickerConfig && (() => {
+        const pickerConfig = idarrPickerConfig
+        return (
+        <div className="modal-overlay" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>
+          <div className="modal-content schedule-modal idarr-target-picker-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Select IDarr Sync Target</h2>
+              <button className="modal-close" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: '#ccc', marginBottom: '1rem' }}>Choose which sync target to upload the dropped file(s) to:</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {(pickerConfig.sync_targets ?? []).map((target, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setIdarrPickerSelectedIndex(i)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.65rem 0.9rem',
+                      background: idarrPickerSelectedIndex === i ? '#1a2a3a' : '#252525',
+                      border: `1px solid ${idarrPickerSelectedIndex === i ? '#64b5f6' : '#424242'}`,
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      color: idarrPickerSelectedIndex === i ? '#64b5f6' : '#ccc',
+                      fontWeight: idarrPickerSelectedIndex === i ? 600 : 400,
+                      fontSize: '0.9rem',
+                      textAlign: 'left',
+                      transition: 'border-color 0.15s, background 0.15s, color 0.15s',
+                    }}
+                  >
+                    <span>{target.label || target.source_dir || `Target ${i + 1}`}</span>
+                    {idarrPickerSelectedIndex === i && (
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#64b5f6', flexShrink: 0 }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  const files = idarrPickerFiles
+                  const index = idarrPickerSelectedIndex
+                  setIdarrPickerFiles(null)
+                  setIdarrPickerConfig(null)
+                  void performIdarrUpload(pickerConfig, index, files)
+                }}
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
+    </>
   )
 }
 

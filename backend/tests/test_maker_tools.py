@@ -9,6 +9,8 @@ from models.setting import Setting
 # Import private helper functions directly
 # ---------------------------------------------------------------------------
 from api.maker_tools import (
+    _build_lang_params,
+    _build_tmdb_images,
     _extract_name,
     _parse_bool,
     _parse_iso_date,
@@ -280,3 +282,286 @@ def test_run_maker_monitor_queues_job_and_returns_job_id(client):
     assert isinstance(data["job_id"], int)
     assert "queued" in data["message"].lower() or "monitor" in data["message"].lower()
     mock_queue.submit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _build_lang_params
+# ---------------------------------------------------------------------------
+
+
+def test_build_lang_params_all_returns_none():
+    assert _build_lang_params("all") is None
+
+
+def test_build_lang_params_en_textless_returns_en_null():
+    assert _build_lang_params("en+textless") == "en,null"
+
+
+def test_build_lang_params_specific_language_returns_code():
+    assert _build_lang_params("ja") == "ja"
+    assert _build_lang_params("fr") == "fr"
+    assert _build_lang_params("zh") == "zh"
+
+
+# ---------------------------------------------------------------------------
+# _build_tmdb_images
+# ---------------------------------------------------------------------------
+
+
+def test_build_tmdb_images_maps_fields_correctly():
+    raw = [{
+        "file_path": "/abc123.jpg",
+        "width": 1000,
+        "height": 1500,
+        "iso_639_1": "en",
+        "vote_average": 8.5,
+    }]
+    result = _build_tmdb_images(raw)
+    assert len(result) == 1
+    img = result[0]
+    assert img.file_path == "/abc123.jpg"
+    assert img.width == 1000
+    assert img.height == 1500
+    assert img.language == "en"
+    assert img.vote_average == 8.5
+    assert img.url_thumb == "https://image.tmdb.org/t/p/w300/abc123.jpg"
+    assert img.url_full == "https://image.tmdb.org/t/p/original/abc123.jpg"
+
+
+def test_build_tmdb_images_textless_sets_language_none():
+    raw = [{"file_path": "/tl.jpg", "width": 1000, "height": 1500, "iso_639_1": None, "vote_average": 7.0}]
+    result = _build_tmdb_images(raw)
+    assert result[0].language is None
+
+
+def test_build_tmdb_images_skips_entries_without_file_path():
+    raw = [
+        {"file_path": "", "width": 100, "height": 100, "iso_639_1": "en", "vote_average": 5.0},
+        {"file_path": "/ok.jpg", "width": 500, "height": 750, "iso_639_1": "en", "vote_average": 6.0},
+    ]
+    result = _build_tmdb_images(raw)
+    assert len(result) == 1
+    assert result[0].file_path == "/ok.jpg"
+
+
+def test_build_tmdb_images_uses_custom_thumb_size():
+    raw = [{"file_path": "/bg.jpg", "width": 1920, "height": 1080, "iso_639_1": "en", "vote_average": 7.0}]
+    result = _build_tmdb_images(raw, size_thumb="w780")
+    assert result[0].url_thumb == "https://image.tmdb.org/t/p/w780/bg.jpg"
+
+
+# ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/tmdb/images
+# ---------------------------------------------------------------------------
+
+_FAKE_IMAGES_RESPONSE = {
+    "posters": [
+        {"file_path": "/p1.jpg", "width": 1000, "height": 1500, "iso_639_1": "en", "vote_average": 8.0},
+        {"file_path": "/p2.jpg", "width": 1000, "height": 1500, "iso_639_1": None, "vote_average": 9.0},
+    ],
+    "backdrops": [
+        {"file_path": "/b1.jpg", "width": 1920, "height": 1080, "iso_639_1": "en", "vote_average": 7.5},
+    ],
+    "logos": [],
+}
+
+
+def _seed_tmdb_key(test_db, key: str = "testkey123") -> None:
+    test_db.add(Setting(key="tmdb_api_key", value=key))
+    test_db.commit()
+
+
+def test_tmdb_images_returns_sorted_results(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _FAKE_IMAGES_RESPONSE
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1396&media_type=tv&language=en%2Btextless")
+
+    assert response.status_code == 200
+    data = response.json()
+    # Textless poster (language=null) should sort first
+    assert data["posters"][0]["language"] is None
+    assert len(data["posters"]) == 2
+    assert len(data["backdrops"]) == 1
+    assert data["logos"] == []
+
+
+def test_tmdb_images_invalid_media_type_returns_400(client, test_db):
+    _seed_tmdb_key(test_db)
+    response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=podcast&language=en")
+    assert response.status_code == 400
+
+
+def test_tmdb_images_no_api_key_returns_400(client):
+    # No TMDB key seeded
+    response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=en")
+    assert response.status_code == 400
+    assert "api key" in response.json()["detail"].lower()
+
+
+def test_tmdb_images_tmdb_401_returns_400(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=en")
+
+    assert response.status_code == 400
+    assert "invalid tmdb api key" in response.json()["detail"].lower()
+
+
+def test_tmdb_images_tmdb_502_returns_502(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 503
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=en")
+
+    assert response.status_code == 502
+
+
+def test_tmdb_images_invalid_language_falls_back_to_en_textless(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"posters": [], "backdrops": [], "logos": []}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp) as mock_get:
+        client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=INVALID!")
+
+    # Should have fallen back and passed "en,null" for include_image_language
+    call_params = mock_get.call_args[1]["params"]
+    assert call_params.get("include_image_language") == "en,null"
+
+
+def test_tmdb_images_language_all_omits_include_image_language(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"posters": [], "backdrops": [], "logos": []}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp) as mock_get:
+        client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=all")
+
+    call_params = mock_get.call_args[1]["params"]
+    assert "include_image_language" not in call_params
+
+
+# ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/tmdb/tv-details
+# ---------------------------------------------------------------------------
+
+_FAKE_TV_DETAILS = {
+    "number_of_seasons": 2,
+    "seasons": [
+        {"season_number": 0, "name": "Specials", "episode_count": 3, "air_date": "2020-01-01", "poster_path": "/sp.jpg"},
+        {"season_number": 1, "name": "Season 1", "episode_count": 10, "air_date": "2020-06-01", "poster_path": "/s1.jpg"},
+        {"season_number": 2, "name": "Season 2", "episode_count": 8, "air_date": "2021-06-01", "poster_path": ""},
+    ],
+}
+
+
+def test_tmdb_tv_details_returns_seasons(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _FAKE_TV_DETAILS
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=1396")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["season_count"] == 2
+    assert len(data["seasons"]) == 3
+
+    specials = data["seasons"][0]
+    assert specials["season_number"] == 0
+    assert specials["name"] == "Specials"
+    assert specials["episode_count"] == 3
+    assert specials["poster_url"] == "https://image.tmdb.org/t/p/w185/sp.jpg"
+
+    # Season with no poster_path → poster_url should be None
+    s2 = data["seasons"][2]
+    assert s2["poster_url"] is None
+
+
+def test_tmdb_tv_details_no_api_key_returns_400(client):
+    response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=1396")
+    assert response.status_code == 400
+
+
+def test_tmdb_tv_details_tmdb_error_returns_502(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=99999")
+
+    assert response.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/tmdb/season-images
+# ---------------------------------------------------------------------------
+
+_FAKE_SEASON_IMAGES = {
+    "posters": [
+        {"file_path": "/s1p1.jpg", "width": 1000, "height": 1500, "iso_639_1": "en", "vote_average": 8.0},
+        {"file_path": "/s1p2.jpg", "width": 1000, "height": 1500, "iso_639_1": None, "vote_average": 9.5},
+    ],
+}
+
+
+def test_tmdb_season_images_returns_posters_only(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _FAKE_SEASON_IMAGES
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/season-images?tmdb_id=1396&season_number=1&language=en%2Btextless")
+
+    assert response.status_code == 200
+    data = response.json()
+    # Textless sorts first
+    assert data["posters"][0]["language"] is None
+    assert len(data["posters"]) == 2
+    assert data["backdrops"] == []
+    assert data["logos"] == []
+
+
+def test_tmdb_season_images_calls_correct_url(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"posters": []}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp) as mock_get:
+        client.get("/api/maker-tools/tmdb/season-images?tmdb_id=1396&season_number=3&language=ja")
+
+    call_url = mock_get.call_args[0][0]
+    assert "/tv/1396/season/3/images" in call_url
+    assert mock_get.call_args[1]["params"]["include_image_language"] == "ja"
+
+
+def test_tmdb_season_images_no_api_key_returns_400(client):
+    response = client.get("/api/maker-tools/tmdb/season-images?tmdb_id=1&season_number=1")
+    assert response.status_code == 400
+
+
+def test_tmdb_season_images_tmdb_401_returns_400(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/season-images?tmdb_id=1&season_number=1")
+
+    assert response.status_code == 400

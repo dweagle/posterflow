@@ -295,6 +295,17 @@ function IDarr() {
     localStorage.setItem(IDARR_TAB_STORAGE_KEY, activeTab)
   }, [activeTab])
 
+  // Refresh state when a sidebar drop upload completes (upload handled by Sidebar directly)
+  useEffect(() => {
+    const handleSidebarUploadComplete = () => {
+      void loadPendingMatches()
+      void loadCacheStats()
+      void loadIgnoredTitles()
+    }
+    window.addEventListener('idarr-sidebar-upload-complete', handleSidebarUploadComplete)
+    return () => window.removeEventListener('idarr-sidebar-upload-complete', handleSidebarUploadComplete)
+  }, [])
+
   useEffect(() => {
     const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
     if (syncTargets.length === 0) {

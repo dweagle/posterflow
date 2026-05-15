@@ -156,10 +156,21 @@ export {
   type MakerMonitorConfig,
   type MakerMonitorRunQueuedResponse,
   type MakerMonitorRunResponse,
+  type TmdbImage,
+  type TmdbImagesResponse,
+  type TmdbSearchFilter,
+  type TmdbSearchResult,
+  type TmdbSeasonInfo,
+  type TmdbTvDetails,
   getMakerMonitorConfig,
   getMakerMonitorLastResult,
+  getSeasonImages,
+  getTmdbImages,
+  getTmdbImageProxyUrl,
+  getTvDetails,
   runMakerMonitor,
   saveMakerMonitorConfig,
+  searchTmdb,
 } from './makerTools'
 
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {

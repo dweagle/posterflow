@@ -2,6 +2,7 @@ import json
 import os
 import re
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -735,6 +736,400 @@ def get_maker_monitor_config(db: Session = Depends(get_db)) -> MakerMonitorConfi
 def get_maker_monitor_last_result(db: Session = Depends(get_db)) -> dict[str, Any]:
     """Return the last successful monitor run result for UI reload persistence."""
     return _get_monitor_last_result(db)
+
+
+class TmdbSearchResult(BaseModel):
+    tmdb_id: int
+    media_type: str  # "movie" | "tv" | "collection"
+    title: str
+    year: str
+    overview: str
+    poster_url: str
+    homepage: str
+    imdb_id: str | None = None
+    tvdb_id: int | None = None
+
+
+def _fetch_external_ids(tmdb_id: int, media_type: str, api_key: str) -> tuple[str | None, int | None]:
+    """Fetch IMDB and TVDB IDs from TMDB external_ids endpoint. Returns (imdb_id, tvdb_id)."""
+    if media_type not in ("movie", "tv"):
+        return None, None
+    url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/external_ids"
+    try:
+        response = requests.get(url, params={"api_key": api_key}, timeout=8)
+        if response.status_code != 200:
+            return None, None
+        data = response.json()
+        imdb_id = str(data.get("imdb_id") or "").strip() or None
+        tvdb_raw = data.get("tvdb_id")
+        tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
+        return imdb_id, tvdb_id
+    except Exception:
+        return None, None
+
+
+_YEAR_SUFFIX_RE = re.compile(r"\s+\(?(\d{4})\)?$")
+
+
+@router.get("/tmdb/search", response_model=list[TmdbSearchResult])
+def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> list[TmdbSearchResult]:
+    """Proxy a TMDB search and return normalized results with external IDs.
+
+    type: 'all' | 'movie' | 'tv' | 'collection'
+
+    A trailing 4-digit year in the query, with or without parentheses
+    (e.g. "The Office 2005" or "The Office (2005)"), is automatically
+    extracted and passed as the appropriate TMDB year filter parameter.
+    """
+    query = q.strip()
+    if not query:
+        return []
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured. Add it in Settings → General → API Keys.")
+
+    filter_type = str(type or "all").strip().lower()
+    if filter_type not in ("all", "movie", "tv", "collection"):
+        filter_type = "all"
+
+    # Extract a trailing year from the query string and pass it as a structured param
+    year_param: str | None = None
+    year_match = _YEAR_SUFFIX_RE.search(query)
+    if year_match:
+        candidate = int(year_match.group(1))
+        current_year = datetime.now().year
+        if 1880 <= candidate <= current_year + 5:
+            year_param = str(candidate)
+            query = query[: year_match.start()]
+
+    raw_items: list[dict[str, Any]] = []
+
+    def _fetch_page(url: str, extra_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"api_key": api_key, "query": query, "language": "en-US", "page": 1}
+        if extra_params:
+            params.update(extra_params)
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+        except Exception as exc:
+            log_error(LogTags.MONITOR, f"TMDB search request failed: {exc}", query=query)
+            raise HTTPException(status_code=502, detail="TMDB request failed")
+        if resp.status_code == 401:
+            raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+        try:
+            return resp.json().get("results", [])
+        except Exception:
+            raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+
+    if filter_type == "all":
+        year_extra: dict[str, Any] = {}
+        if year_param:
+            year_extra["year"] = year_param  # TMDB multi-search accepts 'year' loosely
+        multi_items = _fetch_page("https://api.themoviedb.org/3/search/multi", year_extra or None)
+        for item in multi_items:
+            mt = str(item.get("media_type") or "")
+            if mt in ("movie", "tv"):
+                raw_items.append(item)
+        collection_items = _fetch_page("https://api.themoviedb.org/3/search/collection")
+        for item in collection_items:
+            item["media_type"] = "collection"
+            raw_items.append(item)
+    elif filter_type == "movie":
+        movie_extra: dict[str, Any] = {"primary_release_year": year_param} if year_param else {}
+        items = _fetch_page("https://api.themoviedb.org/3/search/movie", movie_extra or None)
+        for item in items:
+            item["media_type"] = "movie"
+            raw_items.extend([item])
+    elif filter_type == "tv":
+        tv_extra: dict[str, Any] = {"first_air_date_year": year_param} if year_param else {}
+        items = _fetch_page("https://api.themoviedb.org/3/search/tv", tv_extra or None)
+        for item in items:
+            item["media_type"] = "tv"
+            raw_items.extend([item])
+    elif filter_type == "collection":
+        items = _fetch_page("https://api.themoviedb.org/3/search/collection")
+        for item in items:
+            item["media_type"] = "collection"
+            raw_items.extend([item])
+
+    # Build base results
+    results: list[TmdbSearchResult] = []
+    for item in raw_items:
+        media_type = str(item.get("media_type") or "")
+        tmdb_id = int(item.get("id") or 0)
+        if not tmdb_id:
+            continue
+
+        if media_type == "movie":
+            title = str(item.get("title") or item.get("original_title") or "Unknown")
+            raw_date = str(item.get("release_date") or "")
+            homepage = f"https://www.themoviedb.org/movie/{tmdb_id}"
+        elif media_type == "tv":
+            title = str(item.get("name") or item.get("original_name") or "Unknown")
+            raw_date = str(item.get("first_air_date") or "")
+            homepage = f"https://www.themoviedb.org/tv/{tmdb_id}"
+        else:  # collection
+            title = str(item.get("name") or item.get("original_name") or "Unknown")
+            raw_date = ""
+            homepage = f"https://www.themoviedb.org/collection/{tmdb_id}"
+
+        year = raw_date[:4] if len(raw_date) >= 4 else ""
+        poster_path = str(item.get("poster_path") or "")
+        poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else ""
+
+        results.append(TmdbSearchResult(
+            tmdb_id=tmdb_id,
+            media_type=media_type,
+            title=title,
+            year=year,
+            overview=str(item.get("overview") or ""),
+            poster_url=poster_url,
+            homepage=homepage,
+        ))
+
+    # Fetch external IDs in parallel for movie and tv items
+    ext_id_targets = [(i, r) for i, r in enumerate(results) if r.media_type in ("movie", "tv")]
+    if ext_id_targets:
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            future_map = {
+                pool.submit(_fetch_external_ids, r.tmdb_id, r.media_type, api_key): i
+                for i, r in ext_id_targets
+            }
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    imdb_id, tvdb_id = future.result()
+                    results[idx] = results[idx].model_copy(update={"imdb_id": imdb_id, "tvdb_id": tvdb_id})
+                except Exception:
+                    pass
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# TMDB image browser
+# ---------------------------------------------------------------------------
+
+class TmdbImage(BaseModel):
+    file_path: str          # e.g. "/abc123.jpg"
+    width: int
+    height: int
+    language: str | None    # ISO 639-1 or None
+    vote_average: float
+    url_thumb: str          # w300 thumbnail
+    url_full: str           # original
+
+
+class TmdbImagesResponse(BaseModel):
+    posters: list[TmdbImage]
+    backdrops: list[TmdbImage]
+    logos: list[TmdbImage]
+
+
+class TmdbSeasonInfo(BaseModel):
+    season_number: int
+    name: str
+    episode_count: int
+    air_date: str | None = None
+    poster_url: str | None = None
+
+
+class TmdbTvDetails(BaseModel):
+    season_count: int
+    seasons: list[TmdbSeasonInfo]
+
+
+def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300") -> list[TmdbImage]:
+    out: list[TmdbImage] = []
+    for img in items:
+        fp = str(img.get("file_path") or "")
+        if not fp:
+            continue
+        out.append(TmdbImage(
+            file_path=fp,
+            width=int(img.get("width") or 0),
+            height=int(img.get("height") or 0),
+            language=str(img.get("iso_639_1") or "") or None,
+            vote_average=float(img.get("vote_average") or 0),
+            url_thumb=f"https://image.tmdb.org/t/p/{size_thumb}{fp}",
+            url_full=f"https://image.tmdb.org/t/p/original{fp}",
+        ))
+    return out
+
+
+@router.get("/tmdb/images", response_model=TmdbImagesResponse)
+def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Fetch available posters, backdrops, and logos for a TMDB item."""
+    import re
+
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+
+    # Validate language: ISO 639-1/2 code (2-3 lowercase alpha) or "all"
+    lang = str(language or "en+textless").strip().lower()
+    if lang not in ("all", "en+textless") and not re.fullmatch(r"[a-z]{2,3}", lang):
+        lang = "en+textless"
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    url = f"https://api.themoviedb.org/3/{mt}/{tmdb_id}/images"
+    params: dict[str, str] = {"api_key": api_key}
+    img_lang = _build_lang_params(lang)
+    if img_lang:
+        params["include_image_language"] = img_lang
+
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+    except Exception as exc:
+        log_error(LogTags.MONITOR, f"TMDB images request failed: {exc}", tmdb_id=tmdb_id, media_type=mt)
+        raise HTTPException(status_code=502, detail="TMDB request failed")
+
+    if resp.status_code == 401:
+        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+
+    posters = _build_tmdb_images(data.get("posters", []))
+    backdrops = _build_tmdb_images(data.get("backdrops", []), size_thumb="w780")
+    logos = _build_tmdb_images(data.get("logos", []))
+
+    # Sort each group: textless (language=None) first, then by vote_average descending
+    for group in (posters, backdrops, logos):
+        group.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))
+
+    return TmdbImagesResponse(posters=posters, backdrops=backdrops, logos=logos)
+
+
+@router.get("/tmdb/image-proxy")
+def tmdb_image_proxy(path: str, db: Session = Depends(get_db)):
+    """Proxy a TMDB image download so the browser gets a proper filename."""
+    from fastapi.responses import StreamingResponse
+
+    if not path.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid image path")
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    url = f"https://image.tmdb.org/t/p/original{path}"
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+    except Exception as exc:
+        log_error(LogTags.MONITOR, f"Image proxy request failed: {exc}", path=path)
+        raise HTTPException(status_code=502, detail="Failed to fetch image from TMDB")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+
+    content_type = resp.headers.get("content-type", "image/jpeg")
+    filename = path.lstrip("/")
+
+    return StreamingResponse(
+        resp.iter_content(chunk_size=8192),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _build_lang_params(lang: str) -> str | None:
+    """Return the include_image_language value for TMDB, or None to omit it."""
+    if lang == "all":
+        return None
+    if lang == "en+textless":
+        return "en,null"
+    return lang  # specific language, no textless
+
+
+@router.get("/tmdb/tv-details", response_model=TmdbTvDetails)
+def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetails:
+    """Fetch TV show details including the full seasons list."""
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+    try:
+        resp = requests.get(url, params={"api_key": api_key, "language": "en-US"}, timeout=10)
+    except Exception as exc:
+        log_error(LogTags.MONITOR, f"TMDB tv-details request failed: {exc}", tmdb_id=tmdb_id)
+        raise HTTPException(status_code=502, detail="TMDB request failed")
+
+    if resp.status_code == 401:
+        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+
+    seasons: list[TmdbSeasonInfo] = []
+    for s in (data.get("seasons") or []):
+        sn = int(s.get("season_number") or 0)
+        poster_path = str(s.get("poster_path") or "")
+        seasons.append(TmdbSeasonInfo(
+            season_number=sn,
+            name=str(s.get("name") or f"Season {sn}"),
+            episode_count=int(s.get("episode_count") or 0),
+            air_date=str(s.get("air_date") or "") or None,
+            poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else None,
+        ))
+
+    return TmdbTvDetails(
+        season_count=int(data.get("number_of_seasons") or 0),
+        seasons=seasons,
+    )
+
+
+@router.get("/tmdb/season-images", response_model=TmdbImagesResponse)
+def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+textless", db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Fetch poster images for a specific TV season."""
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    lang = str(language or "en+textless").strip().lower()
+    if lang not in ("all", "en+textless") and not re.fullmatch(r"[a-z]{2,3}", lang):
+        lang = "en+textless"
+
+    url = f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season_number}/images"
+    params: dict[str, str] = {"api_key": api_key}
+    img_lang = _build_lang_params(lang)
+    if img_lang:
+        params["include_image_language"] = img_lang
+
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+    except Exception as exc:
+        log_error(LogTags.MONITOR, f"TMDB season-images request failed: {exc}", tmdb_id=tmdb_id, season_number=season_number)
+        raise HTTPException(status_code=502, detail="TMDB request failed")
+
+    if resp.status_code == 401:
+        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+
+    posters = _build_tmdb_images(data.get("posters", []))
+    posters.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))
+
+    return TmdbImagesResponse(posters=posters, backdrops=[], logos=[])
 
 
 @router.post("/monitor/config", response_model=MakerMonitorConfig)

@@ -221,6 +221,13 @@
   color: #e8f3ff;
 }
 
+.sidebar-nav a.idarr-drop-active {
+  background-color: rgba(102, 187, 106, 0.15);
+  color: #fff;
+  box-shadow: inset 2px 0 0 #66bb6a;
+  outline: none;
+}
+
 .sidebar-nav a .icon {
   margin-right: 0.75rem;
   font-size: 1.25rem;
@@ -239,6 +246,32 @@
   border: 1px solid rgba(244, 67, 54, 0.28);
   min-width: 1.5rem;
   text-align: center;
+}
+
+.idarr-target-picker-modal {
+  max-width: 360px;
+}
+
+.idarr-target-picker-modal .modal-header {
+  padding: 1rem 1.25rem;
+}
+
+.idarr-target-picker-modal .modal-header h2 {
+  font-size: 1rem;
+}
+
+.idarr-target-picker-modal .modal-body {
+  padding: 1rem 1.25rem;
+}
+
+.idarr-target-picker-modal .modal-footer {
+  padding: 0.75rem 1.25rem;
+}
+
+@media (max-width: 550px) {
+  .idarr-target-picker-modal {
+    max-width: 100%;
+  }
 }
 
 @media (max-width: 1200px) {

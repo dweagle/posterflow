@@ -90,3 +90,65 @@ export const saveMakerMonitorConfig = async (config: MakerMonitorConfig): Promis
 export const runMakerMonitor = async (payload: MakerMonitorRunRequest): Promise<MakerMonitorRunQueuedResponse> => {
   return postData<MakerMonitorRunQueuedResponse>('/api/maker-tools/monitor/run', payload)
 }
+
+export interface TmdbSearchResult {
+  tmdb_id: number
+  media_type: 'movie' | 'tv' | 'collection'
+  title: string
+  year: string
+  overview: string
+  poster_url: string
+  homepage: string
+  imdb_id: string | null
+  tvdb_id: number | null
+}
+
+export type TmdbSearchFilter = 'all' | 'movie' | 'tv' | 'collection'
+
+export const searchTmdb = async (q: string, type: TmdbSearchFilter = 'all'): Promise<TmdbSearchResult[]> => {
+  return getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/search?q=${encodeURIComponent(q)}&type=${type}`)
+}
+
+export interface TmdbImage {
+  file_path: string
+  width: number
+  height: number
+  language: string | null
+  vote_average: number
+  url_thumb: string
+  url_full: string
+}
+
+export interface TmdbImagesResponse {
+  posters: TmdbImage[]
+  backdrops: TmdbImage[]
+  logos: TmdbImage[]
+}
+
+export const getTmdbImages = async (tmdb_id: number, media_type: string, language: string = 'en'): Promise<TmdbImagesResponse> => {
+  return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/images?tmdb_id=${tmdb_id}&media_type=${media_type}&language=${encodeURIComponent(language)}`)
+}
+
+export const getTmdbImageProxyUrl = (file_path: string): string => {
+  return `/api/maker-tools/tmdb/image-proxy?path=${encodeURIComponent(file_path)}`
+}
+export interface TmdbSeasonInfo {
+  season_number: number
+  name: string
+  episode_count: number
+  air_date: string | null
+  poster_url: string | null
+}
+
+export interface TmdbTvDetails {
+  season_count: number
+  seasons: TmdbSeasonInfo[]
+}
+
+export const getTvDetails = async (tmdb_id: number): Promise<TmdbTvDetails> => {
+  return getData<TmdbTvDetails>(`/api/maker-tools/tmdb/tv-details?tmdb_id=${tmdb_id}`)
+}
+
+export const getSeasonImages = async (tmdb_id: number, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
+  return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
+}

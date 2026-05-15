@@ -153,3 +153,20 @@ input, textarea, select {
   font-weight: var(--pf-chip-font-weight);
   line-height: 1;
 }
+
+/* TMDB attribution — used wherever TMDB API is exposed in the UI */
+.tmdb-attribution {
+  font-size: 0.75rem;
+  color: #555;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.tmdb-attribution a {
+  color: #64b5f6;
+  text-decoration: none;
+}
+
+.tmdb-attribution a:hover {
+  text-decoration: underline;
+}
