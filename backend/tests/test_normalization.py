@@ -120,6 +120,14 @@ class TestNormalizeTitles:
     def test_same_title_normalizes_consistently(self):
         assert normalize_titles("The Dark Knight") == normalize_titles("The Dark Knight")
 
+    def test_ampersand_matches_and(self):
+        # "&" and "and" should normalize to the same string
+        assert normalize_titles("Cloak & Dagger") == normalize_titles("Cloak and Dagger")
+
+    def test_html_entity_ampersand_matches_and(self):
+        # "&amp;" unescapes to "&", then expands to "and"
+        assert normalize_titles("Jack &amp; Jill") == normalize_titles("Jack and Jill")
+
     @pytest.mark.parametrize(
         "title, expected_contains",
         [

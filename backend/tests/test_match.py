@@ -162,3 +162,34 @@ class TestIsMatchStrictFolder:
         media = {"folder": "/media/movies/Avatar", "year": 2009}
         matched, _ = is_match(asset, media, strict_folder_match=True)
         assert matched is False
+
+
+class TestIsMatchNormalizedFolder:
+    """Fallback: asset normalized title matches the basename of media's on-disk folder."""
+
+    def test_ampersand_title_matches_and_folder(self):
+        # Radarr title uses "&" but the on-disk folder Radarr creates uses "and"
+        # e.g. media title: "Cloak & Dagger", folder basename: "Cloak and Dagger (1984)"
+        asset = {"title": "Cloak and Dagger", "normalized_title": "cloakanddagger", "year": 1984}
+        media = {
+            "title": "Cloak & Dagger",
+            "normalized_title": "cloakanddagger",
+            "folder": "/media/movies/Cloak and Dagger (1984)",
+            "year": 1984,
+        }
+        matched, reason = is_match(asset, media)
+        assert matched is True
+
+    def test_normalized_folder_fallback_fires(self):
+        # Asset title matches folder basename but not media title directly.
+        # normalized_folder_title is only extracted when the folder contains "(YYYY)",
+        # and year_matches() requires the asset year to match the folder year.
+        asset = {"title": "Example Folder Title", "normalized_title": "examplefoldertitle", "year": 2020}
+        media = {
+            "title": "Example - Different Title",
+            "normalized_title": "exampledifferenttitle",
+            "folder": "/media/movies/Example Folder Title (2020)",
+        }
+        matched, reason = is_match(asset, media)
+        assert matched is True
+        assert "folder" in reason
