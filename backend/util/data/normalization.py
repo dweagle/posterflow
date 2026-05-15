@@ -97,6 +97,7 @@ def normalize_titles(title: str) -> str:
     normalized_title = unidecode(html.unescape(normalized_title)).strip()
     normalized_title = id_content_regex.sub("", normalized_title)
     normalized_title = remove_tokens(normalized_title)
+    normalized_title = normalized_title.replace("&", " and ")
     normalized_title = illegal_chars_regex.sub("", normalized_title)
     normalized_title = re.sub(remove_special_chars, "", normalized_title)
     normalized_title = normalized_title.replace(" ", "").lower()
