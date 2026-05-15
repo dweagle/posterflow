@@ -147,7 +147,7 @@ def is_match(
             "by normalized title",
         ),
         (
-            asset.get("normalized_title") == media.get("normalized_folder"),
+            asset.get("normalized_title") == media.get("normalized_folder_title"),
             "by normalized folder",
         ),
         (
