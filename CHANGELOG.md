@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-15
+### Added
+- Maker Tools: new **TMDB Search** tab — search movies, TV shows, and collections by name (with optional year filter); browse TMDB and Apple TV poster images per result including season-level images for TV; copy TMDB/IMDB/TVDB IDs and poster URLs directly from results
+- Sidebar: Idarr nav item now accepts drag-and-drop file uploads — drop poster files directly onto the IDarr sidebar link to queue them for IDarr processing without navigating away; also supports a drive picker fallback if not in local page storage; IDarr page refreshes automatically on completion
+
+### Fixed
+- Unmatched Assets: titles containing `&` or `&amp;` now normalize correctly so "Title & Title" matches an on-disk folder named "Title and Title"
+- Unmatched Assets: fixed a key mismatch (`normalized_folder` vs `normalized_folder_title`) that caused the normalized-folder fallback in `is_match` to always return `None`
+- Sidebar: overflow and release notes popover positioning corrected for improved visibility.  Release notes popover was clipped after changes made to improve small screen viewing in last update.
+
+### Changed
+- Bumped `python-multipart` 0.0.22 → 0.0.27
+- Bumped `Pillow` 12.1.1 → 12.2.0
+
 ## [0.3.0] - 2026-05-13
 ### Added
 - Poster Manager: TMDB search results in the Unmatched Assets modal and Poster Style fallback modal now include a copy title button.
