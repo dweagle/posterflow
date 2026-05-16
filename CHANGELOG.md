@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-15
+### Added
+- TMDB Search: Copy Title button now copies the title with year in parentheses e.g. `Breaking Bad (2008)`
+
 ## [0.4.0] - 2026-05-15
 ### Added
 - Maker Tools: new **TMDB Search** tab — search movies, TV shows, and collections by name (with optional year filter); browse TMDB and Apple TV poster images per result including season-level images for TV; copy TMDB/IMDB/TVDB IDs and poster URLs directly from results
