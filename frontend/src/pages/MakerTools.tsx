@@ -1086,8 +1086,8 @@ function MakerTools() {
                                 <button
                                   type="button"
                                   className="tmdb-copy-btn"
-                                  onClick={() => copyToClipboard(item.title)}
-                                  title="Copy title"
+                                  onClick={() => copyToClipboard(item.year ? `${item.title} (${item.year})` : item.title)}
+                                  title="Copy title with year"
                                 >
                                   <Copy size={12} /> Title
                                 </button>
