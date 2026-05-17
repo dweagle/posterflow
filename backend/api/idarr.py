@@ -1188,7 +1188,8 @@ def _build_idarr_pending_preview_url_with_fallback(
     for source_dir in source_dirs:
         try:
             entries = source_dir.iterdir()
-        except Exception:
+        except Exception as e:
+            log_debug(LogTags.IDARR, f"Could not read source directory: {e}", path=str(source_dir))
             continue
 
         for entry in entries:
@@ -1351,8 +1352,9 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                         release_text = str(tmdb_data.get("release_date") or tmdb_data.get("first_air_date") or "").strip()
                         if len(release_text) >= 4 and release_text[:4].isdigit():
                             canonical_year_for_resolve = int(release_text[:4])
-                except Exception:
-                    pass  # Silently continue; runner will re-verify on next run
+                except Exception as e:
+                    log_debug(LogTags.IDARR, f"TMDB fetch for title/year resolution failed: {e}", tmdb_input=tmdb_input)
+                    # Runner will re-verify on next run
 
         resolution_event = {
             "resolved_at": datetime.now(timezone.utc).isoformat(),

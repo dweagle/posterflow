@@ -415,8 +415,8 @@ def update_schedules() -> None:
                         jc = json.loads(schedule.job_config)
                         schedule_sync_after = bool(jc.get("sync_after_run", False))
                         schedule_force_sync = bool(jc.get("force_sync_after_run", False))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_warning(LogTags.SCHEDULER, f"Failed to parse job_config JSON; using defaults: {e}", schedule_id=schedule.id)
                 job_args = [schedule.drive_group, schedule_sync_after, schedule_force_sync]
             elif schedule.job_type == 'maker_monitor':
                 job_func = run_maker_monitor_for_schedule

@@ -7,7 +7,7 @@ to prevent injection. Failure of a hook never fails the parent job.
 """
 import json
 import os
-import subprocess
+import subprocess  # nosec B404
 import traceback
 from typing import Optional
 

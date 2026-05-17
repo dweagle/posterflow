@@ -416,7 +416,7 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
         try:
             upsert_setting(db, "poster_renamer_last_output", json.dumps(output))
             db.commit()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         if not skip_discord:
             send_discord_notification(

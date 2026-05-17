@@ -12,7 +12,7 @@ from pathlib import Path
 from websockets.exceptions import ConnectionClosed
 from uvicorn.protocols.utils import ClientDisconnected
 from core.config import settings
-from core.websocket import WebSocketConnectionManager
+from core.websocket import WebSocketConnectionManager, shutdown_event
 from database import get_db, SessionLocal
 from models.job import (
     Job,
@@ -158,10 +158,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             finally:
                 db.close()
 
-            await asyncio.sleep(max(0.1, sleep_seconds))
+            # Sleep, but wake immediately if the server is shutting down
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=max(0.1, sleep_seconds))
+                return  # Shutdown signaled — exit cleanly
+            except asyncio.TimeoutError:
+                pass  # Normal poll interval elapsed, continue
             
-    except (WebSocketDisconnect, ConnectionClosed, ClientDisconnected):
-        # Client disconnected - this is normal, no logging needed
+    except (WebSocketDisconnect, ConnectionClosed, ClientDisconnected, asyncio.CancelledError):
+        # Client disconnected or server shutting down - this is normal, no logging needed
         pass
     except Exception as e:
         # Log unexpected errors with full traceback

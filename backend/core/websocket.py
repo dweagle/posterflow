@@ -1,9 +1,15 @@
 """Shared WebSocket connection management for API routers."""
 
+import asyncio
+
 from starlette.websockets import WebSocketState
 from fastapi import WebSocket
 
 from core.logging import LogTags, log_info, log_warning
+
+# Set during application shutdown so WebSocket polling loops can exit cleanly
+# before uvicorn's graceful-shutdown timeout fires.
+shutdown_event: asyncio.Event = asyncio.Event()
 
 _DEFAULT_ENTER_THRESHOLD = 12
 _DEFAULT_EXIT_THRESHOLD = 8

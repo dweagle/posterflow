@@ -112,7 +112,7 @@ def _queue_idarr_sync_after_run(db: Any, config_data: dict[str, Any], triggered_
         log_error(LogTags.IDARR, f"sync_after_run: failed to queue personal sync: {exc}\n{traceback.format_exc()}", triggered_by=triggered_by_job_id)
         try:
             db.rollback()
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 

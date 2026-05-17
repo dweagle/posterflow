@@ -356,8 +356,8 @@ class UnmatchedAssetsService:
                 empty = self._empty_result()
                 try:
                     self._save_results(empty["summary"], empty["unmatched"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(LogTags.UNMATCHED, f"Failed to persist empty result after scan error: {e}")
                 return empty
             
             scan_time = time.time() - scan_start
@@ -368,8 +368,8 @@ class UnmatchedAssetsService:
                 empty = self._empty_result()
                 try:
                     self._save_results(empty["summary"], empty["unmatched"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(LogTags.UNMATCHED, f"Failed to persist empty result when no assets found: {e}")
                 if progress_callback:
                     progress_callback("completed", 100, 100, "No poster assets found in destination folder")
                 return empty

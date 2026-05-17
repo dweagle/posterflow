@@ -227,19 +227,19 @@ scope = drive.readonly
                     if any(u in line for u in ('MiB', 'KiB', 'GiB')):
                         try:
                             _stat_transfer_size = line.split('Transferred:')[1].strip().split('/')[0].strip()
-                        except Exception:
+                        except Exception:  # nosec B110
                             pass
                     else:
                         try:
                             parts = line.split('Transferred:')[1].strip().split('/')[0].strip().split()[0]
                             if parts.isdigit():
                                 _stat_transferred = int(parts)
-                        except Exception:
+                        except Exception:  # nosec B110
                             pass
                 elif 'Elapsed time:' in line:
                     try:
                         _stat_elapsed = line.split('Elapsed time:')[1].strip()
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
                 
                 # Log rclone's INFO messages (file operations)

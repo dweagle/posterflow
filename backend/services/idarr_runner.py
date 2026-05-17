@@ -2394,7 +2394,7 @@ class IdarrRunner:
                                 f"(matched={matched_with_any_id}, unmatched={pending_unmatched})"
                             ),
                         )
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
         if cache_checkpoint_assets:
@@ -3843,7 +3843,7 @@ class IdarrRunner:
                         total_assets,
                         f"Renaming {index}/{total_assets} assets",
                     )
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
         return {

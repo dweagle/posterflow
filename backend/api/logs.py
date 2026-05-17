@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from core.config import settings
 from core.logging import log_warning, log_error, log_user_action, LogTags
-from core.websocket import WebSocketConnectionManager
+from core.websocket import WebSocketConnectionManager, shutdown_event
 from database import get_db
 from models.setting import upsert_setting
 import re
@@ -159,7 +159,12 @@ async def websocket_logs(websocket: WebSocket) -> None:
         last_position = log_file.stat().st_size if log_file.exists() else 0
         
         while True:
-            await asyncio.sleep(0.5)  # Check every 500ms
+            # Sleep, but wake immediately if the server is shutting down
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=0.5)
+                return  # Shutdown signaled — exit cleanly
+            except asyncio.TimeoutError:
+                pass  # Normal poll interval elapsed, continue
             now = asyncio.get_running_loop().time()
             
             if not log_file.exists():
@@ -203,8 +208,8 @@ async def websocket_logs(websocket: WebSocket) -> None:
                 await websocket.send_json({'type': 'heartbeat', 'heartbeat': int(now)})
                 last_heartbeat_time = now
     
-    except WebSocketDisconnect:
-        # Client disconnected - this is normal, no logging needed
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        # Client disconnected or server shutting down - this is normal, no logging needed
         return
     except Exception:
         # Silently handle errors during streaming - don't log to avoid recursion

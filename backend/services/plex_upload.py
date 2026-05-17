@@ -1947,7 +1947,7 @@ class PlexUploadService:
                     result = db_record.to_dict()
                     try:
                         self.db.expunge(db_record)
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
                     self._record_cache[file_path] = result
                     return dict(result)
@@ -1962,7 +1962,7 @@ class PlexUploadService:
                 # File contents have changed — treat like a fresh file.
                 try:
                     self.db.expunge(db_record)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 self._record_cache[file_path] = None
                 return self._empty_record()
@@ -1987,7 +1987,7 @@ class PlexUploadService:
         # accumulating in the identity map across a full upload run (one per poster file).
         try:
             self.db.expunge(db_record)
-        except Exception:
+        except Exception:  # nosec B110
             pass
         self._record_cache[file_path] = result
         return dict(result)

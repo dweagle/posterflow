@@ -170,7 +170,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
                 "total_items": total_items,
             }))
             db.commit()
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         if not skip_discord:

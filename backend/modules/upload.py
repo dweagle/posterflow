@@ -1704,7 +1704,7 @@ def run_plex_upload_background_job(
             service.invalidate_local_assets_cache()
             service.invalidate_arr_availability_cache()
             service.invalidate_record_cache()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
@@ -2528,7 +2528,7 @@ def run_plex_webhook_background_job(
             service.invalidate_local_assets_cache()
             service.invalidate_arr_availability_cache()
             service.invalidate_record_cache()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()
@@ -2700,7 +2700,7 @@ def run_plex_single_manual_background_job(
             service.invalidate_local_assets_cache()
             service.invalidate_arr_availability_cache()
             service.invalidate_record_cache()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         remove_job_log_handler(handler_id, "plex_upload", success=success)
         db.close()

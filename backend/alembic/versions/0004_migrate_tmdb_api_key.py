@@ -50,7 +50,7 @@ def upgrade() -> None:
                     embedded = str(cfg.get("tmdb_api_key") or "").strip()
                     if embedded and embedded != "***masked***":
                         migrated_key = embedded
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
         # Source 3: tmdb_api_key inside maker_tools_monitor_config JSON
@@ -62,7 +62,7 @@ def upgrade() -> None:
                     embedded = str(cfg.get("tmdb_api_key") or "").strip()
                     if embedded and embedded != "***masked***":
                         migrated_key = embedded
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
         if migrated_key:
@@ -83,7 +83,7 @@ def upgrade() -> None:
                     .where(settings.c.key == "maker_tools_idarr_config")
                     .values(value=json.dumps(cfg))
                 )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     # Strip tmdb_api_key field from maker_tools_monitor_config JSON
@@ -98,7 +98,7 @@ def upgrade() -> None:
                     .where(settings.c.key == "maker_tools_monitor_config")
                     .values(value=json.dumps(cfg))
                 )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 

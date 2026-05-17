@@ -100,7 +100,7 @@ def _get_remote_owner_repo() -> tuple[str, str]:
             return ssh_match.group(1), ssh_match.group(2)
         if https_match:
             return https_match.group(1), https_match.group(2)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     return GITHUB_OWNER, GITHUB_REPO_NAME
@@ -338,6 +338,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log_info(LogTags.SHUTDOWN, "Testing mode enabled - skipping shutdown side effects")
             log_section_end(LogTags.SHUTDOWN, "Shutdown Complete")
         else:
+            # Signal WebSocket polling loops to exit cleanly before uvicorn
+            # cancels them with a CancelledError.
+            try:
+                from core.websocket import shutdown_event
+                shutdown_event.set()
+            except Exception as e:
+                log_error(LogTags.SHUTDOWN, f"Error signaling WebSocket shutdown: {e}")
+
             # Close all active WebSocket connections
             try:
                 from api.jobs import _ws as job_ws
@@ -482,5 +490,24 @@ else:
         }
 
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
-    uvicorn.run(app, host="0.0.0", port=8000)
+    from core.websocket import shutdown_event as _ws_shutdown_event
+
+    class _ShutdownAwareServer(uvicorn.Server):
+        """Signals the WebSocket shutdown event the moment SIGTERM/SIGINT fires,
+        so polling loops exit cleanly before uvicorn's graceful-shutdown timeout."""
+
+        def handle_exit(self, sig: int, frame: object) -> None:  # type: ignore[override]
+            _ws_shutdown_event.set()
+            super().handle_exit(sig, frame)
+
+    _config = uvicorn.Config(
+        app,
+        host="0.0.0.0",  # nosec B104
+        port=8000,
+        log_level="warning",
+        access_log=False,
+        timeout_graceful_shutdown=3,
+    )
+    asyncio.run(_ShutdownAwareServer(_config).serve())

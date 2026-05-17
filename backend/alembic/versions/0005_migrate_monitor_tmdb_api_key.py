@@ -39,7 +39,7 @@ def upgrade() -> None:
                 embedded = str(cfg.get("tmdb_api_key") or "").strip()
                 if embedded and embedded != "***masked***":
                     conn.execute(settings.insert().values(key="tmdb_api_key", value=embedded))
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
     # Strip tmdb_api_key from maker_tools_monitor_config JSON regardless
@@ -54,7 +54,7 @@ def upgrade() -> None:
                     .where(settings.c.key == "maker_tools_monitor_config")
                     .values(value=json.dumps(cfg))
                 )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
 

@@ -16,7 +16,7 @@ def _trim_process_memory() -> None:
     gc.collect()
     try:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
 class JobQueueManager:

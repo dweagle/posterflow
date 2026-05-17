@@ -310,8 +310,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     _ro_raw = get_setting_value(db, "poster_renamer_last_output")
                     if _ro_raw:
                         _ro = _json.loads(_ro_raw)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(LogTags.WORKFLOW, f"Could not load poster_renamer stats/output from settings: {e}")
                 results["jobs_run"].append({
                     "job": "rename_posters",
                     "success": child_ok,
@@ -562,8 +562,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     _us_raw = get_setting_value(db, "unmatched_last_stats")
                     if _us_raw:
                         _us = _json2.loads(_us_raw)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(LogTags.WORKFLOW, f"Could not load unmatched_last_stats from settings: {e}")
                 _uc = int(_us.get("unmatched_count", 0))
                 results["jobs_run"].append({
                     "job": "detect_unmatched",

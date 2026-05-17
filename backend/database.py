@@ -21,7 +21,7 @@ def set_wal_mode(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
-    except Exception:
+    except Exception:  # nosec B110
         # WAL is a persistent DB-level setting; if another connection already
         # set it (or the DB is briefly locked during startup), this is safe to ignore.
         pass
