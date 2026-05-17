@@ -1592,6 +1592,44 @@ async def upload_psd_to_export_folder(filename: str, request: Request, db: Sessi
     return JSONResponse({"filename": filename, "saved": True})
 
 
+@router.post("/psd-exports/{filename}")
+async def save_psd_from_photopea(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Receive a Photopea File→Save POST and write the PSD to the export folder.
+
+    Photopea's binary POST body format:
+      bytes 0-1999  — null-padded JSON metadata header
+      bytes 2000+   — exported file data (one file because we pass formats=["psd:true"])
+    The response JSON key "message" is shown briefly to the user inside Photopea.
+    """
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    if export_folder:
+        save_dir = Path(export_folder)
+    else:
+        from core.config import settings as app_settings
+        save_dir = app_settings.config_dir / "psd_cache"
+
+    try:
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        # Skip the 2000-byte JSON header Photopea prepends to every save POST.
+        psd_bytes = body[2000:] if len(body) > 2000 else body
+        save_dir.mkdir(parents=True, exist_ok=True)
+        (save_dir / filename).write_bytes(psd_bytes)
+        log_user_action("Saved PSD from Photopea", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Photopea save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"message": "Saved!"})
+
+
 @router.post("/monitor/config", response_model=MakerMonitorConfig)
 def save_maker_monitor_config(config: MakerMonitorConfig, db: Session = Depends(get_db)) -> MakerMonitorConfig:
     """Persist Maker Tools monitor configuration."""

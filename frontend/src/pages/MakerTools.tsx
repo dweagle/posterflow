@@ -350,11 +350,13 @@ function MakerTools() {
       if (result.mode === 'photopea') {
         // Server saved the PSD (to export folder or psd_cache)
         if (result.openPhotopea) {
-          // Open the PSD in a new Photopea tab. Using '_blank' every time guarantees
-          // Photopea reads the hash URL and loads the file on initial page load — the
-          // only mechanism that works reliably for popup windows. Existing Photopea tabs
-          // are left untouched so no work is ever lost.
-          const photopea = `https://www.photopea.com#${JSON.stringify({ files: [result.psdUrl] })}`
+          // Open the PSD in Photopea via hash config (required API for URL-sourced files).
+          // server.url enables File→Save / Ctrl+S: Photopea POSTs the PSD back to that URL.
+          // The hash value must be encodeURIComponent-encoded — per Photopea API docs.
+          // formats:["psd:true"] restricts the POST body to PSD only (one file, at byte 2000).
+          const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(result.filename)}`
+          const config = { files: [result.psdUrl], server: { version: 1, url: saveUrl, formats: ['psd:true'] } }
+          const photopea = `https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`
           window.open(photopea, '_blank')
           showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
         } else {

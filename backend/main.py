@@ -419,6 +419,23 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
+
+@app.middleware("http")
+async def allow_private_network_access(request: Request, call_next):
+    """Add the Chrome Private Network Access header to every response.
+
+    When Photopea (https://www.photopea.com) saves a file back to a LAN address
+    (e.g. 192.168.x.x or localhost), Chrome sends an OPTIONS preflight with
+    Access-Control-Request-Private-Network: true. The server must echo back
+    Access-Control-Allow-Private-Network: true or the browser blocks the request.
+    This middleware runs outermost so it can annotate responses from CORS too.
+    """
+    response = await call_next(request)
+    if request.headers.get("Access-Control-Request-Private-Network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(drives_router)
