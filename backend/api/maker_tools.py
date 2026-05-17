@@ -12,8 +12,6 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from PIL import Image
-from psd_tools import PSDImage
-from psd_tools.api.layers import Group, PixelLayer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1192,6 +1190,12 @@ def _build_psd(
     Each poster is cover-filled to the canvas dimensions. The logo is bottom-anchored.
     Backdrop images are scaled to fit the canvas height (no crop) and centred horizontally.
     """
+    try:
+        from psd_tools import PSDImage
+        from psd_tools.api.layers import PixelLayer
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail="PSD export requires psd-tools, which is not installed.") from exc
+
     # ── Open template or create blank canvas ─────────────────────────────────
     if template_path is not None:
         psd = PSDImage.open(str(template_path))
