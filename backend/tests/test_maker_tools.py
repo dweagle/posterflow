@@ -1,3 +1,4 @@
+import importlib.util as _importlib_util
 import json
 import tempfile
 from datetime import date
@@ -631,7 +632,13 @@ def test_fetch_tmdb_image_bytes_raises_502_on_non_200():
 # _build_psd (unit tests — no mocking, real PIL/psd_tools)
 # ---------------------------------------------------------------------------
 
+_psd_tools_missing = pytest.mark.skipif(
+    _importlib_util.find_spec("psd_tools") is None,
+    reason="psd-tools not installed",
+)
 
+
+@_psd_tools_missing
 def test_build_psd_scratch_mode_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
     result = _build_psd([poster], logo_bytes=None)
@@ -639,6 +646,8 @@ def test_build_psd_scratch_mode_returns_bytes():
     assert len(result) > 0
 
 
+
+@_psd_tools_missing
 def test_build_psd_scratch_mode_with_logo_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
     logo = _make_png_bytes_rgba(40, 10)
@@ -647,6 +656,8 @@ def test_build_psd_scratch_mode_with_logo_returns_bytes():
     assert len(result) > 0
 
 
+
+@_psd_tools_missing
 def test_build_psd_multiple_posters_returns_bytes():
     posters = [_make_jpeg_bytes(20, 30) for _ in range(3)]
     result = _build_psd(posters, logo_bytes=None, title="Multi Poster")
@@ -654,6 +665,8 @@ def test_build_psd_multiple_posters_returns_bytes():
     assert len(result) > 0
 
 
+
+@_psd_tools_missing
 def test_build_psd_with_backdrop_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
     backdrop = _make_jpeg_bytes(40, 20)
@@ -662,6 +675,8 @@ def test_build_psd_with_backdrop_returns_bytes():
     assert len(result) > 0
 
 
+
+@_psd_tools_missing
 def test_build_psd_no_poster_only_logo_returns_bytes():
     logo = _make_png_bytes_rgba(40, 10)
     result = _build_psd([], logo_bytes=logo, title="Logo Only")
