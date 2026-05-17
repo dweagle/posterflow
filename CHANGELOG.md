@@ -6,6 +6,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-17
+### Added
+- Maker Tools: new **PSD Export** tools included on TMDB Search page — configure a PSD template path and output folder; toggle poster, backdrop, and logo layers per item; confirm overwrites via modal before writing; a default `default_template.psd` based on the community template is bundled for quick use.
+- Maker Tools TMDB Search configuration button: new PSD export folder and template path settings fields; users may have to add new mount in docker config for PSD file location if desired.
+- Maker Tool TMDB Search: Photopea integration - Users can toggle settings to allow PSDs to automatically open a new Photopea tab in their browser for PSD export/editing. Photoshop cannot be configured due to limitations of PosterFlow running in a Docker container.
+- Maker Tools TMDB Search Button: Added buttons in Monitor Series/Discovery that will search items on the TMDB Search tab for quick workflow. Buttons are also available in Unmatched Assets and Poster Style modals.
+
+### Fixed
+- WebSocket: improved shutdown handling so in-flight connections are closed cleanly when the server stops
+- Exception handling: consistent logging of unexpected exceptions across jobs, scheduler, queue, modules, and services
+
 ## [0.4.1] - 2026-05-15
 ### Added
 - TMDB Search: Copy Title button now copies the title with year in parentheses e.g. `Breaking Bad (2008)`
