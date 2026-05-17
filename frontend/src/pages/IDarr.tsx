@@ -2461,7 +2461,7 @@ function IDarr() {
               <UploadCloud size={22} />
               <div>
                 <strong>{uploadingFiles ? 'Uploading files…' : 'Drag & drop files here'}</strong>
-                <p>Accepted: .jpg</p>
+                <p>Accepted: .jpg, .jpeg, .png, .webp, .psd</p>
               </div>
               <button
                 type="button"
@@ -2478,7 +2478,7 @@ function IDarr() {
               <input
                 ref={uploadInputRef}
                 type="file"
-                accept=".jpg"
+                accept=".jpg,.jpeg,.png,.webp,.psd"
                 multiple
                 className="idarr-upload-input"
                 onChange={(event) => { void onUploadInputChange(event) }}

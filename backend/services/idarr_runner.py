@@ -33,7 +33,7 @@ from models.idarr import (
 from models.setting import get_setting
 from util.data.normalization import normalize_titles
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 TMDB_ID_REGEX = re.compile(r"tmdb[-_\s]?(\d+)", re.IGNORECASE)
 TVDB_ID_REGEX = re.compile(r"tvdb[-_\s]?(\d+)", re.IGNORECASE)
 IMDB_ID_REGEX = re.compile(r"imdb[-_\s]?(tt\d+)", re.IGNORECASE)

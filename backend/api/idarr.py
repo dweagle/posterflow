@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/idarr", tags=["idarr"])
 
 SETTING_MAKER_IDARR_CONFIG = "maker_tools_idarr_config"
 SETTING_MAKER_IDARR_IGNORED_TITLES = "maker_tools_idarr_ignored_titles"
-IDARR_UPLOAD_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+IDARR_UPLOAD_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 
 
 class MakerIdarrConfig(BaseModel):
