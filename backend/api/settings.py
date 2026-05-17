@@ -84,6 +84,10 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "auto_run_border",
     # GDrive storage path
     "gdrive_storage_path",
+    # PSD export
+    "psd_export_folder",
+    "psd_template_path",
+    "psd_open_photopea",
 })
 
 

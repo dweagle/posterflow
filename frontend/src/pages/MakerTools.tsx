@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Check, ChevronDown, ChevronUp, CircleHelp, Clapperboard, Clapperboard as MovieIcon, Copy, Download, ExternalLink, FolderOpen, Globe, Image, Info, Layers, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { Check, ChevronDown, ChevronUp, CircleHelp, Clapperboard, Clapperboard as MovieIcon, Copy, Download, ExternalLink, FileDown, FolderOpen, Globe, Image, Info, Layers, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
+  exportToPsd,
+  uploadPsdToExportFolder,
+  checkPsdExists,
   getDrives,
   getMakerMonitorConfig,
   getMakerMonitorLastResult,
   getSeasonImages,
+  getSettings,
   getTmdbImages,
   getTmdbImageProxyUrl,
   getTvDetails,
   MakerMonitorConfig,
   MakerMonitorRunResponse,
   runMakerMonitor,
+  saveBulkSettings,
   saveMakerMonitorConfig,
   searchTmdb,
   TmdbImage,
@@ -227,6 +232,7 @@ const cloneMonitorConfig = (value: MakerMonitorConfig): MakerMonitorConfig => ({
 
 function MakerTools() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [activeTab, setActiveTab] = useState<MainTab>('tmdb-search')
   const [drives, setDrives] = useState<Drive[]>([])
   const [loading, setLoading] = useState(false)
@@ -254,6 +260,19 @@ function MakerTools() {
   const [galleryTab, setGalleryTab] = useState<Record<string, 'posters' | 'backdrops' | 'logos' | 'season-posters'>>({})
   const [galleryPreview, setGalleryPreview] = useState<TmdbImage | null>(null)
   const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
+  // PSD export selections: key = galleryKey, value = { posters: ordered file_paths[], backdrops: ordered file_paths[], logo: file_path | null }
+  const [psdSelections, setPsdSelections] = useState<Record<string, { posters: string[]; backdrops: string[]; logo: string | null }>>({})
+  const [psdExporting, setPsdExporting] = useState<Record<string, boolean>>({})
+  // PSD export settings
+  const [psdExportFolder, setPsdExportFolder] = useState('')
+  const [psdTemplatePath, setPsdTemplatePath] = useState('')
+  const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
+  const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
+  // "Use Existing PSD" — not-found modal state
+  const [psdNotFound, setPsdNotFound] = useState<{ galleryKey: string; title: string; year: string; expectedFilename: string } | null>(null)
+  const [psdUploading, setPsdUploading] = useState(false)
+  // "New Export" — overwrite confirmation state
+  const [psdOverwriteConfirm, setPsdOverwriteConfirm] = useState<{ galleryKey: string; title: string; year: string; filename: string } | null>(null)
   // TV show seasons
   const [tvDetails, setTvDetails] = useState<Record<string, TmdbTvDetails>>({})
   const [tvDetailsLoading, setTvDetailsLoading] = useState<Record<string, boolean>>({})
@@ -261,6 +280,123 @@ function MakerTools() {
   const [seasonImages, setSeasonImages] = useState<Record<string, TmdbImagesResponse>>({})
   const [seasonImagesLoading, setSeasonImagesLoading] = useState<Record<string, boolean>>({})
   const { showToast } = useToast()
+
+  const togglePsdSelection = (galleryKey: string, role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
+    setPsdSelections((prev) => {
+      const current = prev[galleryKey] ?? { posters: [], backdrops: [], logo: null }
+      if (role === 'logo') {
+        return { ...prev, [galleryKey]: { ...current, logo: current.logo === filePath ? null : filePath } }
+      }
+      if (role === 'backdrop') {
+        const already = current.backdrops.includes(filePath)
+        return {
+          ...prev,
+          [galleryKey]: {
+            ...current,
+            backdrops: already ? current.backdrops.filter((b) => b !== filePath) : [...current.backdrops, filePath],
+          },
+        }
+      }
+      // poster: toggle in ordered array
+      const already = current.posters.includes(filePath)
+      return {
+        ...prev,
+        [galleryKey]: {
+          ...current,
+          posters: already
+            ? current.posters.filter((p) => p !== filePath)
+            : [...current.posters, filePath],
+        },
+      }
+    })
+  }
+
+  const handlePsdExport = async (galleryKey: string, title: string, year: string, useExisting = false, confirmed = false) => {
+    const sel = psdSelections[galleryKey]
+    if (!sel?.posters.length && !sel?.backdrops?.length && !sel?.logo) return
+
+    // For new exports: check if a PSD with the same name already exists and warn before overwriting.
+    // Skip this check if the user has already confirmed the overwrite (confirmed=true).
+    if (!useExisting && !confirmed) {
+      const safeName = title.replace(/[<>:"/\\|?*]/g, '').trim()
+      const expectedFilename = year ? `${safeName} (${year}).psd` : `${safeName}.psd`
+      const exists = await checkPsdExists(expectedFilename)
+      if (exists) {
+        setPsdOverwriteConfirm({ galleryKey, title, year, filename: expectedFilename })
+        return
+      }
+    }
+
+    setPsdExporting((prev) => ({ ...prev, [galleryKey]: true }))
+    try {
+      const result = await exportToPsd(
+        {
+          title,
+          year: year ?? '',
+          poster_paths: sel.posters,
+          backdrop_paths: sel.backdrops ?? [],
+          logo_path: sel.logo ?? null,
+          use_existing: useExisting,
+        },
+        title,
+        year ?? '',
+      )
+
+      if (result.mode === 'not-found') {
+        setPsdNotFound({ galleryKey, title, year, expectedFilename: result.expectedFilename })
+        return
+      }
+
+      if (result.mode === 'photopea') {
+        // Server saved the PSD (to export folder or psd_cache)
+        if (result.openPhotopea) {
+          // Open the PSD in a new Photopea tab. Using '_blank' every time guarantees
+          // Photopea reads the hash URL and loads the file on initial page load — the
+          // only mechanism that works reliably for popup windows. Existing Photopea tabs
+          // are left untouched so no work is ever lost.
+          const photopea = `https://www.photopea.com#${JSON.stringify({ files: [result.psdUrl] })}`
+          window.open(photopea, '_blank')
+          showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
+        } else {
+          showToast(`PSD saved: ${result.filename}`, 'success')
+        }
+      } else {
+        // No export folder configured — trigger browser download
+        const url = URL.createObjectURL(result.blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = result.filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(url)
+        showToast('PSD downloaded', 'success')
+      }
+    } catch (err) {
+      console.error('PSD export failed:', err)
+      const msg = err instanceof Error ? err.message : 'Failed to export PSD'
+      showToast(msg, 'error')
+    } finally {
+      setPsdExporting((prev) => ({ ...prev, [galleryKey]: false }))
+    }
+  }
+
+  const handlePsdNotFoundUpload = async (file: File) => {
+    if (!psdNotFound) return
+    const { galleryKey, title, year, expectedFilename } = psdNotFound
+    setPsdUploading(true)
+    try {
+      await uploadPsdToExportFolder(file, expectedFilename)
+      setPsdNotFound(null)
+      showToast(`PSD uploaded as "${expectedFilename}" — adding poster layers…`, 'success')
+      await handlePsdExport(galleryKey, title, year, true)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed'
+      showToast(msg, 'error')
+    } finally {
+      setPsdUploading(false)
+    }
+  }
 
   const handleGalleryDownload = async (filePath: string) => {
     const url = getTmdbImageProxyUrl(filePath)
@@ -354,6 +490,16 @@ function MakerTools() {
     void load()
   }, [showToast])
 
+  useEffect(() => {
+    getSettings().then((settings) => {
+      setPsdExportFolder((settings.psd_export_folder || '').trim())
+      setPsdTemplatePath((settings.psd_template_path || '').trim())
+      setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
+    }).catch(() => {
+      // Non-blocking: page still works with empty defaults
+    })
+  }, [])
+
   const addDriveSelection = () => {
     setModalConfig((previous) => {
       const next = cloneMonitorConfig(previous)
@@ -387,6 +533,26 @@ function MakerTools() {
 
   const closeConfigModal = () => {
     setShowConfigModal(false)
+  }
+
+  const openPsdConfigModal = () => setShowPsdConfigModal(true)
+  const closePsdConfigModal = () => setShowPsdConfigModal(false)
+
+  const handleSavePsdConfig = async () => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({
+        psd_export_folder: psdExportFolder.trim(),
+        psd_template_path: psdTemplatePath.trim(),
+        psd_open_photopea: String(psdOpenPhotopea),
+      })
+      showToast('PSD settings saved', 'success')
+      setShowPsdConfigModal(false)
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to save PSD settings'), 'error')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleSaveConfig = async () => {
@@ -558,6 +724,27 @@ function MakerTools() {
     } finally {
       setTmdbSearching(false)
     }
+  }
+
+  // Handle incoming navigation state from other pages (e.g. Poster Manager → Maker Tools search)
+  useEffect(() => {
+    const state = location.state as { tmdbSearch?: string } | null
+    if (state?.tmdbSearch) {
+      const query = state.tmdbSearch
+      setTmdbQuery(query)
+      setActiveTab('tmdb-search')
+      void handleTmdbSearch(query)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSearchOnTmdbTab = (name: string, date?: string) => {
+    const year = date?.slice(0, 4) ?? ''
+    const query = `${name} ${year}`.trim()
+    setTmdbQuery(query)
+    setActiveTab('tmdb-search')
+    void handleTmdbSearch(query)
   }
 
   const handleTmdbFilterChange = (filter: TmdbSearchFilter) => {
@@ -818,6 +1005,14 @@ function MakerTools() {
                               {show.poster_exists ? <Check size={13} /> : <Paintbrush size={13} />}
                               {show.poster_exists ? 'Poster Ready' : 'Needs Poster'}
                             </span>
+                            <button
+                              type="button"
+                              className="maker-tmdb-search-btn"
+                              title="Search TMDB tab"
+                              onClick={() => handleSearchOnTmdbTab(show.name, show.date)}
+                            >
+                              <Search size={12} /> TMDB
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -877,6 +1072,14 @@ function MakerTools() {
                                 return <span className="badge badge-orange" key={`${item.homepage}-${status.type}`}><Paintbrush size={13} /> {status.type}</span>
                               })
                             })()}
+                            <button
+                              type="button"
+                              className="maker-tmdb-search-btn"
+                              title="Search TMDB tab"
+                              onClick={() => handleSearchOnTmdbTab(item.name, item.date)}
+                            >
+                              <Search size={12} /> TMDB
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -892,6 +1095,20 @@ function MakerTools() {
 
       {activeTab === 'tmdb-search' && (
         <div className="maker-tools-panel">
+          <div className="toolbar">
+            <div className="toolbar-title">
+              <h2>TMDB Search</h2>
+              <div className="toolbar-info">
+                <Info size={16} />
+                <div className="toolbar-tooltip">Search TMDB for movies, TV shows, and collections. Browse posters, logos, and backdrops, then export directly to PSD.</div>
+              </div>
+            </div>
+            <div className="action-buttons">
+              <button className="btn-toolbar" type="button" onClick={openPsdConfigModal}>
+                <SlidersHorizontal size={16} /> Configure
+              </button>
+            </div>
+          </div>
           <div className="tmdb-search-panel">
             <div className="tmdb-search-help">
               <button
@@ -901,7 +1118,7 @@ function MakerTools() {
                 aria-expanded={tmdbHelpExpanded}
               >
                 <Info size={14} />
-                <span>How to search</span>
+                <span>How to search &amp; export PSDs</span>
                 <span className={`tmdb-help-chevron${tmdbHelpExpanded ? ' expanded' : ''}`}>›</span>
               </button>
               {tmdbHelpExpanded && (
@@ -909,10 +1126,31 @@ function MakerTools() {
                   <p>Search TMDB for movies, TV shows, and collections to look up IDs and metadata.</p>
                   <ul>
                     <li><strong>By title</strong> — <code>The Office</code></li>
-                    <li><strong>With year</strong> — <code>The Office 2005</code> (narrows results to that release year)</li>
+                    <li><strong>With year</strong> — <code>The Office (2005)</code> or <code>The Office 2005</code> (narrows results to that release year)</li>
                     <li><strong>Filter by type</strong> — use the All / Movies / TV Shows / Collections buttons below</li>
                     <li><strong>ID chips</strong> — click any TMDB / IMDB / TVDB chip to copy just the ID number</li>
                     <li><strong>Poster</strong> — click the poster thumbnail to enlarge it</li>
+                  </ul>
+                  <p>To build a PSD file from the search results:</p>
+                  <ul>
+                    <li><strong>Select images</strong> — click <strong>P</strong> on any poster to add it to your export, or <strong>L</strong> on a logo</li>
+                    <li><strong>Backdrops</strong> — switch to the Backdrops tab and click <strong>B</strong> to add a backdrop as a background layer (fit to height, no crop)</li>
+                    <li><strong>Logo</strong> — switch to the Logos tab and click <strong>L</strong> to add a logo; it will be placed at the bottom, converted to white, and sized automatically based on its shape and density:
+                      <ul>
+                        <li><strong>Short/wide logos</strong> — logos with a low projected height are given a wider target width so they don't appear too small</li>
+                        <li><strong>Sparse logos</strong> — logos with thin strokes or lots of transparent space are sized up slightly so delicate details remain visible</li>
+                        <li><strong>Dense logos</strong> — logos with heavily filled or solid artwork are sized down, with wider logos shrinking more than narrower ones, to avoid an overpowering block of white</li>
+                        <li><strong>Hard limits</strong> — no logo will exceed 800px wide; tall logos are also capped in height to stay within the lower third of the canvas</li>
+                      </ul>
+                    </li>
+                    <li><strong>Export PSD</strong> — once you've selected images, two export buttons appear in the gallery toolbar:
+                      <ul>
+                        <li><strong>New Export</strong> — always creates a fresh PSD using your configured template (or the built-in default). Any file in the export folder with the same name is overwritten from scratch.</li>
+                        <li><strong>Use Existing PSD</strong> — opens an already-saved PSD from your export folder and injects the new poster/logo/backdrop layers into it, preserving all your existing work (borders, text, effects). The file must be named <code>{'{'}title{'}'} ({'{'}year{'}'}).psd</code> and placed in the configured export folder. If no matching file is found, a prompt will guide you to either place the file there manually or upload it directly from your computer.</li>
+                      </ul>
+                    </li>
+                    <li><strong>Open in Photopea</strong> — if the "Open in Photopea" toggle is enabled in Configure, the exported PSD will open directly in Photopea in a new tab instead of downloading</li>
+                    <li><strong>Multiple posters</strong> — you can add more than one poster; each becomes its own layer in the PSD</li>
                   </ul>
                 </div>
               )}
@@ -922,7 +1160,7 @@ function MakerTools() {
               <input
                 type="text"
                 className="tmdb-search-input"
-                placeholder="Search movies, TV shows, and collections..."
+                placeholder="Search movies, TV shows, collections... add (year) to narrow results"
                 value={tmdbQuery}
                 onChange={(e) => setTmdbQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleTmdbSearch() }}
@@ -1154,6 +1392,34 @@ function MakerTools() {
                                     ))}
                                   </select>
                                 </div>
+                                {(() => {
+                                  const sel = psdSelections[galleryKey]
+                                  const hasSel = !!(sel?.posters.length || sel?.backdrops?.length || sel?.logo)
+                                  return hasSel ? (
+                                    <div className="tmdb-psd-export-group">
+                                      <button
+                                        type="button"
+                                        className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
+                                        onClick={() => void handlePsdExport(galleryKey, item.title, item.year, false)}
+                                        disabled={psdExporting[galleryKey]}
+                                        title="Create a new PSD from the selected images"
+                                      >
+                                        <FileDown size={13} />
+                                        {psdExporting[galleryKey] ? 'Exporting…' : 'New Export'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
+                                        onClick={() => void handlePsdExport(galleryKey, item.title, item.year, true)}
+                                        disabled={psdExporting[galleryKey]}
+                                        title="Add selected images to an existing PSD in your export folder"
+                                      >
+                                        <Layers size={13} />
+                                        {psdExporting[galleryKey] ? 'Exporting…' : 'Use Existing PSD'}
+                                      </button>
+                                    </div>
+                                  ) : null
+                                })()}
                               </div>
                               {activeGalleryTab === 'season-posters'
                                 ? (
@@ -1184,37 +1450,51 @@ function MakerTools() {
                                               if (!sImgs || sImgs.posters.length === 0) return <p className="tmdb-gallery-empty">No posters available for this season.</p>
                                               return (
                                                 <div className="tmdb-gallery-grid tmdb-gallery-grid--posters">
-                                                  {sImgs.posters.map((img) => (
-                                                    <div key={img.file_path} className="tmdb-gallery-item">
-                                                      <button
-                                                        type="button"
-                                                        className="tmdb-gallery-thumb-btn"
-                                                        onClick={() => setGalleryPreview(img)}
-                                                        title="Preview full size"
-                                                      >
-                                                        <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
-                                                      </button>
-                                                      <div className="tmdb-gallery-item-meta">
-                                                        <div className="tmdb-gallery-meta-row">
-                                                          {img.language === null
-                                                            ? <span className="tmdb-gallery-lang">TL</span>
-                                                            : img.language
-                                                              ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
-                                                              : null
-                                                          }
-                                                          <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
+                                                  {sImgs.posters.map((img) => {
+                                                    const selIdx = (psdSelections[galleryKey]?.posters ?? []).indexOf(img.file_path)
+                                                    const isSelected = selIdx !== -1
+                                                    return (
+                                                      <div key={img.file_path} className="tmdb-gallery-item">
+                                                        <div className="tmdb-gallery-thumb-wrapper">
                                                           <button
                                                             type="button"
-                                                            className="tmdb-gallery-dl"
-                                                            title="Download"
-                                                            onClick={() => void handleGalleryDownload(img.file_path)}
+                                                            className="tmdb-gallery-thumb-btn"
+                                                            onClick={() => setGalleryPreview(img)}
+                                                            title="Preview full size"
                                                           >
-                                                            <Download size={12} />
+                                                            <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
+                                                            onClick={() => togglePsdSelection(galleryKey, 'poster', img.file_path)}
+                                                            title={isSelected ? 'Deselect poster' : 'Select as Poster'}
+                                                          >
+                                                            {isSelected ? <span>{selIdx + 1}</span> : <span>P</span>}
                                                           </button>
                                                         </div>
+                                                        <div className="tmdb-gallery-item-meta">
+                                                          <div className="tmdb-gallery-meta-row">
+                                                            {img.language === null
+                                                              ? <span className="tmdb-gallery-lang">TL</span>
+                                                              : img.language
+                                                                ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
+                                                                : null
+                                                            }
+                                                            <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
+                                                            <button
+                                                              type="button"
+                                                              className="tmdb-gallery-dl"
+                                                              title="Download"
+                                                              onClick={() => void handleGalleryDownload(img.file_path)}
+                                                            >
+                                                              <Download size={12} />
+                                                            </button>
+                                                          </div>
+                                                        </div>
                                                       </div>
-                                                    </div>
-                                                  ))}
+                                                    )
+                                                  })}
                                                 </div>
                                               )
                                             })()}
@@ -1227,37 +1507,61 @@ function MakerTools() {
                                   ? <p className="tmdb-gallery-empty">No {activeGalleryTab} available.</p>
                                   : (
                                     <div className={`tmdb-gallery-grid tmdb-gallery-grid--${activeGalleryTab}`}>
-                                      {galleryImages[activeGalleryTab as 'posters' | 'backdrops' | 'logos'].map((img) => (
-                                        <div key={img.file_path} className="tmdb-gallery-item">
-                                          <button
-                                            type="button"
-                                            className="tmdb-gallery-thumb-btn"
-                                            onClick={() => setGalleryPreview(img)}
-                                            title="Preview full size"
-                                          >
-                                            <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
-                                          </button>
-                                          <div className="tmdb-gallery-item-meta">
-                                            <div className="tmdb-gallery-meta-row">
-                                              {img.language === null
-                                                ? <span className="tmdb-gallery-lang">TL</span>
-                                                : img.language
-                                                  ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
-                                                  : null
-                                              }
-                                              <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
+                                      {galleryImages[activeGalleryTab as 'posters' | 'backdrops' | 'logos'].map((img) => {
+                                        const role = activeGalleryTab === 'logos' ? 'logo' : activeGalleryTab === 'backdrops' ? 'backdrop' : 'poster'
+                                        const selIdx = role === 'poster'
+                                          ? (psdSelections[galleryKey]?.posters ?? []).indexOf(img.file_path)
+                                          : role === 'backdrop'
+                                            ? (psdSelections[galleryKey]?.backdrops ?? []).indexOf(img.file_path)
+                                            : -1
+                                        const isSelected = role === 'logo'
+                                          ? psdSelections[galleryKey]?.logo === img.file_path
+                                          : selIdx !== -1
+                                        return (
+                                          <div key={img.file_path} className="tmdb-gallery-item">
+                                            <div className="tmdb-gallery-thumb-wrapper">
                                               <button
                                                 type="button"
-                                                className="tmdb-gallery-dl"
-                                                title="Download"
-                                                onClick={() => void handleGalleryDownload(img.file_path)}
+                                                className="tmdb-gallery-thumb-btn"
+                                                onClick={() => setGalleryPreview(img)}
+                                                title="Preview full size"
                                               >
-                                                <Download size={12} />
+                                                <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
+                                                onClick={() => togglePsdSelection(galleryKey, role, img.file_path)}
+                                                title={isSelected ? `Deselect ${role}` : role === 'poster' ? 'Select as Poster' : role === 'backdrop' ? 'Select as Background' : 'Select as Logo'}
+                                              >
+                                                {isSelected
+                                                  ? (role === 'poster' || role === 'backdrop') ? <span>{selIdx + 1}</span> : <Check size={10} />
+                                                  : <span>{role === 'poster' ? 'P' : role === 'backdrop' ? 'B' : 'L'}</span>
+                                                }
                                               </button>
                                             </div>
+                                            <div className="tmdb-gallery-item-meta">
+                                              <div className="tmdb-gallery-meta-row">
+                                                {img.language === null
+                                                  ? <span className="tmdb-gallery-lang">TL</span>
+                                                  : img.language
+                                                    ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
+                                                    : null
+                                                }
+                                                <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
+                                                <button
+                                                  type="button"
+                                                  className="tmdb-gallery-dl"
+                                                  title="Download"
+                                                  onClick={() => void handleGalleryDownload(img.file_path)}
+                                                >
+                                                  <Download size={12} />
+                                                </button>
+                                              </div>
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                        )
+                                      })}
                                     </div>
                                   )
                               }
@@ -1307,6 +1611,168 @@ function MakerTools() {
             </div>
           </div>
           <button type="button" className="tmdb-lightbox-close" onClick={() => setGalleryPreview(null)}>×</button>
+        </div>
+      )}
+
+      {showPsdConfigModal && (
+        <div className="modal-overlay">
+          <div className="modal-content schedule-modal">
+            <div className="modal-header">
+              <h2>TMDB Search Settings</h2>
+              <button className="modal-close" onClick={closePsdConfigModal}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="maker-card">
+                <label>
+                  PSD Export Folder
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Optional. When set, exported PSD files are saved here in addition to the browser download.
+                    Must be an absolute container-side path (e.g. <code>/config/psd_exports</code>).
+                    Leave blank for download-only.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdExportFolder}
+                    onChange={(e) => setPsdExportFolder(e.target.value)}
+                    placeholder="/config/psd_exports"
+                  />
+                </label>
+                <label>
+                  PSD Template File
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Override the bundled default PSD template with your own. Provide an absolute
+                    container-side path to a <code>.psd</code> file (e.g. <code>/config/my_template.psd</code>).
+                    The poster image is injected into the <strong>POSTER</strong> group and the logo into the <strong>LOGO</strong> group.
+                    Leave blank to use the built-in default template.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdTemplatePath}
+                    onChange={(e) => setPsdTemplatePath(e.target.value)}
+                    placeholder="/config/template.psd"
+                  />
+                </label>
+                <div className="maker-setting-row">
+                  <div>
+                    <span style={{ fontWeight: 500 }}>Open in Photopea</span>
+                    <small className="muted" style={{ display: 'block', marginTop: '0.2rem' }}>
+                      When enabled, exported PSD files automatically open in{' '}
+                      <a href="https://www.photopea.com" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>Photopea</a>{' '}
+                      in a new tab. Requires PosterFlow to be accessible over HTTPS. If no export folder
+                      is configured, files are saved temporarily to <code>/config/psd_cache</code>.
+                    </small>
+                  </div>
+                  <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={psdOpenPhotopea}
+                      onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={closePsdConfigModal} disabled={saving}>
+                Cancel
+              </button>
+              <button className="btn-primary" onClick={handleSavePsdConfig} disabled={saving} style={{ justifyContent: 'center' }}>
+                <Save size={16} /> {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {psdOverwriteConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content schedule-modal">
+            <div className="modal-header">
+              <h2>Overwrite Existing PSD?</h2>
+              <button className="modal-close" onClick={() => setPsdOverwriteConfirm(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
+                A PSD with this name already exists in your export folder:
+              </p>
+              <div className="psd-not-found-filename">
+                <code>{psdOverwriteConfirm.filename}</code>
+              </div>
+              {psdExportFolder && (
+                <div className="psd-not-found-folder">
+                  <span className="psd-not-found-folder-label">Export folder:</span>
+                  <code>{psdExportFolder}</code>
+                </div>
+              )}
+              <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                Continuing will overwrite it with a fresh PSD. Any edits you have made to the existing file will be lost.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setPsdOverwriteConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                style={{ justifyContent: 'center', background: '#f44336' }}
+                onClick={() => {
+                  const { galleryKey, title, year } = psdOverwriteConfirm
+                  setPsdOverwriteConfirm(null)
+                  void handlePsdExport(galleryKey, title, year, false, true)
+                }}
+              >
+                Overwrite
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {psdNotFound && (
+        <div className="modal-overlay">
+          <div className="modal-content schedule-modal">
+            <div className="modal-header">
+              <h2>PSD Not Found</h2>
+              <button className="modal-close" onClick={() => setPsdNotFound(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginBottom: '1rem', color: '#ccc', lineHeight: 1.6 }}>
+                No existing PSD was found in your export folder. To use this feature the file must be named exactly:
+              </p>
+              <div className="psd-not-found-filename">
+                <code>{psdNotFound.expectedFilename}</code>
+              </div>
+              {psdExportFolder && (
+                <div className="psd-not-found-folder">
+                  <span className="psd-not-found-folder-label">Export folder:</span>
+                  <code>{psdExportFolder}</code>
+                </div>
+              )}
+              <p style={{ marginTop: '1rem', color: '#aaa', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                Place the file in your export folder{psdExportFolder ? ' shown above' : ''}, or use the button below to upload it directly from your computer.
+                After uploading, the export will run automatically.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setPsdNotFound(null)}>
+                Cancel
+              </button>
+              <label className={`btn-primary psd-upload-label${psdUploading ? ' disabled' : ''}`}>
+                <input
+                  type="file"
+                  accept=".psd"
+                  style={{ display: 'none' }}
+                  disabled={psdUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handlePsdNotFoundUpload(file)
+                  }}
+                />
+                {psdUploading ? 'Uploading…' : 'Browse for PSD…'}
+              </label>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1534,7 +2000,7 @@ function MakerTools() {
               <button className="btn-secondary" onClick={closeConfigModal} disabled={saving}>
                 Cancel
               </button>
-              <button className="btn-primary" onClick={handleSaveConfig} disabled={saving || loading}>
+              <button className="btn-primary" onClick={handleSaveConfig} disabled={saving || loading} style={{ justifyContent: 'center' }}>
                 <Save size={16} /> {saving ? 'Saving...' : 'Save Configuration'}
               </button>
             </div>

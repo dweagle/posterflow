@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     gosu \
-    && apt-get install -y --only-upgrade libssl3 openssl \
+    && apt-get install -y --no-install-recommends --only-upgrade libssl3 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
@@ -42,8 +42,9 @@ WORKDIR /app
 
 # Copy requirements and install as root
 COPY backend/requirements.txt backend/requirements-dev.txt ./
-RUN python -m pip install --no-cache-dir --upgrade pip && \
+RUN python -m pip install --no-cache-dir "pip==26.1.1" && \
     pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --no-deps psd-tools==1.10.4 && \
     pip uninstall -y pip
 
 # Create necessary directories
@@ -69,4 +70,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Container starts as root; entrypoint remaps PUID/PGID then drops to posterflow user
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "warning", "--no-access-log", "--timeout-graceful-shutdown", "3"]
+CMD ["python", "main.py"]

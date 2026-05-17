@@ -825,7 +825,7 @@ function Settings() {
                   </a>.
                 </p>
               </div>
-              <div className="notification-webhook-row api-key-control">
+              <div className="settings-input-row api-key-control">
                 <div className="input-with-toggle">
                   <input
                     type={showTmdbKey ? 'text' : 'password'}
@@ -955,7 +955,7 @@ function Settings() {
                 <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#aaa' }}>4.</span>Use <code>@here</code> or <code>@everyone</code> to ping all online / all members in the channel.</li>
               </ul>
             </details>
-            <div className="notification-webhook-row">
+            <div className="settings-input-row">
               <div className="input-with-toggle">
                 <input
                   type={showDiscordWebhook ? 'text' : 'password'}

@@ -315,6 +315,14 @@
   margin-bottom: 0.6rem;
 }
 
+.maker-setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
 .maker-list {
   display: flex;
   flex-direction: column;
@@ -580,6 +588,28 @@
 
 .maker-badges.wrap {
   flex-wrap: wrap;
+}
+
+.maker-tmdb-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 0.72rem;
+  color: #64b5f6;
+  background: transparent;
+  border: 1px solid rgba(100, 181, 246, 0.35);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.maker-tmdb-search-btn:hover {
+  color: #90caf9;
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
 }
 
 .maker-tools-page .badge {
@@ -1447,6 +1477,145 @@
 
 .tmdb-gallery-dl:hover {
   background: rgba(100, 181, 246, 0.12);
+}
+
+/* ── PSD export: thumb wrapper + select button ─────────────────────────── */
+.tmdb-gallery-thumb-wrapper {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+
+.tmdb-psd-select-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  color: #ccc;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  z-index: 2;
+  opacity: 0;
+}
+
+.tmdb-gallery-item:hover .tmdb-psd-select-btn,
+.tmdb-psd-select-btn.selected {
+  opacity: 1;
+}
+
+.tmdb-psd-select-btn.selected {
+  background: #64b5f6;
+  border-color: #64b5f6;
+  color: #000;
+}
+
+.tmdb-psd-select-btn:hover:not(.selected) {
+  border-color: #64b5f6;
+  color: #fff;
+}
+
+.tmdb-psd-export-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.tmdb-psd-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  border-radius: 5px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.tmdb-psd-export-btn--new {
+  background: #4caf50;
+}
+
+.tmdb-psd-export-btn--new:hover:not(:disabled) {
+  background: #43a047;
+}
+
+.tmdb-psd-export-btn--existing {
+  background: #5B89C4;
+}
+
+.tmdb-psd-export-btn--existing:hover:not(:disabled) {
+  background: #42a5f5;
+}
+
+.tmdb-psd-export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* PSD not-found modal */
+.psd-not-found-filename {
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  text-align: center;
+}
+
+.psd-not-found-filename code {
+  font-size: 0.9rem;
+  color: #64b5f6;
+  word-break: break-all;
+}
+
+.psd-not-found-folder {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+}
+
+.psd-not-found-folder-label {
+  font-size: 0.78rem;
+  color: #888;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.psd-not-found-folder code {
+  font-size: 0.82rem;
+  color: #aaa;
+  word-break: break-all;
+}
+
+.psd-upload-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.psd-upload-label.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Gallery lightbox */

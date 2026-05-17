@@ -295,7 +295,7 @@
   padding: 1.5rem;
 }
 
-.settings-section {
+.poster-manager .settings-section {
   background: #1e1e1e;
   border: 1px solid #333;
   border-radius: 8px;
@@ -303,7 +303,7 @@
   margin-bottom: 2rem;
 }
 
-.settings-section h2 {
+.poster-manager .settings-section h2 {
   font-size: 1.25rem;
   color: #fff;
   margin-bottom: 1.5rem;
@@ -2224,6 +2224,30 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border-color: #64b5f6;
   color: #64b5f6;
   background: #1a2d45;
+}
+
+/* --- Maker Tools navigation button (opens item search in Maker Tools page) --- */
+.maker-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(100, 181, 246, 0.4);
+  border-radius: 4px;
+  background: transparent;
+  color: #64b5f6;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.maker-nav-btn:hover {
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
+  color: #90caf9;
 }
 
 @keyframes spin {

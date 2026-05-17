@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { useToast } from '../Toast'
 
@@ -116,6 +117,7 @@ function UnmatchedItemsModal({
   onDownloadList,
 }: UnmatchedItemsModalProps) {
   const { showToast } = useToast()
+  const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
   const [candidatesMap, setCandidatesMap] = useState<Record<string, TmdbCandidate[]>>({})
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
@@ -339,6 +341,20 @@ function UnmatchedItemsModal({
                     >
                       {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
                       <span>TMDB</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="maker-nav-btn"
+                      title="Search in Maker Tools"
+                      onClick={() => {
+                        const cleanedTitle = item.year
+                          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+                          : item.title
+                        navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle } })
+                      }}
+                    >
+                      <Search size={13} />
+                      <span>Maker</span>
                     </button>
                   </div>
 

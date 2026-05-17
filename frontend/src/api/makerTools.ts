@@ -152,3 +152,116 @@ export const getTvDetails = async (tmdb_id: number): Promise<TmdbTvDetails> => {
 export const getSeasonImages = async (tmdb_id: number, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
   return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
+
+export interface PsdExportRequest {
+  title: string
+  year: string
+  poster_paths: string[]
+  backdrop_paths: string[]
+  logo_path: string | null
+  use_existing?: boolean
+}
+
+/** Returned when the server saved the PSD to an export folder — open in Photopea. */
+export interface PsdExportSaved {
+  mode: 'photopea'
+  filename: string
+  psdUrl: string   // absolute HTTPS URL, ready to pass to Photopea
+  openPhotopea: boolean
+}
+
+/** Returned when no export folder is configured — trigger a browser download. */
+export interface PsdExportDownload {
+  mode: 'download'
+  blob: Blob
+  filename: string
+}
+
+/** Returned when use_existing=true but no PSD with the expected name exists in the export folder. */
+export interface PsdExportNotFound {
+  mode: 'not-found'
+  expectedFilename: string
+}
+
+export type PsdExportResult = PsdExportSaved | PsdExportDownload | PsdExportNotFound
+
+/**
+ * Export selected TMDB images as a layered PSD.
+ *
+ * - If the server has an export folder configured it saves to disk and returns
+ *   JSON {filename, psd_url}. We surface this as mode='photopea'.
+ * - Otherwise the server streams PSD bytes and we surface them as mode='download'.
+ * - When use_existing=true and no file exists: mode='not-found' with the expected filename.
+ *
+ * Error bodies from non-2xx responses arrive as Blobs (responseType:'blob') and
+ * are decoded here so the caller always gets a readable Error message.
+ */
+export const exportToPsd = async (
+  payload: PsdExportRequest,
+  titleForFilename: string,
+  yearForFilename: string,
+): Promise<PsdExportResult> => {
+  const { default: axios } = await import('axios')
+  try {
+    const resp = await axios.post('/api/maker-tools/tmdb/psd-export', payload, {
+      responseType: 'blob',
+    })
+
+    const contentType: string = (resp.headers['content-type'] as string | undefined) ?? ''
+
+    if (contentType.includes('application/json')) {
+      // Server saved to export folder — parse the JSON blob
+      const text = await (resp.data as Blob).text()
+      const json = JSON.parse(text) as { filename: string; psd_url: string; open_photopea: boolean }
+      const absoluteUrl = `${window.location.origin}${json.psd_url}`
+      return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false }
+    }
+
+    // Blob download path
+    const safeName = titleForFilename.replace(/[<>:"/\\|?*]/g, '').trim()
+    const filename = yearForFilename ? `${safeName} (${yearForFilename}).psd` : `${safeName}.psd`
+    return { mode: 'download', blob: resp.data as Blob, filename }
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string }
+    const rawData = axiosErr?.response?.data
+    if (rawData instanceof Blob) {
+      const text = await rawData.text()
+      let parsed: Record<string, unknown> | undefined
+      try { parsed = JSON.parse(text) as Record<string, unknown> } catch { /* ignore */ }
+      // 404 not-found is a structured response, not a real error
+      if (axiosErr?.response?.status === 404 && parsed?.not_found === true) {
+        return { mode: 'not-found', expectedFilename: (parsed.expected_filename as string) ?? '' }
+      }
+      const detail = typeof parsed?.detail === 'string' ? parsed.detail
+        : text.trim().length > 0 && text.trim().length < 300 ? text.trim()
+        : undefined
+      throw new Error(detail ?? 'PSD export failed')
+    }
+    throw err
+  }
+}
+
+/**
+ * Check whether a PSD with the given filename already exists in the export folder.
+ * Uses a HEAD request so no file bytes are transferred.
+ */
+export const checkPsdExists = async (filename: string): Promise<boolean> => {
+  const { default: axios } = await import('axios')
+  try {
+    await axios.head(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Upload a local PSD file to the server's configured export folder.
+ * The file is saved under the given `filename` (must match `{title} ({year}).psd`).
+ */
+export const uploadPsdToExportFolder = async (file: File, filename: string): Promise<void> => {
+  const { default: axios } = await import('axios')
+  await axios.put(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, file, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+  })
+}

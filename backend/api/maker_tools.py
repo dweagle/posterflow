@@ -4,16 +4,21 @@ import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
+from PIL import Image
+from psd_tools import PSDImage
+from psd_tools.api.layers import Group, PixelLayer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.job_queue import job_queue
-from core.logging import LogIcons, LogTags, log_error, log_info, log_success, log_user_action, log_warning
+from core.logging import LogIcons, LogTags, log_debug, log_error, log_info, log_success, log_user_action, log_warning
 from database import SessionLocal, get_db
 from models.drive import Drive
 from models.job import (
@@ -27,7 +32,7 @@ from models.job import (
     format_start_message,
     update_job_state,
 )
-from models.setting import get_setting, upsert_setting
+from models.setting import get_setting, get_setting_value, upsert_setting
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 router = APIRouter(prefix="/api/maker-tools", tags=["maker-tools"])
@@ -902,8 +907,8 @@ def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> lis
                 try:
                     imdb_id, tvdb_id = future.result()
                     results[idx] = results[idx].model_copy(update={"imdb_id": imdb_id, "tvdb_id": tvdb_id})
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(LogTags.MODULE, f"Failed to enrich external IDs for result idx={idx}: {e}")
 
     return results
 
@@ -1132,6 +1137,457 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
     return TmdbImagesResponse(posters=posters, backdrops=[], logos=[])
 
 
+# ── PSD Export ───────────────────────────────────────────────────────────────
+
+SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"
+SETTING_PSD_TEMPLATE_PATH = "psd_template_path"
+SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
+
+# Bundled default template — lives at backend/assets/default_template.psd
+_DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_template.psd"
+
+
+class PsdExportRequest(BaseModel):
+    title: str
+    year: str = ""
+    poster_paths: list[str] = []     # TMDB file_paths e.g. ["/abc.jpg"] — each becomes a separate pixel layer
+    backdrop_paths: list[str] = []   # TMDB backdrop file_paths — fit-to-height, no crop, placed below posters
+    logo_path: str | None = None     # TMDB file_path e.g. "/xyz.png" — used as logo layer
+    use_existing: bool = False       # When True: open existing PSD in export folder and inject layers into it
+
+
+def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
+    """Download a full-resolution TMDB image and return raw bytes."""
+    url = f"https://image.tmdb.org/t/p/original{path}"
+    # api_key is not needed for image CDN but included for consistency / future auth
+    resp = requests.get(url, timeout=30)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch TMDB image: HTTP {resp.status_code}")
+    return resp.content
+
+
+def _build_psd(
+    poster_bytes_list: list[bytes],
+    logo_bytes: bytes | None,
+    backdrop_bytes_list: list[bytes] | None = None,
+    canvas_w: int = 1000,
+    canvas_h: int = 1500,
+    template_path: Path | None = None,
+    title: str = "",
+    year: str = "",
+) -> bytes:
+    """
+    Build a layered PSD in memory.
+
+    Template mode (when *template_path* is set):
+      - Opens the user's existing PSD template file.
+      - Injects each poster image as a separate pixel layer inside the "POSTER" group.
+      - Injects each backdrop image at the bottom of the "POSTER" group (fit-to-height, no crop).
+      - Injects the logo image as a new PixelLayer inside the group named "LOGO".
+      - All other groups/layers in the template (borders, gradients, effects) are preserved.
+
+    Scratch mode (fallback when no template):
+      - Creates a blank PSD with poster layers at the bottom and LOGO on top.
+
+    Each poster is cover-filled to the canvas dimensions. The logo is bottom-anchored.
+    Backdrop images are scaled to fit the canvas height (no crop) and centred horizontally.
+    """
+    # ── Open template or create blank canvas ─────────────────────────────────
+    if template_path is not None:
+        psd = PSDImage.open(str(template_path))
+        canvas_w, canvas_h = psd.width, psd.height
+    else:
+        psd = PSDImage.new("RGB", (canvas_w, canvas_h))
+
+    # Build the base display name used for all layer names
+    base_name = f"{title} ({year})" if title and year else title or "Poster"
+
+    # ── POSTER(S) ─────────────────────────────────────────────────────────────
+    # Insert in reverse order so first-selected ends up on top of the group stack
+    for idx, poster_bytes in enumerate(reversed(poster_bytes_list)):
+        layer_name = base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}"
+        poster_pil = Image.open(BytesIO(poster_bytes)).convert("RGB")
+        # Cover-fill: scale so the shorter dimension matches the canvas, then centre-crop
+        scale = max(canvas_w / poster_pil.width, canvas_h / poster_pil.height)
+        new_w = round(poster_pil.width * scale)
+        new_h = round(poster_pil.height * scale)
+        poster_pil = poster_pil.resize((new_w, new_h), Image.LANCZOS)
+        crop_left = (new_w - canvas_w) // 2
+        crop_top = (new_h - canvas_h) // 2
+        poster_pil = poster_pil.crop((crop_left, crop_top, crop_left + canvas_w, crop_top + canvas_h))
+
+        poster_layer = PixelLayer.frompil(poster_pil, psd, layer_name=layer_name)
+
+        if template_path is not None:
+            poster_group = psd.find("POSTER")
+            if poster_group is not None:
+                poster_group.insert(0, poster_layer)
+            else:
+                log_warning(LogTags.API, "POSTER group not found in template; inserting at root")
+                psd.insert(0, poster_layer)
+        else:
+            psd._layers.insert(0, poster_layer)
+
+    if poster_bytes_list:
+        log_info(LogTags.API, f"Injected {len(poster_bytes_list)} poster(s) into PSD")
+
+    # ── BACKDROP(S) ───────────────────────────────────────────────────────────
+    # Fit to canvas height (no crop), centred horizontally.
+    # Placed below all poster layers inside the POSTER group (or at root bottom).
+    for idx, backdrop_bytes in enumerate(reversed(backdrop_bytes_list or [])):
+        bd_count = len(backdrop_bytes_list or [])
+        layer_name = f"{base_name} - Backdrop" if bd_count == 1 else f"{base_name} - Backdrop {bd_count - idx}"
+        bg_pil = Image.open(BytesIO(backdrop_bytes)).convert("RGB")
+        # Scale so height == canvas_h, preserve aspect ratio — no crop
+        scale = canvas_h / bg_pil.height
+        new_w = round(bg_pil.width * scale)
+        bg_pil = bg_pil.resize((new_w, canvas_h), Image.LANCZOS)
+        # Centre horizontally (may extend outside canvas bounds on wide images)
+        left = (canvas_w - new_w) // 2
+
+        bg_layer = PixelLayer.frompil(bg_pil, psd, layer_name=layer_name, top=0, left=left)
+
+        if template_path is not None:
+            poster_group = psd.find("POSTER")
+            if poster_group is not None:
+                poster_group.append(bg_layer)   # append = bottom of group, below posters
+            else:
+                log_warning(LogTags.API, "POSTER group not found in template; appending backdrop at root")
+                psd.append(bg_layer)
+        else:
+            psd._layers.append(bg_layer)
+
+    if backdrop_bytes_list:
+        log_info(LogTags.API, f"Injected {len(backdrop_bytes_list)} backdrop(s) into PSD (fit-to-height, no crop)")
+
+    # ── LOGO ─────────────────────────────────────────────────────────────────
+    if logo_bytes:
+        logo_pil = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+
+        # Measure pixel density: ratio of non-transparent pixels to total pixels.
+        # Uses the alpha channel histogram (256 bins) — fast, no numpy required.
+        _alpha_hist = logo_pil.split()[3].histogram()
+        _non_transparent = sum(_alpha_hist[11:])  # alpha > 10 = effectively visible
+        _total_pixels = logo_pil.width * logo_pil.height
+        logo_density = _non_transparent / _total_pixels if _total_pixels > 0 else 1.0
+        is_sparse_logo = logo_density < 0.30   # thin/wispy logos → size up
+        is_dense_logo  = logo_density > 0.60   # solid/filled logos → tighter height, mild width reduction
+        density_label = "sparse" if is_sparse_logo else ("dense" if is_dense_logo else "normal")
+        log_debug(LogTags.API, f"Logo source: {logo_pil.width}x{logo_pil.height}px  density={logo_density:.3f} ({density_label})")
+
+        # Placement constants (reference canvas 1000×1500)
+        logo_bottom = round(canvas_h * (1352.13 / 1500))   # bottom edge at 1352.13px @ 1500h
+        max_logo_top = round(canvas_h * (1100.0 / 1500))   # top must not exceed 1100px @ 1500h
+        max_logo_h = logo_bottom - max_logo_top             # = 252px @ 1500h
+        max_logo_w = round(canvas_w * (800.0 / 1000))      # hard cap 800px @ 1000w
+
+        # Smooth continuous formula: taller/squarer logos get narrower targets.
+        # Ceiling scales with source pixel area (size bucket):
+        #   small  (<200K px, e.g. 788×131 banner)  → ceiling 0.85: banner logos fill more canvas
+        #   medium (200K–1.5M px, most logos)        → ceiling 0.84: standard
+        #   large  (>1.5M px, e.g. 4080×921)         → ceiling 0.93: high-res logos downscale cleanly
+        # At 1000w reference: proj_h ≤ 90px → ceiling (flat logos, capped at 800 by max_logo_w)
+        #   proj_h = 133px (Friends, small) → ~750px  |  proj_h = 181px (YF&N, large) → ~704px
+        #   proj_h ≥ 230px → density-dependent floor (0.58–0.63)
+        _logo_px = logo_pil.width * logo_pil.height
+        if _logo_px < 200_000:
+            _ceiling, _size_label = 0.85, "small"
+        elif _logo_px > 1_500_000:
+            _ceiling, _size_label = 0.93, "large"
+        else:
+            _ceiling, _size_label = 0.84, "medium"
+        projected_h_at_max = logo_pil.height * (max_logo_w / logo_pil.width)
+        _ref_h = canvas_w * (90.0 / 1000)
+        _clamped_ph = max(projected_h_at_max, _ref_h)
+        _target_ratio = _ceiling * (_ref_h / _clamped_ph) ** 0.40
+        # Floor scales with density so denser logos get a slightly higher minimum width.
+        # Range: 0.58 at density≤0.30, up to ~0.63 at density=0.80
+        _density_floor = 0.58 + max(0.0, logo_density - 0.30) * 0.10
+        target_logo_w = round(canvas_w * max(_density_floor, min(_ceiling, _target_ratio)))
+        log_debug(LogTags.API, f"Logo sizing:  proj_h={projected_h_at_max:.0f}px  floor={_density_floor:.3f}  ceiling={_ceiling:.2f} ({_size_label})  base_target_w={target_logo_w}px ({target_logo_w/canvas_w*100:.1f}%)")
+
+        # Scale: aim for target width, clamp by max height, cap by max width
+        # Logos wider than 600px (at 1000w reference) get a tighter 225px height cap
+        wide_threshold = round(canvas_w * (600.0 / 1000))
+        effective_max_h = round(canvas_h * (225.0 / 1500)) if target_logo_w > wide_threshold else max_logo_h
+
+        # Apply density adjustments
+        if is_sparse_logo:
+            # More transparent → more boost. Linear: 0% at threshold (0.30) → +15% at density 0.
+            t = (0.30 - logo_density) / 0.30
+            density_mult = 1.0 + (t * 0.15)
+            target_logo_w = min(round(target_logo_w * density_mult), max_logo_w)
+            effective_max_h = min(round(effective_max_h * density_mult), max_logo_h)
+            log_debug(LogTags.API, f"Logo density: sparse boost +{(density_mult - 1.0) * 100:.1f}% → target_w={target_logo_w}px  max_h={effective_max_h}px")
+        elif is_dense_logo:
+            # Dense logos: gentle width reduction (max 10%), aggressive height cap.
+            # Height always derived from the tight 225px base, shrinking up to 55% at max density.
+            t = (logo_density - 0.60) / (1.0 - 0.60)   # density factor 0→1
+            w_mult = 1.0 - (t * 0.10)
+            target_logo_w = round(target_logo_w * w_mult)
+            effective_max_h = round(canvas_h * (225.0 / 1500) * (1.0 - t * 0.55))
+            log_debug(LogTags.API, f"Logo density: dense shrink w×{w_mult:.3f} → target_w={target_logo_w}px  max_h={effective_max_h}px")
+        scale = target_logo_w / logo_pil.width
+        if logo_pil.height * scale > effective_max_h:
+            scale = effective_max_h / logo_pil.height
+        if logo_pil.width * scale > max_logo_w:
+            scale = max_logo_w / logo_pil.width
+
+        logo_w = round(logo_pil.width * scale)
+        logo_h = round(logo_pil.height * scale)
+        log_debug(LogTags.API, f"Logo result:  {logo_w}x{logo_h}px  scale={scale:.4f}  binding={'height' if logo_pil.height * (target_logo_w / logo_pil.width) > effective_max_h else 'width'}")
+        logo_pil = logo_pil.resize((logo_w, logo_h), Image.LANCZOS)
+
+        # Convert logo to pure white, preserving the original alpha channel
+        _, _, _, alpha = logo_pil.split()
+        white = Image.new("RGBA", logo_pil.size, (255, 255, 255, 255))
+        white.putalpha(alpha)
+        logo_pil = white
+
+        logo_left = (canvas_w - logo_w) // 2
+        logo_top = logo_bottom - logo_h   # bottom-anchored
+
+        logo_layer = PixelLayer.frompil(logo_pil, psd, layer_name=f"{base_name} - Logo", top=logo_top, left=logo_left)
+
+        if template_path is not None:
+            logo_group = psd.find("LOGO")
+            if logo_group is not None:
+                logo_group.insert(0, logo_layer)
+                log_info(LogTags.API, "Injected logo into LOGO group")
+            else:
+                log_warning(LogTags.API, "LOGO group not found in template; inserting at root")
+                psd.append(logo_layer)
+        else:
+            psd._layers.append(logo_layer)
+
+    buf = BytesIO()
+    psd.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+@router.post("/tmdb/psd-export")
+def tmdb_psd_export(payload: PsdExportRequest, db: Session = Depends(get_db)):
+    """Download selected TMDB images and return a layered PSD file.
+
+    Optionally also saves the PSD to the configured export folder.
+    """
+    try:
+        return _tmdb_psd_export_impl(payload, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Unhandled PSD export error: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"PSD export failed: {exc}")
+
+
+def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
+    if not payload.poster_paths and not payload.backdrop_paths and not payload.logo_path:
+        raise HTTPException(status_code=400, detail="At least one poster, backdrop, or a logo is required.")
+
+    # Validate paths — must start with / and contain no traversal
+    all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + ([payload.logo_path] if payload.logo_path else [])
+    for p in all_paths:
+        if not p.startswith("/") or ".." in p:
+            raise HTTPException(status_code=400, detail="Invalid image path.")
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    try:
+        poster_bytes_list: list[bytes] = [
+            _fetch_tmdb_image_bytes(p, api_key) for p in payload.poster_paths
+        ]
+        backdrop_bytes_list: list[bytes] = [
+            _fetch_tmdb_image_bytes(p, api_key) for p in payload.backdrop_paths
+        ]
+        logo_bytes = _fetch_tmdb_image_bytes(payload.logo_path, api_key) if payload.logo_path else None
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"PSD export image fetch failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=502, detail=f"Failed to download image from TMDB: {exc}")
+
+    # Construct safe filename and resolve save destination early so we can
+    # check for an existing PSD before deciding which template to use.
+    safe_title = re.sub(r'[<>:"/\\|?*]', "", payload.title).strip()
+    filename = f"{safe_title} ({payload.year}).psd" if payload.year else f"{safe_title}.psd"
+
+    # Determine save behaviour:
+    #   - If export_folder is set → save there (user-configured path)
+    #   - Else if open_photopea is enabled → save to /config/psd_cache (temp, URL-accessible)
+    #   - Otherwise → stream bytes as a browser download (no saving)
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    open_photopea = (get_setting_value(db, SETTING_PSD_OPEN_PHOTOPEA) or "").lower() == "true"
+
+    save_dir: Path | None = None
+    if export_folder:
+        save_dir = Path(export_folder)
+    elif open_photopea:
+        from core.config import settings as app_settings
+        save_dir = app_settings.config_dir / "psd_cache"
+
+    # Resolve template path:
+    #   use_existing=True  → open existing PSD in save_dir (error if not found)
+    #   use_existing=False → user-configured template → bundled default → scratch
+    template_path: Path | None = None
+    if payload.use_existing:
+        if save_dir is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No export folder is configured. Configure a PSD export folder in Settings to use this feature.",
+            )
+        existing_psd = save_dir / filename
+        if not existing_psd.is_file():
+            from fastapi.responses import JSONResponse as _JSONResponse
+            return _JSONResponse(
+                status_code=404,
+                content={"not_found": True, "expected_filename": filename},
+            )
+        template_path = existing_psd
+        log_info(LogTags.API, f"Existing PSD found — adding poster layers: {filename}", folder=str(save_dir))
+    else:
+        template_setting = get_setting_value(db, SETTING_PSD_TEMPLATE_PATH)
+        if template_setting:
+            candidate = Path(template_setting)
+            if candidate.is_file():
+                template_path = candidate
+            else:
+                log_warning(LogTags.API, f"PSD template not found at configured path: {template_setting}; falling back to default")
+        if template_path is None and _DEFAULT_TEMPLATE_PATH.is_file():
+            template_path = _DEFAULT_TEMPLATE_PATH
+            log_info(LogTags.API, "Using bundled default PSD template")
+
+    try:
+        psd_bytes = _build_psd(
+            poster_bytes_list,
+            logo_bytes,
+            backdrop_bytes_list=backdrop_bytes_list,
+            template_path=template_path,
+            title=payload.title,
+            year=payload.year,
+        )
+    except Exception as exc:
+        log_error(LogTags.API, f"PSD build failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to build PSD: {exc}")
+
+    if save_dir is not None:
+        try:
+            save_dir.mkdir(parents=True, exist_ok=True)
+            (save_dir / filename).write_bytes(psd_bytes)
+            log_info(LogTags.API, f"PSD saved: {filename}", folder=str(save_dir))
+        except Exception as exc:
+            log_warning(LogTags.API, f"PSD save failed: {exc}")
+            raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
+
+        log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
+        from fastapi.responses import JSONResponse
+        return JSONResponse({
+            "filename": filename,
+            "psd_url": f"/api/maker-tools/psd-exports/{filename}",
+            "open_photopea": open_photopea,
+        })
+
+    log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
+
+    return Response(
+        content=psd_bytes,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/psd-exports/{filename}")
+def serve_psd_export(filename: str, db: Session = Depends(get_db)) -> Response:
+    """Serve a previously-saved PSD file from the configured export folder.
+
+    Used by the Photopea integration to load the file directly from the server.
+    Security: filename is validated (no slashes, no traversal, must end in .psd).
+    """
+    # Reject any path traversal or non-PSD filenames
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+
+    # Look in export_folder first; fall back to psd_cache dir
+    if export_folder:
+        file_path = Path(export_folder) / filename
+    else:
+        from core.config import settings as app_settings
+        file_path = app_settings.config_dir / "psd_cache" / filename
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    return Response(
+        content=file_path.read_bytes(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.head("/psd-exports/{filename}")
+def check_psd_export_exists(filename: str, db: Session = Depends(get_db)) -> Response:
+    """Lightweight existence check for a saved PSD — returns 200 if found, 404 if not.
+
+    Used by the frontend 'New Export' overwrite-guard before downloading or reading any bytes.
+    """
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    if export_folder:
+        file_path = Path(export_folder) / filename
+    else:
+        from core.config import settings as app_settings
+        file_path = app_settings.config_dir / "psd_cache" / filename
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    return Response(status_code=200)
+
+
+@router.put("/psd-exports/{filename}")
+async def upload_psd_to_export_folder(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Accept a PSD file upload and save it to the configured export folder.
+
+    Used when 'Use Existing PSD' detects no file at the expected path — the user
+    can select their local PSD and upload it here so the next export can reuse it.
+    Security: filename is validated (no slashes, no traversal, must end in .psd).
+    """
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    if export_folder:
+        save_dir = Path(export_folder)
+    else:
+        from core.config import settings as app_settings
+        save_dir = app_settings.config_dir / "psd_cache"
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Uploaded PSD to export folder", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"PSD upload failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded PSD: {exc}")
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"filename": filename, "saved": True})
+
+
 @router.post("/monitor/config", response_model=MakerMonitorConfig)
 def save_maker_monitor_config(config: MakerMonitorConfig, db: Session = Depends(get_db)) -> MakerMonitorConfig:
     """Persist Maker Tools monitor configuration."""
@@ -1277,7 +1733,7 @@ def run_maker_monitor_scan_internal(
 ) -> MakerMonitorRunResponse:
     effective_tmdb_key = _get_monitor_tmdb_key(db)
     if not effective_tmdb_key:
-        log_warning(LogTags.MODULE, "Maker Tools monitor blocked: TMDB API key is not configured")
+        log_warning(LogTags.API, "Maker Tools monitor blocked: TMDB API key is not configured")
         raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
     # Propagate the resolved key so all downstream helpers use the correct value
     resolved_config = resolved_config.model_copy(update={"tmdb_api_key": effective_tmdb_key})

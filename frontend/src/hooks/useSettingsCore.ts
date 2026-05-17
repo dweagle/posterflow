@@ -66,6 +66,9 @@ export const useSettingsCore = ({
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [uploadingServiceAccount, setUploadingServiceAccount] = useState(false)
   const [tmdbApiKey, setTmdbApiKey] = useState('')
+  const [psdExportFolder, setPsdExportFolder] = useState('')
+  const [psdTemplatePath, setPsdTemplatePath] = useState('')
+  const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
 
   const fetchSettings = async (): Promise<SettingsCoreSnapshot | null> => {
     try {
@@ -81,6 +84,9 @@ export const useSettingsCore = ({
       const tmdbKey = (settings.tmdb_api_key || '').trim()
       // tmdb_api_key is sensitive so it comes back masked if set; treat masked as configured
       setTmdbApiKey(tmdbKey === '***masked***' ? '***masked***' : tmdbKey)
+      setPsdExportFolder((settings.psd_export_folder || '').trim())
+      setPsdTemplatePath((settings.psd_template_path || '').trim())
+      setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
 
       const plexInstances = parseInstances(settings.plex_instances, 'Plex')
       const sonarrInstances = parseInstances(settings.sonarr_instances, 'Sonarr')
@@ -194,6 +200,36 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSavePsdExportFolder = async (): Promise<boolean> => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ psd_export_folder: psdExportFolder.trim() })
+      showToast('PSD export folder saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving PSD export folder:', error)
+      showToast('Failed to save PSD export folder', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSavePsdTemplatePath = async (): Promise<boolean> => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ psd_template_path: psdTemplatePath.trim() })
+      showToast('PSD template path saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving PSD template path:', error)
+      showToast('Failed to save PSD template path', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleUploadServiceAccount = async (file: File) => {
     try {
       setUploadingServiceAccount(true)
@@ -207,6 +243,20 @@ export const useSettingsCore = ({
       showToast(getApiErrorMessage(error, 'Failed to upload service account JSON'), 'error')
     } finally {
       setUploadingServiceAccount(false)
+    }
+  }
+
+  const handleTogglePsdOpenPhotopea = async (value: boolean): Promise<void> => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ psd_open_photopea: value ? 'true' : 'false' })
+      setPsdOpenPhotopea(value)
+      showToast(value ? 'Photopea auto-open enabled' : 'Photopea auto-open disabled')
+    } catch (error) {
+      console.error('Error saving Photopea setting:', error)
+      showToast('Failed to save setting', 'error')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -227,5 +277,13 @@ export const useSettingsCore = ({
     tmdbApiKey,
     setTmdbApiKey,
     handleSaveTmdbApiKey,
+    psdExportFolder,
+    setPsdExportFolder,
+    handleSavePsdExportFolder,
+    psdTemplatePath,
+    setPsdTemplatePath,
+    handleSavePsdTemplatePath,
+    psdOpenPhotopea,
+    handleTogglePsdOpenPhotopea,
   }
 }

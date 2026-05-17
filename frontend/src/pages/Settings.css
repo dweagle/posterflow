@@ -53,11 +53,11 @@
   border: 1px solid #333;
   border-radius: 8px;
   padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .settings-section-header {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -82,7 +82,7 @@
 
 .settings-section h2 {
   color: #fff;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
   font-size: 1.25rem;
 }
 
@@ -90,7 +90,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 0;
+  padding: 0.65rem 0;
   border-top: 1px solid #2a2a2a;
 }
 
@@ -114,6 +114,16 @@
   color: #888;
   font-size: 0.875rem;
   margin: 0;
+}
+
+.setting-description a {
+  color: #64b5f6;
+  text-decoration: none;
+}
+
+.setting-description a:hover {
+  color: #42a5f5;
+  text-decoration: underline;
 }
 
 .setting-control {
@@ -251,18 +261,33 @@
   border-color: #64b5f6;
 }
 
-.notification-webhook-row {
+.settings-input-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
-.notification-webhook-row .input-with-toggle {
+.settings-input-row .input-with-toggle {
   flex: 1;
 }
 
-.notification-webhook-row input {
+.settings-input-row input {
   flex: 1;
+  padding: 0.5rem 0.75rem;
+  background-color: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+}
+
+.settings-input-row input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.settings-input-row input::placeholder {
+  color: #666;
 }
 
 .notification-test-inline {
@@ -2165,4 +2190,20 @@ details[open] .feature-events-summary::before {
   .password-textarea {
     font-family: text-security-disc, 'Courier New', monospace;
   }
+}
+
+.settings .settings-section {
+  margin-bottom: 0.75rem;
+}
+
+.settings .settings-section-header {
+  margin-bottom: 0.25rem;
+}
+
+.settings .settings-section h2 {
+  margin-bottom: 0.25rem;
+}
+
+.settings .setting-item {
+  padding: 0.65rem 0;
 }
