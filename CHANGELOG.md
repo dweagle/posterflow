@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-17
+### Added
+- IDarr: file upload now accepts `.psd` files in addition to `.jpg`, `.jpeg`, `.png`, and `.webp`
+
+### Fixed
+- Maker Tools: Photopea **File→Save / Ctrl+S** now works when opening an exported PSD — the hash config was missing the `server.url` directive.
+
 ## [0.4.2] - 2026-05-17
 ### Added
 - Maker Tools: new **PSD Export** tools included on TMDB Search page — configure a PSD template path and output folder; toggle poster, backdrop, and logo layers per item; confirm overwrites via modal before writing; a default `default_template.psd` based on the community template is bundled for quick use.
