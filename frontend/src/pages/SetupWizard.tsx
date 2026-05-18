@@ -581,51 +581,53 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               {showInstructions && (
                 <div className="instructions-box">
                   <h3>Step-by-step Guide:</h3>
-                  
+
                   <div className="instruction-step">
                     <strong>1. Create a Google Cloud Project</strong>
                     <ul>
                       <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a></li>
-                      <li>Click "Create Project" or select existing project</li>
-                      <li>Name it "Posterflow" (or any name you prefer)</li>
+                      <li>Click the <strong>project name button</strong> in the top-left header (it shows your current project name, e.g. "My First Project")</li>
+                      <li>In the modal that appears, click <strong>"New project"</strong> in the top-right corner</li>
+                      <li>Name it "PosterFlow" (or any name you prefer) and click "Create"</li>
                     </ul>
                   </div>
 
                   <div className="instruction-step">
                     <strong>2. Enable Google Drive API</strong>
                     <ul>
-                      <li>In your project, go to "APIs & Services" → "Library"</li>
-                      <li>Search for "Google Drive API"</li>
+                      <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "Library"</li>
+                      <li>Search for "Google Drive API" and click on it</li>
                       <li>Click "Enable"</li>
                     </ul>
                   </div>
 
                   <div className="instruction-step">
-                    <strong>3. Create OAuth 2.0 Credentials</strong>
+                    <strong>3. Configure OAuth Consent Screen</strong>
                     <ul>
-                      <li>Go to "APIs & Services" → "Credentials"</li>
-                      <li>Click "Create Credentials" → "OAuth client ID"</li>
-                      <li>If prompted, configure OAuth consent screen:
+                      <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "OAuth consent screen"</li>
+                      <li>This opens <strong>Google Auth Platform</strong></li>
+                      <li><strong>Branding:</strong> Enter app name ("PosterFlow"), support email, and developer contact. Click Save.</li>
+                      <li><strong>Audience:</strong> Select "External" for personal use. Click Save.</li>
+                      <li><strong>Data Access:</strong> Click "Add or remove scopes"
                         <ul>
-                          <li>Choose "External" user type</li>
-                          <li>Fill in app name: "Posterflow"</li>
-                          <li>Add your email as developer contact</li>
-                          <li>Add scope: <code>../auth/drive.readonly</code></li>
-                          <li>Add your email as test user</li>
+                          <li>In the scope picker, find and check <code>.../auth/drive</code> — "See, edit, create, and delete all of your Google Drive files"</li>
+                          <li><strong>Important:</strong> Do NOT check <code>.../auth/drive.readonly</code> or any other drive scope — rclone requires full access to sync files</li>
+                          <li>Click "Update" then "Save"</li>
+                          <li>Note: This is a sensitive scope. Your app stays in "Testing" mode for personal use — that's fine.</li>
                         </ul>
                       </li>
-                      <li>Application type: "Desktop app"</li>
-                      <li>Name: "Posterflow Desktop"</li>
-                      <li>Click "Create"</li>
                     </ul>
                   </div>
 
                   <div className="instruction-step">
-                    <strong>4. Get Client ID and Secret</strong>
+                    <strong>4. Create OAuth 2.0 Credentials</strong>
                     <ul>
-                      <li>Copy the Client ID and Client Secret or download the .json file.</li>
-                      <li>TIP: You can't download the .json after leaving and returning to this page. Download it now and save for later if needed.</li>
-                      <li>Paste them in the fields below</li>
+                      <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "Credentials"</li>
+                      <li>Click "Create credentials" → "OAuth client ID"</li>
+                      <li>Application type: "Desktop app"</li>
+                      <li>Name: "PosterFlow Desktop"</li>
+                      <li>Click "Create"</li>
+                      <li>⚠️ <strong>Copy your Client ID and Client Secret immediately</strong> — Google no longer allows you to view the secret after leaving this page</li>
                     </ul>
                   </div>
 
@@ -635,8 +637,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                       <li>Install rclone on your computer: <a href="https://rclone.org/install/" target="_blank" rel="noopener noreferrer">rclone.org/install</a></li>
                       <li>Open terminal and run:</li>
                       <li><code>rclone authorize "drive" "YOUR_CLIENT_ID" "YOUR_CLIENT_SECRET"</code></li>
-                      <li>A browser window will open - sign in and authorize</li>
-                      <li>The terminal will display a token - copy the <code>refresh_token</code> value. Copy from bracket to bracket &#123; to &#125;</li>
+                      <li>A browser window will open — sign in and authorize</li>
+                      <li>The terminal will display a token JSON — copy the entire output from &#123; to &#125;</li>
                       <li>Paste it in the "Refresh Token" field below</li>
                     </ul>
                   </div>
@@ -645,9 +647,9 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     <strong>Alternative: OAuth Playground (if rclone not available)</strong>
                     <ul>
                       <li>Use <a href="https://developers.google.com/oauthplayground/" target="_blank" rel="noopener noreferrer">OAuth 2.0 Playground</a></li>
-                      <li>Click settings gear (⚙️) → Check "Use your own OAuth credentials"</li>
+                      <li>Click settings gear → Check "Use your own OAuth credentials"</li>
                       <li>Paste your Client ID and Client Secret</li>
-                      <li>In Step 1: Select "Drive API v3" → <code>../auth/drive.readonly</code></li>
+                      <li>In Step 1: Select "Drive API v3" → <code>https://www.googleapis.com/auth/drive</code></li>
                       <li>Click "Authorize APIs" and sign in</li>
                       <li>In Step 2: Click "Exchange authorization code for tokens"</li>
                       <li>Copy the "Refresh token" value</li>
