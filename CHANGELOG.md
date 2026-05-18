@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-05-18
+### Added
+- Maker Tools TMDB Search: SVG poster images from TMDB are now automatically converted to PNG before display and download.
+### Fixed
+- Maker Tools: Photopea **File→Save / Ctrl+S** now correctly returns the save script in the response so the PSD is written to disk on a successful save.  When closing the tab it still prompted/warned that file wasn't saved.
+- Setup: updated Google Cloud project setup instructions to match current Google Cloud console UI
+
 ## [0.4.3] - 2026-05-17
 ### Added
 - IDarr: file upload now accepts `.psd` files in addition to `.jpg`, `.jpeg`, `.png`, and `.webp`
