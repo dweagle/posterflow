@@ -1657,7 +1657,7 @@ async def save_psd_from_photopea(filename: str, request: Request, db: Session = 
         raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
 
     from fastapi.responses import JSONResponse
-    return JSONResponse({"message": "Saved!"})
+    return JSONResponse({"message": "Saved!", "script": "app.activeDocument.saved=true;"})
 
 
 @router.post("/monitor/config", response_model=MakerMonitorConfig)
