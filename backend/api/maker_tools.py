@@ -1155,13 +1155,37 @@ class PsdExportRequest(BaseModel):
 
 
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
-    """Download a full-resolution TMDB image and return raw bytes."""
+    """Download a full-resolution TMDB image and return raw bytes.
+
+    If the original is an SVG (common for TMDB logos), converts it to a
+    high-quality PNG in-process using cairosvg at 2000px wide.
+    """
     url = f"https://image.tmdb.org/t/p/original{path}"
     # api_key is not needed for image CDN but included for consistency / future auth
     resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"Failed to fetch TMDB image: HTTP {resp.status_code}")
-    return resp.content
+
+    content = resp.content
+    # Detect SVG: TMDB logo originals are often SVG files which Pillow cannot open.
+    # Convert to high-quality PNG using cairosvg (Cairo vector renderer) so the
+    # logo retains full vector fidelity at whatever size the PSD canvas requires.
+    content_type = resp.headers.get("content-type", "").lower()
+    is_svg = "svg" in content_type or content.lstrip()[:5].lower().startswith(b"<svg") or content.lstrip()[:38].lower().startswith(b"<?xml")
+    if is_svg:
+        log_info(LogTags.API, f"SVG logo detected — rendering to PNG via cairosvg at 2000px: {path}")
+        try:
+            import cairosvg
+            # Render at 2000px wide; the logo sizing logic will scale it down appropriately.
+            content = cairosvg.svg2png(bytestring=content, output_width=2000)
+        except ImportError:
+            log_warning(LogTags.API, "cairosvg is not installed — SVG logo cannot be converted; skipping logo")
+            return b""
+        except Exception as svg_exc:
+            log_warning(LogTags.API, f"SVG conversion failed: {svg_exc}; skipping logo")
+            return b""
+
+    return content
 
 
 def _build_psd(
@@ -1266,7 +1290,12 @@ def _build_psd(
 
     # ── LOGO ─────────────────────────────────────────────────────────────────
     if logo_bytes:
-        logo_pil = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+        try:
+            logo_pil = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+        except Exception as img_exc:
+            log_warning(LogTags.API, f"Skipping unreadable logo image: {img_exc}")
+            logo_bytes = None
+    if logo_bytes:
 
         # Measure pixel density: ratio of non-transparent pixels to total pixels.
         # Uses the alpha channel histogram (256 bins) — fast, no numpy required.
@@ -1407,6 +1436,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             _fetch_tmdb_image_bytes(p, api_key) for p in payload.backdrop_paths
         ]
         logo_bytes = _fetch_tmdb_image_bytes(payload.logo_path, api_key) if payload.logo_path else None
+        logo_bytes = logo_bytes or None  # treat empty bytes (cairosvg failure) as no logo
     except HTTPException:
         raise
     except Exception as exc:
