@@ -1013,7 +1013,7 @@ function MakerTools() {
                               title="Search TMDB tab"
                               onClick={() => handleSearchOnTmdbTab(show.name, show.date)}
                             >
-                              <Search size={12} /> TMDB
+                              <Search size={12} /> Maker
                             </button>
                           </div>
                         </div>
@@ -1080,7 +1080,7 @@ function MakerTools() {
                               title="Search TMDB tab"
                               onClick={() => handleSearchOnTmdbTab(item.name, item.date)}
                             >
-                              <Search size={12} /> TMDB
+                              <Search size={12} /> Maker
                             </button>
                           </div>
                         </div>
