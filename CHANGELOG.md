@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-22
+### Added
+- Community Poster Requests: new Supabase-backed workflow for submitting and fulfilling poster requests via Discord — community members can now submit requests through Unmatched Assets; a Supabase webhook opens a Discord forum thread with Claim/Complete, etc. buttons; makers authenticate via Discord OAuth2, upload finished posters, and update request status in app, with all actions reflected in the Discord thread
+- Settings: delete schedule now shows a confirmation modal before removing the schedule
+
+### Fixed
+- Maker Tools: TMDB search button label corrected from "TMDB" to "Maker" on the Monitor pages
+
+### Requirements
+- `starlette` 0.52.1 → 1.0.1
+- `fastapi` 0.129.0 → 0.136.1 (required for starlette ≥ 1.0)
+- `cairosvg` 2.7.1 → 2.9.0
+
 ## [0.4.4] - 2026-05-18
 ### Added
 - Maker Tools TMDB Search: SVG poster images from TMDB are now automatically converted to PNG before display and download.
