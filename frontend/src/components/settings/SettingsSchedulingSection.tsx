@@ -1,5 +1,5 @@
 import { Edit2, Plus, Trash2 } from 'lucide-react'
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import { Schedule } from '../../api/client'
 
 type SettingsSchedulingSectionProps = {
@@ -19,8 +19,45 @@ function SettingsSchedulingSection({
   onRemoveSchedule,
   getScheduleSummary,
 }: SettingsSchedulingSectionProps) {
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
+
+  const handleDeleteClick = (index: number) => {
+    setConfirmDeleteIndex(index)
+  }
+
+  const handleConfirmDelete = () => {
+    if (confirmDeleteIndex !== null) {
+      onRemoveSchedule(confirmDeleteIndex)
+      setConfirmDeleteIndex(null)
+    }
+  }
+
+  const handleCancelDelete = () => {
+    setConfirmDeleteIndex(null)
+  }
+
+  const pendingScheduleName =
+    confirmDeleteIndex !== null ? (schedules[confirmDeleteIndex]?.name || 'this schedule') : ''
+
   return (
     <div className="settings-section">
+      {confirmDeleteIndex !== null && (
+        <div className="modal-overlay">
+          <div className="modal-content schedule-modal confirmation-modal">
+            <div className="modal-header">
+              <h2>Delete Schedule</h2>
+              <button className="modal-close" onClick={handleCancelDelete}>×</button>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to delete <strong>{pendingScheduleName}</strong>? This action cannot be undone.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={handleCancelDelete}>Cancel</button>
+              <button className="btn-danger" onClick={handleConfirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="server-section">
         <div className="server-section-header">
           <h3>Scheduled Tasks</h3>
@@ -56,7 +93,7 @@ function SettingsSchedulingSection({
                     <button
                       type="button"
                       className="btn-remove-instance"
-                      onClick={() => onRemoveSchedule(index)}
+                      onClick={() => handleDeleteClick(index)}
                       title="Remove schedule"
                     >
                       <Trash2 size={16} />
