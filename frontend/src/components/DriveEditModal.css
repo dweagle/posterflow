@@ -163,6 +163,10 @@
 
 .modal-footer button {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   padding: 0.75rem;
   border-radius: 4px;
   font-weight: 500;

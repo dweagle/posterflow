@@ -1,0 +1,20 @@
+[functions.discord-interactions]
+verify_jwt = false
+
+[functions.notify-discord]
+verify_jwt = false
+
+[functions.submit-request]
+verify_jwt = false
+
+[functions.close-threads]
+verify_jwt = false
+
+[functions.discord-oauth]
+verify_jwt = false
+
+[functions.post-poster]
+verify_jwt = false
+
+[functions.update-request-status]
+verify_jwt = false

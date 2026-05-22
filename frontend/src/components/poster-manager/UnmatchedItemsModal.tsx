@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { useToast } from '../Toast'
+import CommunityRequestModal from './CommunityRequestModal'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -13,7 +14,7 @@ interface NormalizedItem {
   title: string
   year: number | null
   origIdx: number
-  missingSeasonsText?: string
+  missingSeasonsNumbers?: number[]
   tmdbType?: TmdbSearchType
   category?: string
 }
@@ -68,7 +69,7 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
         title: item.title,
         year: item.year ?? null,
         origIdx: i,
-        missingSeasonsText: item.missing_seasons.map((s) => `S${s}`).join(', '),
+        missingSeasonsNumbers: item.missing_seasons,
       }))
   }
   if (modalType === 'collections') {
@@ -95,7 +96,7 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
           title: item.title,
           year: item.year ?? null,
           origIdx: i,
-          missingSeasonsText: item.missing_seasons.map((s) => `S${s}`).join(', '),
+          missingSeasonsNumbers: item.missing_seasons,
           tmdbType: 'show',
           category: 'Season',
         })
@@ -126,6 +127,7 @@ function UnmatchedItemsModal({
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null)
   const [noKeyItems, setNoKeyItems] = useState<Set<string>>(new Set())
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [requestItem, setRequestItem] = useState<NormalizedItem | null>(null)
 
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose()
@@ -333,7 +335,13 @@ function UnmatchedItemsModal({
                           {item.category}
                         </span>
                       )}
+                      {item.missingSeasonsNumbers?.map((s) => (
+                        <span key={s} className="unmatched-cat-badge unmatched-cat-badge--season">
+                          {s === 0 ? 'Specials' : `S${s}`}
+                        </span>
+                      ))}
                     </div>
+                    <div className="unmatched-item-actions">
                     <button
                       className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
                       onClick={() => handleTmdbSearch(item)}
@@ -356,11 +364,17 @@ function UnmatchedItemsModal({
                       <Search size={13} />
                       <span>Maker</span>
                     </button>
+                    <button
+                      type="button"
+                      className="community-request-btn"
+                      title="Request this poster from the community"
+                      onClick={() => setRequestItem(item)}
+                    >
+                      <Star size={13} />
+                      <span>Request</span>
+                    </button>
+                    </div>
                   </div>
-
-                  {item.missingSeasonsText && (
-                    <div className="missing-seasons">Missing: {item.missingSeasonsText}</div>
-                  )}
 
                   {isExpanded && (
                     <div className="tmdb-candidates-panel">
@@ -441,6 +455,7 @@ function UnmatchedItemsModal({
                                     {isTitleCopied ? <Check size={13} /> : <Copy size={13} />}
                                     <span>{isTitleCopied ? 'Copied' : 'Title'}</span>
                                   </button>
+
                                 </div>
                               </div>
                             </div>
@@ -477,6 +492,17 @@ function UnmatchedItemsModal({
           />
         </div>
       </div>
+    )}
+
+    {requestItem && (
+      <CommunityRequestModal
+        title={requestItem.title}
+        year={requestItem.year}
+        tmdbType={requestItem.tmdbType ?? getTmdbSearchType(modalType)}
+        seasonNumbers={requestItem.missingSeasonsNumbers}
+        tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+        onClose={() => setRequestItem(null)}
+      />
     )}
     </>
   )

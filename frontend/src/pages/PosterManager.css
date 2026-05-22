@@ -2123,7 +2123,14 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.5rem;
   flex: 1;
-  min-width: 0;
+  min-width: 140px;
+}
+
+.unmatched-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .unmatched-item-meta .item-title {
@@ -2134,6 +2141,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 
 .unmatched-item {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   padding: 0.75rem;
@@ -2411,6 +2419,12 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .tmdb-type-badge--collection {
+  background: rgba(255, 183, 77, 0.15);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
+.tmdb-type-badge--season {
   background: rgba(255, 183, 77, 0.15);
   color: #ffb74d;
   border: 1px solid rgba(255, 183, 77, 0.3);
@@ -3901,3 +3915,393 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.25);
 }
+
+/* ── Request Poster Confirmation Modal ─────────────────────────────────── */
+
+.request-confirm-modal {
+  max-width: 480px;
+}
+
+.request-confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  margin-bottom: 1.25rem;
+}
+
+.request-confirm-name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.request-confirm-year {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.request-field-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.request-optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #666;
+}
+
+.request-style-section {
+  margin-bottom: 1.25rem;
+}
+
+.request-style-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.request-style-tag {
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  border: 1px solid #424242;
+  background: #2a2a2a;
+  color: #ccc;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.request-style-tag:hover {
+  border-color: #64b5f6;
+  color: #64b5f6;
+}
+
+.request-style-tag.selected {
+  background: rgba(100, 181, 246, 0.15);
+  border-color: #64b5f6;
+  color: #64b5f6;
+}
+
+.request-notes-section {
+  margin-bottom: 0.25rem;
+}
+
+.request-notes-textarea {
+  width: 100%;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.88rem;
+  padding: 0.6rem 0.75rem;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+.request-notes-textarea:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.request-notes-textarea::placeholder {
+  color: #555;
+}
+
+.request-discord-input {
+  width: 100%;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.88rem;
+  padding: 0.6rem 0.75rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.request-discord-input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.request-discord-input::placeholder {
+  color: #555;
+}
+
+/* Discord OAuth connect row inside request modal */
+.creq-discord-connect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.creq-discord-connect-row .request-discord-input {
+  flex: 1;
+}
+
+.creq-discord-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.9rem;
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.creq-discord-btn:hover:not(:disabled) {
+  background: #4752c4;
+}
+
+.creq-discord-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.creq-discord-or {
+  font-size: 0.78rem;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.creq-discord-connected {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(88, 101, 242, 0.1);
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  border-radius: 6px;
+}
+
+.creq-discord-username {
+  flex: 1;
+  font-size: 0.88rem;
+  color: #a5b4fc;
+  font-weight: 500;
+}
+
+.creq-discord-logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #888;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.creq-discord-logout:hover {
+  border-color: #666;
+  color: #ccc;
+}
+
+.creq-discord-error {
+  font-size: 0.78rem;
+  color: #f44336;
+  margin-top: 0.35rem;
+}
+
+.request-required {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #f44336;
+  margin-left: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ── Community Request button (item row) ──────────────────────────────── */
+.community-request-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(255, 183, 77, 0.4);
+  border-radius: 4px;
+  background: transparent;
+  color: #ffb74d;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.community-request-btn:hover {
+  border-color: #ffb74d;
+  background: rgba(255, 183, 77, 0.1);
+  color: #ffcc80;
+}
+
+/* ── Community Request Modal ──────────────────────────────────────────── */
+.community-req-modal {
+  max-width: 560px;
+  width: 100%;
+}
+
+.creq-item-label {
+  font-size: 0.88rem;
+  color: #aaa;
+  margin-bottom: 1rem;
+}
+
+.creq-item-label .tmdb-type-badge {
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.creq-item-title {
+  color: #fff;
+}
+
+.creq-item-year {
+  color: #aaa;
+}
+
+.creq-section-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.creq-loading,
+.creq-no-results {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.creq-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.creq-candidate {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+
+.creq-candidate:hover {
+  border-color: #64b5f6;
+  background: #1e2d3e;
+}
+
+.creq-candidate.selected {
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
+}
+
+.creq-candidate-poster {
+  width: 36px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.creq-candidate-poster--empty {
+  background: #333;
+}
+
+.creq-candidate-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.creq-candidate-title {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.creq-candidate-year {
+  color: #aaa;
+  font-weight: 400;
+}
+
+.creq-tmdb-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #64b5f6;
+  text-decoration: none;
+  opacity: 0.8;
+}
+
+.creq-tmdb-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.creq-selected-check {
+  color: #64b5f6;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.creq-rate-limit-notice {
+  padding: 0.5rem 1.25rem;
+  background: rgba(255, 183, 77, 0.08);
+  border-top: 1px solid rgba(255, 183, 77, 0.25);
+  border-bottom: 1px solid rgba(255, 183, 77, 0.25);
+  color: #ffb74d;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+

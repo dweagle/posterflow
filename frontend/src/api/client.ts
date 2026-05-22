@@ -179,6 +179,14 @@ export {
   searchTmdb,
 } from './makerTools'
 
+export {
+  type CommunityRequest,
+  type SubmitRequestPayload,
+  type SubmitRequestResponse,
+  getCommunityRequests,
+  submitCommunityRequest,
+} from './community'
+
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {
   const maybeError = error as {
     response?: { data?: { detail?: string } }

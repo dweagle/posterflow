@@ -1,0 +1,332 @@
+/**
+ * discord-interactions
+ *
+ * Receives Discord button interaction callbacks (Claim / Complete).
+ * Verifies Discord's Ed25519 signature, updates Supabase, and edits
+ * the original Discord message to reflect the new status.
+ *
+ * This URL must be registered as the Interactions Endpoint URL
+ * in your Discord Application settings.
+ *
+ * Required Supabase secrets:
+ *   DISCORD_PUBLIC_KEY          - From Discord Developer Portal (General Information)
+ *   DISCORD_BOT_TOKEN           - Bot token
+ *   DISCORD_CHANNEL_ID          - Channel ID (used for context)
+ *   DISCORD_MAKER_ROLE_ID       - Role ID allowed to claim/complete requests
+ *   SUPABASE_URL                - Auto-provided by Supabase
+ *   SUPABASE_SERVICE_ROLE_KEY   - Auto-provided by Supabase
+ */
+
+import nacl from 'https://esm.sh/tweetnacl@1.0.3'
+
+// Cache the imported public key across warm invocations
+let _cachedPublicKey: CryptoKey | null = null
+async function getPublicKey(): Promise<CryptoKey> {
+  if (_cachedPublicKey) return _cachedPublicKey
+  _cachedPublicKey = await crypto.subtle.importKey(
+    'raw',
+    hexToBytes(DISCORD_PUBLIC_KEY),
+    { name: 'Ed25519', namedCurve: 'Ed25519' },
+    false,
+    ['verify'],
+  )
+  return _cachedPublicKey
+}
+
+const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')!
+const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')!
+const DISCORD_MAKER_ROLE_ID = Deno.env.get('DISCORD_MAKER_ROLE_ID') ?? null
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+function hexToBytes(hex: string): Uint8Array {
+  const pairs = hex.match(/.{1,2}/g) ?? []
+  return new Uint8Array(pairs.map((b) => parseInt(b, 16)))
+}
+
+async function verifyDiscordSignature(
+  signature: string,
+  timestamp: string,
+  body: string,
+): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder()
+    const message = encoder.encode(timestamp + body)
+    const key = await getPublicKey()
+    return await crypto.subtle.verify('Ed25519', key, hexToBytes(signature), message)
+  } catch {
+    return false
+  }
+}
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+// Background task: persists the status change to Supabase and locks the thread
+// on complete. Runs fire-and-forget after we've already returned type 7 to Discord.
+async function persistButtonClick(
+  interaction: Record<string, unknown>,
+  action: string,
+  requestId: string,
+  clicker: string,
+  clickerUserId: string | null,
+) {
+  const newStatus = action === 'claim' ? 'in_progress' : action === 'reject' ? 'rejected' : 'fulfilled'
+  const updateData: Record<string, unknown> = { status: newStatus }
+
+  if (action === 'claim') {
+    updateData.claimed_by = clicker
+    updateData.claimed_by_discord_id = clickerUserId
+  }
+  if (action === 'complete') {
+    updateData.fulfilled_at = new Date().toISOString()
+    updateData.fulfilled_by = clicker
+  }
+  if (action === 'reject') {
+    updateData.fulfilled_at = new Date().toISOString()
+  }
+  // Schedule thread closure 24 hours from now instead of locking immediately
+  if (action === 'complete' || action === 'reject') {
+    updateData.close_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  }
+
+  const updateResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(updateData),
+    }
+  )
+  if (!updateResp.ok) {
+    console.error('Supabase update failed:', await updateResp.text())
+  }
+
+  // Post a farewell message and schedule thread closure in 24 hours
+  if (action === 'complete' || action === 'reject') {
+    const channelId = interaction.channel_id as string
+    const closeMessage = action === 'complete'
+      ? `✅ **Fulfilled by ${clicker}!** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
+      : `❌ **Rejected by ${clicker}.** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
+    await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content: closeMessage }),
+    })
+  }
+
+  if (action === 'claim') {
+    const channelId = interaction.channel_id as string
+    await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: `🎨 **Claimed by ${clicker}** — working on it!`,
+      }),
+    })
+  }
+}
+
+Deno.serve(async (req) => {
+  console.log('[discord-interactions] Request received:', req.method, req.url)
+  try {
+  const body = await req.text()
+  const signature = req.headers.get('x-signature-ed25519') ?? ''
+  const timestamp = req.headers.get('x-signature-timestamp') ?? ''
+  console.log('[discord-interactions] sig present:', !!signature, 'ts present:', !!timestamp)
+
+  // Discord requires signature verification — reject anything invalid
+  if (!await verifyDiscordSignature(signature, timestamp, body)) {
+    console.error('[discord-interactions] Signature verification failed')
+    return new Response('Invalid signature', { status: 401 })
+  }
+
+  const interaction = JSON.parse(body)
+  console.log('[discord-interactions] type:', interaction.type, 'custom_id:', (interaction.data as Record<string,unknown>)?.custom_id)
+
+  // Type 1 = PING (Discord endpoint verification)
+  if (interaction.type === 1) {
+    return jsonResponse({ type: 1 })
+  }
+
+  // Type 3 = MESSAGE_COMPONENT (button click)
+  if (interaction.type === 3) {
+    // Extract clicker info synchronously from the interaction payload
+    const member = interaction.member as Record<string, unknown> | undefined
+    const user = interaction.user as Record<string, unknown> | undefined
+    const memberUser = member?.user as Record<string, unknown> | undefined
+    const clickerUserId =
+      (memberUser?.id as string) ??
+      (user?.id as string) ??
+      null
+    const clicker =
+      (memberUser?.global_name as string) ??
+      (memberUser?.username as string) ??
+      (user?.global_name as string) ??
+      (user?.username as string) ??
+      'a maker'
+
+    // Role check — synchronous, role list is in the interaction payload
+    if (DISCORD_MAKER_ROLE_ID) {
+      const memberRoles = (member?.roles as string[] | undefined) ?? []
+      if (!memberRoles.includes(DISCORD_MAKER_ROLE_ID)) {
+        return jsonResponse({
+          type: 4,
+          data: {
+            content: '⚠️ Only members with the Poster Maker role can claim or complete requests.',
+            flags: 64,
+          },
+        })
+      }
+    }
+
+    // Parse custom_id — format: "action:requestId" or "complete:requestId:claimerUserId"
+    const data = interaction.data as Record<string, string>
+    const customId = data?.custom_id ?? ''
+    const parts = customId.split(':')
+    const action = parts[0] ?? ''
+    const requestId = parts[1] ?? ''
+    const encodedClaimerId = parts[2] ?? ''
+
+    if (!['claim', 'complete', 'reject'].includes(action) || !requestId) {
+      return jsonResponse({ type: 1 })
+    }
+
+    // Claimer check for 'complete' — synchronous, claimer ID encoded in custom_id
+    if (action === 'complete' && encodedClaimerId && encodedClaimerId !== clickerUserId) {
+      return jsonResponse({
+        type: 4,
+        data: {
+          content: '⚠️ Only the maker who claimed this request can mark it as complete.',
+          flags: 64,
+        },
+      })
+    }
+
+    // Build the updated embed synchronously from the interaction payload.
+    // Using type 7 (UPDATE_MESSAGE) updates the Discord message immediately in
+    // this response — no deferred gap, no "Interaction Failed" flash.
+    const message = interaction.message as Record<string, unknown> | undefined
+    const embeds = message?.embeds as Record<string, unknown>[] | undefined
+    const originalEmbed = embeds?.[0] ?? {}
+
+    const statusLabel =
+      action === 'claim' ? `🎨 Claimed by ${clicker}` :
+      action === 'reject' ? `❌ Rejected by ${clicker}` :
+      `✅ Completed by ${clicker}`
+    const newColor =
+      action === 'claim' ? 0xffb74d :
+      action === 'reject' ? 0x9e9e9e :
+      0x4caf50
+
+    const updatedEmbed = {
+      ...originalEmbed,
+      color: newColor,
+      fields: ((originalEmbed.fields ?? []) as { name: string; value: string; inline?: boolean }[]).map((f) =>
+        f.name === 'Status' ? { ...f, value: statusLabel } : f
+      ),
+    }
+
+    // After complete: remove all buttons.
+    // After reject: reset to fresh all-enabled state so a mod can unlock and
+    //   have a maker re-claim or reject again. Thread is still locked by persistButtonClick.
+    // After claim: disable Claim, encode claimer ID in Complete custom_id.
+    const freshButtons = [
+      {
+        type: 2,
+        style: 1,
+        label: 'Claim Poster',
+        custom_id: `claim:${requestId}`,
+        emoji: { name: '🎨' },
+      },
+      {
+        type: 2,
+        style: 3,
+        label: 'Mark Complete',
+        custom_id: `complete:${requestId}`,
+        emoji: { name: '✅' },
+      },
+      {
+        type: 2,
+        style: 4,
+        label: '✕ Reject',
+        custom_id: `reject:${requestId}`,
+      },
+    ]
+    const updatedComponents = action === 'complete'
+      ? []
+      : action === 'reject'
+      ? [{ type: 1, components: freshButtons }]
+      : [{
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 2,
+              label: 'Claim Poster',
+              custom_id: `claim:${requestId}`,
+              emoji: { name: '🎨' },
+              disabled: true,
+            },
+            {
+              type: 2,
+              style: 3,
+              label: 'Mark Complete',
+              custom_id: `complete:${requestId}:${clickerUserId ?? ''}`,
+              emoji: { name: '✅' },
+            },
+            {
+              type: 2,
+              style: 4,
+              label: '✕ Reject',
+              custom_id: `reject:${requestId}`,
+            },
+          ],
+        }]
+
+    // Fire-and-forget: persist to Supabase and lock thread (if complete).
+    // EdgeRuntime.waitUntil keeps the task alive after the response is sent.
+    const bgTask = persistButtonClick(interaction, action, requestId, clicker, clickerUserId).catch(console.error)
+    try {
+      // @ts-ignore - EdgeRuntime is a Supabase-specific global
+      EdgeRuntime.waitUntil(bgTask)
+    } catch {
+      // EdgeRuntime may not be available in all environments; ignore
+    }
+
+    // Type 7 = UPDATE_MESSAGE — immediately replaces the message in this response.
+    // No deferred gap, no "Interaction Failed" flash.
+    return jsonResponse({
+      type: 7,
+      data: {
+        embeds: [updatedEmbed],
+        components: updatedComponents,
+      },
+    })
+  }
+
+  return jsonResponse({ type: 1 })
+  } catch (err) {
+    console.error('[discord-interactions] Unhandled error:', err)
+    // Return a valid type 4 ephemeral message so Discord doesn't show "Interaction Failed"
+    return jsonResponse({
+      type: 4,
+      data: { content: 'An error occurred. Please try again.', flags: 64 },
+    })
+  }
+})

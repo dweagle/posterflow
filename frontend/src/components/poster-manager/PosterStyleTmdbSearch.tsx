@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search } from 'lucide-react'
+import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { type FallbackItem } from '../../api/posterManager'
 import { useToast } from '../Toast'
+import CommunityRequestModal from './CommunityRequestModal'
 
 type PosterStyleTmdbSearchProps = {
   item: FallbackItem
@@ -27,6 +28,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
   const [copiedLink, setCopiedLink] = useState<string | null>(null)
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [showRequestModal, setShowRequestModal] = useState(false)
 
   // Strip trailing (YYYY) from title when year is already provided separately,
   // e.g. "INVINCIBLE (2021)" + year 2021 → search "INVINCIBLE" with year 2021
@@ -154,6 +156,15 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
           <Search size={13} />
           <span>Maker</span>
         </button>
+        <button
+          type="button"
+          className="community-request-btn"
+          title="Request this poster from the community"
+          onClick={() => setShowRequestModal(true)}
+        >
+          <Star size={13} />
+          <span>Request</span>
+        </button>
       </div>
 
       {seasons && seasons.length > 0 && (
@@ -261,6 +272,17 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
           </p>
         )}
         </>
+      )}
+
+      {showRequestModal && (
+        <CommunityRequestModal
+          title={item.title}
+          year={item.year ?? null}
+          tmdbType={item.type === 'show' ? 'show' : item.type === 'collection' ? 'collection' : 'movie'}
+          seasonNumbers={item.season != null ? [item.season] : undefined}
+          tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+          onClose={() => setShowRequestModal(false)}
+        />
       )}
 
       {previewUrl && (

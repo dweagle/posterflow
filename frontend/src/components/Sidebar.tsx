@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench } from 'lucide-react'
+import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe } from 'lucide-react'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, type MakerIdarrConfig } from '../api/client'
 import { useToast } from './Toast'
@@ -275,6 +275,11 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
         </NavLink>
         
         
+        <NavLink to="/community-requests" className={({ isActive }) => isActive ? 'active' : ''} data-label="Community Requests" aria-label="Community Requests">
+          <span className="icon"><Globe size={20} color="#64b5f6" /></span>
+          <span className="nav-label">Requests</span>
+        </NavLink>
+
         <NavLink
           to="/IDarr"
           className={({ isActive }) => [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')}
@@ -300,7 +305,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
           <span className="icon"><Logs size={20} color="#22c55e" /></span>
           <span className="nav-label">Logs</span>
         </NavLink>
-        
+
         <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''} data-label="Settings" aria-label="Settings">
           <span className="icon"><Settings size={20} /></span>
           <span className="nav-label">Settings</span>
