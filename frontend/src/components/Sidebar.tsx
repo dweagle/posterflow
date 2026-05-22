@@ -18,7 +18,7 @@ type VersionUpdateStatus = {
 
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
-  const { unmatchedCount, idarrPendingCount, jobs } = useUnmatched()
+  const { unmatchedCount, idarrPendingCount, communityRequestCount, jobs } = useUnmatched()
   const { showToast } = useToast()
   const [isDragOverIdarr, setIsDragOverIdarr] = useState(false)
   const [idarrPickerFiles, setIdarrPickerFiles] = useState<File[] | null>(null)
@@ -278,6 +278,9 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
         <NavLink to="/community-requests" className={({ isActive }) => isActive ? 'active' : ''} data-label="Community Requests" aria-label="Community Requests">
           <span className="icon"><Globe size={20} color="#64b5f6" /></span>
           <span className="nav-label">Requests</span>
+          {communityRequestCount > 0 && (
+            <span className="sidebar-badge">{communityRequestCount}</span>
+          )}
         </NavLink>
 
         <NavLink

@@ -39,6 +39,9 @@ export interface SubmitRequestResponse {
   request_id: string
 }
 
+export const getCommunityRequestCount = (): Promise<{ count: number }> =>
+  getData('/api/community/requests/count')
+
 export const getCommunityRequests = (
   params?: Record<string, string | number>,
 ): Promise<{ requests: CommunityRequest[] }> =>

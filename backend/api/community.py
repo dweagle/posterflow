@@ -63,6 +63,27 @@ class PosterRequestPayload(BaseModel):
     requested_by: Optional[str] = None
 
 
+@router.get("/requests/count")
+async def get_community_requests_count():
+    """Return a lightweight count of open (pending + in_progress) community requests."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/poster_requests",
+                headers={**SUPABASE_HEADERS, "Prefer": "count=exact"},
+                params={
+                    "select": "id",
+                    "status": "in.(pending,in_progress)",
+                    "limit": 1,
+                },
+            )
+            resp.raise_for_status()
+            count = int(resp.headers.get("content-range", "0/0").split("/")[-1] or 0)
+            return {"count": count}
+    except Exception:
+        return {"count": 0}
+
+
 @router.get("/requests")
 async def get_community_requests(
     status: Optional[str] = Query(None),
