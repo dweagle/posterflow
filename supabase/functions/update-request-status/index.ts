@@ -109,11 +109,12 @@ interface RequestRow {
   status: string
   discord_message_id: string | null
   title: string
+  requested_by_discord_id: string | null
 }
 
 async function fetchRequest(requestId: string): Promise<RequestRow | null> {
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title&limit=1`,
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id&limit=1`,
     { headers: SB_HEADERS },
   )
   if (!resp.ok) return null
@@ -147,14 +148,20 @@ async function updateRequest(
 
 // ── Discord helpers ────────────────────────────────────────────────────────
 
-async function postThreadMessage(channelId: string, content: string): Promise<void> {
+async function postThreadMessage(
+  channelId: string,
+  content: string,
+  allowedMentions?: Record<string, unknown>,
+): Promise<void> {
+  const body: Record<string, unknown> = { content }
+  if (allowedMentions) body.allowed_mentions = allowedMentions
   const resp = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bot ${BOT_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   })
   if (!resp.ok) {
     console.error('[update-request-status] Discord message post failed:', await resp.text())
@@ -162,15 +169,47 @@ async function postThreadMessage(channelId: string, content: string): Promise<vo
 }
 
 /**
- * Update the components (buttons) on the initial embed of a Discord forum thread.
- * In Discord, the starter message of a forum thread has the same ID as the thread
- * channel itself, so we use discord_message_id as both the channel ID and message ID.
+ * Update the starter message of a Discord forum thread to reflect the new status.
+ * Fetches the current embed first so we can update the Status field and color
+ * while preserving all other embed content (title, links, thumbnail, footer, etc.).
+ * In forum threads the starter message ID equals the thread channel ID.
  */
-async function updateEmbedComponents(
+async function updateStarterMessage(
   threadId: string,
+  action: string,
+  makerName: string,
   components: unknown[],
 ): Promise<void> {
-  const resp = await fetch(
+  // Fetch the current starter message to get the existing embed
+  const msgResp = await fetch(
+    `https://discord.com/api/v10/channels/${threadId}/messages/${threadId}`,
+    { headers: { Authorization: `Bot ${BOT_TOKEN}` } },
+  )
+  if (!msgResp.ok) {
+    console.error('[update-request-status] Failed to fetch starter message:', await msgResp.text())
+    return
+  }
+  const msg = await msgResp.json() as { embeds?: Record<string, unknown>[] }
+  const originalEmbed: Record<string, unknown> = msg.embeds?.[0] ?? {}
+
+  const statusLabel =
+    action === 'claim'  ? `🎨 Claimed by ${makerName}` :
+    action === 'reject' ? `❌ Rejected by ${makerName}` :
+    `✅ Completed by ${makerName}`
+  const newColor =
+    action === 'claim'  ? 0xffb74d :
+    action === 'reject' ? 0x9e9e9e :
+    0x4caf50
+
+  const updatedEmbed = {
+    ...originalEmbed,
+    color: newColor,
+    fields: ((originalEmbed.fields ?? []) as { name: string; value: string; inline?: boolean }[]).map((f) =>
+      f.name === 'Status' ? { ...f, value: statusLabel } : f
+    ),
+  }
+
+  const patchResp = await fetch(
     `https://discord.com/api/v10/channels/${threadId}/messages/${threadId}`,
     {
       method: 'PATCH',
@@ -178,11 +217,11 @@ async function updateEmbedComponents(
         Authorization: `Bot ${BOT_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ components }),
+      body: JSON.stringify({ embeds: [updatedEmbed], components }),
     },
   )
-  if (!resp.ok) {
-    console.error('[update-request-status] Discord embed PATCH failed:', await resp.text())
+  if (!patchResp.ok) {
+    console.error('[update-request-status] Discord embed PATCH failed:', await patchResp.text())
   }
 }
 
@@ -237,7 +276,7 @@ Deno.serve(async (req) => {
   }
 
   // ── Step 4: Validate action against current status ────────────────────────
-  const { status, discord_message_id } = row
+  const { status, discord_message_id, requested_by_discord_id } = row
 
   if (action === 'claim' && status !== 'pending') {
     const msg = status === 'in_progress'
@@ -269,13 +308,15 @@ Deno.serve(async (req) => {
     patch.fulfilled_by = maker.discord_username
     patch.fulfilled_at = now
     patch.close_at = closeAt
-    discordMessage = `✅ **Fulfilled by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
+    const requesterPing = requested_by_discord_id ? ` <@${requested_by_discord_id}>` : ''
+    discordMessage = `✅ **Fulfilled by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${requesterPing}`
   } else {
     // reject
     patch.status = 'rejected'
     patch.fulfilled_at = now
     patch.close_at = closeAt
-    discordMessage = `❌ **Rejected by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
+    const rejectPing = requested_by_discord_id ? ` <@${requested_by_discord_id}>` : ''
+    discordMessage = `❌ **Rejected by ${maker.discord_username}** via PosterFlow. This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${rejectPing}`
   }
 
   // ── Step 6: Conditional update (prevents claim race conditions) ────────────
@@ -289,7 +330,10 @@ Deno.serve(async (req) => {
   if (discord_message_id) {
     // Post a status message in the thread
     if (discordMessage) {
-      postThreadMessage(discord_message_id, discordMessage).catch(console.error)
+      const allowedMentions = ((action === 'complete' || action === 'reject') && requested_by_discord_id)
+        ? { parse: [], users: [requested_by_discord_id] }
+        : undefined
+      postThreadMessage(discord_message_id, discordMessage, allowedMentions).catch(console.error)
     }
 
     // Update the embed's components (buttons) so Discord reflects the new state.
@@ -356,7 +400,7 @@ Deno.serve(async (req) => {
         ],
       }]
     }
-    updateEmbedComponents(discord_message_id, updatedComponents).catch(console.error)
+    updateStarterMessage(discord_message_id, action, maker.discord_username, updatedComponents).catch(console.error)
   }
 
   return json({

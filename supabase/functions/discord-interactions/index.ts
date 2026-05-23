@@ -114,16 +114,39 @@ async function persistButtonClick(
   // Post a farewell message and schedule thread closure in 24 hours
   if (action === 'complete' || action === 'reject') {
     const channelId = interaction.channel_id as string
+
+    let requesterPing = ''
+    let requesterDiscordId: string | null = null
+    // Fetch the requester's Discord ID so we can ping them on complete or reject
+    const reqResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=requested_by_discord_id&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      },
+    )
+    if (reqResp.ok) {
+      const rows = await reqResp.json() as { requested_by_discord_id: string | null }[]
+      requesterDiscordId = rows?.[0]?.requested_by_discord_id ?? null
+      if (requesterDiscordId) requesterPing = ` <@${requesterDiscordId}>`
+    }
+
     const closeMessage = action === 'complete'
-      ? `✅ **Fulfilled by ${clicker}!** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
-      : `❌ **Rejected by ${clicker}.** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.`
+      ? `✅ **Fulfilled by ${clicker}!** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${requesterPing}`
+      : `❌ **Rejected by ${clicker}.** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${requesterPing}`
+    const msgBody: Record<string, unknown> = { content: closeMessage }
+    if (requesterDiscordId) {
+      msgBody.allowed_mentions = { parse: [], users: [requesterDiscordId] }
+    }
     await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: 'POST',
       headers: {
         Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ content: closeMessage }),
+      body: JSON.stringify(msgBody),
     })
   }
 

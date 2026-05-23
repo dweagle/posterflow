@@ -86,6 +86,14 @@ Deno.serve(async (req: Request) => {
   if (typeof body.p_notes === 'string')        body.p_notes        = body.p_notes.trim().slice(0, 1000)
   if (typeof body.p_requested_by === 'string') body.p_requested_by = body.p_requested_by.trim().slice(0, 100)
 
+  // Extract and remove the Discord ID before passing to the RPC — the RPC doesn't
+  // accept this parameter. We store it via a separate UPDATE after insert.
+  const requestedByDiscordId =
+    typeof body.p_requested_by_discord_id === 'string'
+      ? body.p_requested_by_discord_id.trim().slice(0, 30)
+      : null
+  delete body.p_requested_by_discord_id
+
   // Call the RPC with the service role key.
   // anon and authenticated roles have had EXECUTE revoked on this function,
   // so this is the only valid path for submissions.
@@ -97,7 +105,38 @@ Deno.serve(async (req: Request) => {
     if (error.code === 'P0001' || error.message?.toLowerCase().includes('already')) {
       return json({ error: error.message }, 409)
     }
+    // 23505 = unique_violation: RPC didn't handle the duplicate itself.
+    // Look up the existing row and return it as a normal duplicate response.
+    if (error.code === '23505') {
+      let dupQuery = supabase
+        .from('poster_requests')
+        .select('id')
+        .eq('tmdb_id', body.p_tmdb_id)
+        .eq('media_type', body.p_media_type)
+      if (body.p_season_number != null) {
+        dupQuery = dupQuery.eq('season_number', body.p_season_number)
+      } else {
+        dupQuery = dupQuery.is('season_number', null)
+      }
+      const { data: existing } = await dupQuery.limit(1).single()
+      if (existing?.id) {
+        return json({ is_new: false, request_id: existing.id })
+      }
+      return json({ error: 'Request already exists' }, 409)
+    }
     return json({ error: 'Submission failed' }, 500)
+  }
+
+  // Store the requester's Discord ID on the new row so they can be pinged on completion.
+  // Only set when this is a brand-new request (not a duplicate vote).
+  if (data?.is_new && data?.request_id && requestedByDiscordId) {
+    const { error: updateErr } = await supabase
+      .from('poster_requests')
+      .update({ requested_by_discord_id: requestedByDiscordId })
+      .eq('id', data.request_id)
+    if (updateErr) {
+      console.error('Failed to store requested_by_discord_id:', updateErr)
+    }
   }
 
   return json(data)

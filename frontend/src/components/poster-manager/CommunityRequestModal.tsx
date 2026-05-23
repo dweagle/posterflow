@@ -38,7 +38,7 @@ export default function CommunityRequestModal({
   onClose,
 }: CommunityRequestModalProps) {
   const { showToast } = useToast()
-  const { isConnected, username, connecting, connectError, login, logout } = useDiscordAuth()
+  const { isConnected, username, discordUserId, connecting, connectError, login, logout } = useDiscordAuth()
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<TmdbCandidate | null>(null)
@@ -100,15 +100,14 @@ export default function CommunityRequestModal({
         notes: notesValue,
         style_tags: styleTags.length > 0 ? styleTags : undefined,
         requested_by: trimmedName,
+        requested_by_discord_id: discordUserId ?? null,
       })
 
       setSubmitted(true)
       showToast(
         result.status === 'already_requested'
-          ? 'Already requested — vote added!'
-          : result.status === 'created'
-            ? 'Request submitted!'
-            : 'Vote added!',
+          ? 'Already requested!'
+          : 'Request submitted!',
         result.status === 'already_requested' ? 'info' : 'success',
       )
       setTimeout(onClose, 1200)

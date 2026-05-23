@@ -32,6 +32,7 @@ export interface SubmitRequestPayload {
   notes?: string | null
   style_tags?: string[]
   requested_by?: string | null
+  requested_by_discord_id?: string | null
 }
 
 export interface SubmitRequestResponse {

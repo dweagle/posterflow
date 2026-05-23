@@ -61,6 +61,7 @@ class PosterRequestPayload(BaseModel):
     notes: Optional[str] = None
     style_tags: Optional[list[str]] = None
     requested_by: Optional[str] = None
+    requested_by_discord_id: Optional[str] = None
 
 
 @router.get("/requests/count")
@@ -250,6 +251,7 @@ async def submit_community_request(
                     "p_notes": payload.notes,
                     "p_style_tags": payload.style_tags,
                     "p_requested_by": payload.requested_by,
+                    "p_requested_by_discord_id": payload.requested_by_discord_id,
                 },
             )
             resp.raise_for_status()
