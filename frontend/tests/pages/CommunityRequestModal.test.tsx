@@ -311,7 +311,7 @@ describe('CommunityRequestModal', () => {
       const user = userEvent.setup()
       renderModal()
       await user.click(screen.getByRole('button', { name: /request poster/i }))
-      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Already requested — vote added!', 'info'))
+      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Already requested!', 'info'))
     })
 
     it('shows error toast on failure', async () => {
