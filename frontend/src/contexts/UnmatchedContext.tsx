@@ -138,6 +138,12 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
     void refreshIdarrPendingCount()
     void refreshCommunityRequestCount()
     
+    // Poll community request count every 60 seconds so new requests from
+    // external users are reflected without a full page reload
+    const communityPollInterval = setInterval(() => {
+      void refreshCommunityRequestCount()
+    }, 60_000)
+
     // Connect to WebSocket for job updates
     const connectTimeout = setTimeout(() => {
       connectWebSocket()
@@ -145,6 +151,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
 
     return () => {
       isMountedRef.current = false
+      clearInterval(communityPollInterval)
       clearTimeout(connectTimeout)
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)

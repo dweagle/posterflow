@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
+import { useUnmatched } from '../contexts/UnmatchedContext'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
@@ -51,6 +52,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 export default function CommunityRequests() {
   const navigate = useNavigate()
   const { isConnected, isMaker, username, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
+  const { refreshCommunityRequestCount } = useUnmatched()
   const [requests, setRequests] = useState<CommunityRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -115,6 +117,7 @@ export default function CommunityRequests() {
         next.delete(requestId)
         return next
       })
+      void refreshCommunityRequestCount()
     } catch (err) {
       setActionStates((prev) =>
         new Map(prev).set(requestId, err instanceof Error ? err.message : `${action} failed`)
