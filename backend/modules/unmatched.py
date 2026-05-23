@@ -159,6 +159,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
         movies_missing = int(summary.get("movies", {}).get("unmatched", 0))
         shows_missing = int(summary.get("series", {}).get("unmatched", 0))
         seasons_missing = int(summary.get("seasons", {}).get("unmatched", 0))
+        collections_missing = int(summary.get("collections", {}).get("unmatched", 0))
 
         # Persist stats so workflow notification can include them
         try:
@@ -167,6 +168,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
                 "movies_missing": movies_missing,
                 "shows_missing": shows_missing,
                 "seasons_missing": seasons_missing,
+                "collections_missing": collections_missing,
                 "total_items": total_items,
             }))
             db.commit()
@@ -185,6 +187,7 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
                     {"name": "Movies", "value": str(movies_missing), "inline": True},
                     {"name": "Shows", "value": str(shows_missing), "inline": True},
                     {"name": "Seasons", "value": str(seasons_missing), "inline": True},
+                    {"name": "Collections", "value": str(collections_missing), "inline": True},
                 ],
                 color=0x64B5F6,
             )

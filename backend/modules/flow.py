@@ -578,6 +578,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                             {"name": "Movies", "value": str(int(_us.get("movies_missing", 0))), "inline": True},
                             {"name": "Shows", "value": str(int(_us.get("shows_missing", 0))), "inline": True},
                             {"name": "Seasons", "value": str(int(_us.get("seasons_missing", 0))), "inline": True},
+                            {"name": "Collections", "value": str(int(_us.get("collections_missing", 0))), "inline": True},
                         ],
                         "color": 0x4CAF50,
                     },
