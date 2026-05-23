@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-23
+### Added
+- Community Requests: sidebar badge now shows the count of pending community poster requests
+- Community Requests: Discord users will be pinged when their request is fulfilled
+
+### Fixed
+- Community Requests: Discord thread embeds now update correctly when request status is changed from within the app
+
 ## [0.5.0] - 2026-05-22
 ### Added
 - Community Poster Requests: new Supabase-backed workflow for submitting and fulfilling poster requests via Discord — community members can now submit requests through Unmatched Assets; a Supabase webhook opens a Discord forum thread with Claim/Complete, etc. buttons; makers authenticate via Discord OAuth2, upload finished posters, and update request status in app, with all actions reflected in the Discord thread
