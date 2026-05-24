@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-24
+### Added
+- Community Requests: makers can now upload poster images directly from the Community Requests page via an IDarr quick-add toggle
+
+### Fixed
+- Community Requests: Discord thread completion message now pings requester correctly
+- Search indexing: ampersands in titles are now normalized for more consistent matching
+- Plex Upload: season label formatting corrected; series bootstrap now logs a reason when triggered
+- Plex Upload: default upload delay now initializes correctly in the settings UI
+
 ## [0.5.2] - 2026-05-24
 ### Added
 - Maker Tools: TMDB Search poster availability check — each search result now shows a visual indicator when a poster image is available in synced drives (only searches synced drives in the database)
