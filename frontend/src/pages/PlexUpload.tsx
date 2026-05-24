@@ -366,7 +366,7 @@ function PlexUpload() {
       const nextWebhookAdoptExistingProcessed = Boolean(settings.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(settings.retry_attempts) || 10
       const nextWebhookRetryDelaySeconds = Number(settings.retry_delay_seconds) || 30
-      const nextWebhookUploadDelayMs = Number(settings.upload_delay_ms) ?? 50
+      const nextWebhookUploadDelayMs = Number(settings.upload_delay_ms) || 50
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)
@@ -406,7 +406,7 @@ function PlexUpload() {
         Boolean(settings.sync_before_upload ?? false),
         Boolean(settings.rename_before_upload ?? true),
         Boolean(settings.border_before_upload ?? false),
-        Number(settings.upload_delay_ms) ?? 50,
+        Number(settings.upload_delay_ms) || 50,
       )
 
       setDryRun(nextSnapshot.dry_run)
@@ -446,7 +446,7 @@ function PlexUpload() {
         Boolean(response.sync_before_upload ?? false),
         Boolean(response.rename_before_upload ?? true),
         Boolean(response.border_before_upload ?? false),
-        Number(response.upload_delay_ms) ?? 50,
+        Number(response.upload_delay_ms) || 50,
       )
 
       setDryRun(nextSnapshot.dry_run)
@@ -786,7 +786,7 @@ function PlexUpload() {
       const nextWebhookAdoptExistingProcessed = Boolean(response.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(response.retry_attempts) || 10
       const nextWebhookRetryDelaySeconds = Number(response.retry_delay_seconds) || 30
-      const nextWebhookUploadDelayMs = Number(response.upload_delay_ms) ?? 50
+      const nextWebhookUploadDelayMs = Number(response.upload_delay_ms) || 50
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)

@@ -54,6 +54,7 @@ describe('PlexUpload', () => {
       adopt_existing_processed: false,
       retry_attempts: 10,
       retry_delay_seconds: 30,
+      upload_delay_ms: 50,
     })
     mockGetPlexWebhookStats.mockResolvedValue({
       received: 0,
@@ -76,12 +77,14 @@ describe('PlexUpload', () => {
       adopt_existing_processed: true,
       retry_attempts: 10,
       retry_delay_seconds: 30,
+      upload_delay_ms: 50,
     })
     mockGetPlexManualSettings.mockResolvedValue({
       remove_overlay_label: false,
       rename_then_upload: false,
       retry_attempts: 10,
       retry_delay_seconds: 30,
+      upload_delay_ms: 50,
     })
     mockSavePlexManualSettings.mockResolvedValue({ success: true })
     mockGetPlexUploadLibraryOverrideSettings.mockResolvedValue({
