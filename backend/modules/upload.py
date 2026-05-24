@@ -1999,7 +1999,7 @@ def run_plex_webhook_background_job(
             )
             if show_cached:
                 webhook_targets = [
-                    {"season_number": season_number, "label": f"season-{int(season_number):02d}"},
+                    {"season_number": season_number, "label": f"Season {int(season_number):02d}"},
                 ]
                 log_info(
                     LogTags.UPLOADER,
@@ -2011,8 +2011,8 @@ def run_plex_webhook_background_job(
                 )
             else:
                 webhook_targets = [
-                    {"season_number": season_number, "label": f"season-{int(season_number):02d}"},
-                    {"season_number": None, "label": "series-bootstrap"},
+                    {"season_number": season_number, "label": f"Season {int(season_number):02d}"},
+                    {"season_number": None, "label": "series-bootstrap", "reason": "show poster missing/not uploaded"},
                 ]
                 log_info(
                     LogTags.UPLOADER,
@@ -2231,9 +2231,20 @@ def run_plex_webhook_background_job(
             for target in webhook_targets:
                 target_season_number = target.get("season_number")
                 target_label = str(target.get("label") or "target")
+                target_reason = target.get("reason")
+                pass_start_label = (
+                    f"{title} — {target_label} ({target_reason})"
+                    if target_reason
+                    else f"{title} ({target_label})"
+                )
+                pass_complete_label = (
+                    f"{title} — {target_label}"
+                    if target_reason
+                    else f"{title} ({target_label})"
+                )
                 log_info(
                     LogTags.UPLOADER,
-                    "Webhook upload pass start",
+                    f"Webhook upload pass start: {pass_start_label}",
                     attempt=attempt,
                     max_attempts=attempts,
                     media_type=media_type,
@@ -2295,7 +2306,7 @@ def run_plex_webhook_background_job(
                 saw_non_preflight_processing = True
                 log_info(
                     LogTags.UPLOADER,
-                    "Webhook upload pass complete",
+                    f"Webhook upload pass complete: {pass_complete_label}",
                     attempt=attempt,
                     max_attempts=attempts,
                     media_type=media_type,
