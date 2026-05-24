@@ -1138,11 +1138,19 @@ class PlexUploadService:
             seasons = show.seasons()
             if not seasons:
                 return normalize_titles(show.title)
-            episodes = seasons[0].episodes()
-            if not episodes:
-                return normalize_titles(show.title)
-            part_file = episodes[0].media[0].parts[0].file
-            return normalize_titles(Path(part_file).parent.parent.name)
+            for season in seasons:
+                episodes = season.episodes()
+                if not episodes:
+                    continue
+                part_file = episodes[0].media[0].parts[0].file
+                return normalize_titles(Path(part_file).parent.parent.name)
+            title = getattr(show, "title", None)
+            year = getattr(show, "year", None)
+            if title and year:
+                return normalize_titles(f"{title} ({year})")
+            if title:
+                return normalize_titles(str(title))
+            return None
         except Exception:
             title = getattr(show, "title", None)
             year = getattr(show, "year", None)
