@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronUp, CircleHelp, Clapperboard, Clapperboard a
 import {
   getApiErrorMessage,
   Drive,
+  checkTmdbPosterAvailability,
   exportToPsd,
   uploadPsdToExportFolder,
   checkPsdExists,
@@ -17,6 +18,7 @@ import {
   getTvDetails,
   MakerMonitorConfig,
   MakerMonitorRunResponse,
+  PosterAvailability,
   runMakerMonitor,
   saveBulkSettings,
   saveMakerMonitorConfig,
@@ -253,6 +255,7 @@ function MakerTools() {
   const [tmdbError, setTmdbError] = useState<string | null>(null)
   const [tmdbPreviewPoster, setTmdbPreviewPoster] = useState<string | null>(null)
   const [tmdbHelpExpanded, setTmdbHelpExpanded] = useState(false)
+  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   // Image gallery: key = `${media_type}-${tmdb_id}`
   const [galleryOpenKey, setGalleryOpenKey] = useState<string | null>(null)
   const [galleryData, setGalleryData] = useState<Record<string, TmdbImagesResponse>>({})
@@ -712,19 +715,33 @@ function MakerTools() {
     if (cached) {
       setTmdbResults(cached)
       setTmdbError(null)
+      void fetchPosterAvailability(cached)
       return
     }
     setTmdbSearching(true)
     setTmdbError(null)
     setTmdbResults(null)
+    setPosterAvailability({})
     try {
       const results = await searchTmdb(query, filter)
       tmdbCacheRef.current.set(cacheKey, results)
       setTmdbResults(results)
+      void fetchPosterAvailability(results)
     } catch (error) {
       setTmdbError(getApiErrorMessage(error, 'Search failed'))
     } finally {
       setTmdbSearching(false)
+    }
+  }
+
+  const fetchPosterAvailability = async (results: TmdbSearchResult[]) => {
+    if (results.length === 0) return
+    try {
+      const items = results.map((r) => ({ tmdb_id: r.tmdb_id, title: r.title, year: r.year, media_type: r.media_type }))
+      const availability = await checkTmdbPosterAvailability(items)
+      setPosterAvailability(availability)
+    } catch {
+      // Non-critical — silently ignore errors
     }
   }
 
@@ -1240,6 +1257,36 @@ function MakerTools() {
                               <div className="tmdb-result-title-row">
                                 <span className="tmdb-result-title">{item.title}</span>
                                 {item.year && <span className="tmdb-result-year">{item.year}</span>}
+                                {posterAvailability[item.tmdb_id] && posterAvailability[item.tmdb_id].length > 0 && (
+                                  <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
+                                    <Check size={11} />
+                                    <span className="tmdb-poster-available-tooltip">
+                                      <span className="tmdb-poster-available-header">Available in synced drives</span>
+                                      <span className="tmdb-poster-available-note">As of last sync</span>
+                                      {posterAvailability[item.tmdb_id].map((entry) => (
+                                        <span key={entry.style} className="tmdb-poster-available-style-row">
+                                          <span className="tmdb-poster-available-style">
+                                            <Check size={10} /> {entry.style}
+                                          </span>
+                                          {entry.seasons.length > 0 && (
+                                            <span className="tmdb-poster-available-seasons">
+                                              {entry.seasons.length <= 5
+                                                ? entry.seasons.map((s) => (
+                                                    <span key={s} className="tmdb-poster-season-chip">S{s}</span>
+                                                  ))
+                                                : (
+                                                    <span className="tmdb-poster-season-chip">
+                                                      S{entry.seasons[0]} – S{entry.seasons[entry.seasons.length - 1]}
+                                                    </span>
+                                                  )
+                                              }
+                                            </span>
+                                          )}
+                                        </span>
+                                      ))}
+                                    </span>
+                                  </span>
+                                )}
                               </div>
 
                               <div className="tmdb-result-meta">

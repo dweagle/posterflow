@@ -996,6 +996,102 @@
   font-size: 0.85rem;
 }
 
+/* Poster availability indicator */
+.tmdb-poster-available {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4caf50;
+  color: #fff;
+  flex-shrink: 0;
+  cursor: default;
+  align-self: center;
+}
+
+.tmdb-poster-available-tooltip {
+  display: none;
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e1e1e;
+  border: 1px solid #4caf50;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  min-width: 160px;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  flex-direction: column;
+  gap: 0.45rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tmdb-poster-available:hover .tmdb-poster-available-tooltip {
+  display: flex;
+}
+
+.tmdb-poster-available-header {
+  color: #4caf50;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tmdb-poster-available-note {
+  color: #666;
+  font-size: 0.68rem;
+  margin-top: -0.25rem;
+}
+
+.tmdb-poster-available-styles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.tmdb-poster-available-style-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tmdb-poster-available-style {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+  font-weight: 500;
+  min-width: 54px;
+}
+
+.tmdb-poster-available-style svg {
+  color: #4caf50;
+  flex-shrink: 0;
+}
+
+.tmdb-poster-available-seasons {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.tmdb-poster-season-chip {
+  background: rgba(100, 181, 246, 0.15);
+  border: 1px solid rgba(100, 181, 246, 0.35);
+  color: #64b5f6;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .tmdb-result-meta {
   display: flex;
   align-items: center;

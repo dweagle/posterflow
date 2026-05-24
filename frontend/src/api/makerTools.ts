@@ -255,6 +255,28 @@ export const checkPsdExists = async (filename: string): Promise<boolean> => {
   }
 }
 
+export interface PosterStyleEntry {
+  style: string    // "MM2K" | "CL2K" | "Custom"
+  seasons: number[] // sorted season numbers, empty for non-TV
+}
+
+/** PosterAvailability is a list of per-style entries for a TMDB item. */
+export type PosterAvailability = PosterStyleEntry[]
+
+export interface PosterCheckItem {
+  tmdb_id: number
+  title: string
+  year: string
+  media_type: string
+}
+
+/** Returns a map of tmdb_id -> per-style availability info. */
+export const checkTmdbPosterAvailability = async (
+  items: PosterCheckItem[],
+): Promise<Record<number, PosterAvailability>> => {
+  return postData<Record<number, PosterAvailability>>('/api/maker-tools/tmdb/poster-check', { items })
+}
+
 /**
  * Upload a local PSD file to the server's configured export folder.
  * The file is saved under the given `filename` (must match `{title} ({year}).psd`).

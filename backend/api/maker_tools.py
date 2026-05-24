@@ -912,6 +912,132 @@ def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> lis
 
 
 # ---------------------------------------------------------------------------
+# TMDB poster availability check (local drive DB)
+# ---------------------------------------------------------------------------
+
+_SEASON_RE = re.compile(r"[-\u2013]\s*season\s+(\d+)", re.IGNORECASE)
+_SPECIALS_RE = re.compile(r"[-\u2013]\s*specials\b", re.IGNORECASE)
+_TVDB_RE = re.compile(r"\{tvdb-", re.IGNORECASE)
+
+
+def _is_tv_filename(file_name: str) -> bool:
+    """Return True if the filename looks like a TV show file (has tvdb tag or season marker)."""
+    return bool(_TVDB_RE.search(file_name) or _SEASON_RE.search(file_name) or _SPECIALS_RE.search(file_name))
+
+
+def _matches_media_type(file_name: str, media_type: str) -> bool:
+    """Guard against TMDB ID collisions across media type namespaces.
+
+    Movie and TV TMDB IDs are independent — the same number can exist in both.
+    TV files always carry a {tvdb-} tag or a season marker; movie files don't.
+    Collections have no reliable marker so we accept them unconditionally.
+    """
+    if not media_type or media_type == "collection":
+        return True
+    is_tv = _is_tv_filename(file_name)
+    return is_tv if media_type == "tv" else not is_tv
+
+
+class PosterCheckItem(BaseModel):
+    tmdb_id: int
+    title: str
+    year: str = ""
+    media_type: str = ""  # "movie" | "tv" | "collection"
+
+
+class PosterCheckRequest(BaseModel):
+    items: list[PosterCheckItem]
+
+
+def _collect_style_seasons(
+    rows: list[tuple],
+    media_type: str,
+    year: str,
+) -> dict[str, set[int]]:
+    """Build a mapping of style_label -> {season_numbers} from (Poster, Drive) rows.
+
+    Every matched style is present as a key; the season set is empty for non-TV items.
+    """
+    style_seasons: dict[str, set[int]] = {}
+    for poster, drive in rows:
+        if year and year not in poster.file_name:
+            continue
+        if not _matches_media_type(poster.file_name, media_type):
+            continue
+        style = "Custom" if drive.is_custom else drive.style_type
+        if style not in style_seasons:
+            style_seasons[style] = set()
+        if media_type == "tv":
+            if _SPECIALS_RE.search(poster.file_name):
+                style_seasons[style].add(0)
+            else:
+                m = _SEASON_RE.search(poster.file_name)
+                if m:
+                    style_seasons[style].add(int(m.group(1)))
+    return style_seasons
+
+
+@router.post("/tmdb/poster-check")
+def tmdb_poster_check(
+    payload: PosterCheckRequest,
+    db: Session = Depends(get_db),
+) -> dict[int, list[dict[str, Any]]]:
+    """Check the local poster database for matching files for a list of TMDB items.
+
+    Primary match: filename contains {tmdb-<id>} (exact, collision-safe via media type guard).
+    Fallback match: filename contains title + year (for files without embedded TMDB IDs).
+
+    Returns a mapping of tmdb_id -> list of {style, seasons} objects, one per drive style found.
+    """
+    from models.poster import Poster
+
+    result: dict[int, list[dict[str, Any]]] = {}
+
+    for item in payload.items:
+        title = item.title.strip()
+        if not title:
+            continue
+
+        # ── Primary: match by embedded TMDB ID ──────────────────────────────
+        tmdb_rows = (
+            db.query(Poster, Drive)
+            .join(Drive, Poster.drive_id == Drive.drive_id)
+            .filter(
+                Poster.file_name.ilike(f"%{{tmdb-{item.tmdb_id}}}%"),
+                Drive.last_synced.isnot(None),
+            )
+            .order_by(Drive.name.asc(), Poster.file_name.asc())
+            .limit(100)
+            .all()
+        )
+
+        style_seasons = _collect_style_seasons(tmdb_rows, item.media_type, item.year)
+
+        # ── Fallback: title + year for files without TMDB ID tags ───────────
+        if not style_seasons and title:
+            fallback_rows = (
+                db.query(Poster, Drive)
+                .join(Drive, Poster.drive_id == Drive.drive_id)
+                .filter(
+                    Poster.file_name.ilike(f"%{title}%"),
+                    Drive.last_synced.isnot(None),
+                )
+                .order_by(Drive.name.asc(), Poster.file_name.asc())
+                .limit(100)
+                .all()
+            )
+            style_seasons = _collect_style_seasons(fallback_rows, item.media_type, item.year)
+
+        if style_seasons:
+            result[item.tmdb_id] = [
+                {"style": style, "seasons": sorted(style_seasons[style])}
+                for style in sorted(style_seasons.keys())
+            ]
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # TMDB image browser
 # ---------------------------------------------------------------------------
 
