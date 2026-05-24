@@ -94,44 +94,50 @@ async function persistButtonClick(
     updateData.close_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   }
 
-  const updateResp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}`,
-    {
-      method: 'PATCH',
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
+  // Run status update and requester-ID fetch in parallel to minimise background task duration
+  const fetchRequesterPromise = (action === 'complete' || action === 'reject')
+    ? fetch(
+        `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=requested_by_discord_id&limit=1`,
+        {
+          headers: {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+        },
+      )
+    : Promise.resolve(null)
+
+  const [updateResp, reqResp] = await Promise.all([
+    fetch(
+      `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify(updateData),
       },
-      body: JSON.stringify(updateData),
-    }
-  )
+    ),
+    fetchRequesterPromise,
+  ])
+
   if (!updateResp.ok) {
     console.error('Supabase update failed:', await updateResp.text())
+  }
+
+  let requesterDiscordId: string | null = null
+  if (reqResp?.ok) {
+    const rows = await reqResp.json() as { requested_by_discord_id: string | null }[]
+    requesterDiscordId = rows?.[0]?.requested_by_discord_id ?? null
   }
 
   // Post a farewell message and schedule thread closure in 24 hours
   if (action === 'complete' || action === 'reject') {
     const channelId = interaction.channel_id as string
-
-    let requesterPing = ''
-    let requesterDiscordId: string | null = null
-    // Fetch the requester's Discord ID so we can ping them on complete or reject
-    const reqResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=requested_by_discord_id&limit=1`,
-      {
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-      },
-    )
-    if (reqResp.ok) {
-      const rows = await reqResp.json() as { requested_by_discord_id: string | null }[]
-      requesterDiscordId = rows?.[0]?.requested_by_discord_id ?? null
-      if (requesterDiscordId) requesterPing = ` <@${requesterDiscordId}>`
-    }
+    const requesterPing = requesterDiscordId ? ` <@${requesterDiscordId}>` : ''
 
     const closeMessage = action === 'complete'
       ? `✅ **Fulfilled by ${clicker}!** This thread will automatically close in **24 hours**. If you have any issues, please ask a moderator to reopen it.${requesterPing}`

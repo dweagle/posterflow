@@ -326,14 +326,16 @@ Deno.serve(async (req) => {
     return json({ error: 'This request was just updated by another maker — please refresh' }, 409)
   }
 
-  // ── Step 7: Update Discord thread (fire and forget) ───────────────────────
+  // ── Step 7: Update Discord thread ────────────────────────────────────────
   if (discord_message_id) {
-    // Post a status message in the thread
+    const discordTasks: Promise<void>[] = []
+
+    // Post a status message in the thread (includes requester ping on complete/reject)
     if (discordMessage) {
       const allowedMentions = ((action === 'complete' || action === 'reject') && requested_by_discord_id)
         ? { parse: [], users: [requested_by_discord_id] }
         : undefined
-      postThreadMessage(discord_message_id, discordMessage, allowedMentions).catch(console.error)
+      discordTasks.push(postThreadMessage(discord_message_id, discordMessage, allowedMentions))
     }
 
     // Update the embed's components (buttons) so Discord reflects the new state.
@@ -400,7 +402,17 @@ Deno.serve(async (req) => {
         ],
       }]
     }
-    updateStarterMessage(discord_message_id, action, maker.discord_username, updatedComponents).catch(console.error)
+    discordTasks.push(updateStarterMessage(discord_message_id, action, maker.discord_username, updatedComponents))
+
+    // Keep the edge function alive until Discord calls complete so the ping is always sent
+    const bgTask = Promise.all(discordTasks).catch(console.error)
+    try {
+      // @ts-ignore - EdgeRuntime is a Supabase-specific global
+      EdgeRuntime.waitUntil(bgTask)
+    } catch {
+      // EdgeRuntime not available — await directly so calls still complete
+      await bgTask
+    }
   }
 
   return json({
