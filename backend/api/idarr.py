@@ -1,12 +1,13 @@
 import csv
 import json
 import re
+import shutil
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Literal
 from urllib.parse import quote
-from uuid import uuid4
 
 import requests
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -788,7 +789,20 @@ async def upload_maker_idarr_files(
 
         destination = source_dir / filename
         if destination.exists():
-            destination = source_dir / f"{destination.stem}_{uuid4().hex[:8]}{suffix}"
+            duplicates_dir = app_settings.config_dir / "idarr" / "duplicates"
+            try:
+                duplicates_dir.mkdir(parents=True, exist_ok=True)
+                archived_name = filename
+                archived_path = duplicates_dir / archived_name
+                if archived_path.exists():
+                    archived_name = f"{destination.stem}_{int(time.time())}{suffix}"
+                    archived_path = duplicates_dir / archived_name
+                shutil.move(str(destination), str(archived_path))
+                log_warning(LogTags.API, f"IDarr upload archived existing file to duplicates: {filename}")
+            except Exception as exc:
+                skipped.append(filename)
+                log_error(LogTags.API, f"IDarr upload skipped (could not archive existing '{filename}'): {exc}\n{traceback.format_exc()}")
+                continue
 
         try:
             payload = await upload.read()
