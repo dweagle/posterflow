@@ -618,6 +618,70 @@
   flex: 1 1 100%;
 }
 
+/* IDarr quick add toggle row (poster makers only, below toolbar) */
+.community-maker-tools-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.maker-idarr-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #aaa;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.maker-idarr-toggle-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  z-index: 20;
+}
+
+.maker-idarr-info-icon {
+  display: inline-flex;
+  align-items: center;
+  color: #666;
+  cursor: default;
+  transition: color 0.15s;
+}
+
+.maker-idarr-toggle-info-wrap:hover .maker-idarr-info-icon {
+  color: #64b5f6;
+}
+
+.maker-idarr-tooltip {
+  opacity: 0;
+  visibility: hidden;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  width: 280px;
+  padding: 0.6rem 0.75rem;
+  background: #1a1a2e;
+  border: 1px solid rgba(88, 101, 242, 0.35);
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 0.76rem;
+  font-weight: 400;
+  line-height: 1.5;
+  pointer-events: none;
+  z-index: 20;
+  white-space: normal;
+  transition: opacity 0.12s ease 0.08s, visibility 0.12s ease 0.08s;
+}
+
+.maker-idarr-toggle-info-wrap:hover .maker-idarr-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
 /* Info toggle button next to hint text */
 .maker-info-btn {
   display: inline-flex;

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
+import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr } from '../api/client'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import './CommunityRequests.css'
@@ -65,6 +66,9 @@ export default function CommunityRequests() {
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [makerInfoOpen, setMakerInfoOpen] = useState(false)
+  const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(() =>
+    localStorage.getItem('posterflow.communityRequests.idarrQuickAdd') === 'true'
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
 
@@ -75,18 +79,48 @@ export default function CommunityRequests() {
 
   const DISCORD_MAX_FILES = 10
 
+  const doIdarrUpload = useCallback(async (files: File[]) => {
+    try {
+      const config = await getMakerIdarrConfig()
+      const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
+      if (!syncTargets.length) return
+
+      const storedKey = 'posterflow.idarr.selectedSyncTarget'
+      const storedValue = localStorage.getItem(storedKey)
+      let resolvedIndex = -1
+      if (storedValue) {
+        resolvedIndex = syncTargets.findIndex((t) => {
+          const scopeToken = String(t.scope_token || '').trim()
+          if (scopeToken) return `scope:${scopeToken}` === storedValue
+          return `${String(t.personal_drive_id || '')}::${String(t.source_dir || '')}::${String(t.label || '')}` === storedValue
+        })
+      }
+      const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
+
+      const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
+      if (config.auto_rename_quick_add && response.uploaded_count > 0) {
+        await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
+      }
+    } catch {
+      // Silently ignore — Discord upload was the primary action
+    }
+  }, [])
+
   const doUpload = useCallback(async (requestId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(requestId, 'uploading'))
     try {
       await uploadPoster(requestId, files)
       const label = files.length > 1 ? `Posted ${files.length}!` : 'done'
       setUploadStates((prev) => new Map(prev).set(requestId, label))
+      if (idarrQuickAddEnabled) {
+        void doIdarrUpload(files)
+      }
     } catch (err) {
       setUploadStates((prev) =>
         new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upload failed')
       )
     }
-  }, [uploadPoster])
+  }, [uploadPoster, idarrQuickAddEnabled, doIdarrUpload])
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const allFiles = Array.from(e.target.files ?? [])
@@ -279,6 +313,32 @@ export default function CommunityRequests() {
           Refresh
         </button>
       </div>
+
+      {isMaker && isConnected && (
+        <div className="community-maker-tools-row">
+          <label className="maker-idarr-toggle-label">
+            <span>Image Drop also adds to IDarr</span>
+            <span className="maker-idarr-toggle-info-wrap">
+              <span className="maker-idarr-info-icon"><Info size={12} /></span>
+              <span className="maker-idarr-tooltip">
+                When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon.
+              </span>
+            </span>
+            <span className="idarr-toggle-control">
+              <input
+                type="checkbox"
+                checked={idarrQuickAddEnabled}
+                onChange={(e) => {
+                  const next = e.target.checked
+                  setIdarrQuickAddEnabled(next)
+                  localStorage.setItem('posterflow.communityRequests.idarrQuickAdd', String(next))
+                }}
+              />
+              <span className="idarr-toggle-slider" />
+            </span>
+          </label>
+        </div>
+      )}
 
       {error && <div className="community-error">{error}</div>}
 
