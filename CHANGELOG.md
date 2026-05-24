@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-05-24
+### Added
+- Maker Tools: TMDB Search poster availability check — each search result now shows a visual indicator when a poster image is available in synced drives (only searches synced drives in the database)
+
+### Fixed
+- Plex Upload: show title normalization improved to correctly handle multiple missing seasons and episodes
+- IDarr: uploading a file that already exists now archives the existing file to a duplicates directory instead of silently adding numbers to file names
+- Flow / Unmatched Assets: collections missing count is now included in Discord job summary notifications
+
 ## [0.5.1] - 2026-05-23
 ### Added
 - Community Requests: sidebar badge now shows the count of pending community poster requests
