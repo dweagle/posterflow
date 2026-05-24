@@ -51,6 +51,7 @@ def build_search_index(
         asset (Asset): Dictionary containing asset metadata.
         debug_items (Optional[List[str]]): List of normalized titles to enable debug logging on.
     """
+    title = title.replace("&", " and ")
     title = remove_common_words(title)
     processed = normalize_titles(title)
     debug_build_index = bool(
@@ -119,6 +120,7 @@ def search_matches(
         ]
         return filtered_assets
 
+    title = title.replace("&", " and ")
     title = remove_common_words(title)
     processed_title = normalize_titles(title)
     words = processed_title.split()
