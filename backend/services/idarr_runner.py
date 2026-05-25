@@ -2207,7 +2207,7 @@ class IdarrRunner:
                     network_lookup_performed = True
                     if not asset.get("imdb_id") and isinstance(external_ids.get("imdb_id"), str):
                         asset["imdb_id"] = external_ids["imdb_id"]
-                    if not asset.get("tvdb_id") and isinstance(external_ids.get("tvdb_id"), int):
+                    if is_tv_series_asset and not asset.get("tvdb_id") and isinstance(external_ids.get("tvdb_id"), int):
                         asset["tvdb_id"] = external_ids["tvdb_id"]
                     if is_tv_series_asset and not before_tvdb and isinstance(asset.get("tvdb_id"), int):
                         enrichment_stats["tvdb_rehydrate_calls"] += 1
@@ -3398,7 +3398,7 @@ class IdarrRunner:
 
         if tmdb_id:
             id_parts.append(f"tmdb-{tmdb_id}")
-        if tvdb_id:
+        if tvdb_id and str(asset.get("type") or "").strip().lower() == "tv_series":
             id_parts.append(f"tvdb-{tvdb_id}")
         if imdb_id and imdb_id.startswith("tt"):
             id_parts.append(f"imdb-{imdb_id}")
