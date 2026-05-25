@@ -38,9 +38,6 @@ frontend/node_modules/
 frontend/.vite/
 frontend/dist/
 
-# Wiki
-wiki/
-
 # Local tooling
 .ci-tmp/
 
