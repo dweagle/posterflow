@@ -608,20 +608,34 @@ class IdarrRunner:
                     asset["title"] = normalized_group_title
                 if normalized_group_year is not None:
                     asset["year"] = normalized_group_year
-                asset["type"] = normalized_group_type
+
+                # If this asset carries a different TMDB ID than the group's consensus,
+                # it's a distinct entity sharing the same title/year (e.g. a movie poster
+                # alongside TV show files). Don't override its type or cross-contaminate
+                # with the group's TVDB ID.
+                _asset_tmdb = asset.get("tmdb_id") if isinstance(asset.get("tmdb_id"), int) else None
+                _conflicts_with_group = (
+                    _asset_tmdb is not None
+                    and isinstance(group_tmdb_id, int)
+                    and _asset_tmdb != group_tmdb_id
+                )
+
+                if not _conflicts_with_group:
+                    asset["type"] = normalized_group_type
 
                 # Only propagate group IDs (tmdb/imdb) to assets that have no IDs of their
                 # own when those assets are explicitly season/specials sub-items of a series.
                 # A plain base-poster file (no season pattern) could be a different movie
                 # with the same title/year — propagating would silently mis-identify it.
                 # tvdb_id is series-specific and only present when the group is confirmed TV,
-                # so propagating it is always safe.
+                # so propagating it is always safe unless this asset conflicts with the group.
                 _asset_is_season = bool(SEASON_REGEX.search(str(asset["file_path"].stem)))
                 if not isinstance(asset.get("tmdb_id"), int) and isinstance(group_tmdb_id, int):
                     if _asset_is_season:
                         asset["tmdb_id"] = group_tmdb_id
                 if not isinstance(asset.get("tvdb_id"), int) and isinstance(group_tvdb_id, int):
-                    asset["tvdb_id"] = group_tvdb_id
+                    if not _conflicts_with_group:
+                        asset["tvdb_id"] = group_tvdb_id
                 if not isinstance(asset.get("imdb_id"), str) and isinstance(group_imdb_id, str):
                     if _asset_is_season:
                         asset["imdb_id"] = group_imdb_id
@@ -1779,7 +1793,15 @@ class IdarrRunner:
                 _asset_has_season = bool(SEASON_REGEX.search(str(asset.get("file_path") or "")))
                 _group_is_confirmed_tv = grouped_resolution is not None and str(grouped_resolution.get("asset_type") or "") == "tv_series"
                 _skip_verify_due_to_group_prefill = False
-                if grouped_resolution and (_asset_has_season or _group_is_confirmed_tv):
+                # If this asset has a different TMDB ID than the group resolved to, it's a
+                # separate entity sharing a title/year — skip group prefill to avoid
+                # cross-contaminating type and TVDB (e.g. movie poster alongside TV show files).
+                _group_tmdb_conflicts = (
+                    isinstance(asset.get("tmdb_id"), int)
+                    and isinstance((grouped_resolution or {}).get("tmdb_id"), int)
+                    and asset["tmdb_id"] != grouped_resolution["tmdb_id"]
+                ) if grouped_resolution else False
+                if grouped_resolution and (_asset_has_season or _group_is_confirmed_tv) and not _group_tmdb_conflicts:
                     grouped_prefilled = False
                     grouped_tmdb = grouped_resolution.get("tmdb_id")
                     grouped_tvdb = grouped_resolution.get("tvdb_id")
@@ -1842,7 +1864,11 @@ class IdarrRunner:
                     if not asset.get("tmdb_id") and isinstance(cache_row.tmdb_id, int):
                         asset["tmdb_id"] = cache_row.tmdb_id
                         cache_applied = True
-                    if not asset.get("tvdb_id") and isinstance(cache_row.tvdb_id, int):
+                    # Only restore tvdb_id for TV series — movies and collections never
+                    # have TVDB IDs, so skip restoration to prevent stale tv_series cache
+                    # rows from contaminating movie/collection assets with a stale tvdb_id.
+                    _is_tv_series_for_prefill = str(asset.get("type") or "").strip().lower() == "tv_series"
+                    if _is_tv_series_for_prefill and not asset.get("tvdb_id") and isinstance(cache_row.tvdb_id, int):
                         asset["tvdb_id"] = cache_row.tvdb_id
                         cache_applied = True
                     if not asset.get("imdb_id") and isinstance(cache_row.imdb_id, str):
@@ -2690,7 +2716,10 @@ class IdarrRunner:
 
             if isinstance(asset.get("tmdb_id"), int):
                 entry["tmdb_id"] = int(asset["tmdb_id"])
-            if isinstance(asset.get("tvdb_id"), int):
+            # Only persist tvdb_id for TV series — movies and collections do not have
+            # TVDB IDs, so never write one into their cache row to prevent a stale
+            # tvdb_id from being pre-filled on the next run and causing oscillation.
+            if asset_type == "tv_series" and isinstance(asset.get("tvdb_id"), int):
                 entry["tvdb_id"] = int(asset["tvdb_id"])
             if isinstance(asset.get("imdb_id"), str) and str(asset.get("imdb_id") or "").startswith("tt"):
                 entry["imdb_id"] = str(asset["imdb_id"])
