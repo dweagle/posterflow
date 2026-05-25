@@ -117,6 +117,52 @@ def _queue_idarr_sync_after_run(db: Any, config_data: dict[str, Any], triggered_
             pass
 
 
+def _run_idarr_personal_sync_inline(
+    db: Any,
+    job: Job,
+    personal_drive_id: str,
+    source_dir: Path,
+    progress_start: int,
+    progress_end: int,
+    label: str,
+) -> None:
+    """Run IDarr personal sync inline as part of an existing job (e.g. workflow step)."""
+    rclone = RcloneService()
+    span = max(1, progress_end - progress_start)
+    last_progress_emit = [progress_start]
+
+    def _sync_progress(current: int, total: int, phase: str, message: str) -> None:
+        try:
+            ratio = min(max(current / max(total, 1), 0.0), 1.0)
+            if phase == "checking":
+                scaled = int(progress_start + ratio * span * 0.4)
+            elif phase in {"uploading", "uploading_stats", "uploading_file"}:
+                scaled = int(progress_start + span * 0.4 + ratio * span * 0.6)
+            elif phase == "complete":
+                scaled = progress_end
+            else:
+                scaled = progress_start
+            next_progress = max(last_progress_emit[0], min(scaled, progress_end))
+            msg = _sanitize_message(f"{label} sync: {message}" if message else f"{label}: syncing to personal drive...")
+            update_job_state(db, job, progress=next_progress, message=msg)
+            last_progress_emit[0] = next_progress
+        except Exception as cb_exc:
+            log_warning(LogTags.IDARR, f"Inline sync progress callback error: {cb_exc}")
+
+    result = rclone.upload_folder(
+        local_path=source_dir,
+        drive_id=personal_drive_id,
+        drive_name="personal-drive",
+        mode="sync",
+        progress_callback=_sync_progress,
+    )
+
+    if not result.get("success", False):
+        raise RuntimeError(f"Personal sync for '{label}' failed: {result.get('error', 'rclone error')}")
+
+    log_success(LogTags.IDARR, f"Personal sync complete for '{label}'", drive_id=personal_drive_id)
+
+
 def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
     db = SessionLocal()
     handler_id = add_job_log_handler("idarr", job_id, "IDarr")
@@ -469,7 +515,7 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
 
     run_config keys:
         idarr_config: dict   - full maker_tools_idarr_config from settings
-        scope_indices: list  - which sync_target indices to run (empty = all)
+        scope_indices: list  - which sync_target indices to run
         dry_run: bool        - dry run mode
         sync_after_run: bool - queue personal sync after each scope (if files renamed)
     """
@@ -501,7 +547,7 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
             log_info(LogTags.IDARR, "Workflow IDarr step: no sync targets configured, skipping", job_id=job_id)
             return
 
-        # Determine which targets to run (empty scope_indices = run all)
+        # Determine which targets to run
         if scope_indices:
             selected = [(i, all_targets[i]) for i in scope_indices if 0 <= i < len(all_targets)]
         else:
@@ -542,11 +588,15 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
                 "scope_token": target.get("scope_token", ""),
                 "sync_target_index": scope_idx,
                 "dry_run": dry_run,
-                "sync_after_run": False,  # prevent queueing during workflow; handled below
+                "sync_after_run": False,  # sync is handled inline below
                 "tmdb_api_key": tmdb_api_key,
             }
 
-            scope_span = max(1, scope_end_progress - scope_start_progress)
+            rename_end_progress = (
+                int(scope_start_progress + (scope_end_progress - scope_start_progress) * 0.7)
+                if sync_after_run else scope_end_progress
+            )
+            scope_span = max(1, rename_end_progress - scope_start_progress)
 
             def _make_progress_callback(s_start: int, s_span: int, label: str) -> Any:
                 def report_progress(_phase: str, current: int, total: int, message: str) -> None:
@@ -570,19 +620,20 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
             total_renamed += scope_renamed
             log_success(LogTags.IDARR, f"IDarr scope '{scope_label}' complete: {scope_renamed} renamed", job_id=job_id)
 
-            # Queue personal sync for this scope if requested and files were renamed (or forced)
+            # Run personal sync inline if requested and files were renamed (or forced)
             if sync_after_run and not dry_run and (scope_renamed > 0 or bool(idarr_config.get("force_sync_after_run"))):
-                sync_config_for_target = {
-                    **idarr_config,
-                    "sync_target_index": scope_idx,
-                    "sync_after_run": True,
-                    "source_dir": source_dir,
-                    "scope_token": target.get("scope_token", ""),
-                    "sync_targets": all_targets,
-                    "force_sync_after_run": bool(idarr_config.get("force_sync_after_run")),
-                    "dry_run": False,
-                }
-                _queue_idarr_sync_after_run(db, sync_config_for_target, job_id)
+                personal_drive_id = str(target.get("personal_drive_id") or "").strip()
+                source_path = Path(source_dir)
+                if personal_drive_id and source_path.exists():
+                    log_info(LogTags.IDARR, f"Running inline personal sync for '{scope_label}'", job_id=job_id, drive_id=personal_drive_id)
+                    update_job_state(db, job, progress=rename_end_progress,
+                                     message=f"Syncing '{scope_label}' to personal drive...")
+                    _run_idarr_personal_sync_inline(db, job, personal_drive_id, source_path,
+                                                    rename_end_progress, scope_end_progress, scope_label)
+                else:
+                    log_warning(LogTags.IDARR, f"Inline sync skipped for '{scope_label}': missing personal_drive_id or source dir",
+                                job_id=job_id)
+            update_job_state(db, job, progress=scope_end_progress, message=f"Scope '{scope_label}' complete")
 
         update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100,
                          message=format_complete_message("IDarr workflow step", f"{total_renamed} renamed across {total_scopes} scope(s)"),

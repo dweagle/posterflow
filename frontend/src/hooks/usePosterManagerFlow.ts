@@ -32,6 +32,7 @@ export const usePosterManagerFlow = ({
   const [idarrShowInWorkflow, setIdarrShowInWorkflow] = useState(false)
 
   const originalFlowConfigRef = useRef<FlowConfig | null>(null)
+
   useEffect(() => {
     if (!flowConfig || !originalFlowConfigRef.current) return
     const hasChanged = JSON.stringify(flowConfig) !== JSON.stringify(originalFlowConfigRef.current)
@@ -104,23 +105,27 @@ export const usePosterManagerFlow = ({
     setHasUnsavedFlowChanges(true)
   }
 
-  const handleIdarrScopeToggle = (scopeIndex: number, included: boolean, totalTargets: number) => {
+  const handleIdarrScopeToggle = (scopeIndex: number, included: boolean) => {
     if (!flowConfig) return
-
-    const current = flowConfig.idarr.scope_indices || []
-    // When scope_indices is empty it means "run all"; expand it to all indices first
-    const expanded = current.length === 0 ? Array.from({ length: totalTargets }, (_, i) => i) : current
+    const current = flowConfig.idarr.scope_indices
     const updated = included
-      ? [...expanded, scopeIndex].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b)
-      : expanded.filter(i => i !== scopeIndex)
-
-    // If all targets are selected, collapse back to empty (= run all)
-    const allSelected = updated.length === totalTargets
-    handleIdarrFlowConfigChange('scope_indices', allSelected ? [] : updated)
+      ? [...current, scopeIndex].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b)
+      : current.filter(i => i !== scopeIndex)
+    handleIdarrFlowConfigChange('scope_indices', updated)
   }
+
+  const idarrScopeError = Boolean(
+    flowConfig?.idarr.enabled &&
+    idarrSyncTargets.length > 1 &&
+    flowConfig.idarr.scope_indices.length === 0
+  )
 
   const handleSaveFlowConfig = async () => {
     if (!flowConfig) return
+    if (idarrScopeError) {
+      showToast('Select at least one IDarr scope before saving', 'error')
+      return
+    }
 
     try {
       setSaving(true)
@@ -183,6 +188,7 @@ export const usePosterManagerFlow = ({
     hasUnsavedFlowChanges,
     idarrSyncTargets,
     idarrShowInWorkflow,
+    idarrScopeError,
     setFlowRunning,
     fetchFlowConfig,
     fetchIdarrSyncTargets,

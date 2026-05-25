@@ -3233,6 +3233,11 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   margin-bottom: 0.15rem;
 }
 
+.scope-error {
+  font-size: 0.8rem;
+  color: #f44336;
+}
+
 /* Flow Results */
 .flow-results {
   background: #1e1e1e;

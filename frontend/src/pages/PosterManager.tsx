@@ -161,6 +161,7 @@ function PosterManager() {
     hasUnsavedFlowChanges,
     idarrSyncTargets,
     idarrShowInWorkflow,
+    idarrScopeError,
     setFlowRunning,
     fetchFlowConfig,
     fetchIdarrSyncTargets,
@@ -482,6 +483,7 @@ function PosterManager() {
           flowRunning={flowRunning}
           idarrSyncTargets={idarrSyncTargets}
           idarrShowInWorkflow={idarrShowInWorkflow}
+          idarrScopeError={idarrScopeError}
           formatPercent={formatPercent}
           onSaveFlowConfig={handleSaveFlowConfig}
           onRunFlow={handleRunFlow}

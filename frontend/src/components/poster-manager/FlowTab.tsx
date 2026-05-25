@@ -12,12 +12,13 @@ type FlowTabProps = {
   flowRunning: boolean
   idarrSyncTargets: MakerIdarrSyncTarget[]
   idarrShowInWorkflow: boolean
+  idarrScopeError: boolean
   formatPercent: (percent: number) => string
   onSaveFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
   onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error', value: boolean) => void
   onChangeIdarrFlowConfig: (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => void
-  onToggleIdarrScope: (scopeIndex: number, included: boolean, totalTargets: number) => void
+  onToggleIdarrScope: (scopeIndex: number, included: boolean) => void
 }
 
 function FlowTab({
@@ -29,6 +30,7 @@ function FlowTab({
   flowRunning,
   idarrSyncTargets,
   idarrShowInWorkflow,
+  idarrScopeError,
   formatPercent,
   onSaveFlowConfig,
   onRunFlow,
@@ -63,7 +65,7 @@ function FlowTab({
             Discord
           </button>
         </div>
-        <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={!hasUnsavedFlowChanges || saving} title={hasUnsavedFlowChanges ? 'Save changes' : 'No changes to save'}>
+        <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={idarrScopeError || !hasUnsavedFlowChanges || saving} title={idarrScopeError ? 'Select at least one IDarr scope' : hasUnsavedFlowChanges ? undefined : 'No changes to save'}>
           <Save size={16} />
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
@@ -105,20 +107,21 @@ function FlowTab({
                   <div className="idarr-scope-selector">
                     <span className="scope-selector-label">Scopes to run:</span>
                     {idarrSyncTargets.map((target, i) => {
-                      const scopeIndices = flowConfig.idarr.scope_indices
-                      // Empty scope_indices means run all — show all as checked
-                      const isSelected = scopeIndices.length === 0 || scopeIndices.includes(i)
+                      const isSelected = flowConfig.idarr.scope_indices.includes(i)
                       return (
                         <label key={i} className="checkbox-option">
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={(e) => onToggleIdarrScope(i, e.target.checked, idarrSyncTargets.length)}
+                            onChange={(e) => onToggleIdarrScope(i, e.target.checked)}
                           />
                           <span>{target.label || `Target ${i + 1}`}</span>
                         </label>
                       )
                     })}
+                    {idarrScopeError && (
+                      <span className="scope-error">* At least one scope must be selected.</span>
+                    )}
                   </div>
                 )}
               </div>
