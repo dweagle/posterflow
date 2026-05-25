@@ -38,6 +38,7 @@ interface UsePosterManagerLifecycleOptions {
   fetchConfig: () => Promise<void>
   fetchDrives: () => Promise<void>
   fetchFlowConfig: () => Promise<void>
+  fetchIdarrSyncTargets: () => Promise<void>
   fetchBorderSettings: () => Promise<void>
   checkActiveWorkflow: () => Promise<void>
   fetchLibraryConfigs: () => Promise<void>
@@ -77,6 +78,7 @@ export function usePosterManagerLifecycle({
   fetchConfig,
   fetchDrives,
   fetchFlowConfig,
+  fetchIdarrSyncTargets,
   fetchBorderSettings,
   checkActiveWorkflow,
   fetchLibraryConfigs,
@@ -154,6 +156,7 @@ export function usePosterManagerLifecycle({
     fetchConfig()
     fetchDrives()
     fetchFlowConfig()
+    fetchIdarrSyncTargets()
     fetchBorderSettings()
     checkActiveWorkflow()
   }, [])

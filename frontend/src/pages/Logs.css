@@ -367,7 +367,6 @@
 .log-item-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
   padding-right: 1.5rem;
   color: #e0e0e0;
@@ -376,7 +375,7 @@
 .log-name {
   font-weight: 500;
   font-size: 0.7rem;
-  flex: 1;
+  flex: 0 0 4.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -386,6 +385,12 @@
   font-size: 0.6rem;
   color: #888;
   flex-shrink: 0;
+}
+
+.log-date {
+  font-size: 0.6rem;
+  color: #e0e0e0;
+  flex: 1;
 }
 
 .btn-download-mini {

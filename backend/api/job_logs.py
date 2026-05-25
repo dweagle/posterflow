@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from core.config import settings
 from core.logging import log_warning, log_error, LogTags
 from fastapi.responses import FileResponse
 import asyncio
+import re
 
 router = APIRouter(prefix="/api/job-logs", tags=["job-logs"])
 
@@ -12,6 +13,35 @@ JobLogFile = Dict[str, Any]
 JobLogsByType = Dict[str, List[JobLogFile]]
 
 PRIMARY_JOB_TYPES = ["sync_one", "sync_all", "plex_upload", "workflow", "poster_renamer", "border_replacer", "unmatched_assets", "idarr"]
+
+
+def _extract_log_metadata(log_file: Path) -> tuple[Optional[int], Optional[str]]:
+    """Read the first 10 lines of a log file to extract job ID and started timestamp.
+
+    Returns:
+        (job_id, started_at) where started_at is in 'MM/DD HH:MM' short form.
+    """
+    job_id: Optional[int] = None
+    started_at: Optional[str] = None
+    try:
+        with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+            for i, line in enumerate(f):
+                if i >= 10:
+                    break
+                if job_id is None:
+                    m = re.search(r'Job ID: (\d+)', line)
+                    if m:
+                        job_id = int(m.group(1))
+                if started_at is None:
+                    m = re.search(r'Started: (\d{2})/(\d{2})/(\d{2}) (\d{2}:\d{2}):\d{2}', line)
+                    if m:
+                        # Format: YY/MM/DD HH:MM:SS → MM/DD HH:MM
+                        started_at = f"{m.group(2)}/{m.group(3)} {m.group(4)}"
+                if job_id is not None and started_at is not None:
+                    break
+    except Exception:
+        pass
+    return job_id, started_at
 
 
 def _collect_log_files(logs_dir: Path, job_type: str) -> List[JobLogFile]:
@@ -37,14 +67,19 @@ def _collect_log_files(logs_dir: Path, job_type: str) -> List[JobLogFile]:
     for log_file in all_logs:
         try:
             stat = log_file.stat()
-            log_files.append({
-                "name": log_file.name,
-                "path": str(log_file.relative_to(logs_dir)),
-                "size": stat.st_size,
-                "modified": stat.st_mtime
-            })
         except Exception as e:
             log_warning(LogTags.API, f"Failed to stat log file {log_file}: {e}")
+            continue
+
+        job_id, started_at = _extract_log_metadata(log_file)
+        log_files.append({
+            "name": log_file.name,
+            "path": str(log_file.relative_to(logs_dir)),
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+            "job_id": job_id,
+            "started_at": started_at,
+        })
 
     return log_files
 

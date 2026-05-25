@@ -3218,6 +3218,21 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   height: 16px;
 }
 
+.idarr-scope-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #333;
+}
+
+.scope-selector-label {
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 0.15rem;
+}
+
 /* Flow Results */
 .flow-results {
   background: #1e1e1e;
@@ -3370,6 +3385,32 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   
   .job-header-left {
     flex-wrap: wrap;
+  }
+}
+
+@media (min-width: 900px) {
+  .job-options {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 1.25rem;
+  }
+
+  .idarr-scope-selector {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    padding-left: 1rem;
+    border-left: 1px solid #333;
+    gap: 0.35rem 0.75rem;
+  }
+
+  .scope-selector-label {
+    margin-bottom: 0;
+    white-space: nowrap;
   }
 }
 

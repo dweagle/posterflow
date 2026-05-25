@@ -159,10 +159,15 @@ function PosterManager() {
     flowRunning,
     flowResult,
     hasUnsavedFlowChanges,
+    idarrSyncTargets,
+    idarrShowInWorkflow,
     setFlowRunning,
     fetchFlowConfig,
+    fetchIdarrSyncTargets,
     checkActiveWorkflow,
     handleFlowConfigChange,
+    handleIdarrFlowConfigChange,
+    handleIdarrScopeToggle,
     handleSaveFlowConfig,
     resetFlowConfigToOriginal,
     handleRunFlow,
@@ -326,6 +331,7 @@ function PosterManager() {
     fetchConfig,
     fetchDrives,
     fetchFlowConfig,
+    fetchIdarrSyncTargets,
     fetchBorderSettings,
     checkActiveWorkflow,
     fetchLibraryConfigs,
@@ -474,10 +480,14 @@ function PosterManager() {
           hasUnsavedFlowChanges={hasUnsavedFlowChanges}
           saving={saving}
           flowRunning={flowRunning}
+          idarrSyncTargets={idarrSyncTargets}
+          idarrShowInWorkflow={idarrShowInWorkflow}
           formatPercent={formatPercent}
           onSaveFlowConfig={handleSaveFlowConfig}
           onRunFlow={handleRunFlow}
           onChangeFlowConfig={handleFlowConfigChange}
+          onChangeIdarrFlowConfig={handleIdarrFlowConfigChange}
+          onToggleIdarrScope={handleIdarrScopeToggle}
         />
       )}
       

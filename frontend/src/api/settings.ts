@@ -145,6 +145,7 @@ export interface MakerIdarrConfig {
   frequency_days: number
   tvdb_frequency: number
   force_sync_after_run: boolean
+  show_in_workflow: boolean
 }
 
 export interface MakerIdarrSyncTarget {

@@ -150,7 +150,15 @@ export interface FlowJobConfig {
   stop_on_error: boolean
 }
 
+export interface IdarrFlowJobConfig {
+  enabled: boolean
+  stop_on_error: boolean
+  scope_indices: number[]
+  sync_after_run: boolean
+}
+
 export interface FlowConfig {
+  idarr: IdarrFlowJobConfig
   sync_drives: FlowJobConfig
   rename_posters: FlowJobConfig
   detect_unmatched: FlowJobConfig

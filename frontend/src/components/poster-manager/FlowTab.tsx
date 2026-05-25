@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle, Eye, Save, Waves, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { FlowConfig, FlowResult } from '../../api/client'
+import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget } from '../../api/client'
 import Toolbar from './Toolbar'
 
 type FlowTabProps = {
@@ -10,10 +10,14 @@ type FlowTabProps = {
   hasUnsavedFlowChanges: boolean
   saving: boolean
   flowRunning: boolean
+  idarrSyncTargets: MakerIdarrSyncTarget[]
+  idarrShowInWorkflow: boolean
   formatPercent: (percent: number) => string
   onSaveFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
   onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error', value: boolean) => void
+  onChangeIdarrFlowConfig: (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => void
+  onToggleIdarrScope: (scopeIndex: number, included: boolean, totalTargets: number) => void
 }
 
 function FlowTab({
@@ -23,12 +27,20 @@ function FlowTab({
   hasUnsavedFlowChanges,
   saving,
   flowRunning,
+  idarrSyncTargets,
+  idarrShowInWorkflow,
   formatPercent,
   onSaveFlowConfig,
   onRunFlow,
   onChangeFlowConfig,
+  onChangeIdarrFlowConfig,
+  onToggleIdarrScope,
 }: FlowTabProps) {
   const navigate = useNavigate()
+
+  const showIdarr = idarrShowInWorkflow
+  const totalSteps = showIdarr ? 6 : 5
+  const stepOffset = showIdarr ? 1 : 0
 
   const openSchedulingSettings = () => {
     localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
@@ -66,10 +78,58 @@ function FlowTab({
       </Toolbar>
 
       <div className="flow-jobs">
+        {showIdarr && (
+          <div className={`flow-job-card ${!flowConfig.idarr.enabled ? 'disabled' : ''}`}>
+            <div className="job-header">
+              <div className="job-header-left">
+                <span className="job-number">1</span>
+                <span className="job-title">IDarr Rename</span>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={flowConfig.idarr.enabled} onChange={(e) => onChangeIdarrFlowConfig('enabled', e.target.checked)} />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+            <p className="job-description">Process and rename poster-maker files using IDarr before syncing</p>
+            {flowConfig.idarr.enabled && (
+              <div className="job-options">
+                <label className="checkbox-option">
+                  <input type="checkbox" checked={flowConfig.idarr.stop_on_error} onChange={(e) => onChangeIdarrFlowConfig('stop_on_error', e.target.checked)} />
+                  <span>Stop workflow if this step fails</span>
+                </label>
+                <label className="checkbox-option">
+                  <input type="checkbox" checked={flowConfig.idarr.sync_after_run} onChange={(e) => onChangeIdarrFlowConfig('sync_after_run', e.target.checked)} />
+                  <span>Queue personal drive sync after IDarr runs</span>
+                </label>
+                {idarrSyncTargets.length > 1 && (
+                  <div className="idarr-scope-selector">
+                    <span className="scope-selector-label">Scopes to run:</span>
+                    {idarrSyncTargets.map((target, i) => {
+                      const scopeIndices = flowConfig.idarr.scope_indices
+                      // Empty scope_indices means run all — show all as checked
+                      const isSelected = scopeIndices.length === 0 || scopeIndices.includes(i)
+                      return (
+                        <label key={i} className="checkbox-option">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => onToggleIdarrScope(i, e.target.checked, idarrSyncTargets.length)}
+                          />
+                          <span>{target.label || `Target ${i + 1}`}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className={`flow-job-card ${!flowConfig.sync_drives.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
-              <span className="job-number">1</span>
+              <span className="job-number">{stepOffset + 1}</span>
               <span className="job-title">Sync Google Drives</span>
             </div>
             <label className="toggle-switch">
@@ -91,7 +151,7 @@ function FlowTab({
         <div className={`flow-job-card ${!flowConfig.rename_posters.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
-              <span className="job-number">2</span>
+              <span className="job-number">{stepOffset + 2}</span>
               <span className="job-title">Rename & Organize Posters</span>
             </div>
             <label className="toggle-switch">
@@ -113,7 +173,7 @@ function FlowTab({
         <div className={`flow-job-card ${!flowConfig.border_replacer.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
-              <span className="job-number">3</span>
+              <span className="job-number">{stepOffset + 3}</span>
               <span className="job-title">Run Border Replacer</span>
             </div>
             <label className="toggle-switch">
@@ -135,7 +195,7 @@ function FlowTab({
         <div className={`flow-job-card ${!flowConfig.plex_upload.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
-              <span className="job-number">4</span>
+              <span className="job-number">{stepOffset + 4}</span>
               <span className="job-title">Upload to Plex</span>
             </div>
             <label className="toggle-switch">
@@ -157,7 +217,7 @@ function FlowTab({
         <div className={`flow-job-card ${!flowConfig.detect_unmatched.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
-              <span className="job-number">5</span>
+              <span className="job-number">{totalSteps}</span>
               <span className="job-title">Detect Unmatched Assets</span>
             </div>
             <label className="toggle-switch">

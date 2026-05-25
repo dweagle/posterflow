@@ -656,7 +656,8 @@ function Logs() {
                             onClick={() => viewLog('workflow', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -704,7 +705,8 @@ function Logs() {
                             onClick={() => viewLog('sync_one', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -752,7 +754,8 @@ function Logs() {
                             onClick={() => viewLog('sync_all', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -800,7 +803,8 @@ function Logs() {
                             onClick={() => viewLog('poster_renamer', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -848,7 +852,8 @@ function Logs() {
                             onClick={() => viewLog('border_replacer', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -896,7 +901,8 @@ function Logs() {
                             onClick={() => viewLog('unmatched_assets', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -944,7 +950,8 @@ function Logs() {
                             onClick={() => viewLog('idarr', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button
@@ -992,7 +999,8 @@ function Logs() {
                             onClick={() => viewLog('plex_upload', file)}
                           >
                             <div className="log-item-content">
-                              <span className="log-name">{file.name}</span>
+                              <span className="log-name">{file.job_id != null ? `Job #${file.job_id}` : file.name}</span>
+                              {file.started_at && <span className="log-date">{file.started_at}</span>}
                               <span className="log-size">{formatFileSize(file.size)}</span>
                             </div>
                             <button

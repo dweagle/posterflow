@@ -40,6 +40,7 @@ class MakerIdarrConfig(BaseModel):
     pending_matches: bool = False
     skip_collections: bool = False
     force_sync_after_run: bool = False
+    show_in_workflow: bool = False
     limit: int | None = None
     frequency_days: int = 30
     tvdb_frequency: int = 7
@@ -173,7 +174,7 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
 
     data["sync_targets"] = sync_targets
 
-    for key in ("auto_rename_quick_add", "auto_upload_quick_add", "remove_non_image_files", "show_unmatched", "pending_matches", "skip_collections", "force_sync_after_run"):
+    for key in ("auto_rename_quick_add", "auto_upload_quick_add", "remove_non_image_files", "show_unmatched", "pending_matches", "skip_collections", "force_sync_after_run", "show_in_workflow"):
         if key in payload:
             data[key] = env_bool(payload.get(key), getattr(defaults, key))
 

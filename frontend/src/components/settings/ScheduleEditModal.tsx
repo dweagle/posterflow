@@ -230,7 +230,7 @@ function ScheduleEditModal({
                   {idarrForceSync ? 'Enabled' : 'Disabled'}
                 </span>
               </div>
-              <p className="field-hint">When enabled, the personal drive sync will run even if no files were renamed during the IDarr run.</p>
+              <p className="field-hint">When enabled, the personal drive sync will run even if no files were renamed. <strong>This overrides the global "Force Sync After Run" setting in IDarr settings.</strong></p>
             </div>
           )}
 

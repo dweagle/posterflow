@@ -66,6 +66,7 @@ const DEFAULT_IDARR_CONFIG: MakerIdarrConfig = {
   frequency_days: 30,
   tvdb_frequency: 7,
   force_sync_after_run: false,
+  show_in_workflow: false,
 }
 
 const cloneIdarrConfig = (value: MakerIdarrConfig): MakerIdarrConfig => ({
@@ -92,6 +93,7 @@ const normalizeIdarrConfigForCompare = (value: MakerIdarrConfig) => ({
   frequency_days: Number(value.frequency_days || 30),
   tvdb_frequency: Number(value.tvdb_frequency || 7),
   force_sync_after_run: Boolean(value.force_sync_after_run),
+  show_in_workflow: Boolean(value.show_in_workflow),
   sync_targets: Array.isArray(value.sync_targets)
     ? value.sync_targets.map((target) => ({
       scope_token: String(target.scope_token || ''),
@@ -1332,12 +1334,19 @@ function IDarr() {
         <div className="idarr-settings-group idarr-settings-group-combined">
           <h3>Paths, Credentials & Processing</h3>
           <div className="settings-grid idarr-settings-grid">
-            <div className="field-group">
-              <label>TMDB API Key</label>
-              <p className="setting-description" style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
-                Configured globally in{' '}
-                <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
-              </p>
+            <div className="field-group field-group-toggle">
+              <label>
+                <span>Show in Poster Workflow</span>
+                <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.show_in_workflow)}
+                    onChange={(e) => updateConfig('show_in_workflow', e.target.checked)}
+                  />
+                  <span className="idarr-toggle-slider" />
+                </span>
+              </label>
+              <small>When enabled, an IDarr Rename step will appear as step 1 in the Poster Workflow page so you can run it as part of your standard workflow.</small>
             </div>
             <div className="field-group">
               <label>Cache Frequency Days</label>
@@ -1450,6 +1459,10 @@ function IDarr() {
               <small>Optional cap on number of assets processed per run. Leave blank for no limit.</small>
             </div>
           </div>
+          <p className="setting-description" style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#888' }}>
+            <strong style={{ color: '#ccc' }}>TMDB API Key:</strong> Configured globally in{' '}
+            <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
+          </p>
         </div>
 
         <div className="idarr-settings-group idarr-settings-group-behavior">
@@ -1776,11 +1789,11 @@ function IDarr() {
     return (
       <div className="settings-section idarr-sync-options-card">
         <h2>Run &amp; Sync Options</h2>
-        <p className="section-description">Controls behaviour of the Run &amp; Sync button.</p>
+        <p className="section-description">Controls sync behaviour for all IDarr run types.</p>
         <label className="idarr-toggle-row">
           <span className="idarr-toggle-label-text">
-            <strong>Force Sync on Run &amp; Sync</strong>
-            <small>When off, the sync is skipped if no files were renamed. When on, the sync always runs regardless.</small>
+            <strong>Force Sync After Run</strong>
+            <small>When off, the sync is skipped if no files were renamed. When on, the sync always runs after any IDarr run that includes a sync step (Run &amp; Sync, Quick Add, and scheduled runs).</small>
           </span>
           <span className="idarr-toggle-control">
             <input

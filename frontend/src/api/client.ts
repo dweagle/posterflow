@@ -108,6 +108,7 @@ export {
 export {
   type FlowConfig,
   type FlowResult,
+  type IdarrFlowJobConfig,
   type PosterConfig,
   type PosterSearchItem,
   type TmdbCandidate,

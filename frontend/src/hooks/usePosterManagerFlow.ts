@@ -2,12 +2,14 @@ import { MutableRefObject, useEffect, useRef, useState } from 'react'
 import {
   FlowConfig,
   FlowResult,
+  IdarrFlowJobConfig,
   getApiErrorMessage,
   getFlowConfig,
   getJobs,
   runFlow,
   saveFlowConfig,
 } from '../api/client'
+import { getMakerIdarrConfig, MakerIdarrSyncTarget } from '../api/client'
 
 type ToastType = 'success' | 'error' | 'info'
 
@@ -26,6 +28,8 @@ export const usePosterManagerFlow = ({
   const [flowRunning, setFlowRunning] = useState(false)
   const [flowResult, setFlowResult] = useState<FlowResult | null>(null)
   const [hasUnsavedFlowChanges, setHasUnsavedFlowChanges] = useState(false)
+  const [idarrSyncTargets, setIdarrSyncTargets] = useState<MakerIdarrSyncTarget[]>([])
+  const [idarrShowInWorkflow, setIdarrShowInWorkflow] = useState(false)
 
   const originalFlowConfigRef = useRef<FlowConfig | null>(null)
   useEffect(() => {
@@ -42,6 +46,17 @@ export const usePosterManagerFlow = ({
     } catch (error) {
       console.error('Error fetching flow config:', error)
       showToast('Failed to load flow configuration', 'error')
+    }
+  }
+
+  const fetchIdarrSyncTargets = async () => {
+    try {
+      const idarrCfg = await getMakerIdarrConfig()
+      setIdarrSyncTargets(idarrCfg.sync_targets || [])
+      setIdarrShowInWorkflow(Boolean(idarrCfg.show_in_workflow))
+    } catch {
+      setIdarrSyncTargets([])
+      setIdarrShowInWorkflow(false)
     }
   }
 
@@ -74,6 +89,34 @@ export const usePosterManagerFlow = ({
       },
     })
     setHasUnsavedFlowChanges(true)
+  }
+
+  const handleIdarrFlowConfigChange = (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => {
+    if (!flowConfig) return
+
+    setFlowConfig({
+      ...flowConfig,
+      idarr: {
+        ...flowConfig.idarr,
+        [field]: value,
+      },
+    })
+    setHasUnsavedFlowChanges(true)
+  }
+
+  const handleIdarrScopeToggle = (scopeIndex: number, included: boolean, totalTargets: number) => {
+    if (!flowConfig) return
+
+    const current = flowConfig.idarr.scope_indices || []
+    // When scope_indices is empty it means "run all"; expand it to all indices first
+    const expanded = current.length === 0 ? Array.from({ length: totalTargets }, (_, i) => i) : current
+    const updated = included
+      ? [...expanded, scopeIndex].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b)
+      : expanded.filter(i => i !== scopeIndex)
+
+    // If all targets are selected, collapse back to empty (= run all)
+    const allSelected = updated.length === totalTargets
+    handleIdarrFlowConfigChange('scope_indices', allSelected ? [] : updated)
   }
 
   const handleSaveFlowConfig = async () => {
@@ -138,10 +181,15 @@ export const usePosterManagerFlow = ({
     flowRunning,
     flowResult,
     hasUnsavedFlowChanges,
+    idarrSyncTargets,
+    idarrShowInWorkflow,
     setFlowRunning,
     fetchFlowConfig,
+    fetchIdarrSyncTargets,
     checkActiveWorkflow,
     handleFlowConfigChange,
+    handleIdarrFlowConfigChange,
+    handleIdarrScopeToggle,
     handleSaveFlowConfig,
     resetFlowConfigToOriginal,
     handleRunFlow,

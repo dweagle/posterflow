@@ -26,6 +26,7 @@ from models.job import (
     update_job_state,
 )
 from models.idarr import create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
+from models.setting import get_setting
 from services.rclone import RcloneService
 from services.idarr_runner import IdarrRunner
 from services.discord_notifications import send_discord_notification, send_major_error_notification
@@ -456,6 +457,146 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr personal sync job failed: {exc}\n{traceback.format_exc()}")
         mark_job_failed(db, job_id, exc)
+    finally:
+        remove_job_log_handler(handler_id, job_type="idarr", success=success)
+        db.close()
+
+
+def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
+    """
+    Run IDarr rename for selected scopes as part of the poster workflow.
+    Called as a child job via _promote_child_progress_to_parent.
+
+    run_config keys:
+        idarr_config: dict   - full maker_tools_idarr_config from settings
+        scope_indices: list  - which sync_target indices to run (empty = all)
+        dry_run: bool        - dry run mode
+        sync_after_run: bool - queue personal sync after each scope (if files renamed)
+    """
+    db = SessionLocal()
+    handler_id = add_job_log_handler("idarr", job_id, "IDarr workflow step")
+    success = False
+
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            log_error(LogTags.IDARR, f"Workflow IDarr job {job_id} not found")
+            return
+
+        update_job_state(db, job, status=JOB_STATUS_RUNNING, progress=1, message=format_start_message("IDarr workflow step"))
+
+        idarr_config: dict[str, Any] = run_config.get("idarr_config") or {}
+        scope_indices: list[int] = [int(i) for i in (run_config.get("scope_indices") or []) if isinstance(i, (int, float))]
+        dry_run: bool = bool(run_config.get("dry_run", False))
+        sync_after_run: bool = bool(run_config.get("sync_after_run", False))
+
+        raw_targets = idarr_config.get("sync_targets") or []
+        all_targets = [t for t in raw_targets if isinstance(t, dict)]
+
+        if not all_targets:
+            update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100,
+                             message="IDarr skipped: no sync targets configured",
+                             completed_at=datetime.now(timezone.utc))
+            success = True
+            log_info(LogTags.IDARR, "Workflow IDarr step: no sync targets configured, skipping", job_id=job_id)
+            return
+
+        # Determine which targets to run (empty scope_indices = run all)
+        if scope_indices:
+            selected = [(i, all_targets[i]) for i in scope_indices if 0 <= i < len(all_targets)]
+        else:
+            selected = list(enumerate(all_targets))
+
+        if not selected:
+            update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100,
+                             message="IDarr skipped: selected scopes not found",
+                             completed_at=datetime.now(timezone.utc))
+            success = True
+            log_warning(LogTags.IDARR, "Workflow IDarr step: no valid scopes to run", job_id=job_id, scope_indices=scope_indices)
+            return
+
+        total_scopes = len(selected)
+        log_info(LogTags.IDARR, f"Workflow IDarr step: running {total_scopes} scope(s)", job_id=job_id, scopes=[i for i, _ in selected])
+
+        idarr_service = IdarrRunner(db)
+        total_renamed = 0
+
+        for run_num, (scope_idx, target) in enumerate(selected):
+            scope_start_progress = int((run_num / total_scopes) * 95) + 1
+            scope_end_progress = int(((run_num + 1) / total_scopes) * 95)
+            scope_label = str(target.get("label") or f"Target {scope_idx + 1}").strip()
+            source_dir = str(target.get("source_dir") or "").strip()
+
+            log_info(LogTags.IDARR, f"Running IDarr scope {run_num + 1}/{total_scopes}: '{scope_label}'",
+                     job_id=job_id, scope_idx=scope_idx, source_dir=source_dir)
+            update_job_state(db, job, progress=scope_start_progress,
+                             message=f"IDarr ({run_num + 1}/{total_scopes}): {scope_label}...")
+
+            # Read the TMDB API key from its canonical settings location
+            tmdb_setting = get_setting(db, "tmdb_api_key")
+            tmdb_api_key = str(tmdb_setting.value or "").strip() if tmdb_setting else ""
+
+            scope_config: dict[str, Any] = {
+                **idarr_config,
+                "source_dir": source_dir,
+                "scope_token": target.get("scope_token", ""),
+                "sync_target_index": scope_idx,
+                "dry_run": dry_run,
+                "sync_after_run": False,  # prevent queueing during workflow; handled below
+                "tmdb_api_key": tmdb_api_key,
+            }
+
+            scope_span = max(1, scope_end_progress - scope_start_progress)
+
+            def _make_progress_callback(s_start: int, s_span: int, label: str) -> Any:
+                def report_progress(_phase: str, current: int, total: int, message: str) -> None:
+                    try:
+                        pct = int((current / max(total, 1)) * 100)
+                        mapped = s_start + int((pct / 100) * s_span)
+                        mapped = max(s_start, min(mapped, s_start + s_span - 1))
+                        msg = _sanitize_message(f"{label}: {message}" if message else label)
+                        update_job_state(db, job, progress=mapped, message=msg)
+                    except Exception as cb_exc:
+                        log_warning(LogTags.IDARR, f"Workflow IDarr progress callback error: {cb_exc}")
+                return report_progress
+
+            result = idarr_service.run(scope_config, progress_callback=_make_progress_callback(scope_start_progress, scope_span, scope_label))
+
+            if not result.success:
+                raise RuntimeError(f"IDarr scope '{scope_label}' failed: {result.message}")
+
+            scope_stats = result.stats or {}
+            scope_renamed = int(scope_stats.get("files_renamed") or scope_stats.get("renamed") or 0)
+            total_renamed += scope_renamed
+            log_success(LogTags.IDARR, f"IDarr scope '{scope_label}' complete: {scope_renamed} renamed", job_id=job_id)
+
+            # Queue personal sync for this scope if requested and files were renamed (or forced)
+            if sync_after_run and not dry_run and (scope_renamed > 0 or bool(idarr_config.get("force_sync_after_run"))):
+                sync_config_for_target = {
+                    **idarr_config,
+                    "sync_target_index": scope_idx,
+                    "sync_after_run": True,
+                    "source_dir": source_dir,
+                    "scope_token": target.get("scope_token", ""),
+                    "sync_targets": all_targets,
+                    "force_sync_after_run": bool(idarr_config.get("force_sync_after_run")),
+                    "dry_run": False,
+                }
+                _queue_idarr_sync_after_run(db, sync_config_for_target, job_id)
+
+        update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100,
+                         message=format_complete_message("IDarr workflow step", f"{total_renamed} renamed across {total_scopes} scope(s)"),
+                         completed_at=datetime.now(timezone.utc))
+        success = True
+        log_section_end(LogTags.IDARR, f"IDarr workflow step completed (job_id={job_id}, renamed={total_renamed})")
+
+    except Exception as exc:
+        log_error(LogTags.IDARR, f"IDarr workflow step failed: {exc}\n{traceback.format_exc()}", job_id=job_id)
+        try:
+            mark_job_failed(db, job_id, exc)
+        except Exception:
+            pass
+        raise
     finally:
         remove_job_log_handler(handler_id, job_type="idarr", success=success)
         db.close()

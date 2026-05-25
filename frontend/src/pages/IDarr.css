@@ -643,7 +643,11 @@
 }
 
 .idarr-page .idarr-upload-card {
-  margin-bottom: 1rem;
+  margin-bottom: 0;
+}
+
+.idarr-upload-card .idarr-upload-dropzone {
+  flex: 1;
 }
 
 .idarr-page .idarr-upload-card .settings-section h2,
@@ -1018,6 +1022,18 @@
   gap: 0.35rem;
 }
 
+.idarr-settings-grid .field-group.field-group-toggle {
+  grid-template-rows: auto auto;
+}
+
+.idarr-settings-grid .field-group.field-group-toggle label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
 .idarr-settings-grid .field-group small {
   min-height: 2.3rem;
 }
@@ -1200,9 +1216,9 @@
   align-items: start;
 }
 
-.idarr-upload-card          { grid-column: 1; grid-row: 1; }
+.idarr-upload-card          { grid-column: 1; grid-row: 1; align-self: stretch; display: flex; flex-direction: column; }
 .idarr-pending-card         { grid-column: 1; grid-row: 2 / 4; align-self: stretch; display: flex; flex-direction: column; }
-.idarr-sync-options-card    { grid-column: 2; grid-row: 1; }
+.idarr-sync-options-card    { grid-column: 2; grid-row: 1; align-self: stretch; }
 .run-cache-actions-section  { grid-column: 2; grid-row: 2; }
 .idarr-ignored-card         { grid-column: 2; grid-row: 3; }
 

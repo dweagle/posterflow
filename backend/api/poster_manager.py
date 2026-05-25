@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Any, Callable, Dict, Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import traceback
 import os
 import json
@@ -126,7 +126,15 @@ class FlowJobConfig(BaseModel):
     stop_on_error: bool = True
 
 
+class IdarrFlowJobConfig(BaseModel):
+    enabled: bool = False
+    stop_on_error: bool = False
+    scope_indices: List[int] = Field(default_factory=list)
+    sync_after_run: bool = False
+
+
 class FlowConfig(BaseModel):
+    idarr: IdarrFlowJobConfig = Field(default_factory=IdarrFlowJobConfig)
     sync_drives: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
     rename_posters: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
     detect_unmatched: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
@@ -805,29 +813,46 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
 @router.get("/flow/config")
 async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        default_config: Dict[str, Dict[str, bool]] = {
+        default_step_config: Dict[str, Dict[str, bool]] = {
             "sync_drives": {"enabled": True, "stop_on_error": True},
             "rename_posters": {"enabled": True, "stop_on_error": True},
             "detect_unmatched": {"enabled": True, "stop_on_error": True},
             "border_replacer": {"enabled": False, "stop_on_error": True},
             "plex_upload": {"enabled": False, "stop_on_error": False},
         }
+        default_idarr_config: Dict[str, Any] = {
+            "enabled": False,
+            "stop_on_error": False,
+            "scope_indices": [],
+            "sync_after_run": False,
+        }
         flow_setting = get_setting(db, SETTING_POSTER_FLOW_CONFIG)
 
         if flow_setting:
             parsed = json.loads(flow_setting.value)
             if isinstance(parsed, dict):
-                normalized = dict(default_config)
-                for key in default_config.keys():
+                normalized: Dict[str, Any] = {"idarr": dict(default_idarr_config)}
+                idarr_value = parsed.get("idarr")
+                if isinstance(idarr_value, dict):
+                    raw_indices = idarr_value.get("scope_indices") or []
+                    normalized["idarr"] = {
+                        "enabled": bool(idarr_value.get("enabled", False)),
+                        "stop_on_error": bool(idarr_value.get("stop_on_error", False)),
+                        "scope_indices": [int(i) for i in raw_indices if isinstance(i, int)],
+                        "sync_after_run": bool(idarr_value.get("sync_after_run", False)),
+                    }
+                for key in default_step_config.keys():
                     value = parsed.get(key)
                     if isinstance(value, dict):
                         normalized[key] = {
-                            "enabled": bool(value.get("enabled", default_config[key]["enabled"])),
-                            "stop_on_error": bool(value.get("stop_on_error", default_config[key]["stop_on_error"])),
+                            "enabled": bool(value.get("enabled", default_step_config[key]["enabled"])),
+                            "stop_on_error": bool(value.get("stop_on_error", default_step_config[key]["stop_on_error"])),
                         }
+                    else:
+                        normalized[key] = dict(default_step_config[key])
                 return normalized
 
-        return default_config
+        return {"idarr": default_idarr_config, **default_step_config}
 
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Error getting flow config: {e}\n{traceback.format_exc()}")
