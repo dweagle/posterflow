@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe } from 'lucide-react'
+import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal } from 'lucide-react'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, type MakerIdarrConfig } from '../api/client'
+import { getSettings, saveSettings } from '../api/settings'
 import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
 import './Sidebar.css'
@@ -16,6 +17,55 @@ type VersionUpdateStatus = {
   release_notes: string | null
 }
 
+type NavItemDef = {
+  id: string
+  label: string
+  to: string
+  iconColor: string
+  badge?: 'unmatched' | 'idarr' | 'community'
+  isIdarr?: boolean
+  isEnd?: boolean
+}
+
+type SidebarItemConfig = {
+  id: string
+  visible: boolean
+  order: number
+}
+
+const NAV_ITEM_DEFS: NavItemDef[] = [
+  { id: 'dashboard', label: 'Dashboard', to: '/', iconColor: '#ff8800', isEnd: true },
+  { id: 'poster-manager', label: 'Poster Manager', to: '/poster-manager', iconColor: '#a855f7', badge: 'unmatched' },
+  { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4' },
+  { id: 'poster-search', label: 'Poster Search', to: '/poster-search', iconColor: '#64b5f6' },
+  { id: 'plex-upload', label: 'Plex Upload', to: '/plex-upload', iconColor: '#e5a00d' },
+  { id: 'community-requests', label: 'Requests', to: '/community-requests', iconColor: '#64b5f6', badge: 'community' },
+  { id: 'idarr', label: 'IDarr', to: '/IDarr', iconColor: '#66bb6a', badge: 'idarr', isIdarr: true },
+  { id: 'maker-tools', label: 'Maker Tools', to: '/maker-tools', iconColor: '#64b5f6' },
+  { id: 'logs', label: 'Logs', to: '/logs', iconColor: '#22c55e' },
+]
+
+const DEFAULT_CONFIGS: SidebarItemConfig[] = NAV_ITEM_DEFS.map((item, i) => ({
+  id: item.id,
+  visible: true,
+  order: i,
+}))
+
+function getNavIcon(id: string, color: string, size = 20) {
+  switch (id) {
+    case 'dashboard': return <LayoutDashboard size={size} color={color} />
+    case 'poster-manager': return <Image size={size} color={color} />
+    case 'drives': return <HardDriveDownload size={size} color={color} />
+    case 'poster-search': return <Search size={size} color={color} />
+    case 'plex-upload': return <UploadCloud size={size} color={color} />
+    case 'community-requests': return <Globe size={size} color={color} />
+    case 'idarr': return <Fingerprint size={size} color={color} />
+    case 'maker-tools': return <Wrench size={size} color={color} />
+    case 'logs': return <Logs size={size} color={color} />
+    default: return null
+  }
+}
+
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
   const { unmatchedCount, idarrPendingCount, communityRequestCount, jobs } = useUnmatched()
@@ -25,6 +75,13 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const [idarrPickerConfig, setIdarrPickerConfig] = useState<MakerIdarrConfig | null>(null)
   const [idarrPickerSelectedIndex, setIdarrPickerSelectedIndex] = useState(0)
   const [version, setVersion] = useState<string>('0.1.0')
+  // Sidebar customization
+  const [isCustomizing, setIsCustomizing] = useState(false)
+  const [itemConfigs, setItemConfigs] = useState<SidebarItemConfig[]>(DEFAULT_CONFIGS)
+  const [pendingConfigs, setPendingConfigs] = useState<SidebarItemConfig[]>(DEFAULT_CONFIGS)
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [versionsBehind, setVersionsBehind] = useState<number>(0)
   const [releasesUrl, setReleasesUrl] = useState<string>('')
@@ -202,6 +259,101 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showReleaseNotes])
 
+  // Load sidebar config from backend settings
+  useEffect(() => {
+    const loadSidebarConfig = async () => {
+      try {
+        const allSettings = await getSettings()
+        if (allSettings.sidebar_config) {
+          const saved = JSON.parse(allSettings.sidebar_config) as SidebarItemConfig[]
+          const merged: SidebarItemConfig[] = []
+          let maxOrder = saved.reduce((m, c) => Math.max(m, c.order), -1)
+          // Preserve saved order/visibility
+          for (const savedItem of [...saved].sort((a, b) => a.order - b.order)) {
+            if (NAV_ITEM_DEFS.find(d => d.id === savedItem.id)) {
+              merged.push(savedItem)
+            }
+          }
+          // Add any new items that weren't in saved config
+          for (const def of NAV_ITEM_DEFS) {
+            if (!merged.find(c => c.id === def.id)) {
+              maxOrder++
+              merged.push({ id: def.id, visible: true, order: maxOrder })
+            }
+          }
+          setItemConfigs(merged)
+          setPendingConfigs(merged)
+        }
+      } catch {
+        // Keep defaults on error
+      }
+    }
+    void loadSidebarConfig()
+  }, [])
+
+  const handleStartCustomize = () => {
+    setPendingConfigs([...itemConfigs])
+    setIsCustomizing(true)
+  }
+
+  const handleCancelCustomize = () => {
+    setPendingConfigs([...itemConfigs])
+    setIsCustomizing(false)
+    setDraggedId(null)
+    setDragOverId(null)
+  }
+
+  const handleSaveCustomization = async () => {
+    setIsSavingConfig(true)
+    try {
+      const normalized = pendingConfigs.map((c, i) => ({ ...c, order: i }))
+      await saveSettings({ sidebar_config: JSON.stringify(normalized) })
+      setItemConfigs(normalized)
+      setIsCustomizing(false)
+      setDraggedId(null)
+      setDragOverId(null)
+    } catch {
+      showToast('Failed to save sidebar layout', 'error')
+    } finally {
+      setIsSavingConfig(false)
+    }
+  }
+
+  const handleCustomizeDragStart = (id: string) => setDraggedId(id)
+
+  const handleCustomizeDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault()
+    if (dragOverId !== id) setDragOverId(id)
+  }
+
+  const handleCustomizeDrop = (targetId: string) => {
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null)
+      setDragOverId(null)
+      return
+    }
+    setPendingConfigs(prev => {
+      const arr = [...prev]
+      const fromIdx = arr.findIndex(c => c.id === draggedId)
+      const toIdx = arr.findIndex(c => c.id === targetId)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      const [removed] = arr.splice(fromIdx, 1)
+      arr.splice(toIdx, 0, removed)
+      return arr.map((c, i) => ({ ...c, order: i }))
+    })
+    setDraggedId(null)
+    setDragOverId(null)
+  }
+
+  const handleCustomizeDragEnd = () => {
+    setDraggedId(null)
+    setDragOverId(null)
+  }
+
+  const toggleItemVisibility = (id: string) => {
+    setPendingConfigs(prev => prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c))
+  }
+
   return (
     <>
     <div className={`sidebar${isOpen ? ' sidebar--open' : ''}`}>
@@ -246,73 +398,141 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
       </div>
       
       <nav className="sidebar-nav">
-        <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''} data-label="Dashboard" aria-label="Dashboard">
-          <span className="icon"><LayoutDashboard size={20} color="#ff8800" /></span>
-          <span className="nav-label">Dashboard</span>
-        </NavLink>
+        {!isCustomizing && (
+          <>
+            {itemConfigs
+              .filter(c => c.visible)
+              .sort((a, b) => a.order - b.order)
+              .map(config => {
+                const def = NAV_ITEM_DEFS.find(d => d.id === config.id)
+                if (!def) return null
 
-        <NavLink to="/poster-manager" className={({ isActive }) => isActive ? 'active' : ''} data-label="Poster Manager" aria-label="Poster Manager">
-          <span className="icon"><Image size={20} color="#a855f7" /></span>
-          <span className="nav-label">Poster Manager</span>
-          {unmatchedCount > 0 && (
-            <span className="sidebar-badge">{unmatchedCount}</span>
-          )}
-        </NavLink>
+                if (def.isIdarr) {
+                  return (
+                    <NavLink
+                      key={def.id}
+                      to={def.to}
+                      className={({ isActive }) =>
+                        [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')
+                      }
+                      data-label={def.label}
+                      aria-label={def.label}
+                      onDragOver={handleIdarrDragOver}
+                      onDragLeave={handleIdarrDragLeave}
+                      onDrop={handleIdarrDrop}
+                    >
+                      <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
+                      <span className="nav-label">{def.label}</span>
+                      {idarrPendingCount > 0 && <span className="sidebar-badge">{idarrPendingCount}</span>}
+                    </NavLink>
+                  )
+                }
 
-        <NavLink to="/drives" className={({ isActive }) => isActive ? 'active' : ''} data-label="GDrives" aria-label="GDrives">
-          <span className="icon"><HardDriveDownload size={20} color="#4285F4" /></span>
-          <span className="nav-label">GDrives</span>
-        </NavLink>
-        
-        <NavLink to="/poster-search" className={({ isActive }) => isActive ? 'active' : ''} data-label="Poster Search" aria-label="Poster Search">
-          <span className="icon"><Search size={20} color="#64b5f6" /></span>
-          <span className="nav-label">Poster Search</span>
-        </NavLink>
+                const badgeCount =
+                  def.badge === 'unmatched' ? unmatchedCount :
+                  def.badge === 'community' ? communityRequestCount : 0
 
-        <NavLink to="/plex-upload" className={({ isActive }) => isActive ? 'active' : ''} data-label="Plex Upload" aria-label="Plex Upload">
-          <span className="icon"><UploadCloud size={20} color="#e5a00d" /></span>
-          <span className="nav-label">Plex Upload</span>
-        </NavLink>
-        
-        
-        <NavLink to="/community-requests" className={({ isActive }) => isActive ? 'active' : ''} data-label="Community Requests" aria-label="Community Requests">
-          <span className="icon"><Globe size={20} color="#64b5f6" /></span>
-          <span className="nav-label">Requests</span>
-          {communityRequestCount > 0 && (
-            <span className="sidebar-badge">{communityRequestCount}</span>
-          )}
-        </NavLink>
+                return (
+                  <NavLink
+                    key={def.id}
+                    to={def.to}
+                    end={def.isEnd}
+                    className={({ isActive }) => isActive ? 'active' : ''}
+                    data-label={def.label}
+                    aria-label={def.label}
+                  >
+                    <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
+                    <span className="nav-label">{def.label}</span>
+                    {badgeCount > 0 && <span className="sidebar-badge">{badgeCount}</span>}
+                  </NavLink>
+                )
+              })}
 
-        <NavLink
-          to="/IDarr"
-          className={({ isActive }) => [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')}
-          data-label="IDarr"
-          aria-label="IDarr"
-          onDragOver={handleIdarrDragOver}
-          onDragLeave={handleIdarrDragLeave}
-          onDrop={handleIdarrDrop}
-        >
-          <span className="icon"><Fingerprint size={20} color="#66bb6a" /></span>
-          <span className="nav-label">IDarr</span>
-          {idarrPendingCount > 0 && (
-            <span className="sidebar-badge">{idarrPendingCount}</span>
-          )}
-        </NavLink>
+            <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''} data-label="Settings" aria-label="Settings">
+              <span className="icon"><Settings size={20} /></span>
+              <span className="nav-label">Settings</span>
+            </NavLink>
 
-        <NavLink to="/maker-tools" className={({ isActive }) => isActive ? 'active' : ''} data-label="Maker Tools" aria-label="Maker Tools">
-          <span className="icon"><Wrench size={20} color="#64b5f6" /></span>
-          <span className="nav-label">Maker Tools</span>
-        </NavLink>
+            <div className="sidebar-customize-btn-row">
+              <button className="sidebar-customize-trigger" onClick={handleStartCustomize} title="Customize sidebar layout" type="button">
+                <SlidersHorizontal size={13} />
+                <span>Customize</span>
+              </button>
+            </div>
+          </>
+        )}
 
-        <NavLink to="/logs" className={({ isActive }) => isActive ? 'active' : ''} data-label="Logs" aria-label="Logs">
-          <span className="icon"><Logs size={20} color="#22c55e" /></span>
-          <span className="nav-label">Logs</span>
-        </NavLink>
+        {isCustomizing && (
+          <>
+            <div className="sidebar-customize-header">
+              Drag to reorder · toggle to show/hide
+            </div>
+            <div className="sidebar-customize-list">
+              {pendingConfigs.map(config => {
+                const def = NAV_ITEM_DEFS.find(d => d.id === config.id)
+                if (!def) return null
+                const iconColor = config.visible ? def.iconColor : '#555'
+                return (
+                  <div
+                    key={config.id}
+                    className={[
+                      'sidebar-customize-item',
+                      draggedId === config.id ? 'dragging' : '',
+                      dragOverId === config.id ? 'drag-over' : '',
+                      !config.visible ? 'hidden' : '',
+                    ].filter(Boolean).join(' ')}
+                    draggable
+                    onDragStart={() => handleCustomizeDragStart(config.id)}
+                    onDragOver={(e) => handleCustomizeDragOver(e, config.id)}
+                    onDrop={() => handleCustomizeDrop(config.id)}
+                    onDragEnd={handleCustomizeDragEnd}
+                  >
+                    <span className="sidebar-customize-grip">
+                      <GripVertical size={15} color="#666" />
+                    </span>
+                    <span className="icon sidebar-customize-icon">{getNavIcon(def.id, iconColor, 18)}</span>
+                    <span className="sidebar-customize-label">{def.label}</span>
+                    <button
+                      className="sidebar-customize-toggle"
+                      onClick={() => toggleItemVisibility(config.id)}
+                      title={config.visible ? 'Hide this item' : 'Show this item'}
+                      type="button"
+                    >
+                      {config.visible
+                        ? <Eye size={15} color="#64b5f6" />
+                        : <EyeOff size={15} color="#555" />
+                      }
+                    </button>
+                  </div>
+                )
+              })}
 
-        <NavLink to="/settings" className={({ isActive }) => isActive ? 'active' : ''} data-label="Settings" aria-label="Settings">
-          <span className="icon"><Settings size={20} /></span>
-          <span className="nav-label">Settings</span>
-        </NavLink>
+              {/* Settings is always visible — not configurable */}
+              <div className="sidebar-customize-item sidebar-customize-item--locked">
+                <span className="sidebar-customize-grip sidebar-customize-grip--locked">
+                  <GripVertical size={15} color="#444" />
+                </span>
+                <span className="icon sidebar-customize-icon"><Settings size={18} color="#666" /></span>
+                <span className="sidebar-customize-label sidebar-customize-label--locked">Settings</span>
+                <span className="sidebar-customize-locked-badge">locked</span>
+              </div>
+            </div>
+
+            <div className="sidebar-customize-btn-row sidebar-customize-btn-row--active">
+              <button className="sidebar-customize-cancel" onClick={handleCancelCustomize} type="button">
+                Cancel
+              </button>
+              <button
+                className="sidebar-customize-done"
+                onClick={() => void handleSaveCustomization()}
+                disabled={isSavingConfig}
+                type="button"
+              >
+                {isSavingConfig ? 'Saving…' : 'Done'}
+              </button>
+            </div>
+          </>
+        )}
       </nav>
 
       {showMiniProgress && currentRunningJob && (

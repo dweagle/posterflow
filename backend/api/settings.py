@@ -88,6 +88,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "psd_export_folder",
     "psd_template_path",
     "psd_open_photopea",
+    # Sidebar layout
+    "sidebar_config",
 })
 
 
