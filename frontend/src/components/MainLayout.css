@@ -11,19 +11,30 @@
   position: relative;
 }
 
-.github-link {
+.header-icons {
   position: absolute;
-  top: 1rem;
+  top: 0.75rem;
   right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.header-icon-link {
   color: #888;
   display: flex;
   align-items: center;
   transition: color 0.2s;
-  z-index: 10;
 }
 
-.github-link:hover {
+.header-icon-link:hover {
   color: #fff;
+}
+
+.header-icon-link.discord-link:hover {
+  color: #5865F2;
 }
 
 .sidebar-toggle {
