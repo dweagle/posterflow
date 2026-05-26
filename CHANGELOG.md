@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-26
+### Added
+- IDarr Workflow Integration: IDarr can now be enabled as the first step in the Poster Manager workflow — posters are processed and renamed through IDarr before syncing; includes inline personal sync and scope selection.  This feature is hidden by default for users.  Poster makers can turn this on in IDarr settings.
+- Sidebar: nav items can now be reordered via drag-and-drop to customize the sidebar layout
+- Job Logs: log cards now show job ID and date instead of log name for quicker identification
+
+### Fixed
+- IDarr: TVDB ID assignment refined to prevent ID contamination across movie and TV assets with identical name and year (e.g. LEGO MARVEL Super Heroes Maximum Overload (2013))
+
+### Changed
+- Header icons updated with a new layout and additional links to include Discord and Github Wiki
+
 ## [0.5.3] - 2026-05-24
 ### Added
 - Community Requests: makers can now upload poster images directly from the Community Requests page via an IDarr quick-add toggle
