@@ -349,6 +349,64 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Type 2 = APPLICATION_COMMAND (slash command)
+  if (interaction.type === 2) {
+    const commandName = (interaction.data as Record<string, unknown>)?.name as string | undefined
+
+    if (commandName === 'archive') {
+      const channelId = interaction.channel_id as string | undefined
+      if (!channelId) {
+        return jsonResponse({
+          type: 4,
+          data: { content: '⚠️ Could not determine the current channel.', flags: 64 },
+        })
+      }
+
+      const member = interaction.member as Record<string, unknown> | undefined
+      const user = interaction.user as Record<string, unknown> | undefined
+      const memberUser = member?.user as Record<string, unknown> | undefined
+      const username =
+        (memberUser?.global_name as string) ??
+        (memberUser?.username as string) ??
+        (user?.global_name as string) ??
+        (user?.username as string) ??
+        'Someone'
+
+      // Fire-and-forget: short delay then lock + archive so Discord has time
+      // to render the response message before the thread becomes archived
+      const bgTask = (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        const lockResp = await fetch(
+          `https://discord.com/api/v10/channels/${channelId}`,
+          {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ locked: true, archived: true }),
+          },
+        )
+        if (!lockResp.ok) {
+          console.error(`[discord-interactions] /archive failed for channel ${channelId}:`, await lockResp.text())
+        }
+      })().catch(console.error)
+
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        // EdgeRuntime may not be available in all environments; ignore
+      }
+
+      // Respond instantly with a public message — lock happens in background
+      return jsonResponse({
+        type: 4,
+        data: { content: `🔒 This thread has been locked and archived by ${username}.` },
+      })
+    }
+  }
+
   return jsonResponse({ type: 1 })
   } catch (err) {
     console.error('[discord-interactions] Unhandled error:', err)
