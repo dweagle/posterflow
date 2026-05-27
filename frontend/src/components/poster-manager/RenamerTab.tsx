@@ -179,6 +179,34 @@ function RenamerTab({
           Add movies or shows that are in Plex but not managed by Radarr/Sonarr. These will be included in poster renaming, border replacement, unmatched detection, and Plex upload.
         </p>
 
+        <details className="manual-media-help">
+          <summary className="manual-media-help-summary">Tips for matching posters correctly</summary>
+          <div className="manual-media-help-body">
+            <p>PosterFlow searches your subscribed poster drives for a folder that matches each entry you add below. Here's how to make sure it finds the right one:</p>
+
+            <div className="manual-media-help-section">
+              <span className="manual-media-help-label">Title</span>
+              <span className="manual-media-help-example">Enter the title <em>exactly as it appears on the poster drive</em> — this is usually the same as the show/movie's common name. (e.g. <em>The Thing)</em></span>
+            </div>
+
+            <div className="manual-media-help-section">
+              <span className="manual-media-help-label">Year</span>
+              <span className="manual-media-help-example">Add the Year. Prevents mismatches between remakes with the same name (e.g. <em>The Thing (1982)</em> vs <em>The Thing (2011)</em>). Also ensures your output folder matches Plex's expected <em>Movie Title (Year)</em> format.</span>
+            </div>
+
+            <div className="manual-media-help-section">
+              <span className="manual-media-help-label">IDs — most reliable</span>
+              <span className="manual-media-help-example">
+                If you enter a TMDB ID (movies) or TVDB ID (TV shows), PosterFlow will match by ID alone — title spelling becomes irrelevant. Find IDs at <em>themoviedb.org</em> or <em>thetvdb.com</em>.
+              </span>
+            </div>
+
+            <p className="manual-media-help-note">
+              The output folder PosterFlow creates will use the title and year you enter here, so make sure they match what Plex expects.
+            </p>
+          </div>
+        </details>
+
         <div className="field-group">
           <label>Add Entry</label>
           {/* Primary row: type, title, year, seasons, add */}
