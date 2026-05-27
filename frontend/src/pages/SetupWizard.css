@@ -495,6 +495,71 @@
   color: #f44336;
 }
 
+.wizard-libraries-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: rgba(100, 181, 246, 0.05);
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.libraries-loading {
+  color: #aaa;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.libraries-label {
+  color: #ccc;
+  font-size: 0.875rem;
+  margin: 0 0 0.75rem 0;
+}
+
+.wizard-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.wizard-library-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.wizard-library-item:hover {
+  background-color: #333;
+}
+
+.wizard-library-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #64b5f6;
+  flex-shrink: 0;
+}
+
+.wizard-library-name {
+  color: #fff;
+  font-size: 0.875rem;
+  flex: 1;
+}
+
+.wizard-library-type {
+  color: #888;
+  font-size: 0.75rem;
+  background-color: #333;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+
 /* Welcome Screen Styles */
 .welcome-screen {
   margin-top: 1rem;

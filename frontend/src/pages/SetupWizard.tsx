@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath } from '../api/client'
+import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -114,6 +114,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showPlexTokens, setShowPlexTokens] = useState<Record<number, boolean>>({})
   const [showSonarrKeys, setShowSonarrKeys] = useState<Record<number, boolean>>({})
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
+  const [plexLibraries, setPlexLibraries] = useState<Record<number, PlexLibrary[]>>({})
+  const [plexLibraryLoading, setPlexLibraryLoading] = useState<Record<number, boolean>>({})
   
   const { showToast } = useToast()
 
@@ -166,6 +168,47 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           } catch (e) { console.error('Error parsing radarr instances:', e) }
         }
         setFormData(updatedFormData)
+
+        // Load existing Plex library configs and map them by instance index,
+        // then auto-fetch for any configured instance that has no saved config yet
+        try {
+          const librariesMap: Record<number, PlexLibrary[]> = {}
+
+          try {
+            const libConfigData = await getPlexLibraryConfigs()
+            if (libConfigData.configs && libConfigData.configs.length > 0) {
+              libConfigData.configs.forEach((config: PlexLibraryConfig) => {
+                const instanceIndex = updatedFormData.plex_instances.findIndex(
+                  inst => inst.name === config.instance_name
+                )
+                if (instanceIndex !== -1) {
+                  librariesMap[instanceIndex] = config.libraries
+                }
+              })
+            }
+          } catch (e) {
+            console.error('Error loading Plex library configs:', e)
+          }
+
+          // For instances that have URL+token but no saved library config, fetch from Plex now
+          for (let i = 0; i < updatedFormData.plex_instances.length; i++) {
+            const instance = updatedFormData.plex_instances[i]
+            if (instance.url && instance.api_key && !librariesMap[i]) {
+              try {
+                const libData = await getPlexLibraries(instance.url, instance.api_key)
+                librariesMap[i] = libData.libraries.map(lib => ({ ...lib, enabled: true }))
+              } catch (e) {
+                // Silent fail — instance may be unreachable at wizard load time
+              }
+            }
+          }
+
+          if (Object.keys(librariesMap).length > 0) {
+            setPlexLibraries(librariesMap)
+          }
+        } catch (e) {
+          console.error('Error setting up Plex library configs:', e)
+        }
       } catch (error) {
         console.error('Error loading settings:', error)
       } finally {
@@ -267,6 +310,26 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         ...prev, 
         [key]: { loading: false, success: true, message: result.message }
       }))
+
+      // Auto-fetch libraries after successful connection
+      setPlexLibraryLoading(prev => ({ ...prev, [index]: true }))
+      try {
+        const libData = await getPlexLibraries(instance.url, instance.api_key)
+        setPlexLibraries(prev => {
+          // Merge with existing saved state: preserve enabled/disabled for known libraries,
+          // default new libraries to enabled
+          const existing = prev[index] || []
+          const merged = libData.libraries.map(lib => {
+            const savedLib = existing.find(l => l.key === lib.key)
+            return savedLib ? savedLib : { ...lib, enabled: true }
+          })
+          return { ...prev, [index]: merged }
+        })
+      } catch (e) {
+        console.error('Failed to fetch Plex libraries:', e)
+      } finally {
+        setPlexLibraryLoading(prev => ({ ...prev, [index]: false }))
+      }
     } catch (error) {
       setTestStatus(prev => ({ 
         ...prev, 
@@ -364,6 +427,15 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }
 
+  const togglePlexLibrary = (instanceIndex: number, libraryKey: string) => {
+    setPlexLibraries(prev => ({
+      ...prev,
+      [instanceIndex]: (prev[instanceIndex] || []).map(lib =>
+        lib.key === libraryKey ? { ...lib, enabled: !lib.enabled } : lib
+      )
+    }))
+  }
+
   const handleSaveStep3 = async () => {
     const missing: string[] = []
     if (!skipPlex && !formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')) missing.push('Plex (or check "I don\'t have Plex")')
@@ -380,6 +452,24 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         sonarr_instances: JSON.stringify(formData.sonarr_instances.filter(s => s.url)),
         radarr_instances: JSON.stringify(formData.radarr_instances.filter(r => r.url)),
       })
+
+      // Save library configs for instances where libraries were fetched
+      for (const [indexStr, libraries] of Object.entries(plexLibraries)) {
+        const index = parseInt(indexStr)
+        const instance = formData.plex_instances[index]
+        if (instance?.url && libraries.length > 0) {
+          try {
+            const config: PlexLibraryConfig = {
+              instance_name: instance.name,
+              libraries,
+            }
+            await savePlexLibraryConfig(config)
+          } catch (e) {
+            console.error(`Failed to save library config for ${instance.name}:`, e)
+          }
+        }
+      }
+
       setStep(4)
     } catch (error) {
       console.error('Error saving settings:', error)
@@ -916,6 +1006,31 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                           {status.success ? '✓' : '✕'} {status.message}
                         </div>
                       )}
+
+                      {(status?.success && !status.loading) || plexLibraries[index]?.length > 0 ? (
+                        <div className="wizard-libraries-section">
+                          {plexLibraryLoading[index] ? (
+                            <p className="libraries-loading">Loading libraries...</p>
+                          ) : plexLibraries[index]?.length > 0 ? (
+                            <>
+                              <p className="libraries-label">Select libraries to include in poster operations:</p>
+                              <div className="wizard-library-list">
+                                {plexLibraries[index].map(lib => (
+                                  <label key={lib.key} className="wizard-library-item">
+                                    <input
+                                      type="checkbox"
+                                      checked={lib.enabled}
+                                      onChange={() => togglePlexLibrary(index, lib.key)}
+                                    />
+                                    <span className="wizard-library-name">{lib.title}</span>
+                                    <span className="wizard-library-type">{lib.type}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })}
