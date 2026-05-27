@@ -953,10 +953,16 @@ def _collect_style_seasons(
     rows: list[tuple],
     media_type: str,
     year: str,
+    expected_tmdb_id: int | None = None,
 ) -> dict[str, set[int]]:
     """Build a mapping of style_label -> {season_numbers} from (Poster, Drive) rows.
 
     Every matched style is present as a key; the season set is empty for non-TV items.
+    When expected_tmdb_id is provided, any file that carries a {tmdb-XXXX} tag must
+    have XXXX == expected_tmdb_id — this double-checks title-fallback matches against
+    the actual TMDB ID so a file for a different title can't trigger a false positive.
+    Files with no embedded TMDB tag are always accepted (they are the intended target
+    of the fallback for legacy untagged posters).
     """
     style_seasons: dict[str, set[int]] = {}
     for poster, drive in rows:
@@ -964,6 +970,10 @@ def _collect_style_seasons(
             continue
         if not _matches_media_type(poster.file_name, media_type):
             continue
+        if expected_tmdb_id is not None:
+            m = TMDB_REGEX.search(poster.file_name)
+            if m and int(m.group(1)) != expected_tmdb_id:
+                continue
         style = "Custom" if drive.is_custom else drive.style_type
         if style not in style_seasons:
             style_seasons[style] = set()
@@ -1019,14 +1029,14 @@ def tmdb_poster_check(
                 db.query(Poster, Drive)
                 .join(Drive, Poster.drive_id == Drive.drive_id)
                 .filter(
-                    Poster.file_name.ilike(f"%{title}%"),
+                    Poster.file_name.ilike(f"{title} (%"),
                     Drive.last_synced.isnot(None),
                 )
                 .order_by(Drive.name.asc(), Poster.file_name.asc())
                 .limit(100)
                 .all()
             )
-            style_seasons = _collect_style_seasons(fallback_rows, item.media_type, item.year)
+            style_seasons = _collect_style_seasons(fallback_rows, item.media_type, item.year, expected_tmdb_id=item.tmdb_id)
 
         if style_seasons:
             result[item.tmdb_id] = [
