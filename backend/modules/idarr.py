@@ -1,3 +1,4 @@
+import hashlib
 import traceback
 import json
 from datetime import datetime, timezone
@@ -26,12 +27,62 @@ from models.job import (
     update_job_state,
 )
 from models.idarr import create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
-from models.setting import get_setting
+from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
 from services.idarr_runner import IdarrRunner
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 IDARR_RUN_HISTORY_KEEP_LATEST = 10
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
+
+
+def _sync_state_key(source_dir: str) -> str:
+    """Return a stable settings key scoped to a specific source directory."""
+    digest = hashlib.sha256(source_dir.encode()).hexdigest()[:16]
+    return f"idarr_last_sync_{digest}"
+
+
+def _get_last_sync_time(db: Any, source_dir: str) -> datetime | None:
+    """Return the UTC datetime of the last successful personal sync for source_dir, or None."""
+    key = _sync_state_key(source_dir)
+    setting = get_setting(db, key)
+    if not setting or not setting.value:
+        return None
+    try:
+        return datetime.fromisoformat(setting.value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _update_last_sync_time(db: Any, source_dir: str) -> None:
+    """Persist the current UTC time as the last successful personal sync time for source_dir."""
+    key = _sync_state_key(source_dir)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    upsert_setting(db, key, now_iso)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _has_files_newer_than(source_dir: Path, since: datetime) -> bool:
+    """Return True if any image file in source_dir has an mtime strictly after `since`."""
+    since_ts = since.timestamp()
+    try:
+        for entry in source_dir.iterdir():
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            try:
+                if entry.stat().st_mtime > since_ts:
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
 
 def _sanitize_message(message: str, max_len: int = 220) -> str:
     value = " ".join(message.split())
@@ -320,15 +371,34 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
         success = True
         log_section_end(LogTags.IDARR, f"IDarr Job Completed (job_id={job_id})")
 
-        # Queue personal drive sync if requested and files were actually renamed (or forced)
+        # Queue personal drive sync if requested and there is something to upload
         _sync_after = bool(config_data.get("sync_after_run"))
         _force_sync = bool(config_data.get("force_sync_after_run"))
-        if _sync_after and not bool(config_data.get("dry_run")) and (renamed_count > 0 or _force_sync):
-            if _force_sync and renamed_count == 0:
-                log_info(LogTags.IDARR, "sync_after_run: forcing personal sync even though no files were renamed", job_id=job_id)
-            _queue_idarr_sync_after_run(db, config_data, job_id)
-        elif _sync_after and not bool(config_data.get("dry_run")) and renamed_count == 0:
-            log_info(LogTags.IDARR, "sync_after_run: skipping personal sync — no files were renamed", job_id=job_id)
+        if _sync_after and not bool(config_data.get("dry_run")):
+            _source_dir_str = str(config_data.get("source_dir") or "").strip()
+            _should_sync = False
+            _sync_reason = ""
+
+            if _force_sync:
+                _should_sync = True
+                _sync_reason = "forced"
+            elif renamed_count > 0:
+                _should_sync = True
+                _sync_reason = f"{renamed_count} file(s) renamed"
+            elif _source_dir_str:
+                _last_sync = _get_last_sync_time(db, _source_dir_str)
+                if _last_sync is None:
+                    _should_sync = True
+                    _sync_reason = "no previous sync recorded"
+                elif _has_files_newer_than(Path(_source_dir_str), _last_sync):
+                    _should_sync = True
+                    _sync_reason = "file(s) modified since last sync"
+
+            if _should_sync:
+                log_info(LogTags.IDARR, f"sync_after_run: queuing personal sync ({_sync_reason})", job_id=job_id)
+                _queue_idarr_sync_after_run(db, config_data, job_id)
+            else:
+                log_info(LogTags.IDARR, "sync_after_run: skipping personal sync — nothing changed since last sync", job_id=job_id)
 
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr background job failed: {exc}\n{traceback.format_exc()}")
@@ -499,6 +569,13 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
             completed_at=datetime.now(timezone.utc),
         )
         log_success(LogTags.IDARR, f"IDarr personal sync complete: {source_dir} -> personal drive ({sync_mode})")
+
+        # Record the sync time so the mtime gate can skip future runs with no changes
+        try:
+            _update_last_sync_time(db, str(source_dir))
+        except Exception as ts_exc:
+            log_warning(LogTags.IDARR, f"Failed to record last sync time: {ts_exc}")
+
         success = True
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr personal sync job failed: {exc}\n{traceback.format_exc()}")
