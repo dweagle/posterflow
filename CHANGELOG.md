@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-27
+### Added
+- Poster Manager: new Manual Media Management panel — add, list, and delete manual media entries that are integrated directly into the poster renaming service
+- IDarr: last sync timestamp is now tracked per personal sync to improve the sync-after-IDarr-run gate
+- Community Requests: Discord `/archive` slash command locks and archives a request thread when a request is closed out
+
+### Fixed
+- Community Requests: style and genre tags were missing from Discord thread messages
+
 ## [0.6.0] - 2026-05-26
 ### Added
 - IDarr Workflow Integration: IDarr can now be enabled as the first step in the Poster Manager workflow — posters are processed and renamed through IDarr before syncing; includes inline personal sync and scope selection.  This feature is hidden by default for users.  Poster makers can turn this on in IDarr settings.
