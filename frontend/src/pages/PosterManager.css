@@ -390,8 +390,8 @@
   align-items: stretch;
 }
 
-.renamer-config-card,
-.renamer-library-card {
+.poster-manager .renamer-config-card,
+.poster-manager .renamer-library-card {
   flex: 1 1 0;
   min-width: 0;
   margin-bottom: 0;
@@ -402,8 +402,8 @@
     flex-direction: column;
   }
 
-  .renamer-config-card,
-  .renamer-library-card {
+  .poster-manager .renamer-config-card,
+  .poster-manager .renamer-library-card {
     flex: none;
     width: 100%;
     margin-bottom: 0;
@@ -414,6 +414,150 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
+}
+
+/* ── Manual Media ──────────────────────────────────────── */
+.manual-media-section {
+  margin-top: 1rem;
+}
+
+.manual-media-section h2 {
+  margin-bottom: 0.5rem;
+}
+
+.manual-media-section .section-description {
+  margin-bottom: 0.75rem;
+}
+
+.manual-media-search-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.manual-media-type-select {
+  width: 100px !important;
+  flex-shrink: 0;
+}
+
+.manual-media-year-input {
+  width: 72px !important;
+  flex-shrink: 0;
+}
+
+.manual-media-seasons-input {
+  width: 90px !important;
+  flex-shrink: 0;
+}
+
+/* Specials checkbox inline with seasons field */
+.manual-media-specials-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: #aaa;
+  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.manual-media-specials-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Add button: matches btn-secondary but with primary accent */
+.poster-manager .manual-media-add-btn {
+  flex-shrink: 0;
+  background: #5B89C4;
+  border-color: #5B89C4;
+  color: #fff;
+}
+
+.poster-manager .manual-media-add-btn:hover:not(:disabled) {
+  background: #6c9bd4;
+  border-color: #6c9bd4;
+}
+
+/* IDs row below the primary row */
+.manual-media-ids-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.manual-media-id-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.manual-media-id-label {
+  font-size: 0.78rem;
+  color: #888;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.manual-media-id-field input {
+  width: 110px;
+}
+
+.manual-media-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.manual-media-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+
+.manual-media-entry-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.manual-media-entry-title {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.manual-media-entry-year {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.manual-media-entry-meta {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.library-badge.badge-movie {
+  background: #1e3a5f;
+  color: #64b5f6;
+  border-color: #2d5a8e;
+}
+
+.library-badge.badge-series {
+  background: #1e3a2e;
+  color: #66bb6a;
+  border-color: #2d6e40;
 }
 
 .poster-manager .checkbox-label {
@@ -514,7 +658,8 @@
 
 .field-group input[type="text"],
 .field-group input[type="number"],
-.field-group input[type="password"] {
+.field-group input[type="password"],
+.field-group select {
   padding: 0.5rem 0.75rem;
   background: #1a1a1a;
   border: 1px solid #444;
@@ -573,7 +718,8 @@
 
 .field-group input[type="text"]:focus,
 .field-group input[type="number"]:focus,
-.field-group input[type="password"]:focus {
+.field-group input[type="password"]:focus,
+.field-group select:focus {
   outline: none;
   border-color: #64b5f6;
 }
@@ -2123,7 +2269,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.5rem;
   flex: 1;
-  min-width: 140px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .unmatched-item-actions {
@@ -2141,14 +2288,26 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 
 .unmatched-item {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.35rem;
   padding: 0.75rem;
   background-color: #3D4556;
   border-radius: 6px;
   border: 1px solid #5c6882;
   transition: all 0.2s;
+}
+
+.unmatched-item-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.unmatched-seasons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.35rem;
 }
 
 .unmatched-item:hover {

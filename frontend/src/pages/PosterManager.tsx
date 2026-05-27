@@ -27,6 +27,7 @@ import { usePosterManagerJobMonitoring } from '../hooks/usePosterManagerJobMonit
 import { usePosterManagerSettings } from '../hooks/usePosterManagerSettings'
 import { usePosterManagerActions } from '../hooks/usePosterManagerActions'
 import { usePosterManagerLifecycle } from '../hooks/usePosterManagerLifecycle'
+import { usePosterManagerManualMedia } from '../hooks/usePosterManagerManualMedia'
 import './PosterManager.css'
 
 // Limits to prevent performance issues
@@ -276,6 +277,29 @@ function PosterManager() {
     showToast,
   })
 
+  const {
+    manualEntries,
+    formTitle,
+    formYear,
+    formType,
+    formSeasonCount,
+    formSpecials,
+    formTmdbId,
+    formTvdbId,
+    formImdbId,
+    adding,
+    setFormTitle,
+    setFormYear,
+    setFormType,
+    setFormSeasonCount,
+    setFormSpecials,
+    setFormTmdbId,
+    setFormTvdbId,
+    setFormImdbId,
+    handleAddManualEntry,
+    handleDeleteEntry,
+  } = usePosterManagerManualMedia({ showToast })
+
   const handleDiscardChangesWithReset = () => {
     if (activeTab === 'settings') {
       resetConfigToOriginal()
@@ -439,10 +463,30 @@ function PosterManager() {
           autoRunBorder={autoRunBorder}
           libraryConfigs={libraryConfigs}
           selectedLibraries={selectedLibraries}
+          manualEntries={manualEntries}
+          formTitle={formTitle}
+          formYear={formYear}
+          formType={formType}
+          formSeasonCount={formSeasonCount}
+          formSpecials={formSpecials}
+          formTmdbId={formTmdbId}
+          formTvdbId={formTvdbId}
+          formImdbId={formImdbId}
+          adding={adding}
           onSaveSettings={saveRenameSettings}
           onRunRename={handleStartRename}
           onSetAutoRunBorder={setAutoRunBorder}
           onToggleLibrarySelection={toggleLibrarySelection}
+          onFormTitleChange={setFormTitle}
+          onFormYearChange={setFormYear}
+          onFormTypeChange={setFormType}
+          onFormSeasonCountChange={setFormSeasonCount}
+          onFormSpecialsChange={setFormSpecials}
+          onFormTmdbIdChange={setFormTmdbId}
+          onFormTvdbIdChange={setFormTvdbId}
+          onFormImdbIdChange={setFormImdbId}
+          onAddManualEntry={handleAddManualEntry}
+          onDeleteEntry={handleDeleteEntry}
         />
       )}
 

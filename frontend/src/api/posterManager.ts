@@ -1,4 +1,4 @@
-import { getData, postData } from './http'
+import { getData, postData, deleteData } from './http'
 
 // Poster types and functions
 export interface PosterConfig {
@@ -133,6 +133,43 @@ export const searchUnmatchedTmdb = async (params: {
   type: 'movie' | 'show' | 'collection'
 }): Promise<{ candidates: TmdbCandidate[] }> => {
   return postData('/api/posterflow/unmatched-tmdb-search', params)
+}
+
+// ---------------------------------------------------------------------------
+// Manual Media Entries
+// ---------------------------------------------------------------------------
+
+export interface ManualMediaEntry {
+  id: number
+  title: string
+  year: number | null
+  media_type: 'movie' | 'series'
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  seasons: number[]
+  created_at: string | null
+}
+
+export const listManualMedia = async (): Promise<{ entries: ManualMediaEntry[] }> => {
+  return getData('/api/posterflow/manual-media')
+}
+
+export const addManualMedia = async (payload: {
+  title: string
+  year: number | null
+  media_type: 'movie' | 'series'
+  seasons_count: number | null
+  include_specials: boolean
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+}): Promise<{ success: boolean; entry: ManualMediaEntry }> => {
+  return postData('/api/posterflow/manual-media', payload)
+}
+
+export const deleteManualMedia = async (id: number): Promise<{ success: boolean; deleted_id: number }> => {
+  return deleteData(`/api/posterflow/manual-media/${id}`)
 }
 
 export const searchPosters = async (query: string, limit: number = 200): Promise<PosterSearchResponse> => {

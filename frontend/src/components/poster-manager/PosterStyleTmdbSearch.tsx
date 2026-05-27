@@ -130,41 +130,45 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
   return (
     <div className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
       <div className="unmatched-item">
-        <div className="unmatched-item-meta">
-          <span className="item-title">{cleanTitle}</span>
-          {item.year && <span className="item-year">({item.year})</span>}
-          <span className={`unmatched-cat-badge unmatched-cat-badge--${
-            item.type === 'movie' ? 'movie' : item.type === 'collection' ? 'collection' : 'series'
-          }`}>
-            {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'}
-          </span>
+        <div className="unmatched-item-top">
+          <div className="unmatched-item-meta">
+            <span className="item-title">{cleanTitle}</span>
+            {item.year && <span className="item-year">({item.year})</span>}
+            <span className={`unmatched-cat-badge unmatched-cat-badge--${
+              item.type === 'movie' ? 'movie' : item.type === 'collection' ? 'collection' : 'series'
+            }`}>
+              {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'}
+            </span>
+          </div>
+          <div className="unmatched-item-actions">
+            <button
+              className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
+              onClick={handleSearch}
+              title="Search TMDB for this item"
+            >
+              {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
+              <span>TMDB</span>
+            </button>
+            <button
+              type="button"
+              className="maker-nav-btn"
+              title="Search in Maker Tools"
+              onClick={() => navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanTitle} ${item.year}` : cleanTitle } })}
+            >
+              <Search size={13} />
+              <span>Maker</span>
+            </button>
+            <button
+              type="button"
+              className="community-request-btn"
+              title="Request this poster from the community"
+              onClick={() => setShowRequestModal(true)}
+            >
+              <Star size={13} />
+              <span>Request</span>
+            </button>
+          </div>
         </div>
-        <button
-          className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
-          onClick={handleSearch}
-          title="Search TMDB for this item"
-        >
-          {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
-          <span>TMDB</span>
-        </button>
-        <button
-          type="button"
-          className="maker-nav-btn"
-          title="Search in Maker Tools"
-          onClick={() => navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanTitle} ${item.year}` : cleanTitle } })}
-        >
-          <Search size={13} />
-          <span>Maker</span>
-        </button>
-        <button
-          type="button"
-          className="community-request-btn"
-          title="Request this poster from the community"
-          onClick={() => setShowRequestModal(true)}
-        >
-          <Star size={13} />
-          <span>Request</span>
-        </button>
       </div>
 
       {seasons && seasons.length > 0 && (

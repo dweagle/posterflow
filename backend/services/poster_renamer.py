@@ -622,6 +622,102 @@ class PosterRenameService:
         
         return output, renamed_files, processed_source_files, winning_source_files
 
+    def _inject_manual_media(self, media_dict: MediaDict, log_tag: str = LogTags.POSTER_RENAMER) -> None:
+        """
+        Load manually added media entries from the database and inject them into
+        *media_dict* so they participate in the normal poster-renaming pipeline.
+
+        Manual entries represent shows/movies that live in Plex but are not
+        managed by Sonarr or Radarr.  They are never deduplicated against
+        arr-sourced entries; if the same title appears in both sources the
+        arr-sourced entry takes precedence because it arrives first and the
+        deduplication step has already run.
+        """
+        try:
+            from models.manual_media import ManualMediaEntry
+            from util.data.construct import generate_title_variants
+
+            entries = self.db.query(ManualMediaEntry).all()
+            if not entries:
+                return
+
+            injected_movies = 0
+            injected_series = 0
+
+            for entry in entries:
+                title = entry.title or ""
+                if not title:
+                    continue
+
+                normalized = normalize_titles(title)
+                title_variants = generate_title_variants(title)
+
+                if entry.media_type == "movie":
+                    folder = f"{title} ({entry.year})" if entry.year else title
+                    media_dict["movies"].append({
+                        "type": "movies",
+                        "title": title,
+                        "year": entry.year,
+                        "folder": folder,
+                        "root_folder": None,
+                        "tmdb_id": entry.tmdb_id,
+                        "tvdb_id": entry.tvdb_id,
+                        "imdb_id": entry.imdb_id,
+                        "monitored": True,
+                        "normalized_title": normalized,
+                        "alternate_titles": title_variants.get("alternate_titles", []),
+                        "normalized_alternate_titles": title_variants.get("normalized_alternate_titles", []),
+                        "status": "released",
+                        "has_file": True,
+                        "instance": "Manual",
+                        "source": "manual",
+                    })
+                    injected_movies += 1
+
+                elif entry.media_type == "series":
+                    season_numbers: List[int] = []
+                    if entry.seasons_json:
+                        try:
+                            season_numbers = json.loads(entry.seasons_json)
+                        except Exception:
+                            pass
+
+                    seasons = [
+                        {"season_number": s, "season_has_episodes": True, "monitored": True}
+                        for s in season_numbers
+                    ]
+
+                    media_dict["series"].append({
+                        "type": "series",
+                        "title": title,
+                        "year": entry.year,
+                        "folder": title,
+                        "root_folder": None,
+                        "tmdb_id": entry.tmdb_id,
+                        "tvdb_id": entry.tvdb_id,
+                        "imdb_id": entry.imdb_id,
+                        "monitored": True,
+                        "normalized_title": normalized,
+                        "alternate_titles": title_variants.get("alternate_titles", []),
+                        "normalized_alternate_titles": title_variants.get("normalized_alternate_titles", []),
+                        "seasons": seasons,
+                        "status": "continuing",
+                        "has_episodes": len(seasons) > 0,
+                        "instance": "Manual",
+                        "source": "manual",
+                    })
+                    injected_series += 1
+
+            if injected_movies or injected_series:
+                log_info(
+                    log_tag,
+                    f"Injected manual media: {injected_movies} movies, {injected_series} series",
+                    movies=injected_movies, series=injected_series,
+                )
+
+        except Exception as exc:
+            log_warning(log_tag, f"Failed to load manual media entries: {exc}")
+
     def get_media_from_instances(self, log_tag: str = LogTags.POSTER_RENAMER, setting_key: str = "poster_renamer_libraries") -> MediaDict:
         """
         Get media from configured Plex/Radarr/Sonarr instances.
@@ -739,7 +835,10 @@ class PosterRenameService:
         media_dict["movies"] = self._merge_duplicate_movies(media_dict["movies"], log_tag)
         media_dict["series"] = self._merge_duplicate_series(media_dict["series"], log_tag)
         media_dict["collections"] = self._merge_duplicate_collections(media_dict["collections"], log_tag)
-        
+
+        # Inject manually added media entries (items in Plex not managed by Sonarr/Radarr)
+        self._inject_manual_media(media_dict, log_tag)
+
         return media_dict
 
     def rename_posters(

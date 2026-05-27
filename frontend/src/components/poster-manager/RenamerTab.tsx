@@ -1,6 +1,7 @@
-import { Eye, Play, Save } from 'lucide-react'
+import { Eye, Play, Save, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig } from '../../api/client'
+import { ManualMediaEntry } from '../../api/posterManager'
 import Toolbar from './Toolbar'
 
 type RenamerTabProps = {
@@ -11,10 +12,31 @@ type RenamerTabProps = {
   autoRunBorder: boolean
   libraryConfigs: PlexLibraryConfig[]
   selectedLibraries: Set<string>
+  // Manual media
+  manualEntries: ManualMediaEntry[]
+  formTitle: string
+  formYear: string
+  formType: 'movie' | 'series'
+  formSeasonCount: string
+  formSpecials: boolean
+  formTmdbId: string
+  formTvdbId: string
+  formImdbId: string
+  adding: boolean
   onSaveSettings: () => void
   onRunRename: (dryRun: boolean) => void
   onSetAutoRunBorder: (enabled: boolean) => void
   onToggleLibrarySelection: (instanceName: string, libraryKey: string) => void
+  onFormTitleChange: (v: string) => void
+  onFormYearChange: (v: string) => void
+  onFormTypeChange: (type: 'movie' | 'series') => void
+  onFormSeasonCountChange: (v: string) => void
+  onFormSpecialsChange: (v: boolean) => void
+  onFormTmdbIdChange: (v: string) => void
+  onFormTvdbIdChange: (v: string) => void
+  onFormImdbIdChange: (v: string) => void
+  onAddManualEntry: () => void
+  onDeleteEntry: (id: number) => void
 }
 
 function RenamerTab({
@@ -25,10 +47,30 @@ function RenamerTab({
   autoRunBorder,
   libraryConfigs,
   selectedLibraries,
+  manualEntries,
+  formTitle,
+  formYear,
+  formType,
+  formSeasonCount,
+  formSpecials,
+  formTmdbId,
+  formTvdbId,
+  formImdbId,
+  adding,
   onSaveSettings,
   onRunRename,
   onSetAutoRunBorder,
   onToggleLibrarySelection,
+  onFormTitleChange,
+  onFormYearChange,
+  onFormTypeChange,
+  onFormSeasonCountChange,
+  onFormSpecialsChange,
+  onFormTmdbIdChange,
+  onFormTvdbIdChange,
+  onFormImdbIdChange,
+  onAddManualEntry,
+  onDeleteEntry,
 }: RenamerTabProps) {
   const navigate = useNavigate()
 
@@ -127,6 +169,133 @@ function RenamerTab({
             )}
             <small>Only media from selected libraries will be processed during rename</small>
           </div>
+        </div>
+      </div>
+
+      {/* Manual Media Card */}
+      <div className="settings-section manual-media-section">
+        <h2>Manual Media</h2>
+        <p className="section-description">
+          Add movies or shows that are in Plex but not managed by Radarr/Sonarr. These will be included in poster renaming, border replacement, unmatched detection, and Plex upload.
+        </p>
+
+        <div className="field-group">
+          <label>Add Entry</label>
+          {/* Primary row: type, title, year, seasons, add */}
+          <div className="manual-media-search-row">
+            <select
+              className="manual-media-type-select"
+              value={formType}
+              onChange={(e) => onFormTypeChange(e.target.value as 'movie' | 'series')}
+            >
+              <option value="movie">Movie</option>
+              <option value="series">TV Show</option>
+            </select>
+            <input
+              type="text"
+              placeholder="Title"
+              value={formTitle}
+              onChange={(e) => onFormTitleChange(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onAddManualEntry()}
+              style={{ flex: 1 }}
+            />
+            <input
+              type="text"
+              placeholder="Year"
+              value={formYear}
+              onChange={(e) => onFormYearChange(e.target.value)}
+              className="manual-media-year-input"
+            />
+            {formType === 'series' && (
+              <>
+                <input
+                  type="text"
+                  placeholder="# Seasons"
+                  value={formSeasonCount}
+                  onChange={(e) => onFormSeasonCountChange(e.target.value)}
+                  className="manual-media-seasons-input"
+                  title="Number of regular seasons (e.g. 3 → S01, S02, S03)"
+                />
+                <label className="manual-media-specials-label" title="Include Season 00 (Specials)">
+                  <input
+                    type="checkbox"
+                    checked={formSpecials}
+                    onChange={(e) => onFormSpecialsChange(e.target.checked)}
+                  />
+                  S00
+                </label>
+              </>
+            )}
+            <button
+              className="btn-secondary manual-media-add-btn"
+              disabled={adding || !formTitle.trim()}
+              onClick={onAddManualEntry}
+            >
+              Add
+            </button>
+          </div>
+          {/* Optional IDs row */}
+          <div className="manual-media-ids-row">
+            <div className="manual-media-id-field">
+              <span className="manual-media-id-label">TMDB ID</span>
+              <input
+                type="text"
+                placeholder="optional, e.g. 123456"
+                value={formTmdbId}
+                onChange={(e) => onFormTmdbIdChange(e.target.value)}
+              />
+            </div>
+            <div className="manual-media-id-field">
+              <span className="manual-media-id-label">TVDB ID</span>
+              <input
+                type="text"
+                placeholder="optional, e.g. 81189"
+                value={formTvdbId}
+                onChange={(e) => onFormTvdbIdChange(e.target.value)}
+              />
+            </div>
+            <div className="manual-media-id-field">
+              <span className="manual-media-id-label">IMDB ID</span>
+              <input
+                type="text"
+                placeholder="optional, e.g. tt1234567"
+                value={formImdbId}
+                onChange={(e) => onFormImdbIdChange(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="field-group" style={{ marginTop: '0.75rem' }}>
+          <label>Entries ({manualEntries.length})</label>
+          {manualEntries.length === 0 ? (
+            <div className="empty-state">
+              <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No entries yet. Use the form above to add items.</p>
+            </div>
+          ) : (
+            <div className="manual-media-table">
+              {manualEntries.map((entry) => (
+                <div key={entry.id} className="manual-media-entry-row">
+                  <div className="manual-media-entry-info">
+                    <span className="manual-media-entry-title">{entry.title}</span>
+                    {entry.year && <span className="manual-media-entry-year">{entry.year}</span>}
+                    <span className={`library-badge ${entry.media_type === 'movie' ? 'badge-movie' : 'badge-series'}`}>
+                      {entry.media_type === 'movie' ? 'Movie' : 'TV Show'}
+                    </span>
+                    {entry.media_type === 'series' && entry.seasons.length > 0 && (
+                      <span className="manual-media-entry-meta">{entry.seasons.length} season{entry.seasons.length !== 1 ? 's' : ''}</span>
+                    )}
+                    {entry.tmdb_id && <span className="manual-media-entry-meta">TMDB: {entry.tmdb_id}</span>}
+                    {entry.tvdb_id && <span className="manual-media-entry-meta">TVDB: {entry.tvdb_id}</span>}
+                    {entry.imdb_id && <span className="manual-media-entry-meta">{entry.imdb_id}</span>}
+                  </div>
+                  <button className="btn-icon-danger" title="Remove entry" onClick={() => onDeleteEntry(entry.id)}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -28,6 +28,7 @@ from models.job import (
     format_start_message,
 )
 from models.drive import Drive
+from models.manual_media import ManualMediaEntry
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
 from modules.renamer import run_rename_background_job
@@ -808,6 +809,122 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
 
     log_info(LogTags.UNMATCHED, f"TMDB search for '{title}' ({media_type}): {len(candidates)} candidates", year=year)
     return {"candidates": candidates}
+
+
+# ---------------------------------------------------------------------------
+# Manual Media Entries
+# ---------------------------------------------------------------------------
+
+class ManualMediaCreateRequest(BaseModel):
+    title: str
+    year: Optional[int] = None
+    media_type: str  # 'movie' or 'series'
+    seasons_count: Optional[int] = None  # for series: generates seasons [1..N]
+    include_specials: Optional[bool] = False  # prepend season 0 to the list
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+
+@router.get("/manual-media")
+async def list_manual_media(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return all manually added media entries."""
+    entries = db.query(ManualMediaEntry).order_by(ManualMediaEntry.created_at.asc()).all()
+    result = []
+    for entry in entries:
+        seasons = []
+        if entry.seasons_json:
+            try:
+                seasons = json.loads(entry.seasons_json)
+            except Exception:
+                pass
+        result.append({
+            "id": entry.id,
+            "title": entry.title,
+            "year": entry.year,
+            "media_type": entry.media_type,
+            "tmdb_id": entry.tmdb_id,
+            "tvdb_id": entry.tvdb_id,
+            "imdb_id": entry.imdb_id,
+            "seasons": seasons,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        })
+    return {"entries": result}
+
+
+@router.post("/manual-media")
+async def add_manual_media(
+    payload: ManualMediaCreateRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Add a manual media entry. For TV series, seasons are generated from seasons_count."""
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+
+    media_type = (payload.media_type or "").strip().lower()
+    if media_type not in {"movie", "series"}:
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
+
+    seasons_json: Optional[str] = None
+    if media_type == "series" and payload.seasons_count and payload.seasons_count > 0:
+        season_numbers = list(range(1, payload.seasons_count + 1))
+        if payload.include_specials:
+            season_numbers = [0] + season_numbers
+        seasons_json = json.dumps(season_numbers)
+    elif media_type == "series" and payload.include_specials:
+        # Specials only, no regular seasons
+        seasons_json = json.dumps([0])
+
+    entry = ManualMediaEntry(
+        title=title,
+        year=payload.year,
+        media_type=media_type,
+        tmdb_id=payload.tmdb_id,
+        tvdb_id=payload.tvdb_id,
+        imdb_id=payload.imdb_id,
+        seasons_json=seasons_json,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    seasons = json.loads(seasons_json) if seasons_json else []
+    log_user_action(
+        f"Added manual media entry: '{title}' ({media_type})",
+        seasons_count=payload.seasons_count,
+        media_type=media_type,
+    )
+
+    return {
+        "success": True,
+        "entry": {
+            "id": entry.id,
+            "title": entry.title,
+            "year": entry.year,
+            "media_type": entry.media_type,
+            "tmdb_id": entry.tmdb_id,
+            "tvdb_id": entry.tvdb_id,
+            "imdb_id": entry.imdb_id,
+            "seasons": seasons,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        },
+    }
+
+
+@router.delete("/manual-media/{entry_id}")
+async def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Delete a manual media entry by ID."""
+    entry = db.query(ManualMediaEntry).filter(ManualMediaEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    title = entry.title
+    db.delete(entry)
+    db.commit()
+
+    log_user_action(f"Deleted manual media entry: '{title}' (id={entry_id})")
+    return {"success": True, "deleted_id": entry_id}
 
 
 @router.get("/flow/config")

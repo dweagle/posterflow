@@ -323,6 +323,7 @@ function UnmatchedItemsModal({
               return (
                 <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
                   <div className="unmatched-item">
+                    <div className="unmatched-item-top">
                     <div className="unmatched-item-meta">
                       <span className="item-title">
                         {item.year
@@ -335,11 +336,6 @@ function UnmatchedItemsModal({
                           {item.category}
                         </span>
                       )}
-                      {item.missingSeasonsNumbers?.map((s) => (
-                        <span key={s} className="unmatched-cat-badge unmatched-cat-badge--season">
-                          {s === 0 ? 'Specials' : `S${s}`}
-                        </span>
-                      ))}
                     </div>
                     <div className="unmatched-item-actions">
                     <button
@@ -374,6 +370,16 @@ function UnmatchedItemsModal({
                       <span>Request</span>
                     </button>
                     </div>
+                    </div>
+                    {item.missingSeasonsNumbers && item.missingSeasonsNumbers.length > 0 && (
+                      <div className="unmatched-seasons-row">
+                        {item.missingSeasonsNumbers.map((s) => (
+                          <span key={s} className="unmatched-cat-badge unmatched-cat-badge--season">
+                            {s === 0 ? 'Specials' : `S${s}`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {isExpanded && (
