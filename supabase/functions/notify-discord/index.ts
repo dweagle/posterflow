@@ -37,10 +37,10 @@ const TAG_SECRETS: Record<string, string> = {
 
 // Maps style_tag string values (sent from frontend) to Supabase secret names
 const STYLE_TAG_SECRETS: Record<string, string> = {
-  mm2k: 'DISCORD_TAG_MM2K',
-  cl2k: 'DISCORD_TAG_CL2K',
-  anime_movie: 'DISCORD_TAG_ANIME_MOVIE',
-  anime_tv: 'DISCORD_TAG_ANIME_TV',
+  'MM2K Style': 'DISCORD_TAG_MM2K',
+  'CL2K Style': 'DISCORD_TAG_CL2K',
+  'Anime Movie': 'DISCORD_TAG_ANIME_MOVIE',
+  'Anime TV': 'DISCORD_TAG_ANIME_TV',
 }
 
 const TYPE_COLORS: Record<string, number> = {
