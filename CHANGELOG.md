@@ -17,6 +17,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Header icons updated with a new layout and additional links to include Discord and Github Wiki
+- Run & Sync - Force Sync even without name changes after IDarr run is now global setting and affects quick add, workflow, and Run & Sync.  Can be overridden in scheduled runs.
 
 ## [0.5.3] - 2026-05-24
 ### Added
