@@ -95,16 +95,22 @@ async def get_community_requests(
     db: Session = Depends(get_db),
 ):
     """Fetch community poster requests from Supabase."""
+    show_all = status == "all"
+    specific_status = status if status and status not in ("all",) else None
+
     params: dict = {
         "select": "*",
         "limit": limit,
         "offset": offset,
         "order": "created_at.desc",
     }
-    if status:
-        params["status"] = f"eq.{status}"
+    if show_all:
+        # No status filter — return everything
+        pass
+    elif specific_status:
+        params["status"] = f"eq.{specific_status}"
     else:
-        # Exclude fulfilled requests older than 24 hours.
+        # Active view: hide fulfilled requests older than 24 hours.
         # Compute the cutoff as an ISO timestamp — PostgREST cannot evaluate
         # PostgreSQL expressions like now()-interval '24 hours' in filter values.
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -122,8 +128,8 @@ async def get_community_requests(
             resp.raise_for_status()
             requests_list = resp.json()
 
-            # Post-filter: hide rejected items older than 24 hours
-            if not status:
+            # Post-filter: hide rejected items older than 24 hours (active view only)
+            if not show_all and not specific_status:
                 cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=24)
                 def _keep(r: dict) -> bool:
                     if r.get("status") != "rejected":

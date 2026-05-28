@@ -8,7 +8,7 @@ import { useUnmatched } from '../contexts/UnmatchedContext'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
-type StatusFilter = 'all' | 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
+type StatusFilter = 'active' | 'all' | 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
 type SortOrder = 'newest' | 'oldest'
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
@@ -58,7 +58,7 @@ export default function CommunityRequests() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
-  const [status, setStatus] = useState<StatusFilter>('all')
+  const [status, setStatus] = useState<StatusFilter>('active')
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   // Per-card upload state: requestId → 'uploading' | 'done' | Error
   const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done' | string>>(new Map())
@@ -173,7 +173,7 @@ export default function CommunityRequests() {
     try {
       const params: Record<string, string> = {}
       if (mediaType !== 'all') params.media_type = mediaType
-      if (status !== 'all') params.status = status
+      if (status !== 'active') params.status = status
       const data = await getCommunityRequests(params)
       const sorted = [...data.requests].sort((a, b) =>
         sortOrder === 'newest'
@@ -293,6 +293,7 @@ export default function CommunityRequests() {
           <div className="community-filter-group">
             <label>Status</label>
             <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+              <option value="active">Active</option>
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="in_progress">In Progress</option>
