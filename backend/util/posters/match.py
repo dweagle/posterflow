@@ -253,6 +253,12 @@ def match_assets_to_media(
                         tmdb_id=tmdb_id,
                         tvdb_id=tvdb_id,
                     )
+
+                    if tmdb_id:
+                        id_candidates = [
+                            c for c in id_candidates
+                            if not c.get("type") or c.get("type") == asset_type
+                        ]
                     for candidate in id_candidates:
                         is_matched, reason = is_match(
                             candidate, media, strict_folder_match
