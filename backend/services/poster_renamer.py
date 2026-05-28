@@ -691,7 +691,7 @@ class PosterRenameService:
                         "type": "series",
                         "title": title,
                         "year": entry.year,
-                        "folder": title,
+                        "folder": f"{title} ({entry.year})" if entry.year else title,
                         "root_folder": None,
                         "tmdb_id": entry.tmdb_id,
                         "tvdb_id": entry.tvdb_id,
