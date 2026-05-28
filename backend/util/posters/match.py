@@ -106,6 +106,13 @@ def is_match(
         return False, ""
 
     if has_asset_ids and has_media_ids:
+        _asset_type = asset.get("type") or ""
+        _media_type = media.get("type") or ""
+        tmdb_types_compatible = (
+            not _asset_type
+            or not _media_type
+            or (_asset_type == "series") == (_media_type == "series")
+        )
         id_match_criteria = [
             (
                 media.get("tvdb_id")
@@ -116,7 +123,8 @@ def is_match(
             (
                 media.get("tmdb_id")
                 and asset.get("tmdb_id")
-                and media.get("tmdb_id") == asset.get("tmdb_id"),
+                and media.get("tmdb_id") == asset.get("tmdb_id")
+                and tmdb_types_compatible,
                 "by tmdb_id",
             ),
             (
