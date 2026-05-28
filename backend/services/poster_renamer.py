@@ -652,8 +652,9 @@ class PosterRenameService:
                 normalized = normalize_titles(title)
                 title_variants = generate_title_variants(title)
 
+                folder = f"{title} ({entry.year})" if entry.year else title
+
                 if entry.media_type == "movie":
-                    folder = f"{title} ({entry.year})" if entry.year else title
                     media_dict["movies"].append({
                         "type": "movies",
                         "title": title,
@@ -691,7 +692,7 @@ class PosterRenameService:
                         "type": "series",
                         "title": title,
                         "year": entry.year,
-                        "folder": f"{title} ({entry.year})" if entry.year else title,
+                        "folder": folder,
                         "root_folder": None,
                         "tmdb_id": entry.tmdb_id,
                         "tvdb_id": entry.tvdb_id,
