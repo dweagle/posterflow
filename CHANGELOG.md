@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-27
+### Added
+- Setup Wizard: Plex instance library selection now appears in the setup step for new users.
+- Maker Tools: Multiple logos can be selected for psd export; logo card previews and expanded views now show a checkerboard background for easier viewing of transparent logos
+- Community Requests: request list filter now includes an 'active' status option.  'all' now shows all items correctly.
+
+### Fixed
+- Maker Tools: TMDB Search poster availability check no longer gives false positives
+- Unmatched Assets: Searching unmatched items with region tags (e.g. NL, US) no longer limiting TMDB results
+- Poster Manager: manually added media entries now match to the correct media type
+- Maker Tools: Apple TV search link now includes media type in query parameters so results return only movies or TV shows
+- Community Requests: total request count and feature toggle now display on the same row
+
 ## [0.6.1] - 2026-05-27
 ### Added
 - Poster Manager: new Manual Media Management panel — add, list, and delete manual media entries that are integrated directly into the poster renaming service
