@@ -63,6 +63,39 @@ def test_unmatched_tmdb_search_rejects_invalid_type(client, test_db):
     assert "type must be one of" in response.json()["detail"]
 
 
+def test_unmatched_tmdb_search_strips_language_region_tags(client, test_db):
+    """Should strip parenthetical 2-3 letter language/region tags (e.g. (NL), (UK)) before searching."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"results": [
+        {"id": 55, "name": "Foute Vrienden", "first_air_date": "2015-01-01",
+         "poster_path": "/fv.jpg", "overview": "", "popularity": 20.0}
+    ]}
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_ext = MagicMock()
+    mock_ext.json.return_value = {"tvdb_id": None, "imdb_id": None}
+    mock_ext.raise_for_status = MagicMock()
+
+    with patch("api.poster_manager.http_requests.get") as mock_get:
+        mock_get.side_effect = [mock_resp, mock_ext]
+
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "Foute Vrienden (NL)", "year": 2015, "type": "show"},
+        )
+
+    assert response.status_code == 200
+    # Verify the query used the cleaned title without "(NL)"
+    search_call_params = mock_get.call_args_list[0][1]["params"]
+    assert search_call_params["query"] == "Foute Vrienden"
+    candidates = response.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["title"] == "Foute Vrienden"
+
+
 def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
     """Should return candidates sorted by score with correct fields."""
     test_db.add(Setting(key="tmdb_api_key", value="fake_key"))

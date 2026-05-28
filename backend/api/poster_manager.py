@@ -711,6 +711,11 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
     if year:
         title = _re.sub(r'\s*\(\d{4}\)\s*$', '', title).strip()
 
+    # Strip trailing parenthetical language/region tags added by media managers
+    # (e.g. "(NL)", "(UK)", "(US)", "(DE)") — only at end-of-string to avoid
+    # stripping legitimate mid-title parentheticals like Roman numerals "(IV)".
+    title = _re.sub(r'\s*\([A-Z]{2,3}\)\s*$', '', title).strip()
+
     tmdb_api_key = _get_unmatched_tmdb_key(db)
     if not tmdb_api_key:
         log_warning(LogTags.UNMATCHED, "Unmatched TMDB search blocked: TMDB API key is not configured")
