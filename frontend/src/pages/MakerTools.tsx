@@ -262,9 +262,10 @@ function MakerTools() {
   const [galleryLoading, setGalleryLoading] = useState<Record<string, boolean>>({})
   const [galleryTab, setGalleryTab] = useState<Record<string, 'posters' | 'backdrops' | 'logos' | 'season-posters'>>({})
   const [galleryPreview, setGalleryPreview] = useState<TmdbImage | null>(null)
+  const [galleryPreviewIsLogo, setGalleryPreviewIsLogo] = useState(false)
   const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
-  // PSD export selections: key = galleryKey, value = { posters: ordered file_paths[], backdrops: ordered file_paths[], logo: file_path | null }
-  const [psdSelections, setPsdSelections] = useState<Record<string, { posters: string[]; backdrops: string[]; logo: string | null }>>({})
+  // PSD export selections: key = galleryKey, value = { posters: ordered file_paths[], backdrops: ordered file_paths[], logos: ordered file_paths[] }
+  const [psdSelections, setPsdSelections] = useState<Record<string, { posters: string[]; backdrops: string[]; logos: string[] }>>({})
   const [psdExporting, setPsdExporting] = useState<Record<string, boolean>>({})
   // PSD export settings
   const [psdExportFolder, setPsdExportFolder] = useState('')
@@ -286,9 +287,16 @@ function MakerTools() {
 
   const togglePsdSelection = (galleryKey: string, role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
     setPsdSelections((prev) => {
-      const current = prev[galleryKey] ?? { posters: [], backdrops: [], logo: null }
+      const current = prev[galleryKey] ?? { posters: [], backdrops: [], logos: [] }
       if (role === 'logo') {
-        return { ...prev, [galleryKey]: { ...current, logo: current.logo === filePath ? null : filePath } }
+        const already = current.logos.includes(filePath)
+        return {
+          ...prev,
+          [galleryKey]: {
+            ...current,
+            logos: already ? current.logos.filter((l) => l !== filePath) : [...current.logos, filePath],
+          },
+        }
       }
       if (role === 'backdrop') {
         const already = current.backdrops.includes(filePath)
@@ -316,7 +324,7 @@ function MakerTools() {
 
   const handlePsdExport = async (galleryKey: string, title: string, year: string, useExisting = false, confirmed = false) => {
     const sel = psdSelections[galleryKey]
-    if (!sel?.posters.length && !sel?.backdrops?.length && !sel?.logo) return
+    if (!sel?.posters.length && !sel?.backdrops?.length && !sel?.logos?.length) return
 
     // For new exports: check if a PSD with the same name already exists and warn before overwriting.
     // Skip this check if the user has already confirmed the overwrite (confirmed=true).
@@ -338,7 +346,7 @@ function MakerTools() {
           year: year ?? '',
           poster_paths: sel.posters,
           backdrop_paths: sel.backdrops ?? [],
-          logo_path: sel.logo ?? null,
+          logo_paths: sel.logos ?? [],
           use_existing: useExisting,
         },
         title,
@@ -1443,7 +1451,7 @@ function MakerTools() {
                                 </div>
                                 {(() => {
                                   const sel = psdSelections[galleryKey]
-                                  const hasSel = !!(sel?.posters.length || sel?.backdrops?.length || sel?.logo)
+                                  const hasSel = !!(sel?.posters.length || sel?.backdrops?.length || sel?.logos?.length)
                                   return hasSel ? (
                                     <div className="tmdb-psd-export-group">
                                       <button
@@ -1508,7 +1516,7 @@ function MakerTools() {
                                                           <button
                                                             type="button"
                                                             className="tmdb-gallery-thumb-btn"
-                                                            onClick={() => setGalleryPreview(img)}
+                                                            onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(false) }}
                                                             title="Preview full size"
                                                           >
                                                             <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
@@ -1562,17 +1570,15 @@ function MakerTools() {
                                           ? (psdSelections[galleryKey]?.posters ?? []).indexOf(img.file_path)
                                           : role === 'backdrop'
                                             ? (psdSelections[galleryKey]?.backdrops ?? []).indexOf(img.file_path)
-                                            : -1
-                                        const isSelected = role === 'logo'
-                                          ? psdSelections[galleryKey]?.logo === img.file_path
-                                          : selIdx !== -1
+                                            : (psdSelections[galleryKey]?.logos ?? []).indexOf(img.file_path)
+                                        const isSelected = selIdx !== -1
                                         return (
                                           <div key={img.file_path} className="tmdb-gallery-item">
                                             <div className="tmdb-gallery-thumb-wrapper">
                                               <button
                                                 type="button"
                                                 className="tmdb-gallery-thumb-btn"
-                                                onClick={() => setGalleryPreview(img)}
+                                                onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(activeGalleryTab === 'logos') }}
                                                 title="Preview full size"
                                               >
                                                 <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
@@ -1584,7 +1590,7 @@ function MakerTools() {
                                                 title={isSelected ? `Deselect ${role}` : role === 'poster' ? 'Select as Poster' : role === 'backdrop' ? 'Select as Background' : 'Select as Logo'}
                                               >
                                                 {isSelected
-                                                  ? (role === 'poster' || role === 'backdrop') ? <span>{selIdx + 1}</span> : <Check size={10} />
+                                                  ? <span>{selIdx + 1}</span>
                                                   : <span>{role === 'poster' ? 'P' : role === 'backdrop' ? 'B' : 'L'}</span>
                                                 }
                                               </button>
@@ -1642,7 +1648,7 @@ function MakerTools() {
         <div className="tmdb-lightbox-overlay" onClick={() => setGalleryPreview(null)}>
           <div className="tmdb-gallery-lightbox" onClick={(e) => e.stopPropagation()}>
             <img
-              className="tmdb-gallery-lightbox-img"
+              className={`tmdb-gallery-lightbox-img${galleryPreviewIsLogo ? ' tmdb-gallery-lightbox-img--logo' : ''}`}
               src={galleryPreview.url_full}
               alt="Preview"
             />

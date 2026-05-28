@@ -641,7 +641,7 @@ _psd_tools_missing = pytest.mark.skipif(
 @_psd_tools_missing
 def test_build_psd_scratch_mode_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
-    result = _build_psd([poster], logo_bytes=None)
+    result = _build_psd([poster], logo_bytes_list=[])
     assert isinstance(result, bytes)
     assert len(result) > 0
 
@@ -651,7 +651,7 @@ def test_build_psd_scratch_mode_returns_bytes():
 def test_build_psd_scratch_mode_with_logo_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
     logo = _make_png_bytes_rgba(40, 10)
-    result = _build_psd([poster], logo_bytes=logo, title="Test Show", year="2026")
+    result = _build_psd([poster], logo_bytes_list=[logo], title="Test Show", year="2026")
     assert isinstance(result, bytes)
     assert len(result) > 0
 
@@ -660,7 +660,7 @@ def test_build_psd_scratch_mode_with_logo_returns_bytes():
 @_psd_tools_missing
 def test_build_psd_multiple_posters_returns_bytes():
     posters = [_make_jpeg_bytes(20, 30) for _ in range(3)]
-    result = _build_psd(posters, logo_bytes=None, title="Multi Poster")
+    result = _build_psd(posters, logo_bytes_list=[], title="Multi Poster")
     assert isinstance(result, bytes)
     assert len(result) > 0
 
@@ -670,7 +670,7 @@ def test_build_psd_multiple_posters_returns_bytes():
 def test_build_psd_with_backdrop_returns_bytes():
     poster = _make_jpeg_bytes(20, 30)
     backdrop = _make_jpeg_bytes(40, 20)
-    result = _build_psd([poster], logo_bytes=None, backdrop_bytes_list=[backdrop], title="With Backdrop")
+    result = _build_psd([poster], logo_bytes_list=[], backdrop_bytes_list=[backdrop], title="With Backdrop")
     assert isinstance(result, bytes)
     assert len(result) > 0
 
@@ -679,7 +679,7 @@ def test_build_psd_with_backdrop_returns_bytes():
 @_psd_tools_missing
 def test_build_psd_no_poster_only_logo_returns_bytes():
     logo = _make_png_bytes_rgba(40, 10)
-    result = _build_psd([], logo_bytes=logo, title="Logo Only")
+    result = _build_psd([], logo_bytes_list=[logo], title="Logo Only")
     assert isinstance(result, bytes)
     assert len(result) > 0
 

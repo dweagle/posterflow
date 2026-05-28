@@ -158,7 +158,7 @@ export interface PsdExportRequest {
   year: string
   poster_paths: string[]
   backdrop_paths: string[]
-  logo_path: string | null
+  logo_paths: string[]
   use_existing?: boolean
 }
 

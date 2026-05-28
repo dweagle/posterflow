@@ -1286,7 +1286,7 @@ class PsdExportRequest(BaseModel):
     year: str = ""
     poster_paths: list[str] = []     # TMDB file_paths e.g. ["/abc.jpg"] — each becomes a separate pixel layer
     backdrop_paths: list[str] = []   # TMDB backdrop file_paths — fit-to-height, no crop, placed below posters
-    logo_path: str | None = None     # TMDB file_path e.g. "/xyz.png" — used as logo layer
+    logo_paths: list[str] = []       # TMDB file_paths — each becomes a separate logo layer
     use_existing: bool = False       # When True: open existing PSD in export folder and inject layers into it
 
 
@@ -1326,7 +1326,7 @@ def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
 
 def _build_psd(
     poster_bytes_list: list[bytes],
-    logo_bytes: bytes | None,
+    logo_bytes_list: list[bytes],
     backdrop_bytes_list: list[bytes] | None = None,
     canvas_w: int = 1000,
     canvas_h: int = 1500,
@@ -1424,14 +1424,17 @@ def _build_psd(
     if backdrop_bytes_list:
         log_info(LogTags.API, f"Injected {len(backdrop_bytes_list)} backdrop(s) into PSD (fit-to-height, no crop)")
 
-    # ── LOGO ─────────────────────────────────────────────────────────────────
-    if logo_bytes:
+    # ── LOGO(S) ───────────────────────────────────────────────────────────────
+    # Insert in reverse order so first-selected ends up on top of the group stack.
+    valid_logo_count = 0
+    for logo_idx, logo_bytes in enumerate(reversed(logo_bytes_list)):
+        if not logo_bytes:
+            continue
         try:
             logo_pil = Image.open(BytesIO(logo_bytes)).convert("RGBA")
         except Exception as img_exc:
-            log_warning(LogTags.API, f"Skipping unreadable logo image: {img_exc}")
-            logo_bytes = None
-    if logo_bytes:
+            log_warning(LogTags.API, f"Skipping unreadable logo image #{logo_idx + 1}: {img_exc}")
+            continue
 
         # Measure pixel density: ratio of non-transparent pixels to total pixels.
         # Uses the alpha channel histogram (256 bins) — fast, no numpy required.
@@ -1491,7 +1494,7 @@ def _build_psd(
         elif is_dense_logo:
             # Dense logos: gentle width reduction (max 10%), aggressive height cap.
             # Height always derived from the tight 225px base, shrinking up to 55% at max density.
-            t = (logo_density - 0.60) / (1.0 - 0.60)   # density factor 0→1
+            t = (logo_density - 0.60) / (1.0 - 0.60)
             w_mult = 1.0 - (t * 0.10)
             target_logo_w = round(target_logo_w * w_mult)
             effective_max_h = round(canvas_h * (225.0 / 1500) * (1.0 - t * 0.55))
@@ -1516,18 +1519,24 @@ def _build_psd(
         logo_left = (canvas_w - logo_w) // 2
         logo_top = logo_bottom - logo_h   # bottom-anchored
 
-        logo_layer = PixelLayer.frompil(logo_pil, psd, layer_name=f"{base_name} - Logo", top=logo_top, left=logo_left)
+        logo_count = len(logo_bytes_list)
+        layer_name = f"{base_name} - Logo" if logo_count == 1 else f"{base_name} - Logo {logo_count - logo_idx}"
+        logo_layer = PixelLayer.frompil(logo_pil, None, layer_name=layer_name, top=logo_top, left=logo_left)
 
         if template_path is not None:
             logo_group = psd.find("LOGO")
             if logo_group is not None:
                 logo_group.insert(0, logo_layer)
-                log_info(LogTags.API, "Injected logo into LOGO group")
             else:
                 log_warning(LogTags.API, "LOGO group not found in template; inserting at root")
                 psd.append(logo_layer)
         else:
             psd._layers.append(logo_layer)
+
+        valid_logo_count += 1
+
+    if valid_logo_count:
+        log_info(LogTags.API, f"Injected {valid_logo_count} logo(s) into PSD")
 
     buf = BytesIO()
     psd.save(buf)
@@ -1551,11 +1560,11 @@ def tmdb_psd_export(payload: PsdExportRequest, db: Session = Depends(get_db)):
 
 
 def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
-    if not payload.poster_paths and not payload.backdrop_paths and not payload.logo_path:
+    if not payload.poster_paths and not payload.backdrop_paths and not payload.logo_paths:
         raise HTTPException(status_code=400, detail="At least one poster, backdrop, or a logo is required.")
 
     # Validate paths — must start with / and contain no traversal
-    all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + ([payload.logo_path] if payload.logo_path else [])
+    all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + list(payload.logo_paths)
     for p in all_paths:
         if not p.startswith("/") or ".." in p:
             raise HTTPException(status_code=400, detail="Invalid image path.")
@@ -1571,8 +1580,10 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         backdrop_bytes_list: list[bytes] = [
             _fetch_tmdb_image_bytes(p, api_key) for p in payload.backdrop_paths
         ]
-        logo_bytes = _fetch_tmdb_image_bytes(payload.logo_path, api_key) if payload.logo_path else None
-        logo_bytes = logo_bytes or None  # treat empty bytes (cairosvg failure) as no logo
+        logo_bytes_list: list[bytes] = [
+            b for p in payload.logo_paths
+            if (b := _fetch_tmdb_image_bytes(p, api_key))  # skip empty (cairosvg failures)
+        ]
     except HTTPException:
         raise
     except Exception as exc:
@@ -1632,7 +1643,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     try:
         psd_bytes = _build_psd(
             poster_bytes_list,
-            logo_bytes,
+            logo_bytes_list,
             backdrop_bytes_list=backdrop_bytes_list,
             template_path=template_path,
             title=payload.title,
