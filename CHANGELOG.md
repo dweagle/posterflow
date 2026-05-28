@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-27
+### Fixed
+- Poster Manager: asset-to-media matching no longer cross-contaminates movie and TV candidates when resolving by TMDB ID
+
 ## [0.6.2] - 2026-05-27
 ### Added
 - Setup Wizard: Plex instance library selection now appears in the setup step for new users.
