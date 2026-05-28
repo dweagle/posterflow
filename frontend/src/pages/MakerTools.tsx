@@ -1368,7 +1368,7 @@ function MakerTools() {
                                       </div>
                                       <a
                                         className="apple-tv-open-btn"
-                                        href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}`}
+                                        href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         onClick={() => setAppleTvPopupKey(null)}
