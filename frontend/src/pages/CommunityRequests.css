@@ -178,10 +178,17 @@
 }
 
 /* List */
+.community-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
 .community-count {
   font-size: 0.8rem;
   color: #666;
-  margin: 0 0 0.75rem 0;
+  margin: 0;
 }
 
 .community-list {
@@ -618,14 +625,7 @@
   flex: 1 1 100%;
 }
 
-/* IDarr quick add toggle row (poster makers only, below toolbar) */
-.community-maker-tools-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
+/* IDarr quick add toggle (poster makers only, inline with count row) */
 .maker-idarr-toggle-label {
   display: inline-flex;
   align-items: center;

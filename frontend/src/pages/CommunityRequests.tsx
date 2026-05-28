@@ -314,32 +314,6 @@ export default function CommunityRequests() {
         </button>
       </div>
 
-      {isMaker && isConnected && (
-        <div className="community-maker-tools-row">
-          <label className="maker-idarr-toggle-label">
-            <span>Image Drop also adds to IDarr</span>
-            <span className="maker-idarr-toggle-info-wrap">
-              <span className="maker-idarr-info-icon"><Info size={12} /></span>
-              <span className="maker-idarr-tooltip">
-                When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon.
-              </span>
-            </span>
-            <span className="idarr-toggle-control">
-              <input
-                type="checkbox"
-                checked={idarrQuickAddEnabled}
-                onChange={(e) => {
-                  const next = e.target.checked
-                  setIdarrQuickAddEnabled(next)
-                  localStorage.setItem('posterflow.communityRequests.idarrQuickAdd', String(next))
-                }}
-              />
-              <span className="idarr-toggle-slider" />
-            </span>
-          </label>
-        </div>
-      )}
-
       {error && <div className="community-error">{error}</div>}
 
       {loading && requests.length === 0 ? (
@@ -357,9 +331,34 @@ export default function CommunityRequests() {
         </div>
       ) : (
         <div className="community-list">
-          <p className="community-count">
-            {requests.length} request{requests.length !== 1 ? 's' : ''}
-          </p>
+          <div className="community-list-header">
+            <p className="community-count">
+              {requests.length} request{requests.length !== 1 ? 's' : ''}
+            </p>
+            {isMaker && isConnected && (
+              <label className="maker-idarr-toggle-label">
+                <span>Image Drop also adds to IDarr</span>
+                <span className="maker-idarr-toggle-info-wrap">
+                  <span className="maker-idarr-info-icon"><Info size={12} /></span>
+                  <span className="maker-idarr-tooltip">
+                    When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon.
+                  </span>
+                </span>
+                <span className="idarr-toggle-control">
+                  <input
+                    type="checkbox"
+                    checked={idarrQuickAddEnabled}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                      setIdarrQuickAddEnabled(next)
+                      localStorage.setItem('posterflow.communityRequests.idarrQuickAdd', String(next))
+                    }}
+                  />
+                  <span className="idarr-toggle-slider" />
+                </span>
+              </label>
+            )}
+          </div>
           {requests.map((req) => {
             const tmdbLink = getTmdbLink(req)
             const tvdbLink = getTvdbLink(req)
