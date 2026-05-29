@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-05-28
+### Fixed
+- Maker Tools: Monitor shows now include the correct year in search results
+- Community Requests: file upload now uses batch processing with per-file status updates for more reliable handling
+- IDarr: Run & Sync toggle now correctly saves configuration settings on change
+- Poster Renamer: Manual injection now correctly includes the year in folder name so unmatched assets can resolve
+
 ## [0.6.3] - 2026-05-27
 ### Fixed
 - Poster Manager: asset-to-media matching no longer cross-contaminates movie and TV candidates when resolving by TMDB ID
