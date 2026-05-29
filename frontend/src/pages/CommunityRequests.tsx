@@ -109,12 +109,30 @@ export default function CommunityRequests() {
   const doUpload = useCallback(async (requestId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(requestId, 'uploading'))
     try {
-      await uploadPoster(requestId, files)
-      const label = files.length > 1 ? `Posted ${files.length}!` : 'done'
+      // Send in batches of DISCORD_MAX_FILES (Discord limit per message).
+      // Wait 1.5 s between batches to avoid Discord channel rate limits.
+      const totalBatches = Math.ceil(files.length / DISCORD_MAX_FILES)
+      for (let i = 0; i < files.length; i += DISCORD_MAX_FILES) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500))
+        if (totalBatches > 1) {
+          const batchNum = Math.floor(i / DISCORD_MAX_FILES) + 1
+          setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${batchNum}/${totalBatches}`))
+        }
+        await uploadPoster(requestId, files.slice(i, i + DISCORD_MAX_FILES))
+      }
+      const label = files.length > 1 ? `Posted ${files.length}!` : 'Posted!'
       setUploadStates((prev) => new Map(prev).set(requestId, label))
       if (idarrQuickAddEnabled) {
         void doIdarrUpload(files)
       }
+      // Reset after a delay so the button can be used again
+      setTimeout(() => {
+        setUploadStates((prev) => {
+          const next = new Map(prev)
+          next.delete(requestId)
+          return next
+        })
+      }, 3000)
     } catch (err) {
       setUploadStates((prev) =>
         new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upload failed')
@@ -127,8 +145,8 @@ export default function CommunityRequests() {
     const requestId = uploadTargetRef.current
     if (!allFiles.length || !requestId) return
     e.target.value = ''
-    doUpload(requestId, allFiles.slice(0, DISCORD_MAX_FILES))
-  }, [doUpload, DISCORD_MAX_FILES])
+    doUpload(requestId, allFiles)
+  }, [doUpload])
 
   const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject') => {
     setActionStates((prev) => new Map(prev).set(requestId, 'loading'))
@@ -164,8 +182,8 @@ export default function CommunityRequests() {
     setDragOverId(null)
     const allFiles = Array.from(e.dataTransfer.files)
     if (!allFiles.length) return
-    doUpload(requestId, allFiles.slice(0, DISCORD_MAX_FILES))
-  }, [doUpload, DISCORD_MAX_FILES])
+    doUpload(requestId, allFiles)
+  }, [doUpload])
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -457,19 +475,24 @@ export default function CommunityRequests() {
                     const actionLoading = as_ === 'loading'
                     const actionError = typeof as_ === 'string' && as_ !== 'loading' ? as_ : null
                     const canAct = req.status === 'pending' || req.status === 'in_progress'
+                    const isUploading = us === 'uploading' || (typeof us === 'string' && us.startsWith('uploading-'))
+                    const isPosted = typeof us === 'string' && us.startsWith('Posted')
+                    const uploadLabel = isUploading
+                      ? (typeof us === 'string' && us.startsWith('uploading-') ? `Uploading ${us.slice('uploading-'.length)}…` : 'Uploading…')
+                      : isPosted ? us : us ? 'Retry' : 'Upload'
                     return (
                       <>
                         <button
                           type="button"
-                          className={`request-upload-btn${us === 'uploading' || us === 'done' || (typeof us === 'string' && us.startsWith('Posted')) ? (us === 'uploading' ? '' : ' upload-done') : us ? ' upload-error' : ''}`}
-                          title={typeof us === 'string' && us !== 'uploading' && us !== 'done' && !us.startsWith('Posted') ? us : 'Upload poster(s) to Discord thread'}
-                          disabled={us === 'uploading' || us === 'done' || (typeof us === 'string' && us.startsWith('Posted'))}
+                          className={`request-upload-btn${isUploading || isPosted ? (isUploading ? '' : ' upload-done') : us ? ' upload-error' : ''}`}
+                          title={typeof us === 'string' && !isUploading && !isPosted ? us : 'Upload poster(s) to Discord thread'}
+                          disabled={isUploading || isPosted}
                           onClick={() => handleUploadClick(req.id)}
                         >
-                          {us === 'uploading' ? <Loader2 size={11} className="spin-icon" /> :
-                           (us === 'done' || (typeof us === 'string' && us.startsWith('Posted'))) ? <Check size={11} /> :
+                          {isUploading ? <Loader2 size={11} className="spin-icon" /> :
+                           isPosted ? <Check size={11} /> :
                            <Upload size={11} />}
-                          <span>{us === 'done' || (typeof us === 'string' && us.startsWith('Posted')) ? (us === 'done' ? 'Posted!' : us) : us === 'uploading' ? 'Uploading…' : us ? 'Retry' : 'Upload'}</span>
+                          <span>{uploadLabel}</span>
                         </button>
                         {canAct && (
                           <div className="request-status-actions">
