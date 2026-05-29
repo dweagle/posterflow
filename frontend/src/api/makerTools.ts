@@ -18,6 +18,7 @@ export interface MakerMonitorShowResult {
   homepage: string
   season_number: number
   date: string
+  first_air_year: string
   poster_exists: boolean
   external_sources: string[]
 }

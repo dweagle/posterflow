@@ -996,6 +996,13 @@
   font-size: 0.85rem;
 }
 
+.maker-show-main a .tmdb-result-year {
+  color: #888;
+  font-size: 0.85rem;
+  font-weight: normal;
+  margin-left: 0.3rem;
+}
+
 /* Poster availability indicator */
 .tmdb-poster-available {
   position: relative;

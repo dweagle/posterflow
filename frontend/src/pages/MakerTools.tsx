@@ -1023,7 +1023,7 @@ function MakerTools() {
                       .map((show) => (
                         <div className={`maker-show-item ${show.poster_exists ? 'ready' : 'todo'}`} key={`${libraryResult.library_name}-${show.tmdb_id}-${show.season_number}`}>
                           <div className="maker-show-main">
-                            <a href={show.homepage} target="_blank" rel="noreferrer">{show.name}</a>
+                            <a href={show.homepage} target="_blank" rel="noreferrer">{show.name}{show.first_air_year ? <> <span className="tmdb-result-year">{show.first_air_year}</span></> : ''}</a>
                             <span>{show.season_number === 0 ? 'Specials' : `Season ${show.season_number}`} starts: {show.date}</span>
                           </div>
                           <div className="maker-badges">
@@ -1036,7 +1036,7 @@ function MakerTools() {
                               type="button"
                               className="maker-tmdb-search-btn"
                               title="Search TMDB tab"
-                              onClick={() => handleSearchOnTmdbTab(show.name, show.date)}
+                              onClick={() => handleSearchOnTmdbTab(show.name, show.first_air_year || undefined)}
                             >
                               <Search size={12} /> Maker
                             </button>
@@ -1073,7 +1073,7 @@ function MakerTools() {
                         <div className={`maker-show-item ${item.statuses.some((status) => status.have || status.synced) ? 'ready' : 'todo'}`} key={`${discoveryTab}-${item.type}-${item.homepage}`}>
                           <div className="maker-show-main">
                             <div className="maker-show-title-row">
-                              <a href={item.homepage} target="_blank" rel="noreferrer">{item.name}</a>
+                              <a href={item.homepage} target="_blank" rel="noreferrer">{item.name}{item.date?.slice(0, 4) ? <> <span className="tmdb-result-year">{item.date.slice(0, 4)}</span></> : ''}</a>
                             </div>
                             <span>Release: {item.date || 'Unknown'} • Pop: {Math.round(Number(item.popularity || 0))}</span>
                           </div>

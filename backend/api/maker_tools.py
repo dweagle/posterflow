@@ -63,6 +63,7 @@ class MakerMonitorShowResult(BaseModel):
     homepage: str
     season_number: int
     date: str
+    first_air_year: str = ""
     poster_exists: bool
     external_sources: list[str] = Field(default_factory=list)
 
@@ -135,6 +136,22 @@ def _parse_iso_date(value: str | None) -> date | None:
         return None
 
 
+def _fetch_first_air_year(tmdb_id: str, tmdb_api_key: str) -> str:
+    """Fetch the first air year for a TV show from TMDB (lightweight fallback)."""
+    try:
+        resp = requests.get(
+            f"https://api.themoviedb.org/3/tv/{tmdb_id}",
+            params={"api_key": tmdb_api_key, "language": "en-US"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            first_air_date = str(resp.json().get("first_air_date") or "")
+            return first_air_date[:4] if len(first_air_date) >= 4 else ""
+    except Exception:
+        pass
+    return ""
+
+
 def _merge_recent_missing_items(
     current_results: list[MakerMonitorLibraryResult],
     previous_payload: dict[str, Any],
@@ -143,6 +160,7 @@ def _merge_recent_missing_items(
     fresh_dates: dict[tuple[str, int], str] | None = None,
     scanned_tmdb_ids: dict[tuple[str, str], set[str]] | None = None,
     scanned_seasons: dict[tuple[str, str], dict[str, set[int]]] | None = None,
+    tmdb_api_key: str = "",
 ) -> tuple[int, int]:
     # fresh_dates: mapping of (tmdb_id, season_number) -> air_date string from current scan results
     # scanned_tmdb_ids: mapping of (library_name, library_type) -> set of tmdb_ids found on disk this run
@@ -228,6 +246,10 @@ def _merge_recent_missing_items(
             if drive_inventory is not None:
                 poster_exists_now = season_number in drive_inventory.get(tmdb_id, set())
 
+            first_air_year = str(previous_show.get("first_air_year") or "")
+            if not first_air_year and tmdb_api_key:
+                first_air_year = _fetch_first_air_year(tmdb_id, tmdb_api_key)
+
             library.shows.append(
                 MakerMonitorShowResult(
                     tmdb_id=tmdb_id,
@@ -235,6 +257,7 @@ def _merge_recent_missing_items(
                     homepage=str(previous_show.get("homepage") or f"https://www.themoviedb.org/tv/{tmdb_id}"),
                     season_number=season_number,
                     date=resolved_date,
+                    first_air_year=first_air_year,
                     poster_exists=poster_exists_now,
                     external_sources=external_sources,
                 )
@@ -503,6 +526,8 @@ def _check_show_status(
     poster_exists = season_number in existing_seasons
 
     name = str(payload.get("name") or "Unknown")
+    first_air_date = str(payload.get("first_air_date") or "")
+    first_air_year = first_air_date[:4] if len(first_air_date) >= 4 else ""
     log_info(
         LogTags.MONITOR,
         (
@@ -521,6 +546,7 @@ def _check_show_status(
         homepage=f"https://www.themoviedb.org/tv/{tmdb_id}",
         season_number=season_number,
         date=air_date,
+        first_air_year=first_air_year,
         poster_exists=poster_exists,
         external_sources=[],
     )
@@ -2207,6 +2233,7 @@ def run_maker_monitor_scan_internal(
         fresh_dates=fresh_dates,
         scanned_tmdb_ids=scanned_tmdb_ids,
         scanned_seasons=scanned_seasons,
+        tmdb_api_key=resolved_config.tmdb_api_key,
     )
 
     if merged_item_count > 0:
