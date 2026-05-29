@@ -1799,10 +1799,17 @@ function IDarr() {
             <input
               type="checkbox"
               checked={Boolean(config.force_sync_after_run)}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const next = e.target.checked
+                const updatedConfig = { ...config, force_sync_after_run: next }
                 updateConfig('force_sync_after_run', next)
-                void saveMakerIdarrConfig({ ...config, force_sync_after_run: next })
+                try {
+                  await saveMakerIdarrConfig(updatedConfig)
+                  originalConfigRef.current = cloneIdarrConfig(updatedConfig)
+                  setHasUnsavedSettings(false)
+                } catch (error) {
+                  showToast(getApiErrorMessage(error, 'Failed to save settings'), 'error')
+                }
               }}
             />
             <span className="idarr-toggle-slider" />
