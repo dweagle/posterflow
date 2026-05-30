@@ -860,6 +860,9 @@ def test_webhook_background_job_completes_with_warning_when_no_local_assets(test
         def __init__(self, _db, **_kwargs):
             pass
 
+        def prepare_webhook_context(self, **_kwargs):
+            return None
+
         def is_single_target_fully_cached(self, **_kwargs):
             return False
 
@@ -946,6 +949,9 @@ def test_webhook_background_job_completes_without_retry_on_matched_zero_upload(t
 
         def __init__(self, _db, **_kwargs):
             pass
+
+        def prepare_webhook_context(self, **_kwargs):
+            return None
 
         def is_single_target_fully_cached(self, **_kwargs):
             return False
@@ -1264,6 +1270,9 @@ def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_
         def __init__(self, _db, **_kwargs):
             pass
 
+        def prepare_webhook_context(self, **_kwargs):
+            return None
+
         def is_single_target_fully_cached(self, **_kwargs):
             self.__class__.cache_checks += 1
             return True
@@ -1356,6 +1365,9 @@ def test_webhook_background_job_series_season_runs_season_and_show_posters(test_
         def __init__(self, _db, **_kwargs):
             pass
 
+        def prepare_webhook_context(self, **_kwargs):
+            return None
+
         def is_single_target_fully_cached(self, **_kwargs):
             return False
 
@@ -1443,6 +1455,9 @@ def test_webhook_background_job_series_season_cache_gate_requires_both_targets(t
 
         def __init__(self, _db, **_kwargs):
             pass
+
+        def prepare_webhook_context(self, **_kwargs):
+            return None
 
         def is_single_target_fully_cached(self, **kwargs):
             season_value = kwargs.get("season_number")
@@ -2928,3 +2943,466 @@ def test_upload_asset_season_present_in_plex_returns_zero_seasons_missing(test_d
     assert uploaded == 1
     assert matched is True
     assert seasons_missing == 0
+
+
+# ---------------------------------------------------------------------------
+# _item_library_name / _item_library_key — stale-item 404 resilience
+# ---------------------------------------------------------------------------
+
+class _RaisingAttr:
+    """Simulates a plexapi item whose attribute access triggers a lazy reload
+    that raises NotFound (the same exception path as a 404 stale-metadata ID)."""
+
+    def __getattribute__(self, name):
+        if name.startswith("_") or name == "__class__":
+            return super().__getattribute__(name)
+        raise Exception("(404) not_found; http://plex/library/metadata/99999 Not Found")
+
+
+def test_item_library_name_returns_empty_string_on_404(test_db):
+    """_item_library_name must return '' rather than propagating a 404."""
+    service = PlexUploadService(test_db)
+    stale_item = _RaisingAttr()
+    result = service._item_library_name(stale_item)
+    assert result == ""
+
+
+def test_item_library_key_returns_empty_string_on_404(test_db):
+    """_item_library_key must return '' rather than propagating a 404."""
+    service = PlexUploadService(test_db)
+    stale_item = _RaisingAttr()
+    result = service._item_library_key(stale_item)
+    assert result == ""
+
+
+def test_item_library_name_returns_value_for_normal_item(test_db):
+    """_item_library_name must still return the correct value for a valid item."""
+    service = PlexUploadService(test_db)
+    item = _FakePlexItem("movie", "The Da Vinci Code", library="Movies")
+    result = service._item_library_name(item)
+    assert result == "Movies"
+
+
+def test_item_library_key_returns_value_for_normal_item(test_db):
+    """_item_library_key must still return a key for a valid item."""
+    service = PlexUploadService(test_db)
+    item = _FakePlexItem("movie", "The Da Vinci Code", library="Movies", section_id=3, server_id="abc123")
+    result = service._item_library_key(item)
+    assert result == "abc123:3"
+
+
+def test_is_asset_fully_cached_skips_stale_item_gracefully(test_db):
+    """When a Plex item raises 404 on attribute access, the cache check must
+    return False (treat as not cached) rather than crashing."""
+    service = PlexUploadService(test_db)
+
+    stale_item = _RaisingAttr()
+    index = {
+        "movies": {"davinci2006": [stale_item]},
+        "shows": {},
+        "collections": {},
+    }
+    asset = {
+        "media_key": "davinci2006",
+        "asset_type": "main",
+        "season_number": None,
+        "path": "/posters/The Da Vinci Code (2006)/poster.jpg",
+        "display_name": "The Da Vinci Code (2006)",
+        "folder_year": 2006,
+    }
+
+    result = service._is_asset_fully_cached_for_targets(
+        asset,
+        index=index,
+        media_type_filter="movie",
+        arr_availability=None,
+    )
+
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for targeted webhook index path
+# ---------------------------------------------------------------------------
+
+
+class _FakePlexSection:
+    """Minimal fake PlexLibrary section for targeted-index tests."""
+
+    def __init__(self, section_type: str, title: str, guid_results=None, title_results=None):
+        self.type = section_type
+        self.title = title
+        self._guid_results = guid_results or []
+        self._title_results = title_results or []
+        self.key = f"fake_key_{title}"
+
+    def search(self, *, guid=None, title=None):
+        if guid is not None:
+            return list(self._guid_results)
+        if title is not None:
+            return list(self._title_results)
+        return []
+
+
+class _FakePlexLibrary:
+    def __init__(self, sections):
+        self._sections = sections
+
+    def sections(self):
+        return list(self._sections)
+
+
+class _FakePlexServerForTargeted:
+    def __init__(self, sections):
+        self.library = _FakePlexLibrary(sections)
+
+
+class _SimplePlex:
+    """Simple fake Plex item with normal attribute access (no lazy reload)."""
+    def __init__(self, item_type: str, title: str, key: str = ""):
+        self.type = item_type
+        self.title = title
+        self.ratingKey = key
+        self.librarySectionTitle = "Movies"
+        self.librarySectionID = "1"
+        self.librarySectionKey = "/library/sections/1"
+        self._server = None
+        self.locations = ["/movies/The Matrix (1999)"]
+        self.editionTitle = None
+        self.year = 1999
+
+
+def test_build_plex_index_targeted_uses_guid_search(test_db, monkeypatch):
+    """_build_plex_index_targeted should search by GUID and return a non-empty micro-index."""
+    movie_item = _SimplePlex("movie", "The Matrix", key="532")
+
+    fake_section = _FakePlexSection(
+        section_type="movie",
+        title="Movies",
+        guid_results=[movie_item],
+        title_results=[],
+    )
+
+    import plexapi.server as plexapi_server
+    monkeypatch.setattr(
+        plexapi_server,
+        "PlexServer",
+        lambda url, token: _FakePlexServerForTargeted([fake_section]),
+    )
+
+    service = PlexUploadService(test_db)
+    plex_instances = [{"name": "Main", "url": "http://plex:32400", "api_key": "abc"}]
+    selected_libraries = {"Main": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}]}
+
+    index, library_totals = service._build_plex_index_targeted(
+        plex_instances,
+        selected_libraries,
+        tmdb_id=603,
+        title="The Matrix",
+        year=1999,
+        media_type="movie",
+    )
+
+    assert index  # non-empty → targeted search found something
+    assert library_totals
+    assert any(lt["library"] == "Movies" for lt in library_totals)
+
+
+def test_build_plex_index_targeted_falls_back_to_title_when_guid_empty(test_db, monkeypatch):
+    """When GUID search returns nothing, targeted index should try title search."""
+    show_item = _SimplePlex("show", "Breaking Bad", key="101")
+    show_item.type = "show"
+    show_item.year = 2008
+
+    fake_section = _FakePlexSection(
+        section_type="show",
+        title="TV Shows",
+        guid_results=[],          # GUID search misses (legacy agent)
+        title_results=[show_item],
+    )
+
+    import plexapi.server as plexapi_server
+    monkeypatch.setattr(
+        plexapi_server,
+        "PlexServer",
+        lambda url, token: _FakePlexServerForTargeted([fake_section]),
+    )
+
+    service = PlexUploadService(test_db)
+    plex_instances = [{"name": "Main", "url": "http://plex:32400", "api_key": "abc"}]
+    selected_libraries = {"Main": [{"key": "fake_key_TV Shows", "title": "TV Shows", "enabled": True}]}
+
+    index, library_totals = service._build_plex_index_targeted(
+        plex_instances,
+        selected_libraries,
+        tvdb_id=81189,
+        title="Breaking Bad",
+        year=2008,
+        media_type="series",
+    )
+
+    assert index
+    assert library_totals
+
+
+def test_build_plex_index_targeted_returns_empty_when_nothing_found(test_db, monkeypatch):
+    """When no items match via GUID or title, the method returns ({}, []) as a fallback signal."""
+    fake_section = _FakePlexSection(
+        section_type="movie",
+        title="Movies",
+        guid_results=[],
+        title_results=[],
+    )
+
+    import plexapi.server as plexapi_server
+    monkeypatch.setattr(
+        plexapi_server,
+        "PlexServer",
+        lambda url, token: _FakePlexServerForTargeted([fake_section]),
+    )
+
+    service = PlexUploadService(test_db)
+    plex_instances = [{"name": "Main", "url": "http://plex:32400", "api_key": "abc"}]
+    selected_libraries = {"Main": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}]}
+
+    index, library_totals = service._build_plex_index_targeted(
+        plex_instances,
+        selected_libraries,
+        tmdb_id=9999999,
+        title="Completely Unknown Movie",
+        year=2099,
+        media_type="movie",
+    )
+
+    assert index == {}
+    assert library_totals == []
+
+
+def test_prepare_webhook_context_seeds_preflight_cache(test_db, monkeypatch):
+    """prepare_webhook_context() should seed _preflight_context_cache via targeted index."""
+    movie_item = _SimplePlex("movie", "The Matrix", key="532")
+
+    fake_section = _FakePlexSection(
+        section_type="movie",
+        title="Movies",
+        guid_results=[movie_item],
+    )
+
+    import plexapi.server as plexapi_server
+    monkeypatch.setattr(
+        plexapi_server,
+        "PlexServer",
+        lambda url, token: _FakePlexServerForTargeted([fake_section]),
+    )
+
+    # Provide the minimum settings needed for plex_instances and selected_libraries.
+    from models.setting import upsert_setting as _upsert_setting
+    import json as _json
+
+    _upsert_setting(test_db, "plex_instances", _json.dumps([
+        {"name": "Main", "url": "http://plex:32400", "api_key": "abc"}
+    ]))
+    _upsert_setting(test_db, "plex_library_config", _json.dumps([
+        {
+            "instance_name": "Main",
+            "libraries": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}],
+        }
+    ]))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    assert service._preflight_context_cache is None
+
+    error = service.prepare_webhook_context(
+        tmdb_id=603,
+        title="The Matrix",
+        year=1999,
+        media_type="movie",
+    )
+
+    assert error is None
+    assert service._preflight_context_cache is not None
+    # The cache tuple is (preflight_error, destination_dir, index, library_totals)
+    _pf_error, _dest, cached_index, cached_totals = service._preflight_context_cache
+    assert cached_index is not None
+    assert cached_totals is not None
+
+
+def test_prepare_webhook_context_returns_error_when_no_plex_instances(test_db):
+    """prepare_webhook_context() should return an error string if no Plex instances are configured."""
+    from models.setting import upsert_setting as _upsert_setting
+    import json as _json
+
+    _upsert_setting(test_db, "plex_instances", _json.dumps([]))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    error = service.prepare_webhook_context(tmdb_id=603, title="The Matrix", year=1999, media_type="movie")
+
+    assert error == PlexUploadService.ERROR_NO_PLEX_INSTANCES
+
+
+def test_prepare_webhook_context_falls_back_to_full_index_on_empty_targeted(test_db, monkeypatch):
+    """When targeted search returns nothing, prepare_webhook_context should fall back to full index."""
+    empty_section = _FakePlexSection(
+        section_type="movie",
+        title="Movies",
+        guid_results=[],
+        title_results=[],
+    )
+    full_movie = _SimplePlex("movie", "Some Other Movie", key="999")
+    full_section = _FakePlexSection(
+        section_type="movie",
+        title="Movies",
+        guid_results=[],
+        title_results=[],
+    )
+
+    import plexapi.server as plexapi_server
+    monkeypatch.setattr(
+        plexapi_server,
+        "PlexServer",
+        lambda url, token: _FakePlexServerForTargeted([empty_section]),
+    )
+
+    # Patch _build_plex_index to verify fallback is called.
+    fallback_called = []
+
+    def _fake_full_index(plex_instances, selected_libraries):
+        fallback_called.append(True)
+        return (
+            {"movies": {"somekey": [full_movie]}, "shows": {}, "collections": {}},
+            [{"instance": "Main", "library": "Movies", "section_type": "movie", "items": 1, "collections": 0}],
+        )
+
+    from models.setting import upsert_setting as _upsert_setting
+    import json as _json
+
+    _upsert_setting(test_db, "plex_instances", _json.dumps([
+        {"name": "Main", "url": "http://plex:32400", "api_key": "abc"}
+    ]))
+    _upsert_setting(test_db, "plex_library_config", _json.dumps([
+        {
+            "instance_name": "Main",
+            "libraries": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}],
+        }
+    ]))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    service._build_plex_index = _fake_full_index  # type: ignore[method-assign]
+
+    error = service.prepare_webhook_context(
+        tmdb_id=9999999,
+        title="Unknown Movie",
+        year=2099,
+        media_type="movie",
+    )
+
+    assert error is None
+    assert fallback_called, "Full index fallback should have been triggered"
+    assert service._preflight_context_cache is not None
+
+
+def test_webhook_background_job_retry_rebuilds_targeted_index(test_db, monkeypatch):
+    """On retry attempts, prepare_webhook_context() should be called again (not a full scan)
+    so Plex can be re-queried in case it has now finished scanning the item."""
+    import modules.upload as upload_module
+
+    job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    job_id = job.id
+
+    monkeypatch.setattr("modules.upload.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr("modules.upload.time.sleep", lambda _seconds: None)
+
+    context_calls = []
+    run_calls = []
+
+    class _FakePlexUploadService:
+        ERROR_INDEX_BUILD_FAILED = "Unable to build Plex index from configured instances/libraries."
+
+        def __init__(self, _db, **_kwargs):
+            pass
+
+        def prepare_webhook_context(self, **_kwargs):
+            context_calls.append(1)
+            return None
+
+        def is_single_target_fully_cached(self, **_kwargs):
+            return False
+
+        def is_series_show_poster_cached(self, **_kwargs):
+            return False
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            # Fail on attempt 1 with a retryable preflight error, succeed on attempt 2.
+            if len(run_calls) == 1:
+                return {"success": False, "error": "Unable to build Plex index from configured instances/libraries."}
+            return {
+                "success": True,
+                "stats": {
+                    "scanned": 1,
+                    "matched": 1,
+                    "uploaded": 1,
+                    "candidate_matches_raw": 1,
+                    "candidate_matches_unique": 1,
+                    "skipped": 0,
+                    "errors": 0,
+                },
+            }
+
+        def invalidate_arr_availability_cache(self) -> None:
+            pass
+
+        def invalidate_preflight_cache(self) -> None:
+            pass
+
+        def invalidate_local_assets_cache(self) -> None:
+            pass
+
+        def _get_destination_dir(self):
+            from pathlib import Path
+            return Path("/tmp")
+
+        def _get_local_assets(self, _destination):
+            return [{"media_key": "placeholder", "asset_type": "main"}]
+
+        def _select_local_assets_for_target(self, assets, **_kwargs):
+            return assets
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _FakePlexUploadService)
+
+    parsed_payload = {
+        "media_type": "movie",
+        "title": "The Matrix",
+        "year": 1999,
+        "season_number": None,
+        "tmdb_id": 603,
+        "tvdb_id": None,
+        "imdb_id": "tt0133093",
+    }
+
+    upload_module.run_plex_webhook_background_job(
+        job_id,
+        parsed_payload,
+        False,
+        False,
+        2,   # 2 attempts
+        1,
+    )
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed is not None
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 2
+
+    # prepare_webhook_context should have been called once for the initial build
+    # and once again for the retry — not a full scan fallback.
+    assert len(context_calls) == 2, (
+        f"Expected prepare_webhook_context called twice (initial + retry), got {len(context_calls)}"
+    )

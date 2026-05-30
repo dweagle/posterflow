@@ -600,7 +600,11 @@ class PlexUploadService:
             return False
 
         for item in matched_items:
-            item_type = str(getattr(item, "type", "")).lower()
+            try:
+                item_type = str(getattr(item, "type", "")).lower()
+            except Exception:
+                # Stale/404 item — treat as not cached so we re-upload.
+                return False
             library_name = self._item_library_name(item)
             library_key = self._item_library_key(item)
             item_cached_for_library = self._is_item_cached_for_library(
@@ -1069,6 +1073,221 @@ class PlexUploadService:
             collections=len(index["collections"]),
         )
         return index, library_totals
+
+    def _build_plex_index_targeted(
+        self,
+        plex_instances: List[Dict[str, str]],
+        selected_libraries: Dict[str, List[Dict[str, Any]]],
+        *,
+        tmdb_id: Optional[int] = None,
+        tvdb_id: Optional[int] = None,
+        imdb_id: Optional[str] = None,
+        title: Optional[str] = None,
+        year: Optional[int] = None,
+        media_type: Optional[str] = None,
+    ) -> Tuple[Dict[str, Dict[str, List[Any]]], List[Dict[str, Any]]]:
+        """Build a minimal Plex index scoped to a single title/ID.
+
+        Uses ``section.search(guid=...)`` to fetch only the matching item(s)
+        rather than iterating the entire library.  Falls back to a title search
+        when no GUID results are found (e.g. legacy Plex agents).  If the
+        targeted search yields nothing at all the caller should fall back to
+        ``_build_plex_index``.
+        """
+        try:
+            from plexapi.server import PlexServer
+        except ImportError as e:
+            log_error(LogTags.UPLOADER, f"plexapi not installed: {e}")
+            return {}, []
+
+        # Build the ordered list of GUID strings to try.
+        guid_searches: List[str] = []
+        if isinstance(tmdb_id, int):
+            guid_searches.append(f"tmdb://{tmdb_id}")
+        if isinstance(tvdb_id, int):
+            guid_searches.append(f"tvdb://{tvdb_id}")
+        if isinstance(imdb_id, str) and imdb_id.strip():
+            guid_searches.append(f"imdb://{imdb_id.strip()}")
+
+        media_type_normalized = str(media_type or "").lower().strip()
+        section_types: set[str] = set()
+        if media_type_normalized in {"movie"}:
+            section_types = {"movie"}
+        elif media_type_normalized in {"series", "show"}:
+            section_types = {"show"}
+        else:
+            section_types = {"movie", "show"}
+
+        index: Dict[str, Dict[str, List[Any]]] = {
+            "movies": {},
+            "shows": {},
+            "collections": {},
+        }
+        library_totals: List[Dict[str, Any]] = []
+        found_any = False
+
+        for instance in plex_instances:
+            instance_name = instance["name"]
+            try:
+                plex = PlexServer(instance["url"], instance["api_key"])
+            except Exception as e:
+                log_error(LogTags.UPLOADER, f"Failed to connect to Plex instance '{instance_name}': {e}")
+                continue
+
+            allowed = selected_libraries.get(instance_name)
+            for section in plex.library.sections():
+                if allowed and not self._is_section_allowed(section, allowed):
+                    continue
+                if section.type not in section_types:
+                    continue
+
+                section_items: List[Any] = []
+
+                # --- GUID search (new agents) ---
+                for guid in guid_searches:
+                    try:
+                        results = section.search(guid=guid)
+                        if results:
+                            section_items.extend(results)
+                            break
+                    except Exception:
+                        pass
+
+                # --- Title fallback (legacy agents or no GUID results) ---
+                if not section_items and title:
+                    try:
+                        title_results = section.search(title=title)
+                        # Narrow by year when available to reduce false positives.
+                        if isinstance(year, int) and title_results:
+                            title_results = [
+                                item for item in title_results
+                                if getattr(item, "year", None) == year
+                            ] or title_results
+                        section_items.extend(title_results)
+                    except Exception:
+                        pass
+
+                if not section_items:
+                    continue
+
+                found_any = True
+                section_title = str(getattr(section, "title", ""))
+
+                if section.type == "movie":
+                    indexed = 0
+                    for movie in section_items:
+                        key = self._movie_folder_key(movie)
+                        if key:
+                            index["movies"].setdefault(key, []).append(movie)
+                        for id_key in self._extract_plex_id_keys(movie):
+                            index["movies"].setdefault(id_key, []).append(movie)
+                        indexed += 1
+                    library_totals.append({
+                        "instance": instance_name,
+                        "library": section_title,
+                        "section_type": "movie",
+                        "items": indexed,
+                        "collections": 0,
+                    })
+                elif section.type == "show":
+                    indexed = 0
+                    for show in section_items:
+                        key = self._show_folder_key(show)
+                        if key:
+                            index["shows"].setdefault(key, []).append(show)
+                        for id_key in self._extract_plex_id_keys(show):
+                            index["shows"].setdefault(id_key, []).append(show)
+                        indexed += 1
+                    library_totals.append({
+                        "instance": instance_name,
+                        "library": section_title,
+                        "section_type": "show",
+                        "items": indexed,
+                        "collections": 0,
+                    })
+
+        if found_any:
+            log_info(
+                LogTags.UPLOADER,
+                "Built targeted Plex index",
+                movies=len(index["movies"]),
+                shows=len(index["shows"]),
+                guid_searches=guid_searches,
+                title=title,
+            )
+        else:
+            log_info(
+                LogTags.UPLOADER,
+                "Targeted Plex index: no results — will fall back to full index",
+                guid_searches=guid_searches,
+                title=title,
+            )
+
+        return (index, library_totals) if found_any else ({}, [])
+
+    def prepare_webhook_context(
+        self,
+        *,
+        tmdb_id: Optional[int] = None,
+        tvdb_id: Optional[int] = None,
+        imdb_id: Optional[str] = None,
+        title: Optional[str] = None,
+        year: Optional[int] = None,
+        media_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """Build and cache a targeted Plex index for a webhook job.
+
+        Must be called before ``is_single_target_fully_cached``,
+        ``is_series_show_poster_cached``, and ``run_single_upload`` so that all
+        three share the same pre-built index without redundant full-library scans.
+
+        Returns an error string if the context cannot be built, or ``None`` on
+        success.
+        """
+        try:
+            destination_dir: Optional[Path] = self._get_destination_dir()
+        except Exception:
+            # destination_dir is validated separately per-operation; falling
+            # through here with None lets the subsequent cache/upload checks
+            # fail gracefully on their own.
+            destination_dir = None
+
+        plex_instances = self._get_plex_instances()
+
+        if not plex_instances:
+            return self.ERROR_NO_PLEX_INSTANCES
+
+        selected_libraries, selected_libraries_error = self._get_selected_libraries(plex_instances)
+        if selected_libraries_error:
+            return selected_libraries_error
+
+        # Try targeted search first.
+        index, library_totals = self._build_plex_index_targeted(
+            plex_instances,
+            selected_libraries,
+            tmdb_id=tmdb_id,
+            tvdb_id=tvdb_id,
+            imdb_id=imdb_id,
+            title=title,
+            year=year,
+            media_type=media_type,
+        )
+
+        # Fall back to full index when targeted search found nothing (legacy agents).
+        if not index:
+            log_info(
+                LogTags.UPLOADER,
+                "Targeted index empty; falling back to full library index",
+                title=title,
+                media_type=media_type,
+            )
+            index, library_totals = self._build_plex_index(plex_instances, selected_libraries)
+
+        if not index or not library_totals:
+            return self.ERROR_INDEX_BUILD_FAILED
+
+        self._preflight_context_cache = (None, destination_dir, index, library_totals)
+        return None
 
     def _is_section_allowed(self, section: Any, allowed: List[Dict[str, Any]]) -> bool:
         section_key = str(getattr(section, "key", ""))
@@ -1813,19 +2032,24 @@ class PlexUploadService:
         seen: set[str] = set()
 
         for item in items:
-            rating_key = getattr(item, "ratingKey", None)
+            try:
+                rating_key = getattr(item, "ratingKey", None)
+            except Exception:
+                rating_key = None
             if rating_key is not None:
                 identity = f"rating:{rating_key}"
             else:
                 library_identity = self._item_library_key(item) or self._item_library_name(item)
-                identity = "fallback:" + "|".join(
-                    [
+                try:
+                    fallback_parts = [
                         str(getattr(item, "type", "")),
                         str(getattr(item, "title", "")),
                         str(getattr(item, "year", "")),
                         str(library_identity or ""),
                     ]
-                )
+                except Exception:
+                    fallback_parts = ["", "", "", str(library_identity or "")]
+                identity = "fallback:" + "|".join(fallback_parts)
 
             if identity in seen:
                 continue
@@ -1872,7 +2096,10 @@ class PlexUploadService:
         return f"{item_type.title()}: {title}"
 
     def _classify_plex_item(self, item: Any) -> str:
-        item_type = str(getattr(item, "type", "")).lower()
+        try:
+            item_type = str(getattr(item, "type", "")).lower()
+        except Exception:
+            return "shows"
         if item_type == "movie":
             return "movies"
         if item_type == "show":
@@ -1884,21 +2111,29 @@ class PlexUploadService:
     def _library_labels_for_items(self, items: List[Any]) -> List[str]:
         labels: set[str] = set()
         for item in items:
-            section_title = str(getattr(item, "librarySectionTitle", "")).strip()
-
+            try:
+                section_title = str(getattr(item, "librarySectionTitle", "")).strip()
+            except Exception:
+                continue
             if section_title:
                 labels.add(section_title)
 
         return sorted(labels)
 
     def _item_library_name(self, item: Any) -> str:
-        return str(getattr(item, "librarySectionTitle", "")).strip()
+        try:
+            return str(getattr(item, "librarySectionTitle", "")).strip()
+        except Exception:
+            return ""
 
     def _item_library_key(self, item: Any) -> str:
-        server = getattr(item, "_server", None)
-        server_id = str(getattr(server, "machineIdentifier", "") or "").strip()
-        section_id = str(getattr(item, "librarySectionID", "") or "").strip()
-        section_key = str(getattr(item, "librarySectionKey", "") or "").strip()
+        try:
+            server = getattr(item, "_server", None)
+            server_id = str(getattr(server, "machineIdentifier", "") or "").strip()
+            section_id = str(getattr(item, "librarySectionID", "") or "").strip()
+            section_key = str(getattr(item, "librarySectionKey", "") or "").strip()
+        except Exception:
+            return ""
 
         section_identity = section_key or section_id
         if server_id and section_identity:
@@ -1925,7 +2160,10 @@ class PlexUploadService:
         return False
 
     def _movie_edition_title(self, item: Any) -> str:
-        edition_title = getattr(item, "editionTitle", None)
+        try:
+            edition_title = getattr(item, "editionTitle", None)
+        except Exception:
+            return self.DEFAULT_EDITION_MOVIE
         if edition_title:
             return str(edition_title)
         return self.DEFAULT_EDITION_MOVIE

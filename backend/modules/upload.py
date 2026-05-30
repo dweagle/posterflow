@@ -1813,11 +1813,6 @@ def _build_destination_presence_checks(
     return checks
 
 
-def _invalidate_retry_caches(service: PlexUploadService) -> None:
-    service.invalidate_preflight_cache()
-    service.invalidate_arr_availability_cache()
-
-
 def _handle_radarr_upgrade_edition_check(
     service: PlexUploadService,
     parsed_payload: Dict[str, Any],
@@ -1987,6 +1982,28 @@ def run_plex_webhook_background_job(
         # relying on Plex scan state (which may lag behind the actual file import).
         if parsed_payload.get("source") == "radarr" and parsed_payload.get("is_upgrade"):
             _handle_radarr_upgrade_edition_check(service, parsed_payload, media_type, title)
+
+        # Build a targeted Plex index scoped to this item (GUID search) rather than
+        # scanning the full library.
+        log_info(
+            LogTags.UPLOADER,
+            f"Webhook index build: searching Plex for '{title}' by GUID",
+            media_type=media_type,
+            title=title,
+            tmdb_id=parsed_payload.get("tmdb_id"),
+            tvdb_id=parsed_payload.get("tvdb_id"),
+            imdb_id=parsed_payload.get("imdb_id"),
+        )
+        webhook_context_error = service.prepare_webhook_context(
+            tmdb_id=parsed_payload.get("tmdb_id"),
+            tvdb_id=parsed_payload.get("tvdb_id"),
+            imdb_id=parsed_payload.get("imdb_id"),
+            title=title,
+            year=parsed_payload.get("year"),
+            media_type=media_type,
+        )
+        if webhook_context_error:
+            raise Exception(webhook_context_error)
 
         webhook_targets: list[Dict[str, Any]] = [{"season_number": season_number, "label": "primary"}]
         if media_type == "series" and isinstance(season_number, int):
@@ -2172,9 +2189,10 @@ def run_plex_webhook_background_job(
             )
 
         for attempt in range(1, attempts + 1):
-            _invalidate_retry_caches(service)
-
+            result = None
             if attempt > 1:
+                service.invalidate_arr_availability_cache()
+
                 retry_progress = min(5 + (attempt * 10), 40)
                 update_job_state(
                     db,
@@ -2186,6 +2204,32 @@ def run_plex_webhook_background_job(
                     ),
                     progress=max(int(job.progress or 0), retry_progress),
                 )
+
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Webhook retry {attempt}/{attempts}: rebuilding Plex index for '{title}'",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    media_type=media_type,
+                    title=title,
+                )
+                retry_context_error = service.prepare_webhook_context(
+                    tmdb_id=parsed_payload.get("tmdb_id"),
+                    tvdb_id=parsed_payload.get("tvdb_id"),
+                    imdb_id=parsed_payload.get("imdb_id"),
+                    title=title,
+                    year=parsed_payload.get("year"),
+                    media_type=media_type,
+                )
+                if retry_context_error:
+                    log_warning(
+                        LogTags.UPLOADER,
+                        f"Webhook retry {attempt}/{attempts}: Plex index rebuild failed — '{retry_context_error}'; upload will attempt with empty index",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                        title=title,
+                        error=retry_context_error,
+                    )
 
             callback_start = max(45, int(job.progress or 0))
             callback_end = 90
