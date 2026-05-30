@@ -703,7 +703,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                           <li>In the scope picker, find and check <code>.../auth/drive</code> — "See, edit, create, and delete all of your Google Drive files"</li>
                           <li><strong>Important:</strong> Do NOT check <code>.../auth/drive.readonly</code> or any other drive scope — rclone requires full access to sync files</li>
                           <li>Click "Update" then "Save"</li>
-                          <li>Note: This is a sensitive scope. Your app stays in "Testing" mode for personal use — that's fine.</li>
+                          <li>⚠️ <strong>Important:</strong> After saving, go back to the main "OAuth consent screen" page and click <strong>"Publish App"</strong> (then confirm). Apps left in "Testing" status cause Google tokens to <strong>expire every 7 days</strong>, requiring you to re-authorize repeatedly. Publishing to production (even unverified) gives you long-lived tokens — Google will show a one-time "unverified app" warning when you authorize, which is normal for self-hosted apps.</li>
                         </ul>
                       </li>
                     </ul>

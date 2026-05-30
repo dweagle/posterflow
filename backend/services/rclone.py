@@ -84,6 +84,41 @@ scope = drive.readonly
         config["gdrive"]["token"] = token_json
         with open(self.config_path, "w") as f:
             config.write(f)
+
+    def _read_token_from_config(self) -> Optional[str]:
+        """Read the current token from rclone.conf (may have been refreshed by rclone)."""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(self.config_path)
+            return config.get("gdrive", "token", fallback=None)
+        except Exception:
+            return None
+
+    def _sync_refreshed_token_to_db(self, original_token: str) -> None:
+        """If rclone refreshed the access token and updated rclone.conf, persist it back to DB.
+
+        This prevents the token written to rclone.conf on the next sync from overwriting
+        a freshly-refreshed token with a stale one from the DB.
+        """
+        try:
+            current_token = self._read_token_from_config()
+            if not current_token or current_token == original_token:
+                return
+
+            from database import SessionLocal
+            from models.setting import Setting
+            db = SessionLocal()
+            try:
+                record = db.query(Setting).filter(Setting.key == "google_token").first()
+                if record:
+                    record.value = current_token
+                    db.commit()
+                    log_debug(LogTags.RCLONE, "Persisted refreshed OAuth token to DB")
+            finally:
+                db.close()
+        except Exception as e:
+            log_warning(LogTags.RCLONE, f"Could not sync refreshed token to DB: {e}")
     
     def _get_credentials(self) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Get Google Drive credentials from database."""
@@ -175,6 +210,10 @@ scope = drive.readonly
         try:
             if not self.rclone_binary:
                 return {"success": False, "files_transferred": 0, "error": "rclone executable not found"}
+
+            # Capture token BEFORE _get_drive_auth_args() writes it to rclone.conf so we
+            # can detect if rclone refreshed it during the sync and persist the new value.
+            _, _, original_token, _ = self._get_credentials()
 
             auth_args = self._get_drive_auth_args()
             if auth_args is None:
@@ -389,6 +428,10 @@ scope = drive.readonly
                     summary += f" in {elapsed_time}"
                 
                 log_success(LogTags.RCLONE, f"Completed: {summary}")
+                # Persist any token refresh rclone performed back to the DB so the
+                # next sync doesn't overwrite a freshly-refreshed token with the old one.
+                if original_token:
+                    self._sync_refreshed_token_to_db(original_token)
                 return {"success": True, "files_transferred": transferred}
             else:
                 error_output = ''.join(recent_lines)  # Last 50 lines (capped by deque)
