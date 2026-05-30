@@ -43,6 +43,7 @@ TMDB_REGEX = re.compile(r"\{tmdb-(\d+)\}", re.IGNORECASE)
 TVDB_REGEX = re.compile(r"\{tvdb-(\d+)\}", re.IGNORECASE)
 SEASON_NUMBER_REGEX = re.compile(r"(?i)\s-\sseason\s*(\d+)")
 SPECIALS_REGEX = re.compile(r"(?i)\s-\sspecials")
+_LIKE_UNSAFE_RE = re.compile(r'[<>:"/\\|?*%\x00-\x1f]')
 
 
 class MakerMonitorConfig(BaseModel):
@@ -1050,12 +1051,14 @@ def tmdb_poster_check(
         style_seasons = _collect_style_seasons(tmdb_rows, item.media_type, item.year)
 
         # ── Fallback: title + year for files without TMDB ID tags ───────────
-        if not style_seasons and title:
+        safe_title = " ".join(_LIKE_UNSAFE_RE.sub("", title).split()).strip()
+        sql_title = safe_title.replace("_", r"\_")
+        if not style_seasons and sql_title:
             fallback_rows = (
                 db.query(Poster, Drive)
                 .join(Drive, Poster.drive_id == Drive.drive_id)
                 .filter(
-                    Poster.file_name.ilike(f"{title} (%"),
+                    Poster.file_name.ilike(f"{sql_title} (%", escape="\\"),
                     Drive.last_synced.isnot(None),
                 )
                 .order_by(Drive.name.asc(), Poster.file_name.asc())
