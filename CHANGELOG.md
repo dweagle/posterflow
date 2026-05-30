@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-05-29
+### Added
+- Plex Upload: webhook upload jobs now build a minimal Plex index scoped to the incoming item (via GUID/title search) instead of scanning the full library, making webhook-triggered uploads significantly faster
+
+### Fixed
+- Setup: rclone token management improved and setup instructions updated
+- Poster Renamer / IDarr: titles containing slashes are now normalized correctly during TMDB lookups and IDarr processing
+
 ## [0.6.4] - 2026-05-28
 ### Fixed
 - Maker Tools: Monitor shows now include the correct year in search results
