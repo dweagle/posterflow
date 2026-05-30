@@ -193,11 +193,17 @@ export default function CommunityRequests() {
       if (mediaType !== 'all') params.media_type = mediaType
       if (status !== 'active') params.status = status
       const data = await getCommunityRequests(params)
-      const sorted = [...data.requests].sort((a, b) =>
-        sortOrder === 'newest'
+      const isActive = (s: string) => s === 'pending' || s === 'in_progress'
+      const sorted = [...data.requests].sort((a, b) => {
+        if (status === 'active') {
+          const aActive = isActive(a.status) ? 0 : 1
+          const bActive = isActive(b.status) ? 0 : 1
+          if (aActive !== bActive) return aActive - bActive
+        }
+        return sortOrder === 'newest'
           ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           : new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      )
+      })
       setRequests(sorted)
     } catch {
       setError('Failed to load community requests. Check your network connection.')
