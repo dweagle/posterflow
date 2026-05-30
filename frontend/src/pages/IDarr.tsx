@@ -1461,7 +1461,11 @@ function IDarr() {
           </div>
           <p className="setting-description" style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#888' }}>
             <strong style={{ color: '#ccc' }}>TMDB API Key:</strong> Configured globally in{' '}
-            <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
+            <a
+              href="/settings"
+              style={{ color: '#64b5f6' }}
+              onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
+            >Settings → General → API Keys</a>.
           </p>
         </div>
 

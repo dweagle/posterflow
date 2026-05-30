@@ -349,7 +349,11 @@ function UnmatchedTab({
             <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>TMDB API Key</label>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
               Configured globally in{' '}
-              <a href="/settings" style={{ color: '#64b5f6' }}>Settings → General → API Keys</a>.
+              <a
+                href="/settings"
+                style={{ color: '#64b5f6' }}
+                onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
+              >Settings → General → API Keys</a>.
             </p>
           </div>
         </div>

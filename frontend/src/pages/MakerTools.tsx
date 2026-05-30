@@ -1846,7 +1846,7 @@ function MakerTools() {
                     TMDB API key is managed in{' '}
                     <a
                       href="/settings"
-                      onClick={(e) => { e.preventDefault(); navigate('/settings') }}
+                      onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
                       style={{ color: '#64b5f6' }}
                     >
                       Settings → General → API Keys
