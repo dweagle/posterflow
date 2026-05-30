@@ -607,7 +607,7 @@ _TMDB_TITLE_ALIASES: Dict[str, str] = {
 def _tmdb_normalize(value: str) -> str:
     """Normalize a title for comparison: strip accents, punctuation, apply canonical aliases."""
     normalized = re.sub(r"[''`\u02b9\u02bc]", "", str(value or ""))
-    normalized = normalized.replace(":", "")
+    normalized = normalized.replace(":", "").replace("/", "")
     normalized = unicodedata.normalize("NFKD", normalized).encode("ASCII", "ignore").decode()
     words = re.split(r"(\W+)", normalized)
     mapped = [_TMDB_TITLE_ALIASES.get(t.lower(), t.lower()) if t.strip() else t for t in words]

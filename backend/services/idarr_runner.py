@@ -201,7 +201,7 @@ class IdarrRunner:
         }
 
         normalized = re.sub(r"[’'`ʹʼ]", "", str(value or ""))
-        normalized = normalized.replace(":", "")
+        normalized = normalized.replace(":", "").replace("/", "")
         normalized = unicodedata.normalize("NFKD", normalized).encode("ASCII", "ignore").decode()
 
         words = re.split(r"(\W+)", normalized)
@@ -1525,7 +1525,11 @@ class IdarrRunner:
                     compare_requested = requested_norm
                     compare_candidate = candidate_norm
                 ratio = SequenceMatcher(None, compare_requested, compare_candidate).ratio() if compare_candidate else 0.0
-                if compare_candidate and ratio < 0.80:
+                # Always enforce the threshold — when compare_candidate is empty the TMDB
+                # title is fully non-ASCII (e.g. Chinese/Japanese).  ratio is 0.0 in that
+                # case, which correctly triggers a mismatch rather than silently accepting
+                # a completely wrong entry.
+                if ratio < 0.80:
                     continue
 
                 if isinstance(year, int):
