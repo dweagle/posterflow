@@ -205,7 +205,7 @@ function GDrives() {
   const handleSaveDrive = async (driveId: number, updates: { custom_path: string | null; sync_enabled: boolean; drive_id?: string }) => {
     try {
       await updateDrive(driveId, {
-        custom_path: updates.custom_path ?? undefined,
+        custom_path: updates.custom_path || null,
         sync_enabled: updates.sync_enabled,
         drive_id: updates.drive_id,
       })

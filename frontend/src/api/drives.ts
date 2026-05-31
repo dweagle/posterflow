@@ -39,7 +39,7 @@ export const unsubscribeDrive = async (driveId: number): Promise<DriveSubscripti
   return postData(`/api/drives/${driveId}/unsubscribe`)
 }
 
-export const updateDrive = async (driveId: number, updates: { priority?: number; custom_path?: string; style_type?: DriveStyleType; subscribed?: boolean; sync_enabled?: boolean; drive_id?: string }) => {
+export const updateDrive = async (driveId: number, updates: { priority?: number; custom_path?: string | null; style_type?: DriveStyleType; subscribed?: boolean; sync_enabled?: boolean; drive_id?: string }) => {
   return patchData(`/api/drives/${driveId}`, updates)
 }
 
