@@ -4,6 +4,12 @@ A self-hosted poster management system that syncs and manages movie and TV show 
 
 PosterFlow is heavily inspired by [DAPS by Drazzilb](https://github.com/Drazzilb08/daps)
 
+See the Wiki for more information [Wiki](https://github.com/dweagle/posterflow/wiki)
+
+## Dashboard
+![dashboard](https://github.com/user-attachments/assets/91a834b3-0652-440d-bc11-6535eb9c627c)
+*The dashboard is the top landing spot when accessing the app. The sidebar exposes every top-level surface.*
+
 ## Features
 
 - **Drive Syncing** — Subscribe to community preset drives (MM2K, CL2K, etc.) or add your own custom Google Drive sources
@@ -28,7 +34,20 @@ The setup wizard runs on first launch to configure your media server connections
 |-----|-------------|
 | `http://localhost:8357` | Main application |
 
+### Install
+Currently the only install route is Docker.
+An Uraid template is available in CA.
+
 ## Docker Compose
+
+Currently only a develop tag exists
+| Tag | Source branch | Updated |
+|---|---|---|
+| `develop` | `develop` | When a maintainer runs the workflow against `develop`. |
+
+## docker-compose.yml
+
+The canonical compose file. Every key is explained inline.
 
 ```yaml
 services:
@@ -36,25 +55,55 @@ services:
     image: dweagle/posterflow:develop
     container_name: posterflow
     ports:
-      - 8357:8000
+      - "8357:8000"
     volumes:
-    # These are default locations for app files, downloading from gdrives and renaming.  If
-    # you are using kometa assets folder, or want your posters stored in a different location,
-    # mount those locations.
-      - path/to/config:/config   # Defualt Poster Storage, Database, rclone config, logs, and idarr working dir
-      - path/to/kometa/assets:/assets # in poster manager settings, set destination directory to this location
-      - path/to/idarr/posters:/idarr # for poster makers only -location of posters you want to sync up to gdrive
+      # The only required mount. Holds posterflow.db, rclone.conf, drives_cache.json,
+      # the default poster cache (/config/posters/gdrive/), /config/logs/,
+      # /config/scripts/ and /config/idarr/. Back this directory up.
+      - ./config:/config
+
+      # Optional. Mount your Kometa assets directory here (or anywhere) and point
+      # the renamer's "Destination" setting at it. Without this mount, PosterFlow
+      # writes its organized output under /config/posters/assets/ and you have
+      # to copy it out yourself.
+      - /path/to/kometa/assets:/assets
+
+      # Optional, poster-makers only. Mount the directory where you stage posters
+      # you intend to upload to your personal Google Drive via IDarr.
+      - /path/to/idarr/staging:/idarr
+      
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=America/New_York
+      - PUID=1000        # Host UID that owns the mount points above.
+      - PGID=1000        # Host GID. Both default to 1000 if unset.
+      - TZ=America/New_York   # Host timezone. Drives scheduler local-time interpretation.
+      - DEBUG=false      # Optional. true forces file logging to DEBUG on startup.
+      - LOG_LEVEL=INFO   # Optional. File log level when DEBUG=false.
+      - CORS_ORIGINS=    # Optional. Comma-separated origins (see configuration.md).
+    restart: unless-stopped
 ```
+
+### Equivalent `docker run`
+
+```bash
+docker run -d \
+  --name posterflow \
+  -p 8357:8000 \
+  -v /srv/posterflow/config:/config \
+  -v /srv/kometa/assets:/assets \
+  -e PUID=1000 -e PGID=1000 \
+  -e TZ=America/New_York \
+  --restart unless-stopped \
+  dweagle/posterflow:develop
+```
+
 ## Volumes
 
-| Path | Purpose |
-|------|---------|
-| `/config` | Defualt Poster Storage, SQLite database, rclone config, drives cache, logs, and idarr working dir |
-| `/custom` | Add custom mounts directed to assets, non-default poster storage, etc. |
+| Container path | Required? | Created by | Purpose |
+|---|---|---|---|
+| `/config` | Yes | The entrypoint `chown`s this and the app `mkdir`s `/config/logs`, `/config/idarr` and `/config/scripts` on every boot (see `backend/core/config.py`). | SQLite DB at `/config/posterflow.db`, WAL/SHM sidecars next to it, `rclone.conf`, `drives_cache.json`, the default GDrive cache at `/config/posters/gdrive/`, logs at `/config/logs/posterflow.log` (plus per-job log dirs), after-job scripts at `/config/scripts/`, IDarr working dir at `/config/idarr/`. |
+| `/assets` (or anywhere) | No | You. | Destination for organized, renamed, bordered posters. Point Kometa's `asset_directory` at the same host path. |
+| `/idarr` (or anywhere) | No | You. | Poster-maker staging area for IDarr. Used only if you operate the IDarr workflow. |
+
 ## Environment Variables
 
 | Variable | Default | Description |
