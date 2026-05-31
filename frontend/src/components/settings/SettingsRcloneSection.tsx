@@ -69,6 +69,7 @@ function SettingsRcloneSection({
               <li>Click the <strong>project name button</strong> in the top-left header (it shows your current project name, e.g. "My First Project")</li>
               <li>In the modal that appears, click <strong>"New project"</strong> in the top-right corner</li>
               <li>Name it "PosterFlow" (or any name you prefer) and click "Create"</li>
+              <li>If you have other projects already created, you will need to choose this project in the project modal to work on.</li>
             </ul>
           </div>
 
@@ -83,30 +84,34 @@ function SettingsRcloneSection({
 
           <div className="instruction-step">
             <strong>3. Configure OAuth Consent Screen</strong>
+            If this is a new project, there will be a configuration setup walkthrough. If editing an existing project, the bolded headings in this guide can be found on the left-side menu.
             <ul>
-              <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "OAuth consent screen"</li>
-              <li>This opens <strong>Google Auth Platform</strong></li>
-              <li><strong>Branding:</strong> Enter app name ("PosterFlow"), support email, and developer contact. Click Save.</li>
-              <li><strong>Audience:</strong> Select "External" for personal use. Click Save.</li>
+              <li>Click the <strong>Get Started</strong> button to enter configuration.</li>
+              <li><strong>Branding:</strong> Enter app name (e.g. "PosterFlow") and support email. Click Next.</li>
+              <li><strong>Audience:</strong> Select "External" for personal use. Click Next.</li>
+              <li><strong>Branding:</strong> Enter contact email. Click Next.</li>
+              <li>Read and agree to the terms. Click Continue, then Create</li>
+              <li>⚠️ <strong>Important:</strong> After creating, click on the <strong>Audience</strong> tab in the menu. Select <strong>"Publish App"</strong> (then confirm). Apps left in "Testing" status cause Google tokens to <strong>expire every 7 days</strong>, requiring you to re-authorize repeatedly. Publishing to production (even unverified) gives you long-lived tokens — Google will show a one-time "unverified app" warning when you authorize, which is normal for self-hosted apps.</li>
               <li><strong>Data Access:</strong> Click "Add or remove scopes"
                 <ul>
                   <li>In the scope picker, find and check <code>.../auth/drive</code> — "See, edit, create, and delete all of your Google Drive files"</li>
                   <li><strong>Important:</strong> Do NOT check <code>.../auth/drive.readonly</code> or any other drive scope — rclone requires full access to sync files</li>
                   <li>Click "Update" then "Save"</li>
-                  <li>⚠️ <strong>Important:</strong> After saving, go back to the main "OAuth consent screen" - "Audience" page and click <strong>"Publish App"</strong> (then confirm). Apps left in "Testing" status cause Google tokens to <strong>expire every 7 days</strong>, requiring you to re-authorize repeatedly. Publishing to production (even unverified) gives you long-lived tokens — Google will show a one-time "unverified app" warning when you authorize, which is normal for self-hosted apps.</li>
                 </ul>
               </li>
+              <li>You will get a warning about verifying your app, but you can continue using the app/credentials without verifying. <a href="https://support.google.com/cloud/answer/7454865?hl=en" target="_blank" rel="noopener noreferrer">Details</a></li>
             </ul>
           </div>
 
           <div className="instruction-step">
-            <strong>4. Create OAuth 2.0 Credentials</strong>
+            <strong>4. Create OAuth 2.0 Client/Credentials</strong>
             <ul>
-              <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "Credentials"</li>
-              <li>Click "Create credentials" → "OAuth client ID"</li>
+              <li>Click <strong>Clients</strong> in the left-side menu</li>
+              <li>Click "Create client"</li>
               <li>Application type: "Desktop app"</li>
-              <li>Name: "PosterFlow Desktop"</li>
+              <li>Name: "PosterFlow Client" or a name you prefer</li>
               <li>Click "Create"</li>
+              <li>You will get a popup.</li>
               <li>⚠️ <strong>Copy your Client ID and Client Secret immediately</strong> — Google no longer allows you to view the secret after leaving this page</li>
             </ul>
           </div>

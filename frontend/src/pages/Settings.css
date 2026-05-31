@@ -1040,6 +1040,12 @@ details[open] .feature-events-summary::before {
   font-size: 1.05rem;
 }
 
+.instruction-step li strong {
+  display: inline;
+  font-size: inherit;
+  margin-bottom: 0;
+}
+
 .instruction-step ul {
   margin: 0.5rem 0 0 1.5rem;
   padding: 0;

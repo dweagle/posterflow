@@ -295,6 +295,11 @@
   margin-bottom: 0.5rem;
 }
 
+.instruction-step li strong {
+  display: inline;
+  margin-bottom: 0;
+}
+
 .instruction-step ul {
   margin-left: 1.5rem;
   color: #ccc;
