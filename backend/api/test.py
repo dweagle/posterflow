@@ -192,6 +192,8 @@ async def test_sonarr(config: ArrTestRequest) -> Dict[str, Any]:
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Sonarr request error: {str(e)}")
         raise HTTPException(status_code=503, detail="Cannot connect to Sonarr - check the URL and that Sonarr is running")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid response from Sonarr - check the URL for a trailing slash (e.g. use http://localhost:8989 not http://localhost:8989/)")
     except Exception as e:
         log_error(LogTags.API, f"Sonarr test error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -230,6 +232,8 @@ async def test_radarr(config: ArrTestRequest) -> Dict[str, Any]:
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Radarr request error: {str(e)}")
         raise HTTPException(status_code=503, detail="Cannot connect to Radarr - check the URL and that Radarr is running")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid response from Radarr - check the URL for a trailing slash (e.g. use http://localhost:7878 not http://localhost:7878/)")
     except Exception as e:
         log_error(LogTags.API, f"Radarr test error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
