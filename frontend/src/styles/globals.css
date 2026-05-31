@@ -142,6 +142,7 @@ input, textarea, select {
 .webhook-stat-chip,
 .maker-tools-page .badge,
 .unmatched-card .badge,
+.tmdb-result-wrapper .badge,
 .priority-badge {
   display: inline-flex;
   align-items: center;
@@ -152,6 +153,40 @@ input, textarea, select {
   font-size: var(--pf-chip-font-size);
   font-weight: var(--pf-chip-font-weight);
   line-height: 1;
+}
+
+/* Badge color variants for TmdbItemCard (works outside .maker-tools-page) */
+.tmdb-result-wrapper .badge {
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tmdb-result-wrapper .badge svg {
+  flex-shrink: 0;
+}
+
+.tmdb-result-wrapper .badge-blue {
+  background: rgba(100, 181, 246, 0.2);
+  color: #f3f9ff;
+  border-color: #64b5f6;
+}
+
+.tmdb-result-wrapper .badge-grey {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.tmdb-result-wrapper .badge-green {
+  background: rgba(76, 175, 80, 0.14);
+  color: #e5e7eb;
+  border-color: rgba(76, 175, 80, 0.32);
+}
+
+.tmdb-result-wrapper .badge-orange {
+  background: rgba(255, 183, 77, 0.12);
+  color: #e5e7eb;
+  border-color: rgba(255, 183, 77, 0.3);
 }
 
 /* TMDB attribution — used wherever TMDB API is exposed in the UI */

@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
-import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr } from '../api/client'
+import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings } from '../api/client'
+import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
+import TmdbItemCard, { type PsdConfig } from '../components/maker-tools/TmdbItemCard'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
@@ -66,11 +68,40 @@ export default function CommunityRequests() {
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [makerInfoOpen, setMakerInfoOpen] = useState(false)
+
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false })
+  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(() =>
     localStorage.getItem('posterflow.communityRequests.idarrQuickAdd') === 'true'
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    getSettings().then((settings) => {
+      setPsdConfig({
+        exportFolder: (settings.psd_export_folder || '').trim(),
+        templatePath: (settings.psd_template_path || '').trim(),
+        openPhotopea: (settings.psd_open_photopea || '').trim().toLowerCase() === 'true',
+      })
+    }).catch(() => {})
+  }, [])
+
+  // Fetch poster availability whenever the visible request list changes
+  useEffect(() => {
+    const items = requests
+      .filter((r) => r.tmdb_id != null)
+      .map((r) => ({
+        tmdb_id: r.tmdb_id!,
+        title: r.title,
+        year: r.year ? String(r.year) : '',
+        media_type: r.media_type === 'movie' ? 'movie' : r.media_type === 'collection' ? 'collection' : ('tv' as const),
+      }))
+    if (items.length === 0) return
+    checkTmdbPosterAvailability(items)
+      .then(setPosterAvailability)
+      .catch(() => {})
+  }, [requests])
 
   const handleUploadClick = useCallback((requestId: string) => {
     uploadTargetRef.current = requestId
@@ -387,9 +418,10 @@ export default function CommunityRequests() {
           {requests.map((req) => {
             const tmdbLink = getTmdbLink(req)
             const tvdbLink = getTvdbLink(req)
+            const showMakerTools = isMaker && isConnected && req.tmdb_id != null
             return (
+              <div key={req.id} className="community-request-wrapper">
               <div
-                key={req.id}
                 className={`community-request-item${dragOverId === req.id ? ' drag-over' : ''}`}
                 onDragOver={isMaker ? (e) => { e.preventDefault(); setDragOverId(req.id) } : undefined}
                 onDragLeave={isMaker ? () => setDragOverId(null) : undefined}
@@ -453,7 +485,41 @@ export default function CommunityRequests() {
                   <div className="request-timestamp">{formatRequestDate(req.created_at)}</div>
                 </div>
 
-                <div className="request-actions">
+                <div className="request-maker-actions-group">
+                  {showMakerTools && (
+                    <div className="request-maker-tools-panel">
+                      <TmdbItemCard
+                        item={{
+                          tmdb_id: req.tmdb_id!,
+                          media_type: req.media_type === 'movie' ? 'movie' : req.media_type === 'collection' ? 'collection' : 'tv',
+                          title: req.title,
+                          year: req.year ? String(req.year) : '',
+                          overview: '',
+                          poster_url: req.poster_path || '',
+                          homepage: req.tmdb_id != null
+                            ? req.media_type === 'movie'
+                              ? `https://www.themoviedb.org/movie/${req.tmdb_id}`
+                              : req.media_type === 'collection'
+                                ? `https://www.themoviedb.org/collection/${req.tmdb_id}`
+                                : `https://www.themoviedb.org/tv/${req.tmdb_id}`
+                            : '',
+                          imdb_id: req.imdb_id,
+                          tvdb_id: req.tvdb_id ?? null,
+                        }}
+                        psdConfig={psdConfig}
+                        posterAvailability={posterAvailability[req.tmdb_id!]}
+                        hidePoster
+                        hideTitle
+                        galleryPortalId={`gallery-portal-${req.id}`}
+                      />
+                      <div className={`request-drop-zone${dragOverId === req.id ? ' drop-active' : ''}`}>
+                        <Upload size={22} />
+                        <span>Drop poster(s) here</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="request-actions">
                   {req.discord_thread_url && (
                     <a
                       className="request-tmdb-link request-discord-link"
@@ -545,10 +611,14 @@ export default function CommunityRequests() {
                       </>
                     )
                   })()}
+                  </div>
                 </div>
 
-
               </div>
+
+              {/* Gallery panel portals here when Browse Images is open */}
+              <div id={`gallery-portal-${req.id}`} />
+            </div>
             )
           })}
         </div>
