@@ -2001,6 +2001,7 @@ def run_plex_webhook_background_job(
             title=title,
             year=parsed_payload.get("year"),
             media_type=media_type,
+            allow_full_fallback=False,
         )
         if webhook_context_error:
             raise Exception(webhook_context_error)
@@ -2220,6 +2221,7 @@ def run_plex_webhook_background_job(
                     title=title,
                     year=parsed_payload.get("year"),
                     media_type=media_type,
+                    allow_full_fallback=(attempt == attempts),
                 )
                 if retry_context_error:
                     log_warning(

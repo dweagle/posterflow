@@ -1215,14 +1215,6 @@ class PlexUploadService:
                 guid_searches=guid_searches,
                 title=title,
             )
-        else:
-            log_info(
-                LogTags.UPLOADER,
-                "Targeted Plex index: no results — will fall back to full index",
-                guid_searches=guid_searches,
-                title=title,
-            )
-
         return (index, library_totals) if found_any else ({}, [])
 
     def prepare_webhook_context(
@@ -1234,6 +1226,7 @@ class PlexUploadService:
         title: Optional[str] = None,
         year: Optional[int] = None,
         media_type: Optional[str] = None,
+        allow_full_fallback: bool = True,
     ) -> Optional[str]:
         """Build and cache a targeted Plex index for a webhook job.
 
@@ -1275,16 +1268,25 @@ class PlexUploadService:
 
         # Fall back to full index when targeted search found nothing (legacy agents).
         if not index:
-            log_info(
-                LogTags.UPLOADER,
-                "Targeted index empty; falling back to full library index",
-                title=title,
-                media_type=media_type,
-            )
-            index, library_totals = self._build_plex_index(plex_instances, selected_libraries)
-
-        if not index or not library_totals:
-            return self.ERROR_INDEX_BUILD_FAILED
+            if allow_full_fallback:
+                log_info(
+                    LogTags.UPLOADER,
+                    "Targeted Plex index: no results — falling back to full library index",
+                    title=title,
+                    media_type=media_type,
+                )
+                index, library_totals = self._build_plex_index(plex_instances, selected_libraries)
+                if not index or not library_totals:
+                    return self.ERROR_INDEX_BUILD_FAILED
+            else:
+                log_info(
+                    LogTags.UPLOADER,
+                    "Targeted Plex index: no results — will retry with targeted search",
+                    title=title,
+                    media_type=media_type,
+                )
+                self._preflight_context_cache = (None, destination_dir, {"movies": {}, "shows": {}, "collections": {}}, [])
+                return None
 
         self._preflight_context_cache = (None, destination_dir, index, library_totals)
         return None
