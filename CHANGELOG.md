@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-05-31
+### Added
+- Community Requests: request cards now show an inline TMDB info panel for poster maker roles, visible between the request info and action buttons — no need to navigate away to look up metadata
+
+### Fixed
+- Community Requests: requests are now sorted by prioritizing active statuses.  Pending and In-Progress always on top for Active filter.
+- Poster Manager: titles with unsafe characters are now sanitized before TMDB poster availability checks
+- Plex Upload: full library index fallback now correctly triggers after the final retry attempt
+- Plex Upload: settings UI now shows a warning about the dependency between Plex Upload and the border replacer setting
+- Settings: TMDB API key info links now navigate to Settings → General instead of the last visited settings tab
+- Arr integrations: error handling added for JSON decode failures in Sonarr and Radarr connection tests
+- Setup: OAuth configuration instructions updated to better match the current Google Cloud console UI
+
 ## [0.6.5] - 2026-05-29
 ### Added
 - Plex Upload: webhook upload jobs now build a minimal Plex index scoped to the incoming item (via GUID/title search) instead of scanning the full library, making webhook-triggered uploads significantly faster
