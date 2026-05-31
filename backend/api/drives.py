@@ -315,8 +315,8 @@ async def update_drive(drive_id: int, request: DriveUpdateRequest, db: Session =
         drive.priority = request.priority
         changes.append(f"priority={request.priority}")
     
-    if request.custom_path is not None:
-        drive.custom_path = request.custom_path
+    if 'custom_path' in request.model_fields_set:
+        drive.custom_path = request.custom_path or None
         changes.append(f"custom_path={request.custom_path}")
 
     if request.style_type is not None:

@@ -206,3 +206,59 @@ def test_subscribe_nonexistent_drive(client):
     response = client.post("/api/drives/99999/subscribe")
     assert response.status_code == 404
 
+
+def test_update_drive_sets_custom_path(client, test_db):
+    drive = Drive(name="Test Drive", drive_id="path-set-1", style_type="MM2K", subscribed=True)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/drives/{drive.id}", json={"custom_path": "/some/path"})
+    assert response.status_code == 200
+    assert response.json()["custom_path"] == "/some/path"
+
+    test_db.refresh(drive)
+    assert drive.custom_path == "/some/path"
+
+
+def test_update_drive_clears_custom_path_with_empty_string(client, test_db):
+    drive = Drive(name="Test Drive", drive_id="path-clear-empty-1", style_type="MM2K", subscribed=True, custom_path="/existing/path")
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/drives/{drive.id}", json={"custom_path": ""})
+    assert response.status_code == 200
+    assert response.json()["custom_path"] is None
+
+    test_db.refresh(drive)
+    assert drive.custom_path is None
+
+
+def test_update_drive_clears_custom_path_with_null(client, test_db):
+    drive = Drive(name="Test Drive", drive_id="path-clear-null-1", style_type="MM2K", subscribed=True, custom_path="/existing/path")
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/drives/{drive.id}", json={"custom_path": None})
+    assert response.status_code == 200
+    assert response.json()["custom_path"] is None
+
+    test_db.refresh(drive)
+    assert drive.custom_path is None
+
+
+def test_update_drive_omitting_custom_path_leaves_it_unchanged(client, test_db):
+    drive = Drive(name="Test Drive", drive_id="path-unchanged-1", style_type="MM2K", subscribed=True, custom_path="/keep/this/path")
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/drives/{drive.id}", json={"priority": 5})
+    assert response.status_code == 200
+    assert response.json()["custom_path"] == "/keep/this/path"
+
+    test_db.refresh(drive)
+    assert drive.custom_path == "/keep/this/path"
+
