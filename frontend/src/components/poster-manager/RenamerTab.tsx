@@ -130,6 +130,7 @@ function RenamerTab({
             </div>
             <small>When enabled, border replacer runs automatically after renaming posters (uses Poster Renamer incremental/full mode setting on Border Replacer page)</small>
             <small className="standalone-warning">⚠️ Standalone runs only. To disable Border Replacer in the Workflow, toggle it off/on on the Workflow page.</small>
+            <small className="standalone-warning">⚠️ Plex Upload also uses this setting — if you want borders applied during Plex Upload runs, this must be enabled.</small>
           </div>
         </div>
 
