@@ -47,6 +47,7 @@
 
 .community-type-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
 }
 
@@ -77,6 +78,7 @@
 
 .community-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
 }
@@ -182,6 +184,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
 
@@ -235,11 +239,10 @@
   gap: 0.75rem;
 }
 
-/* Maker Tools panel — fixed-width box inside the group */
+/* Maker Tools panel — fixed 520px at wide viewports so all cards align */
 .request-maker-tools-panel {
-  flex: 0 1 520px;
+  flex: 0 0 520px;
   width: 520px;
-  max-width: 100%;
   min-width: 0;
   display: flex;
   gap: 0.5rem;
@@ -707,7 +710,8 @@
   font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .maker-idarr-toggle-info-wrap {
@@ -829,19 +833,34 @@
   color: #ccc;
 }
 
-/* ── Medium (≤ 1150px): group wraps to its own full-width row ─── */
-@media (max-width: 1150px) {
+/* ── Medium (≤ 1100px): group wraps to its own full-width row ─── */
+@media (max-width: 1100px) {
   .request-maker-actions-group {
     flex: 0 0 100%;
+    width: 100%;
+  }
+
+  /* Panel expands to fill the row; actions column stays natural width */
+  .request-maker-tools-panel {
+    flex: 1 1 auto;
+    max-width: none;
+    width: auto;
   }
 }
 
-/* ── Narrow (≤ 700px): panel stacks above actions ─────────────── */
-@media (max-width: 700px) {
+/* ── Narrow (≤ 768px): panel stacks above actions ─────────────── */
+@media (max-width: 768px) {
   .request-maker-actions-group {
     flex: 0 0 100%;
+    width: 100%;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .request-maker-tools-panel {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
   }
 
   .request-actions {
@@ -862,11 +881,6 @@
     gap: 0.75rem;
   }
 
-  /* Wrap type tabs so they don't overflow */
-  .community-type-tabs {
-    flex-wrap: wrap;
-  }
-
   .community-tab-btn {
     padding: 0.35rem 0.65rem;
     font-size: 0.8rem;
@@ -874,7 +888,6 @@
 
   /* Filters row: wrap so sort doesn't fall off-screen */
   .community-filters {
-    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
