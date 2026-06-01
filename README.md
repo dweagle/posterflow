@@ -18,6 +18,7 @@ See the Wiki for more information [Wiki](https://github.com/dweagle/posterflow/w
 - **Unmatched Assets** — Detects and reports assets in your library that are missing posters. TMDB links for missing items
 - **Plex Upload** — Upload posters directly to Plex libraries
 - **IDarr** — Metadata enrichment pipeline for poster-maker assets (TMDB/TVDB/IMDB ID assignment and rename normalization)
+- **Community Requests** — Shared request board where users submit missing posters for makers to claim and fulfill. Discord integration auto-fills your username and unlocks an upload button for verified poster makers
 - **Maker Tools** — Poster-makers can monitor upcoming movie and TV releases to track missing posters
 - **Scheduler** — Automate any job on a recurring schedule
 - **Live Job Status** — WebSocket-powered real-time job progress and log streaming
