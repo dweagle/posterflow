@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
 from core.config import settings
 from core.logging import log_info, LogTags
 import logging
@@ -8,11 +9,12 @@ from typing import Generator
 # Suppress SQLAlchemy query logging to prevent log spam
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
-# Create SQLAlchemy engine
+# Create SQLAlchemy engine (NullPool avoids connection pool exhaustion with SQLite)
 engine = create_engine(
     settings.database_url,
     connect_args={"check_same_thread": False},  # Needed for SQLite
-    echo=False  # Disable SQL query logging (causes log spam)
+    echo=False,  # Disable SQL query logging (causes log spam)
+    poolclass=NullPool,
 )
 
 # Enable WAL mode so readers don't block writers and vice versa
