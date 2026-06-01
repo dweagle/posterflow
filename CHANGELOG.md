@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-06-01
+### Fixed
+- Database: switched SQLAlchemy engine to NullPool to prevent connection pool exhaustion with SQLite — resolves WebSocket crashes and errors during TMDB searches and Community Requests image loading
+- Community Requests: fixed request info panel overflow caused by flex layout
+- Drives: clearing the custom sync path field now correctly saves an empty value instead of retaining the previous path
+- Drives: null values for custom path are now handled correctly in the drive update function
+
 ## [0.6.6] - 2026-05-31
 ### Added
 - Community Requests: request cards now show an inline TMDB info panel for poster maker roles, visible between the request info and action buttons — no need to navigate away to look up metadata
