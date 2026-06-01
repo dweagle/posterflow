@@ -67,7 +67,11 @@ def _update_last_sync_time(db: Any, source_dir: str) -> None:
 
 
 def _has_files_newer_than(source_dir: Path, since: datetime) -> bool:
-    """Return True if any image file in source_dir has an mtime strictly after `since`."""
+    """Return True if any image file in source_dir has an mtime or ctime strictly after `since`.
+
+    mtime catches content changes (new/replaced files).
+    ctime catches renames and permission changes without a content write.
+    """
     since_ts = since.timestamp()
     try:
         for entry in source_dir.iterdir():
@@ -76,7 +80,8 @@ def _has_files_newer_than(source_dir: Path, since: datetime) -> bool:
             if entry.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
             try:
-                if entry.stat().st_mtime > since_ts:
+                st = entry.stat()
+                if st.st_mtime > since_ts or st.st_ctime > since_ts:
                     return True
             except OSError:
                 continue
@@ -697,8 +702,19 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
             total_renamed += scope_renamed
             log_success(LogTags.IDARR, f"IDarr scope '{scope_label}' complete: {scope_renamed} renamed", job_id=job_id)
 
-            # Run personal sync inline if requested and files were renamed (or forced)
-            if sync_after_run and not dry_run and (scope_renamed > 0 or bool(idarr_config.get("force_sync_after_run"))):
+            # Run personal sync inline if requested and files were renamed (or forced),
+            # or if any image in the source dir is newer than the last recorded sync time.
+            _force_scope_sync = bool(idarr_config.get("force_sync_after_run"))
+            _should_sync_scope = scope_renamed > 0 or _force_scope_sync
+            if not _should_sync_scope and sync_after_run and not dry_run and source_dir:
+                _last_sync = _get_last_sync_time(db, source_dir)
+                if _last_sync is None:
+                    _should_sync_scope = True
+                    log_info(LogTags.IDARR, f"Workflow sync trigger for '{scope_label}': no previous sync recorded", job_id=job_id)
+                elif _has_files_newer_than(Path(source_dir), _last_sync):
+                    _should_sync_scope = True
+                    log_info(LogTags.IDARR, f"Workflow sync trigger for '{scope_label}': file(s) modified since last sync", job_id=job_id)
+            if sync_after_run and not dry_run and _should_sync_scope:
                 personal_drive_id = str(target.get("personal_drive_id") or "").strip()
                 source_path = Path(source_dir)
                 if personal_drive_id and source_path.exists():
@@ -707,6 +723,10 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
                                      message=f"Syncing '{scope_label}' to personal drive...")
                     _run_idarr_personal_sync_inline(db, job, personal_drive_id, source_path,
                                                     rename_end_progress, scope_end_progress, scope_label)
+                    try:
+                        _update_last_sync_time(db, source_dir)
+                    except Exception as _ts_exc:
+                        log_warning(LogTags.IDARR, f"Failed to record last sync time for '{scope_label}': {_ts_exc}")
                 else:
                     log_warning(LogTags.IDARR, f"Inline sync skipped for '{scope_label}': missing personal_drive_id or source dir",
                                 job_id=job_id)
