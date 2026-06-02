@@ -3,6 +3,47 @@
   margin-bottom: 1.5rem;
 }
 
+/* ── Close-thread confirm modal ─────────────────────────────────────────── */
+.close-confirm-modal {
+  max-width: 480px;
+}
+
+.close-confirm-hint {
+  color: #aaa;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.close-confirm-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.close-confirm-preset {
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 0.82rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.close-confirm-preset:hover {
+  border-color: #64b5f6;
+  background: #2a2a2a;
+}
+
+.close-confirm-preset.selected {
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.08);
+  color: #fff;
+}
+
 .community-requests .community-header h1 {
   color: #64b5f6;
   margin-bottom: 0.5rem;
@@ -395,6 +436,11 @@
   color: #ce93d8;
 }
 
+.request-type-badge.type-person {
+  background: rgba(255, 138, 101, 0.15);
+  color: #ff8a65;
+}
+
 .request-status-badge {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;
@@ -485,12 +531,12 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.15rem 0.4rem;
   border: 1px solid #424242;
   border-radius: 4px;
   background: #2a2a2a;
   color: #aaa;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.2s;
@@ -516,12 +562,12 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.15rem 0.4rem;
   border: 1px solid rgba(100, 181, 246, 0.4);
   border-radius: 4px;
   background: transparent;
   color: #64b5f6;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -540,12 +586,12 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.15rem 0.4rem;
   border: 1px solid rgba(76, 175, 80, 0.5);
   border-radius: 4px;
   background: transparent;
   color: #4caf50;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -575,7 +621,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  margin-top: 0.25rem;
+  margin-top: 0.15rem;
   width: 100%;
 }
 
@@ -584,9 +630,9 @@
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.15rem 0.4rem;
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;

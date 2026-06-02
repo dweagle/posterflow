@@ -123,14 +123,14 @@ export interface TmdbCandidate {
   poster_url: string | null
   overview: string
   popularity: number
-  media_type: 'movie' | 'show' | 'collection'
+  media_type: 'movie' | 'show' | 'collection' | 'person'
   match_reason: string
 }
 
 export const searchUnmatchedTmdb = async (params: {
   title: string
   year: number | null
-  type: 'movie' | 'show' | 'collection'
+  type: 'movie' | 'show' | 'collection' | 'person'
 }): Promise<{ candidates: TmdbCandidate[] }> => {
   return postData('/api/posterflow/unmatched-tmdb-search', params)
 }

@@ -155,14 +155,15 @@ export function useDiscordAuth() {
   const updateRequestStatus = useCallback(
     async (
       requestId: string,
-      action: 'claim' | 'complete' | 'reject',
+      action: 'claim' | 'complete' | 'reject' | 'close',
+      message?: string,
     ): Promise<{ status: string; claimed_by: string | null; fulfilled_by: string | null }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
 
       const resp = await fetch(UPDATE_STATUS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: auth.token, request_id: requestId, action }),
+        body: JSON.stringify({ token: auth.token, request_id: requestId, action, ...(message ? { message } : {}) }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok) {

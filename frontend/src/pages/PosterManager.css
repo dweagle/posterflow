@@ -4458,7 +4458,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 .creq-item-label {
   font-size: 0.88rem;
   color: #aaa;
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
 }
 
 .creq-item-label .tmdb-type-badge {
@@ -4500,7 +4500,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-height: 260px;
+  max-height: 160px;
   overflow-y: auto;
 }
 
@@ -4592,5 +4592,44 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   color: #ffb74d;
   font-size: 0.78rem;
   flex-shrink: 0;
+}
+
+.tmdb-type-badge--person {
+  background: rgba(156, 39, 176, 0.15);
+  color: #ce93d8;
+  border: 1px solid rgba(156, 39, 176, 0.3);
+}
+
+.creq-candidate-poster--person {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2a2a;
+}
+
+.creq-custom-request-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+}
+
+.creq-custom-request-label input[type="checkbox"] {
+  accent-color: #64b5f6;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.creq-field-hint {
+  font-size: 0.78rem;
+  margin-top: 0.3rem;
 }
 

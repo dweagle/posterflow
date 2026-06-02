@@ -3,7 +3,7 @@ import { getData, postData } from './http'
 export interface CommunityRequest {
   id: string
   tmdb_id: number | null
-  media_type: 'movie' | 'show' | 'season' | 'collection'
+  media_type: 'movie' | 'show' | 'season' | 'collection' | 'person'
   title: string
   year: number | null
   season_number: number | null
@@ -14,6 +14,7 @@ export interface CommunityRequest {
   claimed_by: string | null
   fulfilled_by: string | null
   requested_by: string | null
+  requested_by_discord_id: string | null
   discord_thread_url: string | null
   notes?: string | null
   created_at: string
@@ -33,6 +34,7 @@ export interface SubmitRequestPayload {
   style_tags?: string[]
   requested_by?: string | null
   requested_by_discord_id?: string | null
+  ping_discord_id?: string | null  // stores username; resolved to ID by notify-discord
 }
 
 export interface SubmitRequestResponse {

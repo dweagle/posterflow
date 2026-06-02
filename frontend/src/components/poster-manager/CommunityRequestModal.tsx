@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { AlertCircle, Check, ExternalLink, Loader2, Star, LogOut } from 'lucide-react'
+import { AlertCircle, Check, ExternalLink, Loader2, Star, LogOut, User } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
-  import { submitCommunityRequest } from '../../api/client'
+import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 
-type TmdbSearchType = 'movie' | 'show' | 'collection'
+type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
 const STYLE_TAGS = [
   'MM2K Style',
@@ -17,7 +17,14 @@ const STYLE_TAGS = [
 function getTmdbLink(candidate: TmdbCandidate): string {
   if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
   if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
+  if (candidate.media_type === 'person') return `https://www.themoviedb.org/person/${candidate.tmdb_id}`
   return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
+}
+
+/** Validate that a string is a plausible Discord username (2–32 non-whitespace chars, no @everyone/@here) */
+function isValidDiscordUsername(value: string): boolean {
+  const v = value.trim()
+  return v.length >= 2 && v.length <= 32 && !/^@?(everyone|here)$/i.test(v)
 }
 
 type CommunityRequestModalProps = {
@@ -40,10 +47,13 @@ export default function CommunityRequestModal({
   const { showToast } = useToast()
   const { isConnected, username, discordUserId, connecting, connectError, login, logout } = useDiscordAuth()
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
+  const [personCandidates, setPersonCandidates] = useState<TmdbCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<TmdbCandidate | null>(null)
+  const [isCustomRequest, setIsCustomRequest] = useState(false)
   const [styleTags, setStyleTags] = useState<string[]>([])
   const [notes, setNotes] = useState('')
+  const [pingDiscordId, setPingDiscordId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
@@ -51,23 +61,43 @@ export default function CommunityRequestModal({
 
   const cleanTitle = year ? title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : title
 
+  // Combine main + person candidates, deduplicating by tmdb_id
+  const allCandidates: TmdbCandidate[] = (() => {
+    const main = candidates ?? []
+    // Only append person results that aren't already in the main list
+    const mainIds = new Set(main.map((c) => `${c.media_type}:${c.tmdb_id}`))
+    const extra = personCandidates.filter((c) => !mainIds.has(`${c.media_type}:${c.tmdb_id}`))
+    return [...main, ...extra]
+  })()
+
   // Auto-search on open
   useEffect(() => {
     if (!tmdbApiKeyConfigured) return
     setLoading(true)
-    searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType })
-      .then((result) => {
-        setCandidates(result.candidates)
-        // Auto-select first result if it's a clear match
-        if (result.candidates.length === 1) setSelected(result.candidates[0])
+    // Run main search + person search in parallel (skip person search if already searching persons)
+    const mainSearch = searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType })
+    const personSearch = tmdbType !== 'person'
+      ? searchUnmatchedTmdb({ title: cleanTitle, year: null, type: 'person' })
+      : Promise.resolve({ candidates: [] as TmdbCandidate[] })
+
+    Promise.all([mainSearch, personSearch])
+      .then(([mainResult, personResult]) => {
+        setCandidates(mainResult.candidates)
+        setPersonCandidates(personResult.candidates)
+        // Auto-select first result if it's a single unambiguous match (main type only)
+        if (mainResult.candidates.length === 1) setSelected(mainResult.candidates[0])
       })
-      .catch(() => setCandidates([]))
+      .catch(() => { setCandidates([]); setPersonCandidates([]) })
       .finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleTag = useCallback((tag: string) => {
     setStyleTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
   }, [])
+
+  // Determine if the submit should be blocked because of missing TMDB selection
+  const hasResults = allCandidates.length > 0
+  const tmdbSelectionRequired = tmdbApiKeyConfigured && hasResults && !selected && !isCustomRequest
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return
@@ -88,6 +118,8 @@ export default function CommunityRequestModal({
         }
       }
       // Use TMDB match if selected, otherwise fall back to the original asset title/year
+      const trimmedPingId = pingDiscordId.trim()
+      const validPingId = trimmedPingId && isValidDiscordUsername(trimmedPingId) ? trimmedPingId : null
       const result = await submitCommunityRequest({
         tmdb_id: selected?.tmdb_id ?? null,
         media_type: isSeason ? 'season' : (selected?.media_type ?? tmdbType),
@@ -101,6 +133,7 @@ export default function CommunityRequestModal({
         style_tags: styleTags.length > 0 ? styleTags : undefined,
         requested_by: trimmedName,
         requested_by_discord_id: discordUserId ?? null,
+        ping_discord_id: validPingId,
       })
 
       setSubmitted(true)
@@ -118,7 +151,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, styleTags, showToast, onClose])
+  }, [selected, submitting, effectiveName, notes, styleTags, pingDiscordId, showToast, onClose])
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -164,14 +197,15 @@ export default function CommunityRequestModal({
               <Loader2 size={16} className="spin-icon" />
               <span>Searching TMDB…</span>
             </div>
-          ) : !candidates || candidates.length === 0 ? (
+          ) : allCandidates.length === 0 ? (
             <div className="creq-no-results">
-              No TMDB results found — this will be submitted as a custom request using the title above.
+              No TMDB results found.
             </div>
           ) : (
             <div className="creq-candidates">
-              {candidates.map((c, i) => {
+              {allCandidates.map((c, i) => {
                 const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
+                const isPerson = c.media_type === 'person'
                 const link = getTmdbLink(c)
                 return (
                   <button
@@ -183,13 +217,18 @@ export default function CommunityRequestModal({
                     {c.poster_url ? (
                       <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
                     ) : (
-                      <div className="creq-candidate-poster creq-candidate-poster--empty" />
+                      <div className={`creq-candidate-poster creq-candidate-poster--empty${isPerson ? ' creq-candidate-poster--person' : ''}`}>
+                        {isPerson && <User size={22} style={{ opacity: 0.4 }} />}
+                      </div>
                     )}
                     <div className="creq-candidate-info">
                       <div className="creq-candidate-title">
                         {c.title}
                         {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
                       </div>
+                      {isPerson && (
+                        <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>
+                      )}
                       <a
                         href={link}
                         target="_blank"
@@ -208,8 +247,21 @@ export default function CommunityRequestModal({
             </div>
           )}
 
+          {/* Custom request checkbox — shown when there are results but nothing selected, or always when no results */}
+          {tmdbApiKeyConfigured && !loading && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={isCustomRequest || allCandidates.length === 0}
+                disabled={allCandidates.length === 0}
+                onChange={(e) => setIsCustomRequest(e.target.checked)}
+              />
+              This is a custom request — no matching TMDB item available
+            </label>
+          )}
+
           {/* Style tags */}
-          <div className="creq-section-label" style={{ marginTop: '1.25rem' }}>
+          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
             Style preferences
           </div>
           <div className="request-style-tags">
@@ -226,7 +278,7 @@ export default function CommunityRequestModal({
           </div>
 
           {/* Discord identity */}
-          <div className="creq-section-label" style={{ marginTop: '1.25rem' }}>
+          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
             Discord account <span className="request-required">required</span>
           </div>
           {isConnected && username ? (
@@ -252,8 +304,27 @@ export default function CommunityRequestModal({
           )}
           {connectError && <div className="creq-discord-error">{connectError}</div>}
 
+          {/* Ping a user */}
+          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
+            Ping a Discord user <span className="request-optional">(optional)</span>
+          </div>
+          <input
+            type="text"
+            className="request-notes-textarea"
+            style={{ resize: 'none', height: 'auto', padding: '0.5rem 0.75rem' }}
+            placeholder="Discord username (e.g. dweagle)"
+            value={pingDiscordId}
+            onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
+            maxLength={32}
+          />
+          {pingDiscordId.length > 0 && !isValidDiscordUsername(pingDiscordId) && (
+            <div className="creq-field-hint" style={{ color: '#ff9800' }}>
+              Must be 2–32 characters. @everyone and @here are not allowed.
+            </div>
+          )}
+
           {/* Notes */}
-          <div className="creq-section-label" style={{ marginTop: '1.25rem' }}>
+          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
             Notes <span className="request-optional">(optional)</span>
           </div>
           <textarea
@@ -271,8 +342,8 @@ export default function CommunityRequestModal({
           <button
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={submitting || submitted || !isConnected || !effectiveName.trim()}
-            title={!selected ? 'Submitting without a TMDB match' : undefined}
+            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || tmdbSelectionRequired}
+            title={tmdbSelectionRequired ? 'Select a TMDB match or check "custom request" to proceed' : undefined}
           >
             {submitting ? (
               <Loader2 size={14} className="spin-icon" />

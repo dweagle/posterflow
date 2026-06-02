@@ -54,7 +54,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 
 export default function CommunityRequests() {
   const navigate = useNavigate()
-  const { isConnected, isMaker, username, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
+  const { isConnected, isMaker, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
   const { refreshCommunityRequestCount } = useUnmatched()
   const [requests, setRequests] = useState<CommunityRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -68,6 +68,9 @@ export default function CommunityRequests() {
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [makerInfoOpen, setMakerInfoOpen] = useState(false)
+  // Per-card archive-thread state: requestId → 'loading' | 'done' | error string
+  const [archiveStates, setArchiveStates] = useState<Map<string, 'loading' | 'done' | string>>(new Map())
+  const [archiveConfirm, setArchiveConfirm] = useState<{ requestId: string; message: string } | null>(null)
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
@@ -179,10 +182,10 @@ export default function CommunityRequests() {
     doUpload(requestId, allFiles)
   }, [doUpload])
 
-  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject') => {
+  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject', message?: string) => {
     setActionStates((prev) => new Map(prev).set(requestId, 'loading'))
     try {
-      const result = await updateRequestStatus(requestId, action)
+      const result = await updateRequestStatus(requestId, action, message)
       setRequests((prev) =>
         prev.map((r) =>
           r.id === requestId
@@ -204,6 +207,19 @@ export default function CommunityRequests() {
     } catch (err) {
       setActionStates((prev) =>
         new Map(prev).set(requestId, err instanceof Error ? err.message : `${action} failed`)
+      )
+    }
+  }, [updateRequestStatus])
+
+  const handleArchiveThread = useCallback(async (requestId: string, message?: string) => {
+    setArchiveStates((prev) => new Map(prev).set(requestId, 'loading'))
+    setArchiveConfirm(null)
+    try {
+      await updateRequestStatus(requestId, 'close', message)
+      setArchiveStates((prev) => new Map(prev).set(requestId, 'done'))
+    } catch (err) {
+      setArchiveStates((prev) =>
+        new Map(prev).set(requestId, err instanceof Error ? err.message : 'Archive failed')
       )
     }
   }, [updateRequestStatus])
@@ -248,6 +264,7 @@ export default function CommunityRequests() {
   }, [fetchRequests])
 
   return (
+    <>
     <div className="page-container community-requests">
       <div className="community-header">
         <h1>Community Requests</h1>
@@ -611,6 +628,30 @@ export default function CommunityRequests() {
                       </>
                     )
                   })()}
+                  {/* Archive Thread button — visible to the original requester, archives the Discord thread */}
+                  {isConnected && discordUserId && req.requested_by_discord_id === discordUserId && req.discord_thread_url && req.status !== 'rejected' && (() => {
+                    const archiveState = archiveStates.get(req.id)
+                    const isLoading = archiveState === 'loading'
+                    const isDone = archiveState === 'done'
+                    const archiveError = typeof archiveState === 'string' && archiveState !== 'loading' && archiveState !== 'done' ? archiveState : null
+                    return (
+                      <div className="request-status-actions">
+                        <button
+                          type="button"
+                          className={`request-action-btn action-reject${isDone ? ' upload-done' : ''}`}
+                          title={isDone ? 'Discord thread archived' : 'Archive the Discord thread for this request'}
+                          disabled={isLoading || isDone}
+                          onClick={() => setArchiveConfirm({ requestId: req.id, message: '' })}
+                        >
+                          {isLoading ? <Loader2 size={11} className="spin-icon" /> : isDone ? <Check size={11} /> : null}
+                          <span>{isDone ? 'Archived' : 'Archive'}</span>
+                        </button>
+                        {archiveError && (
+                          <span className="request-action-error" title={archiveError}>{archiveError}</span>
+                        )}
+                      </div>
+                    )
+                  })()}
                   </div>
                 </div>
 
@@ -624,5 +665,67 @@ export default function CommunityRequests() {
         </div>
       )}
     </div>
+
+    {/* ── Archive thread confirm modal ──────────────────────────────────────────────────────────────── */}
+    {archiveConfirm && (() => {
+      const PRESETS = [
+        'Looks great! Thanks for the poster! 🎉',
+        "You're the best! Thank you! 🙌",
+        'Perfect, exactly what I was looking for! ❤️',
+        'Amazing work, really appreciate it! 🔥',
+      ]
+      const archiveState = archiveStates.get(archiveConfirm.requestId)
+      const isLoading = archiveState === 'loading'
+
+      return (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !isLoading) setArchiveConfirm(null) }}>
+          <div className="modal-content schedule-modal close-confirm-modal">
+            <div className="modal-header">
+              <h2>Archive Discord Thread</h2>
+              <button className="modal-close" onClick={() => setArchiveConfirm(null)} disabled={isLoading}>×</button>
+            </div>
+            <div className="modal-body">
+              <p className="close-confirm-hint">
+                This will lock and archive the Discord thread. You can optionally leave a message for the maker.
+              </p>
+              <div className="close-confirm-presets">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`close-confirm-preset${archiveConfirm.message === p ? ' selected' : ''}`}
+                    onClick={() => setArchiveConfirm((s) => s ? { ...s, message: s.message === p ? '' : p } : s)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="request-notes-textarea"
+                placeholder="Or type a custom message… (optional)"
+                rows={3}
+                maxLength={300}
+                value={PRESETS.includes(archiveConfirm.message) ? '' : archiveConfirm.message}
+                onChange={(e) => setArchiveConfirm((s) => s ? { ...s, message: e.target.value } : s)}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setArchiveConfirm(null)} disabled={isLoading}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                disabled={isLoading}
+                onClick={() => handleArchiveThread(archiveConfirm.requestId, archiveConfirm.message.trim() || undefined)}
+              >
+                {isLoading ? <Loader2 size={13} className="spin-icon" /> : '🔒'}
+                {' '}Archive Thread
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+    </>
   )
 }
