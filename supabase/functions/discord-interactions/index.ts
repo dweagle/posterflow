@@ -210,6 +210,57 @@ Deno.serve(async (req) => {
       (user?.username as string) ??
       'a maker'
 
+    // Parse custom_id early so we can route before the role check
+    const data = interaction.data as Record<string, string>
+    const customId = data?.custom_id ?? ''
+
+    // Handle close_thread button — open to thread owner or any admin, not role-gated
+    if (customId === 'close_thread') {
+      const channel = interaction.channel as Record<string, unknown> | undefined
+      const threadOwnerId = channel?.owner_id as string | undefined
+      const perms = BigInt((member?.permissions as string) ?? '0')
+      const isAdmin = (perms & BigInt(0x8)) === BigInt(0x8)
+      const isThreadOwner = threadOwnerId != null && clickerUserId === threadOwnerId
+
+      if (!isAdmin && !isThreadOwner) {
+        return jsonResponse({
+          type: 4,
+          data: {
+            content: 'Only the person who opened this thread or a server administrator can close it.',
+            flags: 64,
+          },
+        })
+      }
+
+      const channelId = interaction.channel_id as string
+      const bgTask = (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const lockResp = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ locked: true, archived: true }),
+        })
+        if (!lockResp.ok) {
+          console.error('[discord-interactions] close_thread lock failed:', await lockResp.text())
+        }
+      })().catch(console.error)
+
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        // EdgeRuntime may not be available in all environments; ignore
+      }
+
+      return jsonResponse({
+        type: 4,
+        data: { content: '✅ This thread has been closed and locked.' },
+      })
+    }
+
     // Role check — synchronous, role list is in the interaction payload
     if (DISCORD_MAKER_ROLE_ID) {
       const memberRoles = (member?.roles as string[] | undefined) ?? []
@@ -223,10 +274,6 @@ Deno.serve(async (req) => {
         })
       }
     }
-
-    // Parse custom_id — format: "action:requestId" or "complete:requestId:claimerUserId"
-    const data = interaction.data as Record<string, string>
-    const customId = data?.custom_id ?? ''
     const parts = customId.split(':')
     const action = parts[0] ?? ''
     const requestId = parts[1] ?? ''
