@@ -694,7 +694,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
                   <div className="instruction-step">
                     <strong>3. Configure OAuth Consent Screen</strong>
-                      <li>If this is a new project, there will be a configuration setup walkthrough. If editing an existing project, the bolded headings in this guide can be found on the left-side menu.</li>
+                    If this is a new project, there will be a configuration setup walkthrough. If editing an existing project, the bolded headings in this guide can be found on the left-side menu.
                     <ul>
                       <li>Click the <strong>Get Started</strong> button to enter configuration.</li>
                       <li><strong>Branding:</strong> Enter app name (e.g. "PosterFlow") and support email. Click Next.</li>
