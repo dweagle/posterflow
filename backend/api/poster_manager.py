@@ -702,8 +702,8 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
 
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    if media_type not in {"movie", "show", "collection"}:
-        raise HTTPException(status_code=400, detail="type must be one of: movie, show, collection")
+    if media_type not in {"movie", "show", "collection", "person"}:
+        raise HTTPException(status_code=400, detail="type must be one of: movie, show, collection, person")
 
     # Strip trailing (YYYY) from title if year is already provided separately,
     # so shows like "INVINCIBLE (2021)" don't get searched as "INVINCIBLE (2021)" + year=2021.
@@ -733,6 +733,11 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
         query_params = {"query": title, "include_adult": "false"}
         tmdb_entity = "collection"
         response_media_type = "collection"
+    elif media_type == "person":
+        endpoint = "/search/person"
+        query_params = {"query": title, "include_adult": "false"}
+        tmdb_entity = "person"
+        response_media_type = "person"
     else:
         endpoint = "/search/movie"
         query_params = {"query": title, "include_adult": "false"}
@@ -755,6 +760,36 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
     results = tmdb_data.get("results") if isinstance(tmdb_data, dict) else []
     if not isinstance(results, list):
         results = []
+
+    # For person searches, build candidates directly without external ID lookups
+    if media_type == "person":
+        candidates = []
+        for item in results[:10]:
+            if not isinstance(item, dict):
+                continue
+            tmdb_id = item.get("id")
+            if not isinstance(tmdb_id, int):
+                continue
+            candidate_title = str(item.get("name") or "").strip()
+            if not candidate_title:
+                continue
+            # Persons use profile_path for their image
+            profile_path = item.get("profile_path")
+            poster_url = f"https://image.tmdb.org/t/p/w185{profile_path}" if isinstance(profile_path, str) and profile_path else None
+            candidates.append({
+                "tmdb_id": tmdb_id,
+                "tvdb_id": None,
+                "imdb_id": None,
+                "title": candidate_title,
+                "year": None,
+                "poster_url": poster_url,
+                "overview": str(item.get("known_for_department") or "").strip(),
+                "popularity": float(item.get("popularity") or 0),
+                "media_type": "person",
+                "match_reason": "person_result",
+            })
+        log_info(LogTags.UNMATCHED, f"TMDB person search for '{title}': {len(candidates)} candidates")
+        return {"candidates": candidates}
 
     tmdb_ext_cache: Dict[int, Dict[str, Any]] = {}
 

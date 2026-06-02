@@ -51,7 +51,7 @@ def check_and_increment_rate_limit(db: Session) -> None:
 
 class PosterRequestPayload(BaseModel):
     tmdb_id: Optional[int] = None
-    media_type: str  # movie | show | season | collection
+    media_type: str  # movie | show | season | collection | person
     title: str
     year: Optional[int] = None
     season_number: Optional[int] = None
@@ -62,6 +62,7 @@ class PosterRequestPayload(BaseModel):
     style_tags: Optional[list[str]] = None
     requested_by: Optional[str] = None
     requested_by_discord_id: Optional[str] = None
+    ping_discord_username: Optional[str] = None
 
 
 @router.get("/requests/count")
@@ -160,7 +161,7 @@ async def submit_community_request(
     db: Session = Depends(get_db),
 ):
     """Submit a new poster request to the shared community database."""
-    if payload.media_type not in ("movie", "show", "season", "collection"):
+    if payload.media_type not in ("movie", "show", "season", "collection", "person"):
         raise HTTPException(status_code=400, detail="Invalid media_type")
     if not payload.title or not payload.title.strip():
         raise HTTPException(status_code=400, detail="Title is required")
@@ -258,6 +259,7 @@ async def submit_community_request(
                     "p_style_tags": payload.style_tags,
                     "p_requested_by": payload.requested_by,
                     "p_requested_by_discord_id": payload.requested_by_discord_id,
+                    "p_ping_discord_id": payload.ping_discord_username,
                 },
             )
             resp.raise_for_status()
