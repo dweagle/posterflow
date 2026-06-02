@@ -28,6 +28,12 @@ const DISCORD_GUILD_ID = Deno.env.get('DISCORD_GUILD_ID') ?? null
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+const SB_HEADERS = {
+  apikey: SUPABASE_SERVICE_ROLE_KEY,
+  Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+  'Content-Type': 'application/json',
+}
+
 const TAG_SECRETS: Record<string, string> = {
   movie: 'DISCORD_TAG_MOVIE',
   show: 'DISCORD_TAG_SHOW',
@@ -70,7 +76,36 @@ Deno.serve(async (req) => {
     return new Response('No record', { status: 400 })
   }
 
-  const { id, title, year, media_type, tmdb_id, tvdb_id, season_number, notes, style_tags, requested_by, poster_path } = record
+  const id = record.id
+
+  // Brief pause so that post-INSERT UPDATEs (requested_by_discord_id, ping_discord_id)
+  // have time to complete before we read the row.
+  await new Promise((resolve) => setTimeout(resolve, 800))
+
+  // Re-fetch the row to get the most up-to-date field values
+  const freshResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${id}&select=*&limit=1`,
+    { headers: SB_HEADERS },
+  )
+  let freshRecord: Record<string, unknown> = record
+  if (freshResp.ok) {
+    const rows = await freshResp.json() as Record<string, unknown>[]
+    if (rows.length > 0) freshRecord = rows[0]
+  }
+
+  const { title, year, media_type, tmdb_id, tvdb_id, season_number, notes, style_tags, requested_by, poster_path, ping_discord_username } = freshRecord as {
+    title: string
+    year: number | null
+    media_type: string
+    tmdb_id: number | null
+    tvdb_id: number | null
+    season_number: number | null
+    notes: string | null
+    style_tags: string[] | null
+    requested_by: string | null
+    poster_path: string | null
+    ping_discord_username: string | null
+  }
 
   const tmdbLink = buildTmdbLink(tmdb_id, media_type)
   const tvdbLink = buildTvdbLink(tvdb_id ?? null)
@@ -178,6 +213,36 @@ Deno.serve(async (req) => {
   }
 
   const discordThread = await discordResp.json()
+
+  // If a ping username was specified, resolve it to a user ID via guild member search
+  if (ping_discord_username && ping_discord_username.trim().length >= 2) {
+    const searchResp = await fetch(
+      `https://discord.com/api/v10/guilds/${Deno.env.get('DISCORD_GUILD_ID')}/members/search?query=${encodeURIComponent(ping_discord_username.trim())}&limit=10`,
+      { headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` } },
+    )
+    if (searchResp.ok) {
+      const members = await searchResp.json() as Array<{ user: { id: string; username: string; global_name?: string | null }; nick?: string | null }>
+      const needle = ping_discord_username.trim().toLowerCase()
+      const match = members.find((m) =>
+        m.user.username.toLowerCase() === needle ||
+        (m.user.global_name ?? '').toLowerCase() === needle ||
+        (m.nick ?? '').toLowerCase() === needle
+      )
+      if (match) {
+        const resolvedId = match.user.id
+        await fetch(`https://discord.com/api/v10/channels/${discordThread.id}/messages`, {
+          method: 'POST',
+          headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: `<@${resolvedId}>`,
+            allowed_mentions: { parse: [], users: [resolvedId] },
+          }),
+        })
+      } else {
+        console.warn(`[notify-discord] No exact member match found for ping username: ${ping_discord_username}`)
+      }
+    }
+  }
 
   // Store the thread ID and full URL so the community page can link to it
   const threadUrl = DISCORD_GUILD_ID

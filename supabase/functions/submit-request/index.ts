@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Validate required fields (defense-in-depth; the backend also validates)
-  const validTypes = ['movie', 'show', 'season', 'collection']
+  const validTypes = ['movie', 'show', 'season', 'collection', 'person']
   if (!body.p_media_type || !validTypes.includes(body.p_media_type as string)) {
     return json({ error: 'Invalid media_type' }, 400)
   }
@@ -86,13 +86,18 @@ Deno.serve(async (req: Request) => {
   if (typeof body.p_notes === 'string')        body.p_notes        = body.p_notes.trim().slice(0, 1000)
   if (typeof body.p_requested_by === 'string') body.p_requested_by = body.p_requested_by.trim().slice(0, 100)
 
-  // Extract and remove the Discord ID before passing to the RPC — the RPC doesn't
-  // accept this parameter. We store it via a separate UPDATE after insert.
+  // Extract and remove Discord ID fields before passing to the RPC — the RPC doesn't
+  // accept these parameters. We store them via a separate UPDATE after insert.
   const requestedByDiscordId =
     typeof body.p_requested_by_discord_id === 'string'
       ? body.p_requested_by_discord_id.trim().slice(0, 30)
       : null
   delete body.p_requested_by_discord_id
+
+  // Store ping_discord_username: any reasonable Discord username (2–32 non-whitespace chars)
+  const rawPingUsername = typeof body.p_ping_discord_id === 'string' ? body.p_ping_discord_id.trim() : null
+  const pingDiscordUsername = rawPingUsername && rawPingUsername.length >= 2 && rawPingUsername.length <= 32 ? rawPingUsername : null
+  delete body.p_ping_discord_id
 
   // Call the RPC with the service role key.
   // anon and authenticated roles have had EXECUTE revoked on this function,
@@ -127,15 +132,18 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Submission failed' }, 500)
   }
 
-  // Store the requester's Discord ID on the new row so they can be pinged on completion.
+  // Store the requester's Discord ID and optional ping ID on the new row.
   // Only set when this is a brand-new request (not a duplicate vote).
-  if (data?.is_new && data?.request_id && requestedByDiscordId) {
+  if (data?.is_new && data?.request_id && (requestedByDiscordId || pingDiscordId)) {
+    const updatePayload: Record<string, string> = {}
+    if (requestedByDiscordId) updatePayload.requested_by_discord_id = requestedByDiscordId
+    if (pingDiscordUsername) updatePayload.ping_discord_username = pingDiscordUsername
     const { error: updateErr } = await supabase
       .from('poster_requests')
-      .update({ requested_by_discord_id: requestedByDiscordId })
+      .update(updatePayload)
       .eq('id', data.request_id)
     if (updateErr) {
-      console.error('Failed to store requested_by_discord_id:', updateErr)
+      console.error('Failed to store discord IDs:', updateErr)
     }
   }
 

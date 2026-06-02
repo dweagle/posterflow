@@ -37,7 +37,7 @@ const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const VALID_ACTIONS = new Set(['claim', 'complete', 'reject'])
+const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close'])
 
 // ── Token verification (same as post-poster) ───────────────────────────────
 
@@ -241,20 +241,20 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
-  let body: { token?: string; request_id?: string; action?: string }
+  let body: { token?: string; request_id?: string; action?: string; message?: string }
   try {
     body = await req.json()
   } catch {
     return json({ error: 'Invalid JSON body' }, 400)
   }
 
-  const { token, request_id, action } = body
+  const { token, request_id, action, message } = body
 
   if (!token || !request_id || !action) {
     return json({ error: 'Missing required fields: token, request_id, action' }, 400)
   }
   if (!VALID_ACTIONS.has(action)) {
-    return json({ error: 'Invalid action — must be claim, complete, or reject' }, 400)
+    return json({ error: 'Invalid action — must be claim, complete, reject, or close' }, 400)
   }
 
   // ── Step 1: Verify token signature and expiry ──────────────────────────────
@@ -263,7 +263,49 @@ Deno.serve(async (req) => {
     return json({ error: 'Invalid or expired token — please reconnect your Discord account' }, 401)
   }
 
-  // ── Step 2: Re-check Discord role live ────────────────────────────────────
+  // ── Close action: archives the Discord thread, no status change ───────────
+  if (action === 'close') {
+    const row = await fetchRequest(request_id)
+    if (!row) return json({ error: 'Request not found' }, 404)
+
+    const { discord_message_id, requested_by_discord_id } = row
+    if (maker.discord_user_id !== requested_by_discord_id) {
+      return json({ error: 'Only the person who submitted this request can archive it' }, 403)
+    }
+
+    if (discord_message_id) {
+      const safeMessage = typeof message === 'string' ? message.trim().slice(0, 300) : ''
+      const bgTask = (async () => {
+        if (safeMessage) {
+          await postThreadMessage(discord_message_id, `\n${safeMessage}\n`)
+          await new Promise((resolve) => setTimeout(resolve, 400))
+        }
+        await postThreadMessage(
+          discord_message_id,
+          `🔒 Thread archived by ${maker.discord_username} (requester).`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        const lockResp = await fetch(`https://discord.com/api/v10/channels/${discord_message_id}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bot ${BOT_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locked: true, archived: true }),
+        })
+        if (!lockResp.ok) {
+          console.error('[update-request-status] archive lock failed:', await lockResp.text())
+        }
+      })().catch(console.error)
+      try {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        await bgTask
+      }
+    }
+
+    return json({ ok: true })
+  }
+
+  // ── Step 2: Re-check Discord role live (maker actions only) ───────────────
   const hasMakerRole = await checkMakerRole(maker.discord_user_id)
   if (!hasMakerRole) {
     return json({ error: 'You no longer have the Poster Maker role' }, 403)
