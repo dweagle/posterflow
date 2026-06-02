@@ -83,6 +83,8 @@ function MakerTools() {
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
+  const [psdPosterWidth, setPsdPosterWidth] = useState('')
+  const [psdPosterHeight, setPsdPosterHeight] = useState('')
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
 
@@ -158,6 +160,12 @@ function MakerTools() {
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
+      const rawSize = (settings.psd_poster_size || '').trim()
+      if (rawSize && rawSize.toLowerCase().includes('x')) {
+        const [w, h] = rawSize.toLowerCase().split('x', 2)
+        setPsdPosterWidth(w.trim())
+        setPsdPosterHeight(h.trim())
+      }
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
     })
@@ -208,6 +216,9 @@ function MakerTools() {
         psd_export_folder: psdExportFolder.trim(),
         psd_template_path: psdTemplatePath.trim(),
         psd_open_photopea: String(psdOpenPhotopea),
+        psd_poster_size: psdPosterWidth.trim() && psdPosterHeight.trim()
+          ? `${psdPosterWidth.trim()}x${psdPosterHeight.trim()}`
+          : '',
       })
       showToast('PSD settings saved', 'success')
       setShowPsdConfigModal(false)
@@ -818,6 +829,34 @@ function MakerTools() {
                     placeholder="/config/template.psd"
                   />
                 </label>
+                <div>
+                  <span style={{ fontWeight: 500 }}>Poster Export Size</span>
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Pixel dimensions for poster image layers in exported PSD files.
+                    Backdrops and logos are not affected. Leave blank to match the template canvas size.
+                  </small>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min={100}
+                      max={2000}
+                      value={psdPosterWidth}
+                      onChange={(e) => setPsdPosterWidth(e.target.value)}
+                      placeholder="Width"
+                      style={{ width: '90px' }}
+                    />
+                    <span style={{ color: '#888' }}>×</span>
+                    <input
+                      type="number"
+                      min={100}
+                      max={3000}
+                      value={psdPosterHeight}
+                      onChange={(e) => setPsdPosterHeight(e.target.value)}
+                      placeholder="Height"
+                      style={{ width: '90px' }}
+                    />
+                  </div>
+                </div>
                 <div className="maker-setting-row">
                   <div>
                     <span style={{ fontWeight: 500 }}>Open in Photopea</span>

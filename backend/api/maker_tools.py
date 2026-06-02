@@ -1305,6 +1305,7 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
 SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"
 SETTING_PSD_TEMPLATE_PATH = "psd_template_path"
 SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
+SETTING_PSD_POSTER_SIZE = "psd_poster_size"
 
 # Bundled default template — lives at backend/assets/default_template.psd
 _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_template.psd"
@@ -1359,6 +1360,8 @@ def _build_psd(
     backdrop_bytes_list: list[bytes] | None = None,
     canvas_w: int = 1000,
     canvas_h: int = 1500,
+    poster_w: int | None = None,
+    poster_h: int | None = None,
     template_path: Path | None = None,
     title: str = "",
     year: str = "",
@@ -1392,6 +1395,13 @@ def _build_psd(
     else:
         psd = PSDImage.new("RGB", (canvas_w, canvas_h))
 
+    # Effective poster dimensions — defaults to the canvas size but can be
+    # overridden by the user's custom poster size setting so that poster layers
+    # are exported at a higher (or different) resolution while the canvas and
+    # template remain unchanged.
+    eff_poster_w = poster_w if poster_w else canvas_w
+    eff_poster_h = poster_h if poster_h else canvas_h
+
     # Build the base display name used for all layer names
     base_name = f"{title} ({year})" if title and year else title or "Poster"
 
@@ -1400,16 +1410,20 @@ def _build_psd(
     for idx, poster_bytes in enumerate(reversed(poster_bytes_list)):
         layer_name = base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}"
         poster_pil = Image.open(BytesIO(poster_bytes)).convert("RGB")
-        # Cover-fill: scale so the shorter dimension matches the canvas, then centre-crop
-        scale = max(canvas_w / poster_pil.width, canvas_h / poster_pil.height)
+        # Cover-fill: scale so the shorter dimension matches the target poster size, then centre-crop
+        scale = max(eff_poster_w / poster_pil.width, eff_poster_h / poster_pil.height)
         new_w = round(poster_pil.width * scale)
         new_h = round(poster_pil.height * scale)
         poster_pil = poster_pil.resize((new_w, new_h), Image.LANCZOS)
-        crop_left = (new_w - canvas_w) // 2
-        crop_top = (new_h - canvas_h) // 2
-        poster_pil = poster_pil.crop((crop_left, crop_top, crop_left + canvas_w, crop_top + canvas_h))
+        crop_left = (new_w - eff_poster_w) // 2
+        crop_top = (new_h - eff_poster_h) // 2
+        poster_pil = poster_pil.crop((crop_left, crop_top, crop_left + eff_poster_w, crop_top + eff_poster_h))
 
-        poster_layer = PixelLayer.frompil(poster_pil, psd, layer_name=layer_name)
+        # Calculate center offsets relative to the main canvas
+        pos_left = (canvas_w - eff_poster_w) // 2
+        pos_top = (canvas_h - eff_poster_h) // 2
+
+        poster_layer = PixelLayer.frompil(poster_pil, psd, layer_name=layer_name, top=pos_top, left=pos_left)
 
         if template_path is not None:
             poster_group = psd.find("POSTER")
@@ -1669,11 +1683,32 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             template_path = _DEFAULT_TEMPLATE_PATH
             log_info(LogTags.API, "Using bundled default PSD template")
 
+    # Resolve optional custom poster size.
+    # Controls only how poster image layers are sized before injection — the canvas,
+    # template, backdrops, and logos are completely unaffected.
+    poster_w: int | None = None
+    poster_h: int | None = None
+    poster_size_setting = get_setting_value(db, SETTING_PSD_POSTER_SIZE) or ""
+    if poster_size_setting and "x" in poster_size_setting.lower():
+        try:
+            parts = poster_size_setting.lower().split("x", 1)
+            pw = int(parts[0].strip())
+            ph = int(parts[1].strip())
+            if 100 <= pw <= 10000 and 100 <= ph <= 10000:
+                poster_w, poster_h = pw, ph
+                log_info(LogTags.API, f"Custom poster size: {poster_w}\u00d7{poster_h}")
+            else:
+                log_warning(LogTags.API, f"psd_poster_size value out of range ({poster_size_setting}); using canvas size")
+        except (ValueError, IndexError):
+            log_warning(LogTags.API, f"Invalid psd_poster_size value: {poster_size_setting!r}; using canvas size")
+
     try:
         psd_bytes = _build_psd(
             poster_bytes_list,
             logo_bytes_list,
             backdrop_bytes_list=backdrop_bytes_list,
+            poster_w=poster_w,
+            poster_h=poster_h,
             template_path=template_path,
             title=payload.title,
             year=payload.year,
