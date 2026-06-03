@@ -809,7 +809,7 @@ class BorderReplacerService:
 
             incremental_tracking_records: Dict[str, Poster] = {}
             pending_tracking_updates = 0
-            tracking_updates_enabled = mode == "incremental" and not dry_run
+            tracking_updates_enabled = not dry_run  # Both full and incremental maintain tracking
 
             def _flush_tracking_updates(force: bool = False) -> None:
                 nonlocal pending_tracking_updates, tracking_updates_enabled
@@ -870,7 +870,7 @@ class BorderReplacerService:
                     
                     # Build dict of tracked files with their mtimes
                     tracked_metadata = {
-                        p.file_path: (p.file_mtime, p.file_size)
+                        p.file_path: (p.file_mtime, p.file_size, p.dest_file_mtime)
                         for p in tracked_files
                     }
 
@@ -919,7 +919,7 @@ class BorderReplacerService:
                             )
                             continue
 
-                        tracked_mtime, tracked_source_size = tracked_entry
+                        tracked_mtime, tracked_source_size, tracked_dest_mtime = tracked_entry
 
                         # Reprocess if output file disappeared.
                         if not os.path.exists(dest_file):
@@ -961,7 +961,64 @@ class BorderReplacerService:
                                 source_size,
                                 tracked_source_size,
                             )
+                            continue
+
+                        # First-time population: dest_file_mtime not yet recorded for this
+                        # file (e.g. existing records from before the column was added).
+                        # Process once so the value gets written and future runs can detect
+                        # external modifications.
+                        if tracked_dest_mtime is None:
+                            _mark_for_processing(
+                                dest_file,
+                                input_file,
+                                "dest_mtime_not_recorded",
+                                folder,
+                                source_mtime,
+                                tracked_mtime,
+                                source_size,
+                                tracked_source_size,
+                            )
+                            continue
+
+                        # Reprocess if destination was externally modified (e.g. replaced by another app).
+                        if tracked_dest_mtime is not None:
+                            try:
+                                current_dest_mtime = os.path.getmtime(dest_file)
+                                if abs(float(current_dest_mtime) - float(tracked_dest_mtime)) > 0.0001:
+                                    _mark_for_processing(
+                                        dest_file,
+                                        input_file,
+                                        "dest_modified_externally",
+                                        folder,
+                                        source_mtime,
+                                        tracked_mtime,
+                                        source_size,
+                                        tracked_source_size,
+                                    )
+                            except OSError:
+                                pass
                 
+                # Clean up stale tracking records before (potentially) short-circuiting
+                if tracking_updates_enabled and source_files_with_mtime:
+                    current_dest_paths = set(source_files_with_mtime.keys())
+                    try:
+                        all_tracked = self.db.query(Poster).filter(
+                            Poster.drive_id == "border_processed"
+                        ).all()
+                        stale = [r for r in all_tracked if r.file_path not in current_dest_paths]
+                        if stale:
+                            for record in stale:
+                                self.db.delete(record)
+                            self.db.commit()
+                            log_info(
+                                LogTags.BORDER_REPLACER,
+                                f"Removed {len(stale)} stale tracking record(s) for deleted/moved files",
+                                count=len(stale),
+                            )
+                    except Exception as stale_err:
+                        log_warning(LogTags.BORDER_REPLACER, f"Failed to clean up stale tracking records: {stale_err}")
+                        self.db.rollback()
+
                 log_info(
                     LogTags.BORDER_REPLACER, 
                     f"Incremental mode: {len(files_needing_processing)} of {len(source_files_with_mtime)} files need processing",
@@ -999,6 +1056,53 @@ class BorderReplacerService:
                     record.file_path: record
                     for record in tracked_records
                 }
+
+            elif mode == "full" and tracking_updates_enabled:
+                # Full mode: pre-load all existing tracking records so we can update
+                # vs insert correctly, and clean up stale records in one pass.
+                log_info(LogTags.BORDER_REPLACER, "Full mode: loading tracking records for update...")
+
+                # Walk source dir to build the complete set of dest paths this run will produce
+                full_mode_dest_paths: set[str] = set()
+                for root, dirs, files in os.walk(source_dir):
+                    rel_path = os.path.relpath(root, source_dir)
+                    folder = None if rel_path == "." else rel_path
+                    for file in files:
+                        if not file.lower().endswith((".jpg", ".jpeg", ".png")):
+                            continue
+                        dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
+                        full_mode_dest_paths.add(dest_file)
+
+                # Load existing tracking records (filter in Python to avoid SQLite 999-var limit)
+                if full_mode_dest_paths:
+                    all_existing = self.db.query(Poster).filter(
+                        Poster.drive_id == "border_processed"
+                    ).all()
+                    incremental_tracking_records = {
+                        record.file_path: record
+                        for record in all_existing
+                        if record.file_path in full_mode_dest_paths
+                    }
+
+                # Remove stale records (dest paths no longer produced by source tree)
+                # Filter in Python to avoid SQLite's 999-variable IN clause limit
+                try:
+                    all_tracked = self.db.query(Poster).filter(
+                        Poster.drive_id == "border_processed"
+                    ).all()
+                    stale = [r for r in all_tracked if r.file_path not in full_mode_dest_paths]
+                    if stale:
+                        for record in stale:
+                            self.db.delete(record)
+                        self.db.commit()
+                        log_info(
+                            LogTags.BORDER_REPLACER,
+                            f"Removed {len(stale)} stale tracking record(s) for deleted/moved files",
+                            count=len(stale),
+                        )
+                except Exception as stale_err:
+                    log_warning(LogTags.BORDER_REPLACER, f"Failed to clean up stale tracking records: {stale_err}")
+                    self.db.rollback()
 
             # Scan source directory for folders and posters
             processed_count = 0
@@ -1132,12 +1236,20 @@ class BorderReplacerService:
                                 current_size = os.path.getsize(input_file)
                                 current_time = datetime.now(timezone.utc)
 
+                                # Record the destination file's mtime so we can detect
+                                # external modifications on subsequent runs.
+                                try:
+                                    written_dest_mtime = os.path.getmtime(dest_file)
+                                except OSError:
+                                    written_dest_mtime = None
+
                                 poster_record = incremental_tracking_records.get(dest_file)
 
                                 if poster_record:
                                     poster_record.file_mtime = current_mtime
                                     poster_record.last_processed = current_time
                                     poster_record.file_size = current_size
+                                    poster_record.dest_file_mtime = written_dest_mtime
                                 else:
                                     poster_record = Poster(
                                         drive_id="border_processed",
@@ -1146,6 +1258,7 @@ class BorderReplacerService:
                                         file_size=current_size,
                                         file_mtime=current_mtime,
                                         last_processed=current_time,
+                                        dest_file_mtime=written_dest_mtime,
                                     )
                                     self.db.add(poster_record)
                                     incremental_tracking_records[dest_file] = poster_record

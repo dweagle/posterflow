@@ -175,8 +175,8 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
 
         log_info(LogTags.BORDER_REPLACER, "Preserving tmp/ folder for next incremental run (if exists)")
 
-        changed_count = result.get("changed_count", 0)
-        skipped_count = result.get("skipped_count", 0)
+        changed_count = result.get("changed", result.get("changed_count", 0))
+        skipped_count = result.get("skipped", result.get("skipped_count", 0))
         dry_run_suffix = " (Dry Run - No Changes Made)" if dry_run else ""
         update_job_state(
             db,

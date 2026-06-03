@@ -17,6 +17,7 @@ class Poster(Base):
     gdrive_file_id = Column(String, nullable=True)  # Google Drive file ID
     downloaded_at = Column(DateTime(timezone=True), server_default=func.now())
     file_mtime = Column(Float, nullable=True)  # Filesystem modification time for change detection
+    dest_file_mtime = Column(Float, nullable=True)  # Destination file mtime after last write (for external-change detection)
     last_processed = Column(DateTime(timezone=True), nullable=True)  # When last renamed/organized
     
     def __repr__(self) -> str:
