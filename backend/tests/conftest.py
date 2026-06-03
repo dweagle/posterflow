@@ -39,10 +39,13 @@ import models.manual_media  # noqa: F401
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Bootstrap schema before importing main/app (which triggers startup logic).
+# Drop and recreate all tables so a stale on-disk DB never causes column
+# mismatch errors when models change between test runs.
 _bootstrap_engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+Base.metadata.drop_all(bind=_bootstrap_engine)
 Base.metadata.create_all(bind=_bootstrap_engine)
 _bootstrap_engine.dispose()
 
