@@ -312,7 +312,7 @@ export default function CommunityRequestModal({
             type="text"
             className="request-notes-textarea"
             style={{ resize: 'none', height: 'auto', padding: '0.5rem 0.75rem' }}
-            placeholder="Discord username (e.g. dweagle)"
+            placeholder="Discord username (e.g. dweagle79)"
             value={pingDiscordId}
             onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
             maxLength={32}

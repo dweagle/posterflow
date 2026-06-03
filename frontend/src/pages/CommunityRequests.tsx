@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import TmdbItemCard, { type PsdConfig } from '../components/maker-tools/TmdbItemCard'
+import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
@@ -77,6 +78,8 @@ export default function CommunityRequests() {
   const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(() =>
     localStorage.getItem('posterflow.communityRequests.idarrQuickAdd') === 'true'
   )
+  const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
+  const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
 
@@ -87,6 +90,7 @@ export default function CommunityRequests() {
         templatePath: (settings.psd_template_path || '').trim(),
         openPhotopea: (settings.psd_open_photopea || '').trim().toLowerCase() === 'true',
       })
+      setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
     }).catch(() => {})
   }, [])
 
@@ -269,8 +273,8 @@ export default function CommunityRequests() {
       <div className="community-header">
         <h1>Community Requests</h1>
         <p>
-          Poster makers use this list to prioritize their work. Submit new requests from the{' '}
-          <strong>Unmatched Assets</strong> tab in Poster Manager.
+          Poster makers use this list to prioritize their work. Submit new requests using the{' '}
+          <strong>New Request</strong> button or from the <strong>Unmatched Assets</strong> tab in Poster Manager.
         </p>
       </div>
 
@@ -381,10 +385,16 @@ export default function CommunityRequests() {
             </select>
           </div>
         </div>
-        <button className="community-refresh-btn" onClick={fetchRequests} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
-          Refresh
-        </button>
+        <div className="community-toolbar-actions">
+          <button className="community-refresh-btn" onClick={fetchRequests} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
+            Refresh
+          </button>
+          <button className="community-new-request-btn" onClick={() => setNewRequestModalOpen(true)}>
+            <Plus size={14} />
+            New Request
+          </button>
+        </div>
       </div>
 
       {error && <div className="community-error">{error}</div>}
@@ -726,6 +736,13 @@ export default function CommunityRequests() {
         </div>
       )
     })()}
+    {/* ── New Community Request modal ─────────────────────────────────────── */}
+    {newRequestModalOpen && (
+      <NewCommunityRequestModal
+        tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+        onClose={() => setNewRequestModalOpen(false)}
+      />
+    )}
     </>
   )
 }
