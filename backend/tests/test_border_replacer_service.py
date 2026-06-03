@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from models.setting import Setting
@@ -14,6 +15,12 @@ def _create_source_image(path: Path, color: tuple[int, int, int] = (255, 255, 25
     path.parent.mkdir(parents=True, exist_ok=True)
     image = Image.new("RGB", (1000, 1500), color)
     image.save(path)
+
+
+def _get_corner_color(path: Path) -> tuple[int, int, int]:
+    """Return the top-left corner pixel color of a processed poster."""
+    with Image.open(path) as img:
+        return img.convert("RGB").getpixel((0, 0))
 
 
 def test_resolve_effective_colors_uses_active_holiday(test_db):
@@ -373,3 +380,201 @@ def test_incremental_reprocesses_when_source_size_changes_with_same_mtime(test_d
 
     assert second_result["success"] is True
     assert second_result["changed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Season-specific border tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("filename,expected", [
+    ("Season01.jpg", True),
+    ("Season00.jpg", True),   # specials
+    ("Season12.png", True),
+    ("season01.jpg", True),   # case-insensitive
+    ("poster.jpg", False),
+    ("poster.jpeg", False),
+    ("Season.jpg", False),    # no digits
+    ("Season01Extra.jpg", False),
+    ("MyShow.jpg", False),
+])
+def test_is_season_file(filename, expected):
+    result = BorderReplacerService._is_season_file(filename)
+    assert result is expected
+
+
+def test_season_mode_remove_strips_borders_from_season_files_only(test_db, tmp_path):
+    """season_mode='remove' removes borders from Season files; main posters get colored borders."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    show_folder = source_dir / "My Show"
+    main_poster = show_folder / "poster.png"
+    season_poster = show_folder / "Season01.png"
+
+    _create_source_image(main_poster, (200, 200, 200))
+    _create_source_image(season_poster, (200, 200, 200))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#FF0000"],
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        season_mode="remove",
+    )
+
+    assert result["success"] is True
+    assert result["changed"] == 2
+
+    dest_main = destination_dir / "My Show" / "poster.png"
+    dest_season = destination_dir / "My Show" / "Season01.png"
+
+    assert dest_main.exists()
+    assert dest_season.exists()
+
+    # Main poster should have a red border
+    assert _get_corner_color(dest_main) == (255, 0, 0)
+
+    # Season poster should NOT have a red border (borders removed)
+    assert _get_corner_color(dest_season) != (255, 0, 0)
+
+
+def test_season_mode_colors_applies_different_colors_to_seasons(test_db, tmp_path):
+    """season_mode='colors' applies season-specific colors to Season files."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    show_folder = source_dir / "My Show"
+    main_poster = show_folder / "poster.png"
+    season_poster = show_folder / "Season01.png"
+
+    _create_source_image(main_poster, (200, 200, 200))
+    _create_source_image(season_poster, (200, 200, 200))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#FF0000"],
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        season_mode="colors",
+        season_border_colors=["#0000FF"],
+    )
+
+    assert result["success"] is True
+    assert result["changed"] == 2
+
+    dest_main = destination_dir / "My Show" / "poster.png"
+    dest_season = destination_dir / "My Show" / "Season01.png"
+
+    assert _get_corner_color(dest_main) == (255, 0, 0)    # red main border
+    assert _get_corner_color(dest_season) == (0, 0, 255)  # blue season border
+
+
+def test_season_mode_inherit_treats_seasons_same_as_main(test_db, tmp_path):
+    """season_mode='inherit' (default) applies identical color logic to all files."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    show_folder = source_dir / "My Show"
+    main_poster = show_folder / "poster.png"
+    season_poster = show_folder / "Season01.png"
+
+    _create_source_image(main_poster, (200, 200, 200))
+    _create_source_image(season_poster, (200, 200, 200))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#00FF00"],
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        season_mode="inherit",
+    )
+
+    assert result["success"] is True
+    assert result["changed"] == 2
+
+    dest_main = destination_dir / "My Show" / "poster.png"
+    dest_season = destination_dir / "My Show" / "Season01.png"
+
+    assert _get_corner_color(dest_main) == (0, 255, 0)
+    assert _get_corner_color(dest_season) == (0, 255, 0)
+
+
+def test_season_mode_colors_empty_falls_back_to_inherit(test_db, tmp_path):
+    """season_mode='colors' with no colors falls back to inherit behavior."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    show_folder = source_dir / "My Show"
+    main_poster = show_folder / "poster.png"
+    season_poster = show_folder / "Season01.png"
+
+    _create_source_image(main_poster, (200, 200, 200))
+    _create_source_image(season_poster, (200, 200, 200))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#FF0000"],
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        season_mode="colors",
+        season_border_colors=[],
+    )
+
+    assert result["success"] is True
+    dest_season = destination_dir / "My Show" / "Season01.png"
+    # Falls back to main color (red)
+    assert _get_corner_color(dest_season) == (255, 0, 0)
+
+
+def test_settings_hash_differs_when_season_params_change(test_db):
+    """Changing season_mode or season_colors produces a different settings hash."""
+    service = BorderReplacerService(test_db)
+
+    hash_inherit = service.calculate_settings_hash(
+        border_colors=["#FF0000"],
+        border_width=26,
+        exclusion_list=[],
+        season_mode="inherit",
+        season_border_colors=[],
+    )
+
+    hash_remove = service.calculate_settings_hash(
+        border_colors=["#FF0000"],
+        border_width=26,
+        exclusion_list=[],
+        season_mode="remove",
+        season_border_colors=[],
+    )
+
+    hash_colors = service.calculate_settings_hash(
+        border_colors=["#FF0000"],
+        border_width=26,
+        exclusion_list=[],
+        season_mode="colors",
+        season_border_colors=["#0000FF"],
+    )
+
+    assert hash_inherit != hash_remove
+    assert hash_inherit != hash_colors
+    assert hash_remove != hash_colors

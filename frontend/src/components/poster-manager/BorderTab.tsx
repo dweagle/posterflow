@@ -54,6 +54,9 @@ type BorderTabProps = {
   holidaySchedules: HolidaySchedule[]
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
+  seasonMode: 'inherit' | 'remove' | 'colors'
+  seasonColors: string[]
+  newSeasonColor: string
   onSaveSettings: () => void
   onRunBorderReplacer: (dryRun: boolean) => void
   onSetBorderWidth: (width: number) => void
@@ -65,6 +68,10 @@ type BorderTabProps = {
   onSetSkipRunOutsideHoliday: (value: boolean) => void
   onAddHolidaySchedule: (holiday: HolidaySchedule) => void
   onRemoveHolidaySchedule: (name: string) => void
+  onSetSeasonMode: (mode: 'inherit' | 'remove' | 'colors') => void
+  onSetNewSeasonColor: (color: string) => void
+  onAddSeasonBorderColor: () => void
+  onRemoveSeasonBorderColor: (color: string) => void
 }
 
 function BorderTab({
@@ -78,6 +85,9 @@ function BorderTab({
   holidaySchedules,
   skipRunOutsideHoliday,
   removeBorders,
+  seasonMode,
+  seasonColors,
+  newSeasonColor,
   onSaveSettings,
   onRunBorderReplacer,
   onSetBorderWidth,
@@ -89,6 +99,10 @@ function BorderTab({
   onSetSkipRunOutsideHoliday,
   onAddHolidaySchedule,
   onRemoveHolidaySchedule,
+  onSetSeasonMode,
+  onSetNewSeasonColor,
+  onAddSeasonBorderColor,
+  onRemoveSeasonBorderColor,
 }: BorderTabProps) {
   const navigate = useNavigate()
 
@@ -357,6 +371,95 @@ function BorderTab({
             )}
           </div>
           )}
+
+          <div className="field-group">
+            <label>Season Poster Borders</label>
+            <small style={{ marginBottom: '1rem', display: 'block' }}>
+              Control how borders are applied to TV season posters (files named like <code>Season01.jpg</code>).
+              Overrides the main poster setting for season files only.
+            </small>
+
+            <div className="season-mode-options">
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="seasonMode"
+                  value="inherit"
+                  checked={seasonMode === 'inherit'}
+                  onChange={() => onSetSeasonMode('inherit')}
+                />
+                <span>Same as main posters</span>
+              </label>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="seasonMode"
+                  value="remove"
+                  checked={seasonMode === 'remove'}
+                  onChange={() => onSetSeasonMode('remove')}
+                />
+                <span>Remove borders</span>
+              </label>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="seasonMode"
+                  value="colors"
+                  checked={seasonMode === 'colors'}
+                  onChange={() => onSetSeasonMode('colors')}
+                />
+                <span>Custom colors</span>
+              </label>
+            </div>
+
+            {seasonMode === 'colors' && (
+              <div style={{ marginTop: '1rem' }}>
+                <div className="color-input-row">
+                  <input
+                    type="color"
+                    value={newSeasonColor}
+                    onChange={(e) => onSetNewSeasonColor(e.target.value)}
+                    className="color-picker"
+                  />
+                  <input
+                    type="text"
+                    value={newSeasonColor}
+                    onChange={(e) => onSetNewSeasonColor(e.target.value)}
+                    placeholder="#000000"
+                  />
+                  <button
+                    className="btn-secondary"
+                    onClick={onAddSeasonBorderColor}
+                    disabled={!newSeasonColor || seasonColors.includes(newSeasonColor)}
+                  >
+                    Add Color
+                  </button>
+                </div>
+
+                {seasonColors.length > 0 ? (
+                  <div className="color-list">
+                    {seasonColors.map((color, index) => (
+                      <div key={index} className="color-item">
+                        <div className="color-preview" style={{ background: color }} />
+                        <span className="color-value">{color}</span>
+                        <button
+                          className="btn-remove-color"
+                          onClick={() => onRemoveSeasonBorderColor(color)}
+                          title="Remove color"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-config">
+                    <p>No season colors added. Add at least one color for season posters.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {!removeBorders && (
           <div className="field-group">

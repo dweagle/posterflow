@@ -11,6 +11,8 @@ interface OriginalBorderSettings {
   holidaySchedules: BorderHolidaySchedule[]
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
+  seasonMode: 'inherit' | 'remove' | 'colors'
+  seasonColors: string[]
 }
 
 export interface BorderHolidaySchedule {
@@ -40,6 +42,9 @@ export const usePosterManagerBorder = ({
   const [holidaySchedules, setHolidaySchedules] = useState<BorderHolidaySchedule[]>([])
   const [skipRunOutsideHoliday, setSkipRunOutsideHoliday] = useState(false)
   const [removeBorders, setRemoveBorders] = useState(false)
+  const [seasonMode, setSeasonMode] = useState<'inherit' | 'remove' | 'colors'>('inherit')
+  const [seasonColors, setSeasonColors] = useState<string[]>([])
+  const [newSeasonColor, setNewSeasonColor] = useState('#000000')
 
   const fetchBorderSettings = async () => {
     try {
@@ -98,6 +103,22 @@ export const usePosterManagerBorder = ({
       const removeBordersEnabled = removeBordersStr.toLowerCase() === 'true'
       setRemoveBorders(removeBordersEnabled)
 
+      const seasonModeStr = settings['border_replacer_season_mode'] || 'inherit'
+      const resolvedSeasonMode = (['inherit', 'remove', 'colors'].includes(seasonModeStr)
+        ? seasonModeStr
+        : 'inherit') as 'inherit' | 'remove' | 'colors'
+      setSeasonMode(resolvedSeasonMode)
+
+      const seasonColorsStr = settings['border_replacer_season_colors'] || '[]'
+      let loadedSeasonColors: string[] = []
+      try {
+        loadedSeasonColors = JSON.parse(seasonColorsStr)
+        loadedSeasonColors = Array.isArray(loadedSeasonColors) ? loadedSeasonColors : []
+        setSeasonColors(loadedSeasonColors)
+      } catch {
+        setSeasonColors([])
+      }
+
       originalBorderSettingsRef.current = {
         colors: [...colors],
         width,
@@ -106,6 +127,8 @@ export const usePosterManagerBorder = ({
         holidaySchedules: holidays,
         skipRunOutsideHoliday: skipRun,
         removeBorders: removeBordersEnabled,
+        seasonMode: resolvedSeasonMode,
+        seasonColors: [...loadedSeasonColors],
       }
     } catch (error) {
       console.error('Error fetching border settings:', error)
@@ -136,6 +159,8 @@ export const usePosterManagerBorder = ({
         border_replacer_holidays: JSON.stringify(holidaySchedules),
         border_replacer_skip_non_holiday: skipRunOutsideHoliday ? 'true' : 'false',
         border_replacer_remove_borders: removeBorders ? 'true' : 'false',
+        border_replacer_season_mode: seasonMode,
+        border_replacer_season_colors: JSON.stringify(seasonColors),
       })
 
       originalBorderSettingsRef.current = {
@@ -146,6 +171,8 @@ export const usePosterManagerBorder = ({
         holidaySchedules,
         skipRunOutsideHoliday,
         removeBorders,
+        seasonMode,
+        seasonColors: [...seasonColors],
       }
       setHasUnsavedBorderChanges(false)
       showToast('Border settings saved successfully', 'success')
@@ -166,6 +193,17 @@ export const usePosterManagerBorder = ({
 
   const removeBorderColor = (color: string) => {
     setBorderColors(borderColors.filter(c => c !== color))
+  }
+
+  const addSeasonBorderColor = () => {
+    if (newSeasonColor && !seasonColors.includes(newSeasonColor)) {
+      setSeasonColors([...seasonColors, newSeasonColor])
+      setNewSeasonColor('#000000')
+    }
+  }
+
+  const removeSeasonBorderColor = (color: string) => {
+    setSeasonColors(seasonColors.filter(c => c !== color))
   }
 
   const addHolidaySchedule = (holiday: BorderHolidaySchedule) => {
@@ -197,6 +235,8 @@ export const usePosterManagerBorder = ({
     setHolidaySchedules([...original.holidaySchedules])
     setSkipRunOutsideHoliday(original.skipRunOutsideHoliday)
     setRemoveBorders(original.removeBorders)
+    setSeasonMode(original.seasonMode)
+    setSeasonColors([...original.seasonColors])
     setHasUnsavedBorderChanges(false)
   }
 
@@ -209,17 +249,24 @@ export const usePosterManagerBorder = ({
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,
+    seasonMode,
+    seasonColors,
+    newSeasonColor,
     setBorderWidth,
     setBorderMode,
     setNewColor,
     setAutoRunBorder,
     setSkipRunOutsideHoliday,
     setRemoveBorders,
+    setSeasonMode,
+    setNewSeasonColor,
     fetchBorderSettings,
     saveBorderSettings,
     resetBorderSettingsToOriginal,
     addBorderColor,
     removeBorderColor,
+    addSeasonBorderColor,
+    removeSeasonBorderColor,
     addHolidaySchedule,
     removeHolidaySchedule,
   }

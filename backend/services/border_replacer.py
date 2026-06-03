@@ -56,12 +56,21 @@ class BorderReplacerService:
         self.db = db
         self.logger = logger
 
+    @staticmethod
+    def _is_season_file(filename: str) -> bool:
+        """Return True if the filename represents a season poster (e.g. Season01.jpg)."""
+        import re as _re
+        name = os.path.splitext(filename)[0]
+        return bool(_re.match(r"^Season\d+$", name, _re.IGNORECASE))
+
     def calculate_settings_hash(
         self,
         border_colors: Optional[List[str]],
         border_width: int,
         exclusion_list: Optional[List[str]],
         processing_profile: Optional[str] = None,
+        season_mode: str = "inherit",
+        season_border_colors: Optional[List[str]] = None,
     ) -> str:
         """
         Calculate a hash of border replacer settings to detect changes.
@@ -71,6 +80,8 @@ class BorderReplacerService:
             border_colors: List of hex colors or None
             border_width: Border width in pixels
             exclusion_list: List of titles to exclude
+            season_mode: Season border mode ("inherit", "remove", "colors")
+            season_border_colors: Colors to use for season posters when season_mode is "colors"
             
         Returns:
             MD5 hash of the settings as a hex string
@@ -80,6 +91,8 @@ class BorderReplacerService:
             "width": border_width,
             "exclusions": sorted(exclusion_list or []),  # Sort for consistent hashing
             "profile": processing_profile or "default",
+            "season_mode": season_mode,
+            "season_colors": sorted(season_border_colors or []),
         }
         settings_json = json.dumps(settings_dict, sort_keys=True)
         return hashlib.md5(settings_json.encode(), usedforsecurity=False).hexdigest()
@@ -92,6 +105,8 @@ class BorderReplacerService:
         destination_dir: str,
         dry_run: bool = False,
         processing_profile: Optional[str] = None,
+        season_mode: str = "inherit",
+        season_border_colors: Optional[List[str]] = None,
     ) -> bool:
         """
         Check if border replacer settings have changed since last run.
@@ -103,6 +118,8 @@ class BorderReplacerService:
             exclusion_list: Current exclusion list
             destination_dir: Destination directory path to scope the reset
             dry_run: If True, only log what would happen without modifying database
+            season_mode: Season border mode ("inherit", "remove", "colors")
+            season_border_colors: Colors for season posters when season_mode is "colors"
             
         Returns:
             True if settings changed (or would change in dry run), False otherwise
@@ -115,6 +132,8 @@ class BorderReplacerService:
             border_width,
             exclusion_list,
             processing_profile=processing_profile,
+            season_mode=season_mode,
+            season_border_colors=season_border_colors,
         )
         
         # Get stored hash from database
@@ -631,6 +650,8 @@ class BorderReplacerService:
         dry_run: bool = False,
         progress_callback: Optional[ProgressCallback] = None,
         mode: str = "full",
+        season_mode: str = "inherit",
+        season_border_colors: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Process posters by applying or removing borders.
@@ -639,12 +660,15 @@ class BorderReplacerService:
             source_dir: Source directory containing posters (typically /posters/assets/tmp/)
             destination_dir: Final destination directory (/posters/assets/)
             border_colors: List of hex colors to cycle through for replacement mode
-            remove_borders: If True, run explicit border-removal mode
-            border_width: Border width in pixels (default: 75)
+            remove_borders: If True, run explicit border-removal mode for main/movie posters
+            border_width: Border width in pixels (default: 26)
             exclusion_list: List of titles to exclude from processing
             dry_run: If True, simulate without making changes
             progress_callback: Optional callback(phase, current, total, message)
             mode: "full" or "incremental" - full processes all, incremental only changed items
+            season_mode: How to handle season posters — "inherit" (same as main), "remove"
+                         (strip borders), or "colors" (use season_border_colors)
+            season_border_colors: Hex colors used when season_mode is "colors"
 
         Returns:
             Dictionary with results including processed count and messages
@@ -724,11 +748,23 @@ class BorderReplacerService:
                 return copy_result
 
             if not remove_borders and len(effective_border_colors) == 0:
+                # Check if season colors compensate — if seasons use "colors" mode with colors, and everything
+                # else is expected to remove borders, that's still a valid config (remove_borders handles main).
+                # But if remove_borders is also False, there's truly nothing configured for main posters.
                 log_section_end(LogTags.BORDER_REPLACER, "Border Processing Failed")
                 return {
                     "success": False,
                     "error": "No border colors configured. Add colors or enable 'Remove Borders' mode.",
                 }
+
+            # Resolve season border colors
+            effective_season_mode = season_mode if season_mode in ("inherit", "remove", "colors") else "inherit"
+            effective_season_colors: List[str] = []
+            if effective_season_mode == "colors":
+                effective_season_colors = list(season_border_colors or [])
+                if not effective_season_colors:
+                    # Fall back to inherit if colors mode is selected but no colors configured
+                    effective_season_mode = "inherit"
 
             # Convert hex colors to RGB
             rgb_border_colors: List[Tuple[int, int, int]] = []
@@ -737,9 +773,17 @@ class BorderReplacerService:
                     rgb_color = self.convert_to_rgb(color)
                     rgb_border_colors.append(rgb_color)
 
+            rgb_season_colors: List[Tuple[int, int, int]] = []
+            if effective_season_mode == "colors" and effective_season_colors:
+                for color in effective_season_colors:
+                    rgb_season_colors.append(self.convert_to_rgb(color))
+
             action = "Removing borders" if remove_borders else "Replacing borders"
             mode_str = "(incremental)" if mode == "incremental" else "(full)"
             log_info(LogTags.BORDER_REPLACER, f"{action} {mode_str}")
+            if effective_season_mode != "inherit":
+                season_action = "remove" if effective_season_mode == "remove" else f"custom colors ({len(rgb_season_colors)})"
+                log_info(LogTags.BORDER_REPLACER, f"Season poster override: {season_action}")
 
             # Import Poster model for incremental tracking
             from models.poster import Poster
@@ -759,6 +803,8 @@ class BorderReplacerService:
                     destination_dir,
                     dry_run,
                     processing_profile=profile,
+                    season_mode=effective_season_mode,
+                    season_border_colors=effective_season_colors,
                 )
 
             incremental_tracking_records: Dict[str, Poster] = {}
@@ -984,6 +1030,7 @@ class BorderReplacerService:
             )
 
             current_color_index = 0
+            current_season_color_index = 0
 
             # Process each poster file
             for root, dirs, files in os.walk(source_dir):
@@ -996,6 +1043,9 @@ class BorderReplacerService:
                         continue
 
                     input_file = os.path.join(root, file)
+
+                    # Determine whether this is a season poster
+                    is_season = self._is_season_file(file)
 
                     # Check exclusion list
                     excluded = False
@@ -1032,8 +1082,29 @@ class BorderReplacerService:
                     if not dry_run:
                         dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
 
-                        if not remove_borders and rgb_border_colors:
-                            # Replace border with color
+                        # Determine the action for this specific file based on whether it's a season poster
+                        if is_season and effective_season_mode == "remove":
+                            # Season-specific: remove borders
+                            result = self.remove_borders(
+                                input_file,
+                                destination_dir,
+                                border_width,
+                                excluded,
+                                folder,
+                            )
+                        elif is_season and effective_season_mode == "colors" and rgb_season_colors:
+                            # Season-specific: apply season colors
+                            rgb_season_color = rgb_season_colors[current_season_color_index]
+                            result = self.replace_borders(
+                                input_file,
+                                destination_dir,
+                                rgb_season_color,
+                                border_width,
+                                folder,
+                            )
+                            current_season_color_index = (current_season_color_index + 1) % len(rgb_season_colors)
+                        elif not remove_borders and rgb_border_colors:
+                            # Main behavior: replace border with color
                             rgb_border_color = rgb_border_colors[current_color_index]
                             result = self.replace_borders(
                                 input_file,
@@ -1042,11 +1113,9 @@ class BorderReplacerService:
                                 border_width,
                                 folder,
                             )
-                            current_color_index = (current_color_index + 1) % len(
-                                rgb_border_colors
-                            )
+                            current_color_index = (current_color_index + 1) % len(rgb_border_colors)
                         else:
-                            # Remove borders
+                            # Fallback: remove borders (main remove_borders=True, or no colors configured)
                             result = self.remove_borders(
                                 input_file,
                                 destination_dir,

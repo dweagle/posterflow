@@ -81,6 +81,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_holidays",
     "border_replacer_skip_non_holiday",
     "border_replacer_remove_borders",
+    "border_replacer_season_mode",
+    "border_replacer_season_colors",
     "auto_run_border",
     # GDrive storage path
     "gdrive_storage_path",
@@ -91,6 +93,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "psd_poster_fit_border",
     # Sidebar layout
     "sidebar_config",
+    # Community Requests maker preferences
+    "idarr_quick_add_community",
 })
 
 

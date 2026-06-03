@@ -101,6 +101,19 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
 
         remove_borders = str(remove_borders_value).lower() == "true"
 
+        season_mode = get_setting_value(db, "border_replacer_season_mode", "inherit")
+        if season_mode not in ("inherit", "remove", "colors"):
+            season_mode = "inherit"
+
+        season_colors = []
+        season_colors_value = get_setting_value(db, "border_replacer_season_colors")
+        if season_colors_value:
+            try:
+                season_colors = json.loads(season_colors_value)
+            except json.JSONDecodeError:
+                log_warning(LogTags.BORDER_REPLACER, "Failed to parse season border colors, using empty list")
+                season_colors = []
+
         exclusions_value = get_setting_value(db, "border_replacer_exclusions")
         exclusions = []
         if exclusions_value:
@@ -136,6 +149,9 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
         log_info(LogTags.BORDER_REPLACER, f"Standalone: {action} ({mode_label})")
         if not remove_borders:
             log_info(LogTags.BORDER_REPLACER, f"Colors: {len(border_colors)}, Width: {border_width}px")
+        if season_mode != "inherit":
+            season_desc = "remove" if season_mode == "remove" else f"custom colors ({len(season_colors)})"
+            log_info(LogTags.BORDER_REPLACER, f"Season poster mode: {season_desc}")
         if exclusions:
             log_info(LogTags.BORDER_REPLACER, f"Exclusions: {len(exclusions)} title(s)")
 
@@ -150,6 +166,8 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
             dry_run=dry_run,
             progress_callback=_build_progress_callback(db, job),
             mode=mode,
+            season_mode=season_mode,
+            season_border_colors=season_colors if season_colors else None,
         )
 
         if not result["success"]:

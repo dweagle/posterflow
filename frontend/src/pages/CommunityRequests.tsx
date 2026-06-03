@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
-import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings } from '../api/client'
+import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
@@ -75,9 +75,7 @@ export default function CommunityRequests() {
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
-  const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(() =>
-    localStorage.getItem('posterflow.communityRequests.idarrQuickAdd') === 'true'
-  )
+  const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +89,7 @@ export default function CommunityRequests() {
         openPhotopea: (settings.psd_open_photopea || '').trim().toLowerCase() === 'true',
       })
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
+      setIdarrQuickAddEnabled((settings.idarr_quick_add_community || '').trim().toLowerCase() === 'true')
     }).catch(() => {})
   }, [])
 
@@ -434,7 +433,7 @@ export default function CommunityRequests() {
                     onChange={(e) => {
                       const next = e.target.checked
                       setIdarrQuickAddEnabled(next)
-                      localStorage.setItem('posterflow.communityRequests.idarrQuickAdd', String(next))
+                      void saveSettings({ idarr_quick_add_community: String(next) })
                     }}
                   />
                   <span className="idarr-toggle-slider" />

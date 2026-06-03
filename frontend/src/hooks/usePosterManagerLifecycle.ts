@@ -20,6 +20,8 @@ interface UsePosterManagerLifecycleOptions {
   holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
+  seasonMode: 'inherit' | 'remove' | 'colors'
+  seasonColors: string[]
   originalBorderSettingsRef: React.MutableRefObject<{
     colors: string[]
     width: number
@@ -28,6 +30,8 @@ interface UsePosterManagerLifecycleOptions {
     holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
     skipRunOutsideHoliday: boolean
     removeBorders: boolean
+    seasonMode: 'inherit' | 'remove' | 'colors'
+    seasonColors: string[]
   } | null>
   setHasUnsavedBorderChanges: React.Dispatch<React.SetStateAction<boolean>>
   selectedLibraries: Set<string>
@@ -68,6 +72,8 @@ export function usePosterManagerLifecycle({
   holidaySchedules,
   skipRunOutsideHoliday,
   removeBorders,
+  seasonMode,
+  seasonColors,
   originalBorderSettingsRef,
   setHasUnsavedBorderChanges,
   selectedLibraries,
@@ -120,8 +126,10 @@ export function usePosterManagerLifecycle({
     const holidaysChanged = JSON.stringify(holidaySchedules) !== JSON.stringify(originalBorderSettingsRef.current.holidaySchedules)
     const skipRunChanged = skipRunOutsideHoliday !== originalBorderSettingsRef.current.skipRunOutsideHoliday
     const removeBordersChanged = removeBorders !== originalBorderSettingsRef.current.removeBorders
+    const seasonModeChanged = seasonMode !== originalBorderSettingsRef.current.seasonMode
+    const seasonColorsChanged = JSON.stringify(seasonColors) !== JSON.stringify(originalBorderSettingsRef.current.seasonColors)
 
-    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged)
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged)
   }, [
     autoRunBorder,
     borderColors,
@@ -130,6 +138,8 @@ export function usePosterManagerLifecycle({
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,
+    seasonMode,
+    seasonColors,
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
   ])
