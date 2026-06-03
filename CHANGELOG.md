@@ -12,6 +12,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Maker Tools: PSD export in TMDB Search configuration now has a toggle to resize/fit poster to border edge.
 - Community Requests: new request submission modal with updated UI; 'person' media type is now supported for poster requests and TMDB searches
 - Community Requests: Discord threads can now be closed via an in app Archive action button on the users request card that closes and locks the thread
+- Community Requests: Users can now optionally ping a specific poster maker on Discord when requesting a poster that might belong to their existing poster sets.
 - Border Replacer: `dest_file_mtime` is now tracked per poster to prevent assets from being skipped incorrectly on subsequent border replacer runs if files were changed outside of app
 
 ### Fixed
