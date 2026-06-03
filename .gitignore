@@ -37,8 +37,10 @@ Thumbs.db
 *.tmp
 *.temp
 
-# GitHub Copilot (personal)
+# AI assistant instructions (personal)
 .github/copilot-instructions.md
+CLAUDE.md
+GEMINI.md
 
 # Environment
 .env
