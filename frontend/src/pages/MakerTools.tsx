@@ -661,7 +661,7 @@ function MakerTools() {
         <div className="maker-tools-panel">
           <div className="toolbar">
             <div className="toolbar-title">
-              <h2>TMDB Search</h2>
+              <h2>TMDB Search/PSD Export</h2>
               <div className="toolbar-info">
                 <Info size={16} />
                 <div className="toolbar-tooltip">Search TMDB for movies, TV shows, and collections. Browse posters, logos, and backdrops, then export directly to PSD.</div>
@@ -787,7 +787,7 @@ function MakerTools() {
         <div className="modal-overlay">
           <div className="modal-content schedule-modal">
             <div className="modal-header">
-              <h2>TMDB Search Settings</h2>
+              <h2>TMDB Search/PSD Export Settings</h2>
               <button className="modal-close" onClick={closePsdConfigModal}>×</button>
             </div>
             <div className="modal-body">
