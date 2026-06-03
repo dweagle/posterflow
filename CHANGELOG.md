@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-03
+### Added
+- Docker images are now tagged with the release version number in addition to branch tags
+- Docker images are now published to GitHub Container Registry (GHCR) alongside Docker Hub
+
+### Fixed
+- Dashboard: schedule popover no longer appears squished
+
+
 ## [0.7.0] - 2026-06-03
 ### Added
 - Border Replacer: season posters can now have their own border settings independent of the main series poster
