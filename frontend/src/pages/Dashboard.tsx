@@ -187,7 +187,6 @@ function Dashboard() {
         hour: '2-digit',
         minute: '2-digit',
         hour12: true,
-        timeZone: 'UTC',
       })
     } catch {
       return 'Invalid date'
@@ -848,7 +847,7 @@ function Dashboard() {
 
       {hoveredSchedule && (() => {
         const { data: s, rect } = hoveredSchedule
-        const tooltipWidth = 260
+        const tooltipWidth = 290
         let left = rect.left
         if (left + tooltipWidth > window.innerWidth - 8) {
           left = window.innerWidth - tooltipWidth - 8
