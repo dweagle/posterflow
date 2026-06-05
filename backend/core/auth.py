@@ -32,6 +32,10 @@ _EXEMPT_PATHS: frozenset[str] = frozenset({
 _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/api/auth/",
     "/ws",
+    "/api/stats/posters/",
+    "/api/idarr/pending-matches/source-image",
+    "/api/posterflow/plex-upload/source-image",
+    "/api/posterflow/plex-upload/plex-thumb",
 )
 
 
@@ -169,12 +173,12 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
         # Check the Authorization header
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
-            log_warning(LogTags.API, "Unauthorized API request – missing Bearer token", path=path)
+            log_warning(LogTags.API, f"Unauthorized API request – missing Bearer token ({path})")
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
         token = auth_header[7:]
         if not verify_password(token, _cache.salt_val, _cache.hash_val):
-            log_warning(LogTags.API, "Unauthorized API request – invalid token", path=path)
+            log_warning(LogTags.API, f"Unauthorized API request – invalid token ({path})")
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
         return await call_next(request)
