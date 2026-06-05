@@ -855,6 +855,13 @@ async def save_maker_idarr_config(config: MakerIdarrConfig, db: Session = Depend
         upsert_setting(db, SETTING_MAKER_IDARR_CONFIG, sanitized_config.model_dump_json())
         db.commit()
         log_user_action("Saved Maker Tools IDarr configuration")
+
+        # Prune any scope data that no longer matches the saved sync targets
+        try:
+            _run_prune_orphaned_scopes(db)
+        except Exception as prune_err:
+            log_warning(LogTags.MODULE, f"Could not prune orphaned idarr scopes after config save: {prune_err}")
+
         return {"success": True}
     except Exception as e:
         db.rollback()
