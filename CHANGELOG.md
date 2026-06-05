@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-05
+### Fixed
+- Plex Upload: Season poster borders setting not applying during Plex Upload webhook
+
 ## [0.7.2] - 2026-06-05
 ### Added
 - Database: improved pruning logic for orphaned and stale records
