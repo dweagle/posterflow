@@ -86,7 +86,6 @@ export const useSettingsOperations = ({ showToast }: UseSettingsOperationsParams
       setRestoreLoading(false)
     }
   }
-
   return {
     databaseStats,
     loadingStats,

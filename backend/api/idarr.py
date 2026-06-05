@@ -20,7 +20,7 @@ from core.config import settings as app_settings
 from core.logging import LogTags, log_debug, log_error, log_user_action, log_warning
 from database import get_db
 from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key
-from models.setting import get_setting, upsert_setting
+from models.setting import Setting, get_setting, upsert_setting
 from util.data.normalization import normalize_titles
 
 router = APIRouter(prefix="/api/idarr", tags=["idarr"])
@@ -57,7 +57,7 @@ class IdarrPendingResolveRequest(BaseModel):
 
 
 class IdarrCacheMaintenanceRequest(BaseModel):
-    action: Literal["clear_all", "prune_unmatched", "purge_stale", "prune_targeted"]
+    action: Literal["clear_all", "prune_unmatched", "purge_stale", "prune_targeted", "prune_orphaned_scopes"]
     days: int | None = None
     title: str | None = None
     asset_key: str | None = None
@@ -343,6 +343,147 @@ def _resolve_scope_token(db: Session, sync_target_index: int | None) -> str | No
     when both scope token and source dir are needed."""
     scope_token, _ = _resolve_scope_context(db, sync_target_index)
     return scope_token
+
+
+def _run_prune_orphaned_scopes(db: Session) -> Dict[str, Any]:
+    """Remove cache, pending-match, and run records for scope tokens that no longer
+    correspond to any sync target in the current Idarr configuration.
+
+    A scope token is considered orphaned when it appears in the database but is absent
+    from the set of tokens derived from the saved ``sync_targets`` list.
+    """
+    config = load_runtime_config(db)
+    active_scope_tokens: set[str] = set()
+    for idx, target in enumerate(config.sync_targets or []):
+        if isinstance(target, dict):
+            token = resolve_idarr_scope_token(target, idx)
+            if token:
+                active_scope_tokens.add(token)
+
+    # Collect all scope tokens currently stored in the database.
+    db_scope_tokens: set[str] = set()
+
+    for (token,) in (
+        db.query(IdarrRun.scope_token)
+        .filter(IdarrRun.scope_token.isnot(None), func.trim(IdarrRun.scope_token) != "")
+        .distinct()
+        .all()
+    ):
+        cleaned = str(token or "").strip()
+        if cleaned:
+            db_scope_tokens.add(cleaned)
+
+    for (asset_key,) in (
+        db.query(IdarrAssetCache.asset_key)
+        .filter(IdarrAssetCache.asset_key.like("%::scope=%"))
+        .distinct()
+        .all()
+    ):
+        if isinstance(asset_key, str) and "::scope=" in asset_key:
+            scope_part = asset_key.split("::scope=")[-1].strip()
+            if scope_part:
+                db_scope_tokens.add(scope_part)
+
+    for (asset_key,) in (
+        db.query(IdarrPendingMatch.asset_key)
+        .filter(IdarrPendingMatch.asset_key.like("%::scope=%"))
+        .distinct()
+        .all()
+    ):
+        if isinstance(asset_key, str) and "::scope=" in asset_key:
+            scope_part = asset_key.split("::scope=")[-1].strip()
+            if scope_part:
+                db_scope_tokens.add(scope_part)
+
+    orphaned_tokens = sorted(db_scope_tokens - active_scope_tokens)
+
+    # Collect active source directories to identify orphaned last-sync settings keys.
+    active_source_dirs: set[str] = set()
+    for target in (config.sync_targets or []):
+        if isinstance(target, dict):
+            src = str(target.get("source_dir") or "").strip()
+            if src:
+                active_source_dirs.add(src)
+
+    runs_deleted = 0
+    cache_deleted = 0
+    pending_deleted = 0
+    settings_deleted = 0
+
+    for token in orphaned_tokens:
+        runs_deleted += int(
+            db.query(IdarrRun).filter(IdarrRun.scope_token == token).delete(synchronize_session=False) or 0
+        )
+        cache_deleted += int(
+            db.query(IdarrAssetCache)
+            .filter(IdarrAssetCache.asset_key.like(f"%::scope={token}"))
+            .delete(synchronize_session=False) or 0
+        )
+        pending_deleted += int(
+            db.query(IdarrPendingMatch)
+            .filter(IdarrPendingMatch.asset_key.like(f"%::scope={token}"))
+            .delete(synchronize_session=False) or 0
+        )
+
+    # Delete idarr_last_sync_* settings keys whose source_dir is no longer in config.
+    import hashlib as _hashlib
+    all_sync_keys = (
+        db.query(Setting)
+        .filter(Setting.key.like("idarr_last_sync_%"))
+        .all()
+    )
+    active_digests = {
+        _hashlib.sha256(src.encode()).hexdigest()[:16]
+        for src in active_source_dirs
+    }
+    for row in all_sync_keys:
+        digest = str(row.key or "")[len("idarr_last_sync_"):]
+        if digest not in active_digests:
+            db.delete(row)
+            settings_deleted += 1
+
+    # Delete legacy null-scope runs whose source_dir is not in any active sync target.
+    # These are pre-scope-token historical rows that will never be auto-pruned otherwise.
+    legacy_runs_deleted = 0
+    legacy_null_runs = (
+        db.query(IdarrRun)
+        .filter(
+            (IdarrRun.scope_token.is_(None)) | (func.trim(IdarrRun.scope_token) == "")
+        )
+        .all()
+    )
+    for run in legacy_null_runs:
+        src = str(run.source_dir or "").strip()
+        if not src or src not in active_source_dirs:
+            db.delete(run)
+            legacy_runs_deleted += 1
+
+    runs_deleted += legacy_runs_deleted
+
+    db.commit()
+    total_deleted = runs_deleted + cache_deleted + pending_deleted + settings_deleted
+
+    log_user_action(
+        "IDarr cache maintenance action",
+        maintenance_action="prune_orphaned_scopes",
+        deleted=total_deleted,
+        orphaned_scope_count=len(orphaned_tokens),
+        legacy_runs_deleted=legacy_runs_deleted,
+        settings_deleted=settings_deleted,
+    )
+
+    return {
+        "success": True,
+        "action": "prune_orphaned_scopes",
+        "deleted": total_deleted,
+        "runs_deleted": runs_deleted,
+        "cache_deleted": cache_deleted,
+        "pending_deleted": pending_deleted,
+        "settings_deleted": settings_deleted,
+        "legacy_runs_deleted": legacy_runs_deleted,
+        "orphaned_scopes": orphaned_tokens,
+        "purged_items": [],
+    }
 
 
 def _apply_idarr_run_scope_filter(run_query: Any, scope_token: str | None, source_dir: str | None) -> Any:
@@ -1978,6 +2119,10 @@ async def get_maker_idarr_cache_stats(sync_target_index: int | None = None, db: 
 @router.post("/cache/maintenance")
 async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Run IDarr cache maintenance actions in dedicated cache table."""
+    # prune_orphaned_scopes is a global (cross-scope) operation — resolve and return early.
+    if payload.action == "prune_orphaned_scopes":
+        return _run_prune_orphaned_scopes(db)
+
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
     deleted = 0
     purged_items: list[dict[str, Any]] = []

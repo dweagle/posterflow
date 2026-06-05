@@ -26,13 +26,17 @@ from models.job import (
     mark_job_failed,
     update_job_state,
 )
-from models.idarr import create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
+from models.idarr import IdarrAssetCache, create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
 from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
 from services.idarr_runner import IdarrRunner
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 IDARR_RUN_HISTORY_KEEP_LATEST = 10
+# Auto-prune idarr_asset_cache after each run: remove entries not checked in this many days.
+IDARR_CACHE_AUTO_PRUNE_DAYS = 90
+# Only run the auto-prune when the cache has at least this many rows (avoids overhead on small installs).
+IDARR_CACHE_AUTO_PRUNE_MIN_ROWS = 500
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 
 
@@ -40,6 +44,43 @@ def _sync_state_key(source_dir: str) -> str:
     """Return a stable settings key scoped to a specific source directory."""
     digest = hashlib.sha256(source_dir.encode()).hexdigest()[:16]
     return f"idarr_last_sync_{digest}"
+
+
+def _auto_prune_cache(db: Any, scope_token: str | None) -> None:
+    """Automatically prune stale idarr_asset_cache rows after a successful run.
+
+    Only runs when the scoped cache row count exceeds ``IDARR_CACHE_AUTO_PRUNE_MIN_ROWS``
+    to avoid overhead on small installs. Removes rows not checked in the last
+    ``IDARR_CACHE_AUTO_PRUNE_DAYS`` days.
+    """
+    from datetime import timedelta
+    from sqlalchemy import func as _func, or_ as _or_
+    from models.idarr import IdarrAssetCache
+
+    try:
+        if scope_token:
+            base = db.query(IdarrAssetCache).filter(
+                IdarrAssetCache.asset_key.like(f"%::scope={scope_token}")
+            )
+        else:
+            base = db.query(IdarrAssetCache).filter(
+                ~IdarrAssetCache.asset_key.like("%::scope=%")
+            )
+
+        if base.count() < IDARR_CACHE_AUTO_PRUNE_MIN_ROWS:
+            return
+
+        threshold = datetime.now(timezone.utc) - timedelta(days=IDARR_CACHE_AUTO_PRUNE_DAYS)
+        deleted = base.filter(
+            _or_(
+                IdarrAssetCache.last_checked_at.is_(None),
+                IdarrAssetCache.last_checked_at < threshold,
+            )
+        ).delete(synchronize_session=False)
+        if deleted:
+            log_info(LogTags.IDARR, f"Auto-pruned {deleted} stale cache entries (>{IDARR_CACHE_AUTO_PRUNE_DAYS}d not checked)", scope_token=scope_token)
+    except Exception as _exc:
+        log_warning(LogTags.IDARR, f"Auto cache prune failed (non-fatal): {_exc}")
 
 
 def _get_last_sync_time(db: Any, source_dir: str) -> datetime | None:
@@ -299,6 +340,7 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
             keep_full_latest=1,
             scope_token=str(config_data.get("scope_token") or "").strip() or None,
         )
+        _auto_prune_cache(db, str(config_data.get("scope_token") or "").strip() or None)
         db.commit()
 
         update_job_state(

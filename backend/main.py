@@ -299,6 +299,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             log_error(LogTags.STARTUP, f"Failed to clean up stale jobs: {e}\\n{traceback.format_exc()}")
 
+        # Prune orphaned idarr scope data (runs, cache, pending matches, settings keys
+        # for sync targets that are no longer in config)
+        try:
+            from api.idarr import _run_prune_orphaned_scopes
+            db = SessionLocal()
+            try:
+                result = _run_prune_orphaned_scopes(db)
+                total = result.get("deleted", 0)
+                if total > 0:
+                    log_info(LogTags.STARTUP, f"Pruned orphaned idarr scope data: {total} rows removed", **{k: v for k, v in result.items() if k != "orphaned_scopes"})
+                else:
+                    log_debug(LogTags.STARTUP, "No orphaned idarr scope data found")
+            finally:
+                db.close()
+        except Exception as e:
+            log_warning(LogTags.STARTUP, f"Could not prune orphaned idarr scopes: {e}")
+
         # Load drives from hybrid source (remote with local fallback)
         try:
             log_info(LogTags.STARTUP, "Loading drives configuration...")

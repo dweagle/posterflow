@@ -125,6 +125,13 @@ def prune_job_history(
         Job.completed_at < failed_cutoff,
     ).delete(synchronize_session=False)
 
+    # Also prune legacy failed jobs where completed_at was never set
+    deleted_total += db.query(Job).filter(
+        Job.status == JOB_STATUS_FAILED,
+        Job.completed_at.is_(None),
+        Job.started_at < failed_cutoff,
+    ).delete(synchronize_session=False)
+
     per_type_limit = max(1, int(max_per_job_type))
     job_types = [
         row[0]
