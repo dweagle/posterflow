@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-05
+### Added
+- Database: improved pruning logic for orphaned and stale records
+
+### Fixed
+- Discord Notifications: correct variable now used for ping targets
+
 ## [0.7.1] - 2026-06-03
 ### Added
 - Docker images are now tagged with the release version number in addition to branch tags
