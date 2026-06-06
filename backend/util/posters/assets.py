@@ -1,5 +1,6 @@
 import datetime
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.logging import log_debug, log_warning, LogTags, logger
@@ -28,6 +29,7 @@ def get_assets_files(
 
     final_assets: List[Dict] = []
     prefix_index: Dict[str, Any] = create_new_empty_index()
+    source_priority: Dict[str, int] = {sd: i for i, sd in enumerate(source_dirs)}
 
     start_time = datetime.datetime.now()
 
@@ -35,7 +37,7 @@ def get_assets_files(
         new_assets = process_files(source_dir)
         if new_assets:
             if merge:
-                merge_assets(new_assets, final_assets, prefix_index)
+                merge_assets(new_assets, final_assets, prefix_index, source_priority)
             else:
                 for asset in new_assets:
                     asset["files"].sort()
@@ -60,7 +62,8 @@ def get_assets_files(
 
 
 def merge_assets(
-    new_assets: List[Dict], final_assets: List[Dict], prefix_index: Dict
+    new_assets: List[Dict], final_assets: List[Dict], prefix_index: Dict,
+    source_priority: Optional[Dict[str, int]] = None,
 ) -> None:
     """Merge new asset entries into the final asset list, collapsing duplicates,
     handling upgrades, and indexing.
@@ -149,7 +152,18 @@ def merge_assets(
                     else:
                         final["season_numbers"] = new_season_numbers
                 
-                final["files"].sort()
+                if source_priority:
+                    def _priority_key(f: str, _sp: Dict[str, int] = source_priority) -> tuple:
+                        for sd, idx in _sp.items():
+                            try:
+                                Path(f).relative_to(sd)
+                                return (idx, f)
+                            except ValueError:
+                                continue
+                        return (len(_sp), f)
+                    final["files"].sort(key=_priority_key)
+                else:
+                    final["files"].sort()
                 post_files = list(final["files"])
                 post_file_count = len(post_files)
                 
