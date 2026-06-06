@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-06-05
+### Fixed
+- Auth: image preview paths are no longer blocked when user has password authentification set up.
+- Poster Renamer: asset merging correctly sorts by source priority when assets with different match to media
+
 ## [0.7.3] - 2026-06-05
 ### Fixed
 - Plex Upload: Season poster borders setting not applying during Plex Upload webhook
