@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-06-06
+### Fixed
+- Plex Upload: improved year handling and folder resolution for more accurate library matching
+
 ## [0.7.4] - 2026-06-05
 ### Fixed
 - Auth: image preview paths are no longer blocked when user has password authentification set up.
