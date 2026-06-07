@@ -330,9 +330,9 @@ function UnmatchedTab({
               className="unmatched-settings-textarea"
               value={unmatchedIgnoreCollectionsText}
               onChange={(e) => onSetUnmatchedIgnoreCollectionsText(e.target.value)}
-              placeholder="Ignore collections (example: Marvel Collection, Disney)"
+              placeholder="Ignore collections (one per line)"
             />
-            <small>Comma-separated collection titles. Matching is case-insensitive.</small>
+            <small>One collection title per line. Matching is case-insensitive.</small>
 
             <label className="checkbox-label">
               <input

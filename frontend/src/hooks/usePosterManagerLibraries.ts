@@ -71,9 +71,16 @@ export const usePosterManagerLibraries = ({
       .filter(Boolean)
   }
 
+  const parseNewlineList = (raw: string): string[] => {
+    return raw
+      .split(/\n+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
   useEffect(() => {
     const currentRootFolders = parseListInput(unmatchedIgnoreRootFoldersText)
-    const currentCollections = parseListInput(unmatchedIgnoreCollectionsText)
+    const currentCollections = parseNewlineList(unmatchedIgnoreCollectionsText)
 
     const hasRootChanges =
       JSON.stringify(currentRootFolders) !== JSON.stringify(originalUnmatchedIgnoreRootFolders)
@@ -140,7 +147,7 @@ export const usePosterManagerLibraries = ({
       const ignoreUnmonitored = parseBooleanSetting(settings.unmatched_ignore_unmonitored)
 
       setUnmatchedIgnoreRootFoldersText(rootFolders.join(', '))
-      setUnmatchedIgnoreCollectionsText(collections.join(', '))
+      setUnmatchedIgnoreCollectionsText(collections.join('\n'))
       setUnmatchedIgnoreUnmonitored(ignoreUnmonitored)
 
       setOriginalUnmatchedIgnoreRootFolders(rootFolders)
@@ -177,7 +184,7 @@ export const usePosterManagerLibraries = ({
 
       if (activeTab === 'unmatched') {
         const parsedRootFolders = parseListInput(unmatchedIgnoreRootFoldersText)
-        const parsedCollections = parseListInput(unmatchedIgnoreCollectionsText)
+        const parsedCollections = parseNewlineList(unmatchedIgnoreCollectionsText)
 
         settingsToSave['unmatched_ignore_root_folders'] = JSON.stringify(parsedRootFolders)
         settingsToSave['unmatched_ignore_collections'] = JSON.stringify(parsedCollections)
@@ -195,7 +202,7 @@ export const usePosterManagerLibraries = ({
 
       if (activeTab === 'unmatched') {
         setOriginalUnmatchedIgnoreRootFolders(parseListInput(unmatchedIgnoreRootFoldersText))
-        setOriginalUnmatchedIgnoreCollections(parseListInput(unmatchedIgnoreCollectionsText))
+        setOriginalUnmatchedIgnoreCollections(parseNewlineList(unmatchedIgnoreCollectionsText))
         setOriginalUnmatchedIgnoreUnmonitored(unmatchedIgnoreUnmonitored)
       }
 
@@ -220,7 +227,7 @@ export const usePosterManagerLibraries = ({
     }
 
     setUnmatchedIgnoreRootFoldersText(originalUnmatchedIgnoreRootFolders.join(', '))
-    setUnmatchedIgnoreCollectionsText(originalUnmatchedIgnoreCollections.join(', '))
+    setUnmatchedIgnoreCollectionsText(originalUnmatchedIgnoreCollections.join('\n'))
     setUnmatchedIgnoreUnmonitored(originalUnmatchedIgnoreUnmonitored)
     setHasUnsavedLibraryChanges(false)
   }
