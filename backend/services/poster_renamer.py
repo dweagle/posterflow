@@ -39,6 +39,7 @@ class PosterRenameService:
         *,
         target_media_type: Optional[str],
         target_title_keys: set[str],
+        target_year: Optional[int],
         target_tmdb_id: Optional[int],
         target_tvdb_id: Optional[int],
         target_imdb_id: Optional[str],
@@ -71,6 +72,14 @@ class PosterRenameService:
             return True
         if target_imdb_id and asset_imdb and asset_imdb == target_imdb_id:
             return True
+
+        # When a specific year is requested and the asset also has a year, require they match.
+        # This prevents "3:10 to Yuma (2007)" assets from passing a filter for year=1957
+        # when normalize_titles strips years from both sides and can't distinguish them.
+        # ID-based early returns above are exempt since IDs already uniquely identify the item.
+        asset_year = asset.get("year")
+        if target_year is not None and asset_year is not None and asset_year != target_year:
+            return False
 
         normalized_title = str(asset.get("normalized_title") or "").strip().lower()
         if not normalized_title:
@@ -124,6 +133,7 @@ class PosterRenameService:
                 asset,
                 target_media_type=target_media_type,
                 target_title_keys=title_keys,
+                target_year=target_year,
                 target_tmdb_id=target_tmdb_id,
                 target_tvdb_id=target_tvdb_id,
                 target_imdb_id=normalized_imdb,

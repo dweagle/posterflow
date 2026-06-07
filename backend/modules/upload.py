@@ -1961,18 +1961,18 @@ def run_plex_webhook_background_job(
         title = parsed_payload.get("title")
         media_type = parsed_payload.get("media_type")
         season_number = parsed_payload.get("season_number")
+        year_label = f" ({int(parsed_payload.get('year'))})" if isinstance(parsed_payload.get("year"), int) else ""
+        season_label = f" S{int(season_number):02d}" if isinstance(season_number, int) else ""
 
         update_job_state(
             db,
             job,
             status=JOB_STATUS_RUNNING,
-            message=format_start_message("webhook upload", qualifier=f"for {media_type}: {title}"),
+            message=format_start_message("webhook upload", qualifier=f"for {media_type}: {title}{year_label}"),
             progress=5,
         )
 
         log_section_start(LogTags.UPLOADER, f"Plex Webhook Upload Job {job_id}")
-        season_label = f" S{int(season_number):02d}" if isinstance(season_number, int) else ""
-        year_label = f" ({int(parsed_payload.get('year'))})" if isinstance(parsed_payload.get("year"), int) else ""
         log_info(
             LogTags.UPLOADER,
             f"Webhook target received: {str(media_type or 'item').upper()} - {title}{year_label}{season_label}",
@@ -1998,7 +1998,7 @@ def run_plex_webhook_background_job(
         # scanning the full library.
         log_info(
             LogTags.UPLOADER,
-            f"Webhook index build: searching Plex for '{title}' by GUID",
+            f"Webhook index build: searching Plex for '{title}{year_label}' by GUID",
             media_type=media_type,
             title=title,
             tmdb_id=parsed_payload.get("tmdb_id"),
@@ -2017,7 +2017,7 @@ def run_plex_webhook_background_job(
         if webhook_context_error:
             raise Exception(webhook_context_error)
 
-        webhook_targets: list[Dict[str, Any]] = [{"season_number": season_number, "label": "primary"}]
+        webhook_targets: list[Dict[str, Any]] = [{"season_number": season_number, "label": str(media_type or "item").lower()}]
         if media_type == "series" and isinstance(season_number, int):
             show_cached = service.is_series_show_poster_cached(
                 title=title,
@@ -2219,7 +2219,7 @@ def run_plex_webhook_background_job(
 
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook retry {attempt}/{attempts}: rebuilding Plex index for '{title}'",
+                    f"Webhook retry {attempt}/{attempts}: rebuilding Plex index for '{title}{year_label}'",
                     attempt=attempt,
                     max_attempts=attempts,
                     media_type=media_type,
@@ -2265,7 +2265,7 @@ def run_plex_webhook_background_job(
                     job,
                     progress=next_progress,
                     message=(
-                        f"Webhook upload: {processed}/{normalized_total} processed for {media_type}: {title} | "
+                        f"Webhook upload: {processed}/{normalized_total} processed for {media_type}: {title}{year_label} | "
                         f"matched={int(stats.get('matched', 0))}, "
                         f"uploaded={int(stats.get('uploaded', 0))}, "
                         f"skipped={int(stats.get('skipped', 0))}, "
@@ -2290,14 +2290,14 @@ def run_plex_webhook_background_job(
                 target_label = str(target.get("label") or "target")
                 target_reason = target.get("reason")
                 pass_start_label = (
-                    f"{title} — {target_label} ({target_reason})"
+                    f"{title}{year_label} — {target_label} ({target_reason})"
                     if target_reason
-                    else f"{title} ({target_label})"
+                    else f"{title}{year_label} ({target_label})"
                 )
                 pass_complete_label = (
-                    f"{title} — {target_label}"
+                    f"{title}{year_label} — {target_label}"
                     if target_reason
-                    else f"{title} ({target_label})"
+                    else f"{title}{year_label} ({target_label})"
                 )
                 log_info(
                     LogTags.UPLOADER,
@@ -2447,7 +2447,7 @@ def run_plex_webhook_background_job(
             if attempt < attempts:
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook upload had no Plex match yet, retrying in {delay_seconds}s",
+                    f"Webhook upload had no Plex match yet for '{title}{year_label}', retrying in {delay_seconds}s",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,

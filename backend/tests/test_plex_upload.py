@@ -3406,3 +3406,381 @@ def test_webhook_background_job_retry_rebuilds_targeted_index(test_db, monkeypat
     assert len(context_calls) == 2, (
         f"Expected prepare_webhook_context called twice (initial + retry), got {len(context_calls)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _show_folder_key
+# ---------------------------------------------------------------------------
+
+def test_show_folder_key_uses_locations_when_available(test_db):
+    """Primary path: show.locations gives the folder directly, no episode traversal needed."""
+    service = PlexUploadService(test_db)
+
+    class _FakeShow:
+        locations = ["/tv/Friday Night Lights (2006)"]
+        title = "Friday Night Lights"
+        year = 2006
+
+    # normalize_titles strips the year, so (2006) is not in the result
+    assert service._show_folder_key(_FakeShow()) == "fridaynightlights"
+
+
+def test_show_folder_key_episode_traversal_with_season_subfolder(test_db):
+    """Fallback: episode path has a Season subfolder → return its parent (the show folder)."""
+    service = PlexUploadService(test_db)
+
+    class _FakePart:
+        file = "/tv/Friday Night Lights (2006)/Season 01/s01e01.mkv"
+
+    class _FakeMedia:
+        parts = [_FakePart()]
+
+    class _FakeEpisode:
+        media = [_FakeMedia()]
+
+    class _FakeSeason:
+        def episodes(self):
+            return [_FakeEpisode()]
+
+    class _FakeShow:
+        locations = None
+        title = "Friday Night Lights"
+        year = 2006
+
+        def seasons(self):
+            return [_FakeSeason()]
+
+    assert service._show_folder_key(_FakeShow()) == "fridaynightlights"
+
+
+def test_show_folder_key_episode_traversal_flat_layout(test_db):
+    """Flat layout fix: episodes stored directly in show folder (no Season subfolder) must
+    return the show folder name, not the TV root directory above it."""
+    service = PlexUploadService(test_db)
+
+    class _FakePart:
+        file = "/tv/Friday Night Lights (2006)/s01e01.mkv"  # flat — no Season xx
+
+    class _FakeMedia:
+        parts = [_FakePart()]
+
+    class _FakeEpisode:
+        media = [_FakeMedia()]
+
+    class _FakeSeason:
+        def episodes(self):
+            return [_FakeEpisode()]
+
+    class _FakeShow:
+        locations = None
+        title = "Friday Night Lights"
+        year = 2006
+
+        def seasons(self):
+            return [_FakeSeason()]
+
+    # Must be the show folder name, not the parent "tv" directory
+    key = service._show_folder_key(_FakeShow())
+    assert key == "fridaynightlights"
+    assert key != "tv"
+
+
+def test_show_folder_key_locations_takes_priority_over_episode_traversal(test_db):
+    """When locations is present, episode traversal should not be used even if seasons() exists."""
+    service = PlexUploadService(test_db)
+
+    traversal_called = {"value": False}
+
+    class _FakeShow:
+        locations = ["/tv/Ghosts (2021)"]
+        title = "Ghosts"
+        year = 2021
+
+        def seasons(self):
+            traversal_called["value"] = True
+            return []
+
+    key = service._show_folder_key(_FakeShow())
+    assert key == "ghosts"
+    assert traversal_called["value"] is False
+
+
+# ---------------------------------------------------------------------------
+# _arr_id_keys_for_asset
+# ---------------------------------------------------------------------------
+
+def test_arr_id_keys_for_asset_returns_empty_when_no_availability(test_db):
+    service = PlexUploadService(test_db)
+    asset = {"media_key": "fridaynightlights", "path": "/posters/Friday Night Lights (2006)/poster.jpg"}
+    assert service._arr_id_keys_for_asset(asset, None) == []
+
+
+def test_arr_id_keys_for_asset_returns_empty_when_key_not_in_index(test_db):
+    service = PlexUploadService(test_db)
+    asset = {"media_key": "missingtitle", "path": "/posters/Missing Title/poster.jpg"}
+    arr_availability = {"shows": {}, "movies": {}}
+    assert service._arr_id_keys_for_asset(asset, arr_availability) == []
+
+
+def test_arr_id_keys_for_asset_returns_show_tvdb_and_imdb(test_db):
+    service = PlexUploadService(test_db)
+    # media_key matches how _availability_keys_for_item indexes it (year stripped)
+    asset = {"media_key": "fridaynightlights", "path": "/posters/Friday Night Lights (2006)/poster.jpg"}
+    arr_availability = {
+        "shows": {
+            "fridaynightlights": {
+                "tvdb_id": 79337,
+                "imdb_id": "tt0364978",
+            }
+        },
+        "movies": {},
+    }
+    keys = service._arr_id_keys_for_asset(asset, arr_availability, inferred_filter="series")
+    assert "id:tvdb:79337" in keys
+    assert "id:imdb:tt0364978" in keys
+
+
+def test_arr_id_keys_for_asset_returns_movie_tmdb_and_imdb(test_db):
+    service = PlexUploadService(test_db)
+    asset = {"media_key": "thematrix", "path": "/posters/The Matrix (1999)/poster.jpg"}
+    arr_availability = {
+        "movies": {
+            "thematrix": {
+                "tmdb_id": 603,
+                "imdb_id": "tt0133093",
+            }
+        },
+        "shows": {},
+    }
+    keys = service._arr_id_keys_for_asset(asset, arr_availability, inferred_filter="movie")
+    assert "id:tmdb:603" in keys
+    assert "id:imdb:tt0133093" in keys
+
+
+def test_arr_id_keys_for_asset_series_filter_skips_movies_index(test_db):
+    """inferred_filter='series' must not return IDs from the movies index."""
+    service = PlexUploadService(test_db)
+    asset = {"media_key": "somekey", "path": "/posters/Some Show/poster.jpg"}
+    arr_availability = {
+        "shows": {},
+        "movies": {"somekey": {"tmdb_id": 999, "imdb_id": "tt9999999"}},
+    }
+    assert service._arr_id_keys_for_asset(asset, arr_availability, inferred_filter="series") == []
+
+
+def test_arr_id_keys_for_asset_movie_filter_skips_shows_index(test_db):
+    """inferred_filter='movie' must not return IDs from the shows index."""
+    service = PlexUploadService(test_db)
+    asset = {"media_key": "somekey", "path": "/posters/Some Show/poster.jpg"}
+    arr_availability = {
+        "shows": {"somekey": {"tvdb_id": 12345, "imdb_id": None}},
+        "movies": {},
+    }
+    assert service._arr_id_keys_for_asset(asset, arr_availability, inferred_filter="movie") == []
+
+
+# ---------------------------------------------------------------------------
+# _build_arr_availability_index — ID fields stored in entries
+# ---------------------------------------------------------------------------
+
+def test_build_arr_availability_index_stores_tvdb_and_imdb_in_show_entries(test_db, monkeypatch):
+    service = PlexUploadService(test_db)
+    monkeypatch.setattr(
+        service,
+        "_get_arr_instances",
+        lambda _key: [{"url": "http://sonarr", "api_key": "abc"}],
+    )
+
+    class _FakeClient:
+        connect_status = True
+
+        def get_parsed_media(self, include_unmonitored=True):
+            return [
+                {
+                    "title": "Friday Night Lights",
+                    "year": 2006,
+                    "folder": "/tv/Friday Night Lights (2006)",
+                    "tvdb_id": 79337,
+                    "imdb_id": "tt0364978",
+                    "has_episodes": True,
+                    "seasons": [{"season_number": 1, "season_has_episodes": True}],
+                }
+            ]
+
+    monkeypatch.setattr("services.plex_upload.create_arr_client", lambda *args, **kwargs: _FakeClient())
+
+    result = service._build_arr_availability_index(media_type_filter="series")
+
+    # normalize_titles strips the year tag, so the index key has no year
+    entry = result["shows"].get("fridaynightlights")
+    assert entry is not None
+    assert entry["tvdb_id"] == 79337
+    assert entry["imdb_id"] == "tt0364978"
+
+
+def test_build_arr_availability_index_stores_tmdb_and_imdb_in_movie_entries(test_db, monkeypatch):
+    service = PlexUploadService(test_db)
+    monkeypatch.setattr(
+        service,
+        "_get_arr_instances",
+        lambda _key: [{"url": "http://radarr", "api_key": "abc"}],
+    )
+
+    class _FakeClient:
+        connect_status = True
+
+        def get_parsed_media(self, include_unmonitored=True):
+            return [
+                {
+                    "title": "The Matrix",
+                    "year": 1999,
+                    "folder": "/movies/The Matrix (1999)",
+                    "tmdb_id": 603,
+                    "imdb_id": "tt0133093",
+                    "has_file": True,
+                }
+            ]
+
+    monkeypatch.setattr("services.plex_upload.create_arr_client", lambda *args, **kwargs: _FakeClient())
+
+    result = service._build_arr_availability_index(media_type_filter="movie")
+
+    # normalize_titles strips the year tag
+    entry = result["movies"].get("thematrix")
+    assert entry is not None
+    assert entry["tmdb_id"] == 603
+    assert entry["imdb_id"] == "tt0133093"
+
+
+# ---------------------------------------------------------------------------
+# _upload_asset — ARR supplementation integration
+# ---------------------------------------------------------------------------
+
+def test_upload_asset_supplements_arr_ids_when_path_has_no_tokens(test_db):
+    """End-to-end: asset folder has no {tvdb-N} tokens, ARR index has the TVDB ID,
+    and the Plex index is keyed by that GUID — the show must still be matched."""
+    service = PlexUploadService(test_db)
+
+    class _FakeSeason:
+        def __init__(self, index: int):
+            self.index = index
+
+        def uploadPoster(self, filepath: str) -> None:
+            pass
+
+    class _FakeShow:
+        class _FakeServer:
+            machineIdentifier = "server-1"
+
+        _server = _FakeServer()
+        ratingKey = "42"
+        title = "Friday Night Lights"
+        year = 2006
+        type = "show"
+        librarySectionTitle = "TV Shows"
+        librarySectionID = 1
+
+        def seasons(self):
+            return [_FakeSeason(1)]
+
+        def uploadPoster(self, filepath: str) -> None:
+            pass
+
+    fake_show = _FakeShow()
+
+    # Plex index has the show under the GUID-based key (set by includeGuids=1)
+    index = {
+        "movies": {},
+        "shows": {"id:tvdb:79337": [fake_show]},
+        "collections": {},
+    }
+
+    # ARR index has the TVDB ID stored (new behaviour from _build_arr_availability_index).
+    # Key uses normalize_titles output — year is stripped.
+    arr_availability = {
+        "movies": {},
+        "shows": {
+            "fridaynightlights": {
+                "has_episodes": True,
+                "seasons": {1: True},
+                "tvdb_id": 79337,
+                "imdb_id": None,
+            }
+        },
+    }
+
+    # Asset path has NO {tvdb-N} token — simulates plain Sonarr folder naming.
+    # media_key matches normalize_titles output (year stripped).
+    asset = {
+        "asset_type": "season",
+        "path": "/posters/Friday Night Lights (2006)/Season01.jpg",
+        "media_key": "fridaynightlights",
+        "display_name": "Friday Night Lights (2006)",
+        "season_number": 1,
+    }
+
+    uploaded, matched, raw, unique, _, seasons_missing = service._upload_asset(
+        asset=asset,
+        index=index,
+        dry_run=True,
+        media_type_filter="series",
+        arr_availability=arr_availability,
+    )
+
+    assert matched is True, "Show should be matched via ARR-supplemented TVDB ID key"
+    assert raw >= 1
+    assert unique >= 1
+    assert uploaded == 1  # dry_run counts the would-be upload
+    assert seasons_missing == 0
+
+
+def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
+    """When neither the path nor the ARR index provides IDs, and the Plex index only
+    has a GUID key, the asset must NOT match (correct failure mode)."""
+    service = PlexUploadService(test_db)
+
+    class _FakeShow:
+        class _FakeServer:
+            machineIdentifier = "server-1"
+
+        _server = _FakeServer()
+        ratingKey = "99"
+        title = "Friday Night Lights"
+        year = 2006
+        type = "show"
+        librarySectionTitle = "TV Shows"
+        librarySectionID = 1
+
+        def seasons(self):
+            return []
+
+        def uploadPoster(self, filepath: str) -> None:
+            pass
+
+    index = {
+        "movies": {},
+        "shows": {"id:tvdb:79337": [_FakeShow()]},  # only GUID key, no title key
+        "collections": {},
+    }
+
+    asset = {
+        "asset_type": "season",
+        "path": "/posters/Friday Night Lights (2006)/Season01.jpg",
+        "media_key": "fridaynightlights",
+        "display_name": "Friday Night Lights (2006)",
+        "season_number": 1,
+    }
+
+    # No ARR availability at all
+    uploaded, matched, raw, unique, _, _ = service._upload_asset(
+        asset=asset,
+        index=index,
+        dry_run=True,
+        media_type_filter="series",
+        arr_availability=None,
+    )
+
+    assert matched is False
+    assert raw == 0
+    assert unique == 0
+    assert uploaded == 0

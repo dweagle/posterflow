@@ -535,10 +535,11 @@ class PlexUploadService:
         uploaded_media_types = set(uploaded_record.get("uploaded_media_types", []))
 
         media_key = str(asset.get("media_key") or "")
+        folder_year = asset.get("folder_year")
         asset_id_keys = self._extract_asset_id_keys(asset)
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys)
-        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys)
+        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
+        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
 
         if str(asset.get("asset_type") or "").lower() == "season":
             shows = self._dedupe_plex_items(shows_raw)
@@ -1305,7 +1306,7 @@ class PlexUploadService:
     def _index_movies(self, section: Any, movie_index: Dict[str, List[Any]]) -> int:
         indexed = 0
         try:
-            for movie in section.all():
+            for movie in section.all(includeGuids=1):
                 key = self._movie_folder_key(movie)
                 if key:
                     movie_index.setdefault(key, []).append(movie)
@@ -1319,7 +1320,7 @@ class PlexUploadService:
     def _index_shows(self, section: Any, show_index: Dict[str, List[Any]]) -> int:
         indexed = 0
         try:
-            for show in section.all():
+            for show in section.all(includeGuids=1):
                 key = self._show_folder_key(show)
                 if key:
                     show_index.setdefault(key, []).append(show)
@@ -1354,7 +1355,20 @@ class PlexUploadService:
                 return normalize_titles(str(title))
             return None
 
+    _SEASON_FOLDER_RE = re.compile(r"^(season\s*\d+|specials?|extras?|featurettes?)$", re.IGNORECASE)
+
     def _show_folder_key(self, show: Any) -> Optional[str]:
+        # Prefer show.locations — available when section.all() includes location
+        # data, gives the show folder directly without episode traversal.
+        try:
+            locations = getattr(show, "locations", None)
+            if locations:
+                return normalize_titles(Path(locations[0]).name)
+        except Exception:
+            pass
+
+        # Fall back to navigating episode file paths (handles older plexapi
+        # versions or servers that don't return locations in bulk queries).
         try:
             seasons = show.seasons()
             if not seasons:
@@ -1364,7 +1378,16 @@ class PlexUploadService:
                 if not episodes:
                     continue
                 part_file = episodes[0].media[0].parts[0].file
-                return normalize_titles(Path(part_file).parent.parent.name)
+                episode_path = Path(part_file)
+                parent = episode_path.parent
+                # Episodes may be stored flat inside the show folder (no season
+                # subfolder) or inside a named season subfolder. Detect which
+                # layout is in use so we always return the show-level folder name.
+                if self._SEASON_FOLDER_RE.match(parent.name):
+                    folder_name = parent.parent.name
+                else:
+                    folder_name = parent.name
+                return normalize_titles(folder_name)
             title = getattr(show, "title", None)
             year = getattr(show, "year", None)
             if title and year:
@@ -1394,6 +1417,9 @@ class PlexUploadService:
         file_path = asset["path"]
         asset_label = self._asset_label(asset)
         asset_id_keys = self._extract_asset_id_keys(asset)
+        if not asset_id_keys and arr_availability:
+            arr_inferred = media_type_filter
+            asset_id_keys = self._arr_id_keys_for_asset(asset, arr_availability, inferred_filter=arr_inferred)
         media_counts = self._empty_media_upload_counts()
         uploaded_record = self._get_uploaded_record(file_path)
         uploaded_to_libraries = set(uploaded_record.get("uploaded_to_libraries", []))
@@ -1401,9 +1427,10 @@ class PlexUploadService:
         uploaded_editions = set(uploaded_record.get("uploaded_editions", []))
         uploaded_media_types = set(uploaded_record.get("uploaded_media_types", []))
 
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys)
-        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys)
+        folder_year = asset.get("folder_year")
+        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
+        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
 
         if asset["asset_type"] == "season":
             shows = self._dedupe_plex_items(shows_raw)
@@ -1842,12 +1869,77 @@ class PlexUploadService:
 
         return sorted(id_keys)
 
+    def _arr_id_keys_for_asset(
+        self,
+        asset: Dict[str, Any],
+        arr_availability: Optional[Dict[str, Any]],
+        inferred_filter: Optional[str] = None,
+    ) -> List[str]:
+        """Return TVDB/TMDB/IMDB id keys sourced from the ARR index for an asset
+        that has no embedded ID tokens in its file path.  Used to supplement
+        asset_id_keys so GUID-based Plex matching works even when folder names
+        don't include {tvdb-…} / {tmdb-…} tokens."""
+        if not arr_availability:
+            return []
+        media_key = str(asset.get("media_key", "")).strip()
+        if not media_key:
+            return []
+
+        # Build lookup keys in priority order: year-qualified key first (avoids same-title/
+        # different-year collision), then plain key as fallback.
+        folder_year = asset.get("folder_year")
+        year_qualified_key = f"{media_key}::{folder_year}" if folder_year is not None else None
+        lookup_keys = ([year_qualified_key] if year_qualified_key else []) + [media_key]
+
+        id_keys: set[str] = set()
+        check_shows = inferred_filter in {None, "series"}
+        check_movies = inferred_filter in {None, "movie"}
+
+        if check_shows:
+            record = None
+            for lk in lookup_keys:
+                r = arr_availability.get("shows", {}).get(lk)
+                if isinstance(r, dict):
+                    record = r
+                    break
+            if isinstance(record, dict):
+                tvdb_id = record.get("tvdb_id")
+                imdb_id = record.get("imdb_id")
+                if isinstance(tvdb_id, int):
+                    id_keys.add(f"id:tvdb:{tvdb_id}")
+                if isinstance(imdb_id, str) and imdb_id:
+                    id_keys.add(f"id:imdb:{imdb_id}")
+
+        if check_movies:
+            record = None
+            for lk in lookup_keys:
+                r = arr_availability.get("movies", {}).get(lk)
+                if isinstance(r, dict):
+                    record = r
+                    break
+            if isinstance(record, dict):
+                tmdb_id = record.get("tmdb_id")
+                imdb_id = record.get("imdb_id")
+                if isinstance(tmdb_id, int):
+                    id_keys.add(f"id:tmdb:{tmdb_id}")
+                if isinstance(imdb_id, str) and imdb_id:
+                    id_keys.add(f"id:imdb:{imdb_id}")
+
+        return sorted(id_keys)
+
     def _resolve_index_candidates(
         self,
         index_map: Dict[str, List[Any]],
         media_key: str,
         asset_id_keys: List[str],
+        folder_year: Optional[int] = None,
     ) -> List[Any]:
+        def _item_year(item: Any) -> Optional[int]:
+            try:
+                return getattr(item, "year", None)
+            except Exception:
+                return None
+
         if asset_id_keys:
             id_candidates: List[Any] = []
             for id_key in asset_id_keys:
@@ -1855,8 +1947,34 @@ class PlexUploadService:
             deduped_id_candidates = self._dedupe_plex_items(id_candidates)
             if deduped_id_candidates:
                 return deduped_id_candidates
+            # IDs were present but nothing matched in the Plex index. Two possible causes:
+            # (a) Plex hasn't scanned the item yet — we must not fall back to a same-title
+            #     different-year item (e.g. plex_1957 when we want plex_2007).
+            # (b) The Plex item exists but has no external GUIDs configured — a plain
+            #     title+year match is still safe and correct.
+            # Try a year-filtered title-key lookup to distinguish the two cases.
+            # If it finds a year-correct item, return it (case b).
+            # If nothing matches the year, return [] to trigger a retry (case a).
+            if folder_year is not None:
+                plain_results = index_map.get(media_key, [])
+                if plain_results:
+                    year_filtered = [item for item in plain_results if _item_year(item) == folder_year]
+                    if year_filtered:
+                        return year_filtered
+                return []
 
-        return index_map.get(media_key, [])
+        plain_results = index_map.get(media_key, [])
+        # When the asset has a folder_year, filter plain-key results to only Plex items
+        # matching that year. This prevents uploading a 1957 poster to a 2007 Plex item
+        # (and vice versa) for same-title movies not tracked in any ARR instance.
+        if folder_year is not None and plain_results:
+            year_filtered = [item for item in plain_results if _item_year(item) == folder_year]
+            if year_filtered:
+                return year_filtered
+            # No year match — Plex item not yet scanned or metadata year differs.
+            # Return empty so the retry mechanism handles it rather than using the wrong movie.
+            return []
+        return plain_results
 
     def _asset_has_arr_availability(
         self,
@@ -1896,7 +2014,7 @@ class PlexUploadService:
             # 2. Year-qualified title key — rules out same-name future remakes
             # 3. Plain title key — broadest fallback
             asset_id_keys = self._extract_asset_id_keys(asset)
-            year_key = normalize_titles(f"{asset.get('display_name', media_key)} ({asset['folder_year']})") if asset.get("folder_year") else None
+            year_key = f"{media_key}::{asset['folder_year']}" if asset.get("folder_year") else None
             candidate_keys = list(asset_id_keys)
             if year_key:
                 candidate_keys.append(year_key)
@@ -1934,13 +2052,20 @@ class PlexUploadService:
                         imdb_id=movie.get("imdb_id"),
                     )
                     has_file = bool(movie.get("has_file", False))
+                    tmdb_id = movie.get("tmdb_id")
+                    imdb_id = movie.get("imdb_id")
+                    entry: Dict[str, Any] = {
+                        "has_file": has_file,
+                        "tmdb_id": int(tmdb_id) if isinstance(tmdb_id, int) else None,
+                        "imdb_id": str(imdb_id).strip().lower() if isinstance(imdb_id, str) and imdb_id.strip() else None,
+                    }
                     for key in movie_keys:
                         existing = movies_index.get(key)
                         # Don't let a no-file entry overwrite an existing file entry
                         # for the same title key (e.g. a future remake with no release
                         # date shadowing an original that already has a file).
                         if existing is None or (has_file and not existing.get("has_file", False)):
-                            movies_index[key] = {"has_file": has_file}
+                            movies_index[key] = entry
 
         if include_shows:
             for instance in self._get_arr_instances(self.SETTING_SONARR_INSTANCES):
@@ -1966,11 +2091,18 @@ class PlexUploadService:
                             continue
 
                     has_episodes = bool(show.get("has_episodes", False))
+                    tvdb_id = show.get("tvdb_id")
+                    imdb_id = show.get("imdb_id")
+                    show_entry: Dict[str, Any] = {
+                        "has_episodes": has_episodes,
+                        "seasons": seasons,
+                        "tvdb_id": int(tvdb_id) if isinstance(tvdb_id, int) else None,
+                        "imdb_id": str(imdb_id).strip().lower() if isinstance(imdb_id, str) and imdb_id.strip() else None,
+                    }
                     for key in show_keys:
-                        shows_index[key] = {
-                            "has_episodes": has_episodes,
-                            "seasons": seasons,
-                        }
+                        existing = shows_index.get(key)
+                        if existing is None or (has_episodes and not existing.get("has_episodes", False)):
+                            shows_index[key] = show_entry
 
         return {
             "movies": movies_index,
@@ -1989,11 +2121,21 @@ class PlexUploadService:
     ) -> set[str]:
         keys: set[str] = set()
         if folder:
-            keys.add(normalize_titles(Path(folder).name))
+            folder_name = Path(folder).name
+            plain_folder_key = normalize_titles(folder_name)
+            keys.add(plain_folder_key)
+            # Also add year-qualified key when folder contains a year so same-title/different-year
+            # items (e.g. "3:10 to Yuma (1957)" vs "3:10 to Yuma (2007)") get distinct index entries.
+            folder_year_m = re.search(r'\((\d{4})\)', folder_name)
+            if folder_year_m:
+                keys.add(f"{plain_folder_key}::{int(folder_year_m.group(1))}")
         if title:
             keys.add(normalize_titles(title))
         if title and year is not None:
-            keys.add(normalize_titles(f"{title} ({year})"))
+            # Use "normalized_title::year" format instead of normalize_titles(f"{title} ({year})")
+            # because normalize_titles strips years, making the year-qualified form identical to
+            # the plain title key and providing no disambiguation benefit.
+            keys.add(f"{normalize_titles(title)}::{year}")
         if tmdb_id is not None:
             normalized = str(tmdb_id).strip().lower()
             if normalized and normalized != "0":
