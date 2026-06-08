@@ -566,6 +566,13 @@
   border-color: #6c9bd4;
 }
 
+.manual-media-ids-warning {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #f59e0b;
+  opacity: 0.85;
+}
+
 /* IDs row below the primary row */
 .manual-media-ids-row {
   display: flex;

@@ -264,6 +264,9 @@ function RenamerTab({
             </button>
           </div>
           {/* Optional IDs row */}
+          <div className="manual-media-ids-warning">
+            <span>⚠ Only enter an ID if it uniquely identifies this item. An ID shared with another item in your library will cause matching conflicts.</span>
+          </div>
           <div className="manual-media-ids-row">
             <div className="manual-media-id-field">
               <span className="manual-media-id-label">TMDB ID</span>
