@@ -1946,7 +1946,14 @@ class PlexUploadService:
                 id_candidates.extend(index_map.get(id_key, []))
             deduped_id_candidates = self._dedupe_plex_items(id_candidates)
             if deduped_id_candidates:
-                return deduped_id_candidates
+                if folder_year is not None:
+                    year_filtered = [item for item in deduped_id_candidates if _item_year(item) == folder_year]
+                    if year_filtered:
+                        return year_filtered
+                    # ID matched but year is wrong — wrong ID entered or stale metadata.
+                    # Fall through to year-filtered title lookup below.
+                else:
+                    return deduped_id_candidates
             # IDs were present but nothing matched in the Plex index. Two possible causes:
             # (a) Plex hasn't scanned the item yet — we must not fall back to a same-title
             #     different-year item (e.g. plex_1957 when we want plex_2007).
