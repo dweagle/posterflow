@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw, Info } from 'lucide-react'
+import { Eye, Play, Save, UploadCloud, Plus, Trash2, FolderOpen, Search, RotateCw, Info, ChevronDown, ChevronRight, AlertTriangle, FileImage } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import IDarrTabs, { IDarrTab } from '../components/IDarr/IDarrTabs'
 import ConfirmDialog from '../components/ConfirmDialog'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
-import { useIDarrPendingReview } from '../hooks/useIDarrPendingReview'
 import { useIDarrResolverActions } from '../hooks/useIDarrResolverActions'
 import { useIDarrPendingActions } from '../hooks/useIDarrPendingActions'
 import { useIDarrOperationalActions } from '../hooks/useIDarrOperationalActions'
@@ -22,9 +21,12 @@ import {
   getMakerIdarrConfig,
   getMakerIdarrIgnoredTitles,
   getMakerIdarrLastRun,
+  getMakerIdarrPendingCandidates,
+  archiveIdarrSourceFile,
   getMakerIdarrPendingMatches,
   importMakerIdarrIgnoredTitles,
   replaceMakerIdarrIgnoredTitles,
+  resolveMakerIdarrPendingMatch,
   runMakerIdarrCacheMaintenance,
   saveMakerIdarrConfig,
   startIdarr,
@@ -37,6 +39,8 @@ import './IDarr.css'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
 const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
+// Pending matches are paginated
+const PENDING_PAGE_SIZE = 25
 
 const isIDarrTab = (value: string): value is IDarrTab => {
   return ['IDarr', 'settings'].includes(value)
@@ -77,6 +81,8 @@ const cloneIdarrConfig = (value: MakerIdarrConfig): MakerIdarrConfig => ({
       source_dir: String(target.source_dir || ''),
       ...(target.label ? { label: String(target.label) } : {}),
       ...(target.scope_token ? { scope_token: String(target.scope_token) } : {}),
+      ...(target.is_asset_drive ? { is_asset_drive: true } : {}),
+      ...(target.is_psd_drive ? { is_psd_drive: true } : {}),
     }))
     : [],
 })
@@ -100,6 +106,8 @@ const normalizeIdarrConfigForCompare = (value: MakerIdarrConfig) => ({
       label: String(target.label || ''),
       personal_drive_id: String(target.personal_drive_id || ''),
       source_dir: String(target.source_dir || ''),
+      is_asset_drive: Boolean(target.is_asset_drive),
+      is_psd_drive: Boolean(target.is_psd_drive),
     }))
     : [],
 })
@@ -244,7 +252,10 @@ function IDarr() {
   const [limitInput, setLimitInput] = useState('')
   const [lastRun, setLastRun] = useState<MakerIdarrLastRun | null>(null)
   const [pendingItems, setPendingItems] = useState<MakerIdarrPendingItem[]>([])
-  const [pendingListFilter, setPendingListFilter] = useState<'all' | 'unresolved' | 'reviewed'>('all')
+  const [pendingPage, setPendingPage] = useState(0)
+  const [pendingTotal, setPendingTotal] = useState(0)
+  const [pendingPaging, setPendingPaging] = useState(false)
+  const pendingPageRef = useRef(0)
   const [ignoredItems, setIgnoredItems] = useState<MakerIdarrIgnoredItem[]>([])
   const [pendingLoading, setPendingLoading] = useState(false)
   const [resolving, setResolving] = useState(false)
@@ -264,18 +275,24 @@ function IDarr() {
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [isDragOverUpload, setIsDragOverUpload] = useState(false)
   const [resolverItem, setResolverItem] = useState<MakerIdarrPendingItem | null>(null)
+  const [resolverIndex, setResolverIndex] = useState(0)
   const [resolverTmdbId, setResolverTmdbId] = useState('')
+  const [resolverTmdbType, setResolverTmdbType] = useState<'movie' | 'tv_series' | 'collection' | ''>('')
+  const [resolverManualSearch, setResolverManualSearch] = useState('')
   const [resolverTvdbId, setResolverTvdbId] = useState('')
   const [resolverImdbId, setResolverImdbId] = useState('')
   const [resolverCandidates, setResolverCandidates] = useState<MakerIdarrPendingCandidate[]>([])
   const [resolverCandidatesLoading, setResolverCandidatesLoading] = useState(false)
   const [resolverHistory, setResolverHistory] = useState<MakerIdarrResolutionEvent[]>([])
-  const [resolverCandidateReviews, setResolverCandidateReviews] = useState<Record<string, { status?: 'accept' | 'reject'; reviewed_at?: string; note?: string | null }>>({})
   const [resolverPreviewUrl, setResolverPreviewUrl] = useState<string | null>(null)
+  const [cardPreviewUrl, setCardPreviewUrl] = useState<string | null>(null)
+  const [selectedCandidate, setSelectedCandidate] = useState<MakerIdarrPendingCandidate | null>(null)
   const [pendingActionConfirm, setPendingActionConfirm] = useState<PendingActionConfirm>(null)
   const [maintenanceActionConfirm, setMaintenanceActionConfirm] = useState<MaintenanceActionConfirm>(null)
+  const [pendingAssetDriveToggleIndex, setPendingAssetDriveToggleIndex] = useState<number | null>(null)
+  const [pendingPsdDriveToggleIndex, setPendingPsdDriveToggleIndex] = useState<number | null>(null)
   const [resolverAutoAdvance] = useState(false)
-  const [resolverSkipReviewedNav] = useState(false)
+  const [manualSectionOpen, setManualSectionOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const ignoredTitlesImportInputRef = useRef<HTMLInputElement | null>(null)
   const resolverModalBodyRef = useRef<HTMLDivElement | null>(null)
@@ -296,6 +313,7 @@ function IDarr() {
   useEffect(() => {
     localStorage.setItem(IDARR_TAB_STORAGE_KEY, activeTab)
   }, [activeTab])
+
 
   // Refresh state when a sidebar drop upload completes (upload handled by Sidebar directly)
   useEffect(() => {
@@ -336,6 +354,9 @@ function IDarr() {
     if (normalized === 'collection') {
       return { label: 'Collection', className: 'chip-collection' }
     }
+    if (normalized === 'pending') {
+      return { label: 'Pending', className: 'chip-pending' }
+    }
     return { label: 'Show', className: 'chip-show' }
   }
 
@@ -368,6 +389,12 @@ function IDarr() {
     }
   }
 
+  const isPng = (url: string | null | undefined) => /\.png/i.test(String(url || ''))
+  // Browsers can't render .psd, so any preview pointing at one would just break — detect it
+  // and show a PSD placeholder instead. Matches a .psd extension whether it's a bare filename or
+  // sits inside a preview URL (e.g. "…/source-image?path=Foo.psd&cb=123").
+  const isPsd = (url: string | null | undefined) => /\.psd\b/i.test(String(url || ''))
+
   const getPreviewImageUrl = (rawUrl: string | null | undefined): string | null => {
     const value = String(rawUrl || '').trim()
     if (!value) {
@@ -382,70 +409,63 @@ function IDarr() {
   const resetResolver = () => {
     setResolverItem(null)
     setResolverTmdbId('')
+    setResolverTmdbType('')
+    setResolverManualSearch('')
     setResolverTvdbId('')
     setResolverImdbId('')
     setResolverCandidates([])
     setResolverCandidatesLoading(false)
     setResolverHistory([])
-    setResolverCandidateReviews({})
     setResolverPreviewUrl(null)
+    setSelectedCandidate(null)
   }
-
-  const {
-    pendingSummary,
-    filteredPendingItems,
-    resolverProgress,
-    getFirstUnresolvedItem,
-    getNextPendingItem,
-    getPreviousPendingItem,
-    getNextUnresolvedItem,
-    getPreviousUnresolvedItem,
-  } = useIDarrPendingReview({
-    pendingItems,
-    pendingListFilter,
-    resolverItem,
-  })
 
   const {
     loadResolverCandidates,
     openResolver,
-    handleOpenNextPending,
-    handleOpenPreviousPending,
-    handleOpenFirstUnresolved,
   } = useIDarrResolverWorkflow({
     selectedSyncTargetIndex,
-    resolverItem,
-    resolverSkipReviewedNav,
-    getFirstUnresolvedItem,
-    getNextPendingItem,
-    getPreviousPendingItem,
-    getNextUnresolvedItem,
-    getPreviousUnresolvedItem,
     showToast,
     setResolverItem,
     setResolverTmdbId,
+    setResolverTmdbType,
     setResolverTvdbId,
     setResolverImdbId,
     setResolverCandidates,
     setResolverCandidatesLoading,
     setResolverHistory,
-    setResolverCandidateReviews,
   })
 
   const loadPendingMatches = async ({
     silent = false,
     syncTargetIndex,
+    page,
   }: {
     silent?: boolean
     syncTargetIndex?: number
+    page?: number
   } = {}): Promise<MakerIdarrPendingItem[]> => {
     const requestedIndex = typeof syncTargetIndex === 'number' ? syncTargetIndex : selectedSyncTargetIndex
+    // Default to the page the user is currently on (via ref, so resolver-action callers with a
+    // stale closure still reload the right page).
+    let targetPage = Math.max(0, typeof page === 'number' ? page : pendingPageRef.current)
     try {
       if (!silent) {
         setPendingLoading(true)
       }
-      const response = await getMakerIdarrPendingMatches(requestedIndex)
+      let response = await getMakerIdarrPendingMatches(requestedIndex, PENDING_PAGE_SIZE, targetPage * PENDING_PAGE_SIZE)
+      let total = typeof response.total === 'number' ? response.total : (response.items?.length ?? 0)
+      // If we paged past the end (items resolved/dismissed away), clamp to the last page and refetch.
+      const lastPage = Math.max(0, Math.ceil(total / PENDING_PAGE_SIZE) - 1)
+      if (targetPage > lastPage) {
+        targetPage = lastPage
+        response = await getMakerIdarrPendingMatches(requestedIndex, PENDING_PAGE_SIZE, targetPage * PENDING_PAGE_SIZE)
+        total = typeof response.total === 'number' ? response.total : (response.items?.length ?? 0)
+      }
       const items = response.items || []
+      pendingPageRef.current = targetPage
+      setPendingPage(targetPage)
+      setPendingTotal(total)
       setPendingItems(items)
       void refreshIdarrPendingCount()
       return items
@@ -459,47 +479,69 @@ function IDarr() {
     }
   }
 
+  const goToPendingPage = async (page: number) => {
+    if (pendingPaging) {
+      return
+    }
+    setPendingPaging(true)
+    try {
+      await loadPendingMatches({ page, silent: true })
+    } finally {
+      setPendingPaging(false)
+    }
+  }
+
+  const openResolverAtIndex = async (index: number): Promise<boolean> => {
+    const requested = Math.max(0, index)
+    try {
+      const response = await getMakerIdarrPendingMatches(selectedSyncTargetIndex, 1, requested)
+      let total = typeof response.total === 'number' ? response.total : (response.items?.length ?? 0)
+      setPendingTotal(total)
+      if (total <= 0) {
+        resetResolver()
+        return false
+      }
+      let item = (response.items || [])[0]
+      const clamped = Math.min(requested, total - 1)
+      if (!item && clamped !== requested) {
+        const retry = await getMakerIdarrPendingMatches(selectedSyncTargetIndex, 1, clamped)
+        total = typeof retry.total === 'number' ? retry.total : total
+        setPendingTotal(total)
+        item = (retry.items || [])[0]
+      }
+      if (!item) {
+        resetResolver()
+        return false
+      }
+      setResolverIndex(clamped)
+      await openResolver(item)
+      return true
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to load pending match'), 'error')
+      return false
+    }
+  }
+
   const refreshPendingAndHandleResolverAdvance = async (
     resolvedAssetKey: string,
     options?: { forceAdvance?: boolean },
   ) => {
-    const previousItems = pendingItems
-    const refreshedItems = await loadPendingMatches({ silent: true })
+    void loadPendingMatches({ silent: true })
 
     if (!resolverItem || resolverItem.asset_key !== resolvedAssetKey) {
       return
     }
 
     const shouldAutoAdvance = options?.forceAdvance ?? resolverAutoAdvance
-
     if (!shouldAutoAdvance) {
       resetResolver()
       return
     }
 
-    const previousIndex = previousItems.findIndex((item) => item.asset_key === resolvedAssetKey)
-    let nextItem: MakerIdarrPendingItem | undefined
-
-    if (previousIndex >= 0) {
-      for (let index = previousIndex + 1; index < previousItems.length; index += 1) {
-        const candidateKey = previousItems[index].asset_key
-        nextItem = refreshedItems.find((item) => item.asset_key === candidateKey)
-        if (nextItem) {
-          break
-        }
-      }
+    const advanced = await openResolverAtIndex(resolverIndex)
+    if (!advanced) {
+      resetResolver()
     }
-
-    if (!nextItem && refreshedItems.length > 0) {
-      nextItem = refreshedItems[0]
-    }
-
-    if (nextItem) {
-      await openResolver(nextItem)
-      return
-    }
-
-    resetResolver()
   }
 
   const loadIgnoredTitles = async (syncTargetIndex?: number) => {
@@ -533,7 +575,7 @@ function IDarr() {
     try {
       const [lastRunData] = await Promise.all([
         getMakerIdarrLastRun(requestedIndex),
-        loadPendingMatches({ silent: silentPending, syncTargetIndex: requestedIndex }),
+        loadPendingMatches({ silent: silentPending, syncTargetIndex: requestedIndex, page: 0 }),
         loadCacheStats(requestedIndex),
         loadIgnoredTitles(requestedIndex),
       ])
@@ -604,12 +646,20 @@ function IDarr() {
     wsJobs.forEach((job) => {
       if (job.job_type !== 'idarr') return
       const prev = lastIdarrJobStatusRef.current[job.id]
-      if ((job.status === 'completed' || job.status === 'failed') && prev !== job.status) {
+      const isObservedTransition = prev !== undefined && prev !== job.status
+      if ((job.status === 'completed' || job.status === 'failed') && isObservedTransition) {
         void (async () => {
-          const items = await loadPendingMatches({ silent: true })
+          const [items, lastRunData] = await Promise.all([
+            loadPendingMatches({ silent: true }),
+            getMakerIdarrLastRun(selectedSyncTargetIndex),
+          ])
           void refreshIdarrPendingCount()
-          if (job.status === 'completed' && items.length > 0) {
-            showToast(`IDarr run complete — ${items.length} pending match${items.length === 1 ? '' : 'es'} need attention`, 'info')
+          if (lastRunData && Object.keys(lastRunData).length > 0) {
+            setLastRun(lastRunData)
+          }
+          const unresolvedItems = items.filter((item) => !item.pending_status)
+          if (job.status === 'completed' && unresolvedItems.length > 0) {
+            showToast(`IDarr run complete — ${unresolvedItems.length} pending match${unresolvedItems.length === 1 ? '' : 'es'} need attention`, 'info')
           }
         })()
       }
@@ -659,7 +709,6 @@ function IDarr() {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (activeTab === 'settings' && hasUnsavedSettings) {
         event.preventDefault()
-        event.returnValue = ''
       }
     }
 
@@ -777,7 +826,7 @@ function IDarr() {
     setIsDragOverUpload(false)
   }
 
-  const updateSyncTarget = (index: number, key: 'label' | 'personal_drive_id' | 'source_dir', value: string) => {
+  const updateSyncTarget = (index: number, key: 'label' | 'personal_drive_id' | 'source_dir' | 'is_asset_drive' | 'is_psd_drive', value: string | boolean) => {
     const currentTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
     if (index < 0 || index >= currentTargets.length) {
       return
@@ -785,6 +834,23 @@ function IDarr() {
 
     const updatedTargets = currentTargets.map((target, targetIndex) => (
       targetIndex === index ? { ...target, [key]: value } : target
+    ))
+
+    updateConfig('sync_targets', updatedTargets)
+  }
+
+  // Assets and PSD drive types are mutually exclusive — set both flags in a single update so a
+  // drive is exactly one of: normal ('none'), assets, or psd.
+  const setSyncTargetDriveType = (index: number, type: 'asset' | 'psd' | 'none') => {
+    const currentTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
+    if (index < 0 || index >= currentTargets.length) {
+      return
+    }
+
+    const updatedTargets = currentTargets.map((target, targetIndex) => (
+      targetIndex === index
+        ? { ...target, is_asset_drive: type === 'asset', is_psd_drive: type === 'psd' }
+        : target
     ))
 
     updateConfig('sync_targets', updatedTargets)
@@ -798,6 +864,8 @@ function IDarr() {
         label: `Drive ${currentTargets.length + 1}`,
         personal_drive_id: '',
         source_dir: '',
+        is_asset_drive: false,
+        is_psd_drive: false,
       },
     ]
     updateConfig('sync_targets', nextTargets)
@@ -859,6 +927,14 @@ function IDarr() {
     resolverCandidates
       .slice()
       .sort((left, right) => {
+        // Closest match first: match_reason.score encodes title/year closeness
+        // (exact title +70, partial +40, year match +30). Popularity/vote only break ties.
+        const leftReasonScore = Number(left.match_reason?.score || 0)
+        const rightReasonScore = Number(right.match_reason?.score || 0)
+        if (rightReasonScore !== leftReasonScore) {
+          return rightReasonScore - leftReasonScore
+        }
+
         const leftPopularity = Number(left.popularity || 0)
         const rightPopularity = Number(right.popularity || 0)
         if (rightPopularity !== leftPopularity) {
@@ -869,12 +945,6 @@ function IDarr() {
         const rightVote = Number(right.vote_average || 0)
         if (rightVote !== leftVote) {
           return rightVote - leftVote
-        }
-
-        const leftReasonScore = Number(left.match_reason?.score || 0)
-        const rightReasonScore = Number(right.match_reason?.score || 0)
-        if (rightReasonScore !== leftReasonScore) {
-          return rightReasonScore - leftReasonScore
         }
 
         return 0
@@ -1124,6 +1194,12 @@ function IDarr() {
     }
   }
 
+  const wsJobsRef = useRef(wsJobs)
+  wsJobsRef.current = wsJobs
+  const isIdarrJobActive = () => wsJobsRef.current.some(
+    (job) => job.job_type === 'idarr' && (job.status === 'running' || job.status === 'pending' || job.status === 'queued'),
+  )
+
   const {
     handleResolvePending,
     handleResolveAndRename,
@@ -1132,27 +1208,36 @@ function IDarr() {
     selectedSyncTargetIndex,
     resolverItem,
     resolverTmdbId,
+    resolverTmdbType,
     resolverTvdbId,
     resolverImdbId,
-    resolverCandidates,
-    resolverCandidateReviews,
-    filteredResolverCandidates: displayedResolverCandidates,
-    setResolverCandidateReviews,
-    setResolverCandidates,
     setResolving,
     showToast,
     refreshPendingAndHandleResolverAdvance,
     loadCacheStats,
     loadIgnoredTitles,
+    isIdarrJobActive,
   })
 
-  const handlePrefillCandidateIds = (candidate: MakerIdarrPendingCandidate) => {
-    setResolverTmdbId(String(candidate.tmdb_id || ''))
-    setResolverTvdbId(candidate.tvdb_id ? String(candidate.tvdb_id) : '')
-    setResolverImdbId(candidate.imdb_id ? String(candidate.imdb_id) : '')
+  const handleManualCandidateSearch = async () => {
+    if (!resolverManualSearch.trim() || !resolverItem) return
+    setResolverCandidatesLoading(true)
+    try {
+      const response = await getMakerIdarrPendingCandidates({
+        title: resolverManualSearch.trim(),
+        year: null,
+        type: resolverTmdbType || 'pending',
+        sync_target_index: selectedSyncTargetIndex,
+      })
+      setResolverCandidates(response.candidates || [])
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Search failed'), 'error')
+    } finally {
+      setResolverCandidatesLoading(false)
+    }
   }
 
-  const {
+const {
     handleDismissPending,
     handleIgnorePending,
     handleRemoveIgnored,
@@ -1167,6 +1252,29 @@ function IDarr() {
     loadIgnoredTitles,
     loadCacheStats,
   })
+
+  const handleResolveConflictFile = async (item: MakerIdarrPendingItem, selectedFile: string) => {
+    try {
+      setResolving(true)
+      const otherFiles = (item.conflict_files ?? []).filter((f) => f !== selectedFile)
+      for (const file of otherFiles) {
+        await archiveIdarrSourceFile({ filename: file, sync_target_index: selectedSyncTargetIndex })
+      }
+      const job = await startIdarr(false, selectedSyncTargetIndex, [selectedFile])
+      await resolveMakerIdarrPendingMatch({
+        asset_key: item.asset_key,
+        action: 'dismiss',
+        sync_target_index: selectedSyncTargetIndex,
+      })
+      showToast(`Rename started for ${selectedFile} (Job ID: ${job.id})`, 'info')
+      await loadPendingMatches({ silent: true })
+      await loadCacheStats()
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to resolve conflict file'), 'error')
+    } finally {
+      setResolving(false)
+    }
+  }
 
   const closeTargetedPruneModal = () => {
     setShowTargetedPruneModal(false)
@@ -1284,13 +1392,13 @@ function IDarr() {
 
     if (key === 'n') {
       event.preventDefault()
-      void handleOpenNextPending()
+      void openResolverAtIndex(resolverIndex + 1)
       return
     }
 
     if (key === 'p') {
       event.preventDefault()
-      void handleOpenPreviousPending()
+      void openResolverAtIndex(resolverIndex - 1)
     }
   }
 
@@ -1304,8 +1412,6 @@ function IDarr() {
       window.removeEventListener('keydown', handleResolverKeydown)
     }
   }, [
-    handleOpenNextPending,
-    handleOpenPreviousPending,
     handleResolverKeydown,
     pendingLoading,
     resolverCandidatesLoading,
@@ -1315,6 +1421,8 @@ function IDarr() {
   ])
 
   useEffect(() => {
+    setSelectedCandidate(null)
+
     if (!resolverItem) {
       return
     }
@@ -1544,7 +1652,13 @@ function IDarr() {
         </div>
 
         <div className="idarr-settings-group idarr-settings-group-sync-targets">
-          <h3>Personal Drive Sync Targets</h3>
+          <div className="idarr-sync-targets-header">
+            <h3>Personal Drive Sync Targets</h3>
+            <button type="button" className="btn-toolbar" onClick={addSyncTarget} disabled={saving || loading || syncing}>
+              <Plus size={16} />
+              Add Personal Drive
+            </button>
+          </div>
           <p className="section-description">Each target includes a personal Drive folder ID and its own local sync folder.</p>
 
           <div className="idarr-sync-target-list">
@@ -1597,22 +1711,112 @@ function IDarr() {
                       placeholder="/path/to/local/sync/folder"
                     />
                   </div>
+                  <div className="idarr-drive-type-toggles">
+                    <div className="field-group field-group-toggle">
+                      <label>
+                        <span>
+                          Assets Drive
+                          <span className="idarr-info-icon-wrap">
+                            <Info size={13} className="idarr-info-icon" />
+                            <span className="idarr-info-tooltip">
+                              When enabled, this drive is treated as an assets drive. IDarr will scan <strong>logos/</strong> and <strong>backdrops/</strong> subfolders inside the sync folder instead of the root. Season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only.
+                            </span>
+                          </span>
+                        </span>
+                        <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(target.is_asset_drive)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setPendingAssetDriveToggleIndex(index)
+                              } else {
+                                updateSyncTarget(index, 'is_asset_drive', false)
+                              }
+                            }}
+                          />
+                          <span className="idarr-toggle-slider" />
+                        </span>
+                      </label>
+                    </div>
+                    <div className="field-group field-group-toggle">
+                      <label>
+                        <span>
+                          PSD Drive
+                          <span className="idarr-info-icon-wrap">
+                            <Info size={13} className="idarr-info-icon" />
+                            <span className="idarr-info-tooltip">
+                              When enabled, this drive is treated as a PSD drive. IDarr scans the sync folder directly (no <strong>logos/</strong>/<strong>backdrops/</strong> subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. Mutually exclusive with Assets Drive.
+                            </span>
+                          </span>
+                        </span>
+                        <span className="idarr-toggle-control" style={{ flexShrink: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(target.is_psd_drive)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setPendingPsdDriveToggleIndex(index)
+                              } else {
+                                updateSyncTarget(index, 'is_psd_drive', false)
+                              }
+                            }}
+                          />
+                          <span className="idarr-toggle-slider" />
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-          <div className="action-buttons">
-            <button type="button" className="btn-toolbar" onClick={addSyncTarget} disabled={saving || loading || syncing}>
-              <Plus size={16} />
-              Add Personal Drive Target
-            </button>
-          </div>
+          {(config.sync_targets || []).length > 0 && (
+            <div className="idarr-sync-targets-footer">
+              <button
+                className={`btn-toolbar ${hasUnsavedSettings ? 'btn-unsaved' : ''}`}
+                onClick={handleSave}
+                disabled={!hasUnsavedSettings || saving || loading}
+                title={hasUnsavedSettings ? 'Save changes' : 'No changes to save'}
+              >
+                <Save size={16} />
+                {saving ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   )
 
-  const renderPendingMatchesSection = () => (
+  const renderPendingMatchesSection = () => {
+    const pendingPageCount = Math.max(1, Math.ceil(pendingTotal / PENDING_PAGE_SIZE))
+    const pendingSafePage = Math.min(pendingPage, pendingPageCount - 1)
+    const pendingPageStart = pendingSafePage * PENDING_PAGE_SIZE
+    const pendingPager = pendingPageCount > 1 ? (
+      <div className="pending-pagination">
+        <button
+          type="button"
+          className="btn-toolbar"
+          disabled={pendingSafePage === 0 || resolving || pendingLoading || pendingPaging}
+          onClick={() => { void goToPendingPage(pendingSafePage - 1) }}
+        >
+          Prev
+        </button>
+        <span className="pending-pagination-info">
+          {pendingTotal === 0 ? 0 : pendingPageStart + 1}–{Math.min(pendingPageStart + pendingItems.length, pendingTotal)} of {pendingTotal} · Page {pendingSafePage + 1} of {pendingPageCount}
+        </span>
+        <button
+          type="button"
+          className="btn-toolbar"
+          disabled={pendingSafePage >= pendingPageCount - 1 || resolving || pendingLoading || pendingPaging}
+          onClick={() => { void goToPendingPage(pendingSafePage + 1) }}
+        >
+          Next
+        </button>
+      </div>
+    ) : null
+    return (
     <div className="settings-section idarr-pending-card">
       <div className="pending-section-header">
         <h2>Pending Matches</h2>
@@ -1631,7 +1835,7 @@ function IDarr() {
         </div>
       </div>
       <p className="section-description">
-        Total: {pendingSummary.total} • Unresolved: {pendingSummary.unresolved} • Reviewed: {pendingSummary.reviewed}
+        Total: {pendingTotal}
       </p>
       <div className="pending-actions">
         <div className="pending-actions-row">
@@ -1640,86 +1844,121 @@ function IDarr() {
             <button
               className="btn-toolbar btn-primary"
               onClick={() => {
-                void handleOpenFirstUnresolved()
+                void openResolverAtIndex(0)
               }}
-              disabled={pendingLoading || pendingSummary.unresolved === 0 || resolving}
+              disabled={pendingLoading || pendingTotal === 0 || resolving}
             >
-              Open First Unresolved
+              Open First
             </button>
           </div>
         </div>
 
-        <div className="pending-actions-row">
-          <span className="pending-actions-label">Filters</span>
-          <div className="action-buttons pending-filter-buttons">
-            <button
-              className={`btn-toolbar ${pendingListFilter === 'all' ? 'btn-primary' : ''}`}
-              onClick={() => setPendingListFilter('all')}
-              disabled={pendingLoading}
-            >
-              All ({pendingSummary.total})
-            </button>
-            <button
-              className={`btn-toolbar ${pendingListFilter === 'unresolved' ? 'btn-primary' : ''}`}
-              onClick={() => setPendingListFilter('unresolved')}
-              disabled={pendingLoading}
-            >
-              Unresolved ({pendingSummary.unresolved})
-            </button>
-            <button
-              className={`btn-toolbar ${pendingListFilter === 'reviewed' ? 'btn-primary' : ''}`}
-              onClick={() => setPendingListFilter('reviewed')}
-              disabled={pendingLoading}
-            >
-              Reviewed ({pendingSummary.reviewed})
-            </button>
-          </div>
-        </div>
       </div>
       {pendingLoading ? (
         <p className="section-description">Loading pending matches...</p>
-      ) : filteredPendingItems.length === 0 ? (
+      ) : pendingItems.length === 0 ? (
         <p className="section-description">No pending matches.</p>
       ) : (
-        <div className="pending-list">
-          {filteredPendingItems.map((item) => (
-            <div key={item.asset_key} className="pending-list-card">
-              <div className="pending-list-main">
-                <span className="pending-list-title">{item.title}{item.year ? ` (${item.year})` : ''}</span>
-                <div className="pending-list-meta">
-                  {(() => {
-                    const reasonChip = getPendingReasonChipMeta(item.pending_reason)
-                    if (!reasonChip) {
-                      return null
-                    }
-                    return <span className={`pending-type-chip pending-status-chip ${reasonChip.className}`}>{reasonChip.label}</span>
-                  })()}
-                  <span
-                    className={`pending-type-chip ${item.type === 'movie' ? 'chip-movie' : item.type === 'collection' ? 'chip-collection' : 'chip-show'}`}
-                  >
-                    {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'}
-                  </span>
+        <>
+          {pendingPager}
+          <div className="pending-list">
+          {pendingItems.map((item, itemIndex) => {
+            const globalIndex = pendingPage * PENDING_PAGE_SIZE + itemIndex
+            const hasConflictFiles = Array.isArray(item.conflict_files) && item.conflict_files.length > 0
+            return (
+              <div key={item.asset_key} className={`pending-list-card${hasConflictFiles ? ' has-conflict-files' : ''}`}>
+                <div className="pending-list-main">
+                  <span className="pending-list-title">{item.title}{item.year ? ` (${item.year})` : ''}</span>
+                  <div className="pending-list-meta">
+                    {(() => {
+                      const reasonChip = getPendingReasonChipMeta(item.pending_reason)
+                      if (!reasonChip) {
+                        return null
+                      }
+                      return <span className={`pending-type-chip pending-status-chip ${reasonChip.className}`}>{reasonChip.label}</span>
+                    })()}
+                    <span
+                      className={`pending-type-chip ${item.type === 'movie' ? 'chip-movie' : item.type === 'collection' ? 'chip-collection' : item.type === 'pending' ? 'chip-pending' : 'chip-show'}`}
+                    >
+                      {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : item.type === 'pending' ? 'Pending' : 'Show'}
+                    </span>
+                  </div>
+                </div>
+                {hasConflictFiles && (
+                  <div className="conflict-files-section">
+                    <small className="conflict-files-label">Same target — select which to keep:</small>
+                    <div className="conflict-files-grid">
+                      {item.conflict_files!.map((file, fileIndex) => {
+                        const fileIsPsd = isPsd(file)
+                        const previewUrl = fileIsPsd ? null : getPreviewImageUrl(item.conflict_file_previews?.[fileIndex])
+                        return (
+                          <div key={file} className="conflict-file-cell">
+                            <button
+                              type="button"
+                              className={`conflict-cell-thumb-btn${isPng(file) ? ' idarr-checkered' : ''}`}
+                              title={previewUrl ? 'Click to preview' : undefined}
+                              onClick={previewUrl ? () => setCardPreviewUrl(previewUrl) : undefined}
+                              style={!previewUrl ? { cursor: 'default' } : undefined}
+                            >
+                              {previewUrl ? (
+                                <img src={previewUrl} alt={file} className="conflict-cell-thumb" loading="lazy" />
+                              ) : fileIsPsd ? (
+                                <div className="conflict-cell-thumb conflict-cell-thumb-placeholder idarr-psd-placeholder">
+                                  <FileImage size={20} />
+                                  <span>PSD</span>
+                                </div>
+                              ) : (
+                                <div className="conflict-cell-thumb conflict-cell-thumb-placeholder" />
+                              )}
+                            </button>
+                            <span className="conflict-cell-name" title={file}>{file}</span>
+                            <button
+                              className="btn-toolbar btn-primary conflict-cell-use-btn"
+                              onClick={() => void handleResolveConflictFile(item, file)}
+                              disabled={resolving}
+                            >
+                              Keep
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div className="pending-list-actions">
+                  {!hasConflictFiles && (
+                    <button className="btn-toolbar btn-primary" onClick={() => { setResolverIndex(globalIndex); void openResolver(item) }} disabled={resolving}>
+                      Resolve
+                    </button>
+                  )}
+                  <button className="btn-toolbar" onClick={() => handleDismissPending(item)} disabled={resolving}>
+                    Dismiss
+                  </button>
+                  {!hasConflictFiles && (
+                    <button className="btn-toolbar" onClick={() => handleIgnorePending(item)} disabled={resolving}>
+                      Ignore
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="pending-list-actions">
-                <button className="btn-toolbar btn-primary" onClick={() => {
-                  void openResolver(item)
-                }} disabled={resolving}>
-                  Resolve
-                </button>
-                <button className="btn-toolbar" onClick={() => handleDismissPending(item)} disabled={resolving}>
-                  Dismiss
-                </button>
-                <button className="btn-toolbar" onClick={() => handleIgnorePending(item)} disabled={resolving}>
-                  Ignore
-                </button>
-              </div>
+            )
+          })}
+          </div>
+        </>
+      )}
+      {lastRun?.warnings && lastRun.warnings.length > 0 && (
+        <div className="pending-list pending-warnings-list">
+          {lastRun.warnings.map((w, i) => (
+            <div key={i} className="pending-list-card pending-warning-card">
+              <AlertTriangle size={14} className="pending-warning-icon" />
+              <span>{w}</span>
             </div>
           ))}
         </div>
       )}
     </div>
-  )
+    )
+  }
 
   const renderIgnoredTitlesSection = () => (
     <div className="settings-section idarr-ignored-card">
@@ -1868,8 +2107,8 @@ function IDarr() {
               onClick={() => {
                 openMaintenanceConfirmation('clear_pending')
               }}
-              disabled={pendingLoading || resolving || pendingSummary.total === 0}
-              title="Clears all unresolved and reviewed pending unmatched items"
+              disabled={pendingLoading || resolving || pendingTotal === 0}
+              title="Clears all pending unmatched items"
             >
               Clear Pending
             </button>
@@ -2021,6 +2260,17 @@ function IDarr() {
       return null
     }
 
+    const assetSubtype = resolverItem.asset_subtype ?? null
+    const sourcePosterClass = assetSubtype === 'logo'
+      ? 'resolver-source-asset resolver-source-logo'
+      : assetSubtype === 'backdrop'
+        ? 'resolver-source-asset resolver-source-backdrop'
+        : 'resolver-candidate-poster'
+    const sourcePlaceholderLabel = assetSubtype === 'logo' ? 'No Logo' : assetSubtype === 'backdrop' ? 'No Backdrop' : 'No Poster'
+    // PSD sources can't be rendered as an <img>; show a PSD placeholder instead of a broken image.
+    const sourceIsPsd = isPsd(resolverItem.preview_url)
+      || (Array.isArray(resolverItem.source_filenames) && resolverItem.source_filenames.some((f) => isPsd(f)))
+
     return (
       <div className="modal-overlay">
         <div className="modal-content schedule-modal resolver-modal">
@@ -2033,7 +2283,12 @@ function IDarr() {
               <label>Asset</label>
               <div className="resolver-asset-header">
                 <div className="resolver-candidate-poster-wrap">
-                  {resolverItem.preview_url ? (
+                  {sourceIsPsd ? (
+                    <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder idarr-psd-placeholder`}>
+                      <FileImage size={22} />
+                      <span>PSD</span>
+                    </div>
+                  ) : resolverItem.preview_url ? (
                     <button
                       type="button"
                       className="resolver-candidate-poster-link resolver-source-preview-trigger"
@@ -2042,13 +2297,13 @@ function IDarr() {
                     >
                       <img
                         src={getPreviewImageUrl(resolverItem.preview_url) || ''}
-                        alt={`${resolverItem.title} source poster`}
-                        className="resolver-candidate-poster"
+                        alt={`${resolverItem.title} source image`}
+                        className={sourcePosterClass}
                         loading="lazy"
                       />
                     </button>
                   ) : (
-                    <div className="resolver-candidate-poster resolver-candidate-poster-placeholder">No Poster</div>
+                    <div className={`${sourcePosterClass} resolver-candidate-poster-placeholder`}>{sourcePlaceholderLabel}</div>
                   )}
                 </div>
                 <div className="resolver-asset-header-text">
@@ -2062,24 +2317,24 @@ function IDarr() {
                 </div>
               </div>
               <small className="resolver-item-count">
-                Item {resolverProgress.current || 0} of {resolverProgress.total || 0}
+                Item {pendingTotal === 0 ? 0 : resolverIndex + 1} of {pendingTotal}
               </small>
               <div className="action-buttons">
                 <button
                   className="btn-toolbar"
                   onClick={() => {
-                    void handleOpenPreviousPending()
+                    void openResolverAtIndex(resolverIndex - 1)
                   }}
-                  disabled={resolving || pendingLoading || resolverProgress.total <= 1}
+                  disabled={resolving || pendingLoading || resolverIndex <= 0}
                 >
                   Previous
                 </button>
                 <button
                   className="btn-toolbar"
                   onClick={() => {
-                    void handleOpenNextPending()
+                    void openResolverAtIndex(resolverIndex + 1)
                   }}
-                  disabled={resolving || pendingLoading || resolverProgress.total <= 1}
+                  disabled={resolving || pendingLoading || resolverIndex >= pendingTotal - 1}
                 >
                   Next
                 </button>
@@ -2099,19 +2354,80 @@ function IDarr() {
             <div className="form-group">
               <small>Shortcuts: N = next pending, P = previous pending, Esc = close</small>
             </div>
-            <div className="resolver-id-row">
+            <div className="resolver-manual-section">
+              <button
+                type="button"
+                className="resolver-manual-section-toggle"
+                onClick={() => setManualSectionOpen((o) => !o)}
+              >
+                {manualSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <span className="resolver-manual-section-title">Manual Resolution</span>
+                {!manualSectionOpen && (
+                  <span className="resolver-manual-section-hint">Use if the candidates below don't match your item</span>
+                )}
+              </button>
+              {manualSectionOpen && (
+              <div className="resolver-manual-content">
               <div className="form-group">
-                <label>TMDB ID</label>
-                <input type="text" value={resolverTmdbId} onChange={(e) => setResolverTmdbId(e.target.value)} placeholder="12345" />
+                <label>Media Type</label>
+                <small className="resolver-type-hint">Required when entering a TMDB ID manually — movie and TV IDs share the same number space.</small>
+                <div className="resolver-type-buttons">
+                  {(['movie', 'tv_series', 'collection'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`resolver-type-btn${resolverTmdbType === t ? ' active' : ''}`}
+                      onClick={() => setResolverTmdbType(resolverTmdbType === t ? '' : t)}
+                    >
+                      {t === 'movie' ? 'Movie' : t === 'tv_series' ? 'TV Show' : 'Collection'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="form-group">
-                <label>TVDB ID</label>
-                <input type="text" value={resolverTvdbId} onChange={(e) => setResolverTvdbId(e.target.value)} placeholder="98765" />
+              <div className="resolver-id-row">
+                <div className="form-group">
+                  <label>TMDB ID</label>
+                  <input type="text" value={resolverTmdbId} onChange={(e) => setResolverTmdbId(e.target.value)} placeholder="12345" />
+                </div>
+                <div className="form-group">
+                  <label>TVDB ID</label>
+                  <input type="text" value={resolverTvdbId} onChange={(e) => setResolverTvdbId(e.target.value)} placeholder="98765" />
+                </div>
+                <div className="form-group">
+                  <label>IMDB ID</label>
+                  <input type="text" value={resolverImdbId} onChange={(e) => setResolverImdbId(e.target.value)} placeholder="tt1234567" />
+                </div>
               </div>
-              <div className="form-group">
-                <label>IMDB ID</label>
-                <input type="text" value={resolverImdbId} onChange={(e) => setResolverImdbId(e.target.value)} placeholder="tt1234567" />
+              <div className="resolver-manual-search-row">
+                <input
+                  type="text"
+                  className="resolver-manual-search-input"
+                  value={resolverManualSearch}
+                  onChange={(e) => setResolverManualSearch(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleManualCandidateSearch() }}
+                  placeholder="Search TMDB by title..."
+                />
+                <button
+                  className="btn-toolbar"
+                  onClick={() => void handleManualCandidateSearch()}
+                  disabled={!resolverManualSearch.trim() || resolverCandidatesLoading}
+                >
+                  Search
+                </button>
+                {resolverManualSearch.trim() && (
+                  <button
+                    className="btn-toolbar"
+                    onClick={() => {
+                      setResolverManualSearch('')
+                      if (resolverItem) void loadResolverCandidates(resolverItem)
+                    }}
+                    disabled={resolverCandidatesLoading}
+                  >
+                    Reset
+                  </button>
+                )}
               </div>
+              </div>)}
             </div>
             <div className="form-group">
               <label>TMDB Candidates</label>
@@ -2151,73 +2467,62 @@ function IDarr() {
                   </div>
                 ) : (
                   <div className="settings-grid">
-                    {displayedResolverCandidates.slice(0, 6).map((candidate) => (
-                      <div key={`${candidate.tmdb_id}-${candidate.media_type}`} className="field-group">
-                        {(() => {
-                          const tmdbUrl = getCandidateTmdbUrl(candidate.tmdb_id, candidate.media_type)
-                          return (
-                            <>
-                              <div className="resolver-candidate-header">
-                                <div className="resolver-candidate-poster-wrap">
-                                  {candidate.poster_url ? (
-                                    <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" className="resolver-candidate-poster-link" title="Open on TMDB">
-                                      <img
-                                        src={candidate.poster_url}
-                                        alt={`${candidate.title} poster`}
-                                        className="resolver-candidate-poster"
-                                        loading="lazy"
-                                      />
-                                    </a>
-                                  ) : (
-                                    <div className="resolver-candidate-poster resolver-candidate-poster-placeholder">No Poster</div>
-                                  )}
-                                </div>
-                                <div className="resolver-candidate-header-text">
-                                  <label>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
-                                  <div className="resolver-candidate-meta-row">
-                                    <span>TMDB {candidate.tmdb_id}</span>
-                                    {(() => {
-                                      const chip = getTypeChipMeta(candidate.media_type)
-                                      return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
-                                    })()}
-                                  </div>
-                                  <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" className="resolver-candidate-tmdb-link">
-                                    TMDB Link ↗
-                                  </a>
-                                </div>
-                              </div>
-                              <small>
-                                Score: {Number(candidate.vote_average || 0).toFixed(1)} • Popularity: {Number(candidate.popularity || 0).toFixed(1)}
-                              </small>
-                              <small>
-                                Match: {candidate.match_reason?.summary || 'tmdb_rank'}
-                                {typeof candidate.match_reason?.score === 'number' ? ` • Reason Score ${candidate.match_reason.score}` : ''}
-                              </small>
-                              <div className="action-buttons resolver-candidate-actions">
+                    {displayedResolverCandidates.slice(0, 6).map((candidate) => {
+                      const isSelected = selectedCandidate?.tmdb_id === candidate.tmdb_id && selectedCandidate?.media_type === candidate.media_type
+                      const tmdbUrl = getCandidateTmdbUrl(candidate.tmdb_id, candidate.media_type)
+                      return (
+                        <div
+                          key={`${candidate.tmdb_id}-${candidate.media_type}`}
+                          className={`field-group resolver-candidate-card${isSelected ? ' selected' : ''}`}
+                          onClick={() => setSelectedCandidate(isSelected ? null : candidate)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedCandidate(isSelected ? null : candidate) }}
+                        >
+                          <div className="resolver-candidate-header">
+                            <div className="resolver-candidate-poster-wrap">
+                              {candidate.poster_url ? (
                                 <button
-                                  className="btn-secondary"
-                                  onClick={() => {
-                                    handlePrefillCandidateIds(candidate)
-                                  }}
-                                  disabled={resolving}
+                                  type="button"
+                                  className="resolver-candidate-poster-link resolver-source-preview-trigger"
+                                  title="Preview poster"
+                                  onClick={(e) => { e.stopPropagation(); setResolverPreviewUrl(candidate.poster_url ?? null) }}
                                 >
-                                  Use Candidate
+                                  <img
+                                    src={candidate.poster_url}
+                                    alt={`${candidate.title} poster`}
+                                    className="resolver-candidate-poster"
+                                    loading="lazy"
+                                  />
                                 </button>
-                                <button
-                                  className="btn-toolbar"
-                                  onClick={() => {
-                                    void handleResolveWithCandidate(candidate)
-                                  }}
-                                  disabled={resolving}
-                                >
-                                  Use Candidate & Next
-                                </button>
+                              ) : (
+                                <div className="resolver-candidate-poster resolver-candidate-poster-placeholder">No Poster</div>
+                              )}
+                            </div>
+                            <div className="resolver-candidate-header-text">
+                              <label>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
+                              <div className="resolver-candidate-meta-row">
+                                <span>TMDB {candidate.tmdb_id}</span>
+                                {(() => {
+                                  const chip = getTypeChipMeta(candidate.media_type)
+                                  return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
+                                })()}
                               </div>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    ))}
+                              <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" className="resolver-candidate-tmdb-link" onClick={(e) => e.stopPropagation()}>
+                                TMDB Link ↗
+                              </a>
+                            </div>
+                          </div>
+                          <small>
+                            Score: {Number(candidate.vote_average || 0).toFixed(1)} • Popularity: {Number(candidate.popularity || 0).toFixed(1)}
+                          </small>
+                          <small>
+                            Match: {candidate.match_reason?.summary || 'tmdb_rank'}
+                            {typeof candidate.match_reason?.score === 'number' ? ` • Reason Score ${candidate.match_reason.score}` : ''}
+                          </small>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -2260,33 +2565,73 @@ function IDarr() {
             <button className="btn-secondary" onClick={resetResolver} disabled={resolving}>
               Cancel
             </button>
-            <button
-              className="btn-toolbar"
-              onClick={() => {
-                void handleResolvePending({ forceAdvance: true })
-              }}
-              disabled={resolving}
-            >
-              {resolving ? 'Resolving...' : 'Resolve & Next'}
-            </button>
-            <button
-              className="btn-toolbar"
-              onClick={() => {
-                void handleResolveAndRename()
-              }}
-              disabled={resolving}
-            >
-              {resolving ? 'Resolving...' : 'Resolve & Rename'}
-            </button>
-            <button
-              className="btn-primary"
-              onClick={() => {
-                void handleResolvePending()
-              }}
-              disabled={resolving}
-            >
-              {resolving ? 'Resolving...' : 'Resolve with Entered IDs'}
-            </button>
+            {pendingTotal > 1 ? (
+              <>
+                <button
+                  className="btn-toolbar resolver-footer-btn"
+                  data-tooltip={selectedCandidate ? 'Use selected candidate and close — file not renamed, run Idarr to apply' : 'Save IDs and close — file not renamed, run Idarr to apply'}
+                  onClick={() => {
+                    selectedCandidate
+                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
+                      : void handleResolvePending({ forceAdvance: false })
+                  }}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Resolving...' : <>Resolve &amp; Close<Info size={11} className="resolver-btn-info-icon" /></>}
+                </button>
+                <button
+                  className="btn-toolbar resolver-footer-btn"
+                  data-tooltip={selectedCandidate ? 'Use selected candidate and advance to next — file not renamed, run Idarr to apply' : 'Save IDs and advance to next — file not renamed, run Idarr to apply'}
+                  onClick={() => {
+                    selectedCandidate
+                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true })
+                      : void handleResolvePending({ forceAdvance: true })
+                  }}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Resolving...' : <>Resolve &amp; Next<Info size={11} className="resolver-btn-info-icon" /></>}
+                </button>
+                <button
+                  className="btn-toolbar btn-primary resolver-footer-btn"
+                  data-tooltip={selectedCandidate ? 'Use selected candidate, start renaming the file, and advance to next' : 'Save IDs, start renaming the file, and advance to next'}
+                  onClick={() => {
+                    selectedCandidate
+                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: true, andRename: true })
+                      : void handleResolveAndRename()
+                  }}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn-toolbar resolver-footer-btn"
+                  data-tooltip={selectedCandidate ? 'Use selected candidate — file not renamed, run Idarr to apply' : 'Save IDs — file not renamed, run Idarr to apply'}
+                  onClick={() => {
+                    selectedCandidate
+                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false })
+                      : void handleResolvePending({ forceAdvance: false })
+                  }}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Resolving...' : <>Resolve<Info size={11} className="resolver-btn-info-icon" /></>}
+                </button>
+                <button
+                  className="btn-toolbar btn-primary resolver-footer-btn"
+                  data-tooltip={selectedCandidate ? 'Use selected candidate and immediately start renaming the file' : 'Save IDs and immediately start renaming the file'}
+                  onClick={() => {
+                    selectedCandidate
+                      ? void handleResolveWithCandidate(selectedCandidate, { forceAdvance: false, andRename: true })
+                      : void handleResolveAndRename()
+                  }}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Resolving...' : <>Resolve &amp; Rename<Info size={11} className="resolver-btn-info-icon" /></>}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -2311,7 +2656,7 @@ function IDarr() {
           <img
             src={resolverPreviewUrl}
             alt={`${resolverItem.title} source poster preview`}
-            className="resolver-preview-image"
+            className={`resolver-preview-image${isPng(resolverPreviewUrl) ? ' idarr-checkered' : ''}`}
           />
         </div>
       </div>
@@ -2580,6 +2925,45 @@ function IDarr() {
         onCancel={closeMaintenanceConfirmation}
       />
 
+      <ConfirmDialog
+        isOpen={pendingAssetDriveToggleIndex !== null}
+        title="Enable Assets Drive?"
+        message="Assets drives behave differently from poster drives. IDarr will scan logos/ and backdrops/ subfolders instead of the root folder, and season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only. Make sure your sync folder contains these subfolders before running."
+        confirmText="Enable Assets Drive"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={() => {
+          if (pendingAssetDriveToggleIndex !== null) {
+            setSyncTargetDriveType(pendingAssetDriveToggleIndex, 'asset')
+          }
+          setPendingAssetDriveToggleIndex(null)
+        }}
+        onCancel={() => setPendingAssetDriveToggleIndex(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={pendingPsdDriveToggleIndex !== null}
+        title="Enable PSD Drive?"
+        message="PSD drives behave differently from poster drives. IDarr will scan the sync folder directly (no logos/ or backdrops/ subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. This will turn off Assets Drive for this target."
+        confirmText="Enable PSD Drive"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={() => {
+          if (pendingPsdDriveToggleIndex !== null) {
+            setSyncTargetDriveType(pendingPsdDriveToggleIndex, 'psd')
+          }
+          setPendingPsdDriveToggleIndex(null)
+        }}
+        onCancel={() => setPendingPsdDriveToggleIndex(null)}
+      />
+
+      {cardPreviewUrl && (
+        <div className="modal-overlay" onClick={() => setCardPreviewUrl(null)}>
+          <div className="modal-content resolver-preview-modal">
+            <img src={cardPreviewUrl} alt="Conflict file preview" className={`resolver-preview-image${isPng(cardPreviewUrl) ? ' idarr-checkered' : ''}`} />
+          </div>
+        </div>
+      )}
       {renderResolverModal()}
       {renderResolverPreviewModal()}
       {renderTargetedPruneModal()}

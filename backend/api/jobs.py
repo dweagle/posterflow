@@ -521,6 +521,8 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
     config_data["sync_target_index"] = requested_index
     config_data["scope_token"] = resolve_idarr_scope_token(selected_target, requested_index)
     config_data["sync_after_run"] = bool(request.sync_after_run)
+    config_data["is_asset_drive"] = bool(selected_target.get("is_asset_drive", False))
+    config_data["is_psd_drive"] = bool(selected_target.get("is_psd_drive", False))
     if source_filenames:
         config_data["source_filenames"] = source_filenames
 

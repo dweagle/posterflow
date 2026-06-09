@@ -33,10 +33,12 @@ from services.idarr_runner import IdarrRunner
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 IDARR_RUN_HISTORY_KEEP_LATEST = 10
-# Auto-prune idarr_asset_cache after each run: remove entries not checked in this many days.
+# Auto-prune idarr_asset_cache after each run: remove entries with no activity in this many days.
 IDARR_CACHE_AUTO_PRUNE_DAYS = 90
 # Only run the auto-prune when the cache has at least this many rows (avoids overhead on small installs).
 IDARR_CACHE_AUTO_PRUNE_MIN_ROWS = 500
+# Max number of pruned entry names to list in the log (with an "…and N more" overflow line).
+IDARR_CACHE_AUTO_PRUNE_LOG_CAP = 100
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 
 
@@ -50,12 +52,21 @@ def _auto_prune_cache(db: Any, scope_token: str | None) -> None:
     """Automatically prune stale idarr_asset_cache rows after a successful run.
 
     Only runs when the scoped cache row count exceeds ``IDARR_CACHE_AUTO_PRUNE_MIN_ROWS``
-    to avoid overhead on small installs. Removes rows not checked in the last
-    ``IDARR_CACHE_AUTO_PRUNE_DAYS`` days.
+    to avoid overhead on small installs. A row is "stale" when it has had no activity —
+    checked, updated, or created — within ``IDARR_CACHE_AUTO_PRUNE_DAYS`` days.
+
+    Staleness is judged on ``COALESCE(last_checked_at, updated_at, created_at)`` rather than
+    ``last_checked_at`` alone: a freshly created/resolved row hasn't had a TMDB re-check yet, so
+    its ``last_checked_at`` is NULL — keying off that would wrongly delete brand-new rows and
+    mislabel them as "90 days old".
     """
     from datetime import timedelta
-    from sqlalchemy import func as _func, or_ as _or_
+    from sqlalchemy import func as _func
     from models.idarr import IdarrAssetCache
+
+    def _label(title: Any, year: Any) -> str:
+        text = str(title or "").strip() or "unknown"
+        return f"{text} ({year})" if isinstance(year, int) else f"{text} (None)"
 
     try:
         if scope_token:
@@ -71,14 +82,34 @@ def _auto_prune_cache(db: Any, scope_token: str | None) -> None:
             return
 
         threshold = datetime.now(timezone.utc) - timedelta(days=IDARR_CACHE_AUTO_PRUNE_DAYS)
-        deleted = base.filter(
-            _or_(
-                IdarrAssetCache.last_checked_at.is_(None),
-                IdarrAssetCache.last_checked_at < threshold,
-            )
-        ).delete(synchronize_session=False)
+        last_activity = _func.coalesce(
+            IdarrAssetCache.last_checked_at,
+            IdarrAssetCache.updated_at,
+            IdarrAssetCache.created_at,
+        )
+        stale = base.filter(last_activity < threshold)
+
+        # Capture the names before deleting so the log can say exactly what was pruned.
+        labels = [
+            _label(title, year)
+            for (title, year) in stale
+            .with_entities(IdarrAssetCache.title, IdarrAssetCache.year)
+            .limit(IDARR_CACHE_AUTO_PRUNE_LOG_CAP)
+            .all()
+        ]
+
+        deleted = stale.delete(synchronize_session=False)
         if deleted:
-            log_info(LogTags.IDARR, f"Auto-pruned {deleted} stale cache entries (>{IDARR_CACHE_AUTO_PRUNE_DAYS}d not checked)", scope_token=scope_token)
+            log_info(
+                LogTags.IDARR,
+                f"Auto-pruned {deleted} stale cache entries (no checked/updated/created activity in >{IDARR_CACHE_AUTO_PRUNE_DAYS}d)",
+                scope_token=scope_token,
+            )
+            for label in labels:
+                log_info(LogTags.IDARR, f"• Stale cache entry removed: {label}")
+            overflow = int(deleted) - len(labels)
+            if overflow > 0:
+                log_info(LogTags.IDARR, f"…and {overflow} more stale cache entry(ies) removed")
     except Exception as _exc:
         log_warning(LogTags.IDARR, f"Auto cache prune failed (non-fatal): {_exc}")
 
@@ -402,18 +433,19 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
         if renamed_lines:
             discord_fields.append({"name": "Renamed Files", "value": renamed_value, "inline": False})
 
-        send_discord_notification(
-            db,
-            feature_key="idarr",
-            event_type="success",
-            title="IDarr Summary",
-            description=(
-                f"IDarr processing complete: {renamed_count} renamed"
-                + (f", {pending_count} unresolved" if pending_count else "")
-            ),
-            fields=discord_fields,
-            color=0x4CAF50,
-        )
+        if not config_data.get("source_filenames"):
+            send_discord_notification(
+                db,
+                feature_key="idarr",
+                event_type="success",
+                title="IDarr Summary",
+                description=(
+                    f"IDarr processing complete: {renamed_count} renamed"
+                    + (f", {pending_count} unresolved" if pending_count else "")
+                ),
+                fields=discord_fields,
+                color=0x4CAF50,
+            )
 
         success = True
         log_section_end(LogTags.IDARR, f"IDarr Job Completed (job_id={job_id})")
@@ -714,6 +746,8 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
                 "dry_run": dry_run,
                 "sync_after_run": False,  # sync is handled inline below
                 "tmdb_api_key": tmdb_api_key,
+                "is_asset_drive": bool(target.get("is_asset_drive", False)),
+                "is_psd_drive": bool(target.get("is_psd_drive", False)),
             }
 
             rename_end_progress = (

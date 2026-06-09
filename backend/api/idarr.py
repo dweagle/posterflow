@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import re
 import shutil
 import time
@@ -17,7 +18,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
-from core.logging import LogTags, log_debug, log_error, log_user_action, log_warning
+from core.logging import LogTags, log_debug, log_error, log_info, log_user_action, log_warning
 from database import get_db
 from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key
 from models.setting import Setting, get_setting, upsert_setting
@@ -31,7 +32,7 @@ IDARR_UPLOAD_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 
 
 class MakerIdarrConfig(BaseModel):
-    sync_targets: list[dict[str, str]] = Field(default_factory=list)
+    sync_targets: list[dict[str, Any]] = Field(default_factory=list)
     tmdb_api_key: str = ""
     auto_rename_quick_add: bool = True
     auto_upload_quick_add: bool = False
@@ -53,7 +54,9 @@ class IdarrPendingResolveRequest(BaseModel):
     tvdb_id: int | None = None
     imdb_id: str | None = None
     tmdb_input: str | None = None
+    tmdb_type: str | None = None
     sync_target_index: int | None = None
+    mark_as_renamed: bool = False
 
 
 class IdarrCacheMaintenanceRequest(BaseModel):
@@ -150,7 +153,7 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
         if key in payload and payload.get(key) is not None:
             data[key] = str(payload.get(key))
 
-    sync_targets: list[dict[str, str]] = []
+    sync_targets: list[dict[str, Any]] = []
     raw_targets = payload.get("sync_targets")
     if isinstance(raw_targets, list):
         for index, item in enumerate(raw_targets):
@@ -162,7 +165,7 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
             scope_token = resolve_idarr_scope_token(item, index)
             if not personal_drive_id and not source_dir:
                 continue
-            normalized_target: dict[str, str] = {
+            normalized_target: dict[str, Any] = {
                 "personal_drive_id": personal_drive_id,
                 "source_dir": source_dir,
             }
@@ -170,6 +173,14 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
                 normalized_target["label"] = label
             if scope_token:
                 normalized_target["scope_token"] = scope_token
+            # A drive is normal, an assets drive (logos/backdrops subfolders), or a PSD drive
+            # (flat folder, asset-style matching). The toggle UI keeps these mutually exclusive.
+            is_asset_drive = bool(item.get("is_asset_drive", False))
+            if is_asset_drive:
+                normalized_target["is_asset_drive"] = True
+            is_psd_drive = bool(item.get("is_psd_drive", False))
+            if is_psd_drive:
+                normalized_target["is_psd_drive"] = True
             sync_targets.append(normalized_target)
 
     data["sync_targets"] = sync_targets
@@ -909,6 +920,7 @@ async def upload_maker_idarr_files(
         raise HTTPException(status_code=400, detail="Selected sync target is missing source_dir.")
 
     source_dir = Path(source_dir_value)
+    is_asset_drive = bool(selected_target.get("is_asset_drive", False))
     try:
         source_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
@@ -936,7 +948,23 @@ async def upload_maker_idarr_files(
             skipped.append(filename)
             continue
 
-        destination = source_dir / filename
+        # For asset drives, route to logos/ or backdrops/ based on the filename
+        if is_asset_drive:
+            name_lower = filename.lower()
+            if "logo" in name_lower:
+                dest_dir = source_dir / "logos"
+            elif "backdrop" in name_lower:
+                dest_dir = source_dir / "backdrops"
+            else:
+                dest_dir = source_dir / "logos"
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        else:
+            dest_dir = source_dir
+
+        destination = dest_dir / filename
         if destination.exists():
             duplicates_dir = app_settings.config_dir / "idarr" / "duplicates"
             try:
@@ -1019,10 +1047,24 @@ async def get_maker_idarr_pending_count(db: Session = Depends(get_db)) -> Dict[s
 
 
 @router.get("/pending-matches")
-async def get_maker_idarr_pending_matches(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """List current IDarr pending matches from dedicated table."""
+async def get_maker_idarr_pending_matches(
+    sync_target_index: int | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """List current IDarr pending matches from dedicated table.
+
+    Supports server-side pagination via ``limit``/``offset`` so a large pending list doesn't
+    pay the per-item preview/JSON cost for every row on each load. Returns the page of ``items``
+    plus the full ``total`` count for the scope.
+    """
     scope_token = _resolve_scope_token(db, sync_target_index)
-    return {"items": _build_idarr_pending_items_payload(db, scope_token, sync_target_index)}
+    safe_limit = int(limit) if isinstance(limit, int) and limit > 0 else None
+    items, total = _build_idarr_pending_items_payload(
+        db, scope_token, sync_target_index, limit=safe_limit, offset=offset,
+    )
+    return {"items": items, "total": total, "limit": safe_limit, "offset": max(0, int(offset or 0))}
 
 
 @router.get("/pending-matches/source-image")
@@ -1047,10 +1089,105 @@ async def get_maker_idarr_pending_source_image(
     )
 
 
+class ArchiveIdarrSourceFileRequest(BaseModel):
+    filename: str
+    sync_target_index: int | None = None
+
+
+@router.post('/source-file/archive')
+async def archive_idarr_source_file(
+    request: ArchiveIdarrSourceFileRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    'Archive a specific source file to the duplicates directory so it stops causing rename conflicts.'
+    filename = Path(request.filename.strip()).name
+    if not filename:
+        raise HTTPException(status_code=400, detail='filename is required')
+
+    source_dirs = _get_idarr_source_dirs(db, request.sync_target_index)
+    if not source_dirs:
+        raise HTTPException(status_code=400, detail='No IDarr source folders configured.')
+
+    target_path: Path | None = None
+    filename_lower = filename.lower()
+    for source_dir in source_dirs:
+        for root, _dirs, files in os.walk(str(source_dir)):
+            for f in files:
+                if f.lower() == filename_lower:
+                    candidate = Path(root) / f
+                    try:
+                        candidate.resolve().relative_to(source_dir)
+                        if candidate.is_file():
+                            target_path = candidate
+                            break
+                    except Exception:
+                        continue
+            if target_path is not None:
+                break
+        if target_path is not None:
+            break
+
+    if target_path is None:
+        # File already moved or doesn't exist — not an error, just skip
+        return {'success': True, 'filename': filename, 'skipped': True, 'archived_path': None}
+
+    duplicates_dir = app_settings.config_dir / 'idarr' / 'duplicates'
+    duplicates_dir.mkdir(parents=True, exist_ok=True)
+    archived_name = filename
+    archived_path = duplicates_dir / archived_name
+    if archived_path.exists():
+        archived_name = f'{target_path.stem}_{int(time.time())}{target_path.suffix}'
+        archived_path = duplicates_dir / archived_name
+
+    try:
+        shutil.move(str(target_path), str(archived_path))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Failed to archive file: {exc}')
+
+    log_user_action(f'Conflict file archived: {filename}', archived_path=str(archived_path))
+    return {'success': True, 'filename': filename, 'archived_path': str(archived_path)}
+
+
+def _format_pending_match_label(row: Any) -> str:
+    """Human-readable ``Title (Year) [type]`` label for a pending match row, used when
+    logging which entries were cleared or pruned."""
+    title = str(getattr(row, "title", "") or "").strip() or "unknown"
+    year = getattr(row, "year", None)
+    asset_type = str(getattr(row, "asset_type", "") or "").strip()
+    year_label = str(year) if isinstance(year, int) else "None"
+    type_suffix = f" [{asset_type}]" if asset_type else ""
+    return f"{title} ({year_label}){type_suffix}"
+
+
+# Upper bound on how many individual purged item names we enumerate in the log for a
+# single bulk cache-maintenance action. Beyond this we emit an "and N more" summary line
+# so a full-cache purge can't flood the log with thousands of entries.
+_IDARR_PURGE_LOG_CAP = 500
+
+
+def _collect_idarr_cache_labels(query: Any, limit: int = _IDARR_PURGE_LOG_CAP) -> list[str]:
+    """Fetch up to ``limit`` ``Title (Year)`` labels for the rows a cache query is about
+    to delete, so cache-maintenance actions can name the purged items in the log.
+
+    Uses ``with_entities`` to pull only the two needed columns; the returned query is a
+    new object, leaving the caller's query intact for the subsequent ``delete()``.
+    """
+    rows = query.with_entities(IdarrAssetCache.title, IdarrAssetCache.year).limit(limit).all()
+    labels: list[str] = []
+    for row in rows:
+        title = str((getattr(row, "title", None) or "")).strip() or "unknown"
+        year = getattr(row, "year", None)
+        year_label = str(year) if isinstance(year, int) else "None"
+        labels.append(f"{title} ({year_label})")
+    return labels
+
+
 @router.post("/pending-matches/clear-all")
 async def clear_maker_idarr_pending_matches(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Clear all pending IDarr unmatched rows from the pending match queue."""
     scope_token = _resolve_scope_token(db, sync_target_index)
+    rows = _filter_pending_query_by_scope(db.query(IdarrPendingMatch), scope_token).all()
+    cleared_labels = [_format_pending_match_label(row) for row in rows]
     deleted = _filter_pending_query_by_scope(db.query(IdarrPendingMatch), scope_token).delete(synchronize_session=False)
     db.commit()
 
@@ -1058,6 +1195,10 @@ async def clear_maker_idarr_pending_matches(sync_target_index: int | None = None
         "Cleared all IDarr pending unmatched entries",
         deleted=int(deleted or 0),
     )
+    if cleared_labels:
+        log_info(LogTags.IDARR, f"Cleared {len(cleared_labels)} pending IDarr match(es):")
+        for label in cleared_labels:
+            log_info(LogTags.IDARR, f"• Pending match cleared: {label}")
 
     return {
         "success": True,
@@ -1069,17 +1210,31 @@ def _build_idarr_pending_items_payload(
     db: Session,
     scope_token: str | None = None,
     sync_target_index: int | None = None,
-) -> list[dict[str, Any]]:
-    """Build the full pending-match item list for the API response and snapshot export.
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    """Build a pending-match item page plus the total count for the scope.
+
+    The per-item payload is expensive (on-disk preview-URL resolution, JSON parsing of cached
+    candidates/history), so when ``limit`` is given only that slice of rows is materialised —
+    the heavy work scales with the page size, not the whole pending list. ``offset``/``limit``
+    are applied to the scope-ordered rows; ``limit=None`` builds every item (snapshot export).
+
+    Returns ``(items, total)`` where ``total`` is the full pending count for the scope.
 
     Currently lives in the API layer because it uses ``_get_idarr_source_dirs`` for preview URL
     resolution. The pure path-resolution logic has been extracted into ``_source_dirs_from_targets``
     to facilitate a future move of this function to a dedicated service module.
     """
-    rows = _filter_pending_query_by_scope(
+    all_rows = _filter_pending_query_by_scope(
         db.query(IdarrPendingMatch),
         scope_token,
     ).order_by(IdarrPendingMatch.created_at.desc(), IdarrPendingMatch.id.desc()).all()
+    total = len(all_rows)
+
+    start = max(0, int(offset or 0))
+    rows = all_rows[start:start + int(limit)] if isinstance(limit, int) and limit > 0 else all_rows[start:]
+
     keys = [row.asset_key for row in rows if row.asset_key]
     cache_rows = _filter_cache_query_by_scope(
         db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key.in_(keys)),
@@ -1110,10 +1265,18 @@ def _build_idarr_pending_items_payload(
             if not title or not item_type:
                 continue
             key = _idarr_asset_key(item_type, title, year, scope_token)
-            history = run_history.get(key, {"unmatched_run_count": 0, "last_unmatched_at": None})
+            history = run_history.get(key, {"unmatched_run_count": 0, "last_unmatched_at": None, "source_path": None})
             history["unmatched_run_count"] = int(history.get("unmatched_run_count", 0)) + 1
             if not history.get("last_unmatched_at") and run.completed_at:
                 history["last_unmatched_at"] = run.completed_at.isoformat()
+            # Capture the most recent run's on-disk source path so the pending list can still
+            # build ``source_filenames`` (for "resolve and rename") even when the backing cache
+            # row is missing — e.g. after a cache-maintenance prune deleted the ``pending::`` row.
+            # Runs are iterated newest-first, so the first non-empty value wins.
+            if not history.get("source_path"):
+                item_source_path = str(item.get("source_path") or "").strip()
+                if item_source_path:
+                    history["source_path"] = item_source_path
             run_history[key] = history
 
     items: list[dict[str, Any]] = []
@@ -1134,6 +1297,16 @@ def _build_idarr_pending_items_payload(
             for f in (raw_current_files if isinstance(raw_current_files, list) else [])
             if isinstance(f, str) and f.strip()
         )) or None
+        history_source_path = str(run_history.get(row.asset_key, {}).get("source_path") or "").strip()
+
+        if source_filenames is None and history_source_path:
+            fallback_name = Path(history_source_path).name
+            if fallback_name:
+                source_filenames = [fallback_name]
+
+        asset_subtype = _derive_asset_subtype(pending_entry)
+        if asset_subtype is None and history_source_path:
+            asset_subtype = _derive_asset_subtype({"files": history_source_path})
 
         items.append(
             {
@@ -1163,6 +1336,18 @@ def _build_idarr_pending_items_payload(
                     ),
                 ),
                 "source_filenames": source_filenames,
+                "asset_subtype": asset_subtype,
+                "pending_status": cache_payload.get("pending_status") or None,
+                "conflict_files": cache_payload.get("conflict_files") if isinstance(cache_payload.get("conflict_files"), list) else None,
+                "conflict_file_previews": (
+                    [
+                        _build_idarr_pending_preview_url({"pending_entry": {"files": p}}, source_dirs, cache_buster=None)
+                        for p in cache_payload["conflict_file_paths"]
+                        if isinstance(p, str) and p.strip()
+                    ]
+                    if isinstance(cache_payload.get("conflict_file_paths"), list)
+                    else None
+                ),
                 "pending_entry": pending_entry,
                 "pending_reason": _extract_pending_reason(cache_payload, pending_entry),
                 "candidates": _extract_cached_candidates(cache_row) if cache_row else [],
@@ -1172,7 +1357,7 @@ def _build_idarr_pending_items_payload(
             }
         )
 
-    return items
+    return items, total
 
 
 def _source_dirs_from_targets(targets: list[dict[str, Any]]) -> list[Path]:
@@ -1240,6 +1425,16 @@ def _resolve_authorized_idarr_source_image_path(source_path_raw: str, source_dir
             return requested_path
 
     raise HTTPException(status_code=403, detail="Source image is outside allowed IDarr source folders.")
+
+
+def _derive_asset_subtype(pending_entry: dict[str, Any]) -> str | None:
+    """Return 'logo' or 'backdrop' from the source file path, else None."""
+    file_path = str(pending_entry.get("files") or "").replace("\\", "/").lower()
+    if "/logos/" in file_path:
+        return "logo"
+    if "/backdrops/" in file_path:
+        return "backdrop"
+    return None
 
 
 def _build_idarr_pending_preview_url(cache_payload: dict[str, Any], source_dirs: list[Path], cache_buster: int | None = None) -> str | None:
@@ -1349,42 +1544,49 @@ def _build_idarr_pending_preview_url_with_fallback(
     best_path: Path | None = None
 
     for source_dir in source_dirs:
-        try:
-            entries = source_dir.iterdir()
-        except Exception as e:
-            log_debug(LogTags.IDARR, f"Could not read source directory: {e}", path=str(source_dir))
-            continue
+        dirs_to_scan = [source_dir]
+        for subdir_name in ("logos", "backdrops"):
+            subdir = source_dir / subdir_name
+            if subdir.is_dir():
+                dirs_to_scan.append(subdir)
 
-        for entry in entries:
-            if not entry.is_file():
-                continue
-            if entry.suffix.lower() not in IDARR_UPLOAD_IMAGE_EXTENSIONS:
-                continue
-
-            # Skip files that already have ID tags — they're already enriched/renamed
-            # and cannot be the plain pending file we want to preview.
-            stem_raw = str(entry.stem or "")
-            if re.search(r'\{(?:tmdb|tvdb|imdb)[-_]', stem_raw, re.IGNORECASE):
+        for scan_dir in dirs_to_scan:
+            try:
+                entries = list(scan_dir.iterdir())
+            except Exception as e:
+                log_debug(LogTags.IDARR, f"Could not read source directory: {e}", path=str(scan_dir))
                 continue
 
-            candidate_stem = normalize_titles(entry.stem)
-            if not candidate_stem:
-                continue
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in IDARR_UPLOAD_IMAGE_EXTENSIONS:
+                    continue
 
-            score = 0
-            if candidate_stem == normalized_title:
-                score += 80
-            elif normalized_title in candidate_stem or candidate_stem in normalized_title:
-                score += 40
-            else:
-                continue
+                # Skip files that already have ID tags — they're already enriched/renamed
+                # and cannot be the plain pending file we want to preview.
+                stem_raw = str(entry.stem or "")
+                if re.search(r'\{(?:tmdb|tvdb|imdb)[-_]', stem_raw, re.IGNORECASE):
+                    continue
 
-            if year_text and year_text in stem_raw:
-                score += 20
+                candidate_stem = normalize_titles(entry.stem)
+                if not candidate_stem:
+                    continue
 
-            if score > best_score:
-                best_score = score
-                best_path = entry
+                score = 0
+                if candidate_stem == normalized_title:
+                    score += 80
+                elif normalized_title in candidate_stem or candidate_stem in normalized_title:
+                    score += 40
+                else:
+                    continue
+
+                if year_text and year_text in stem_raw:
+                    score += 20
+
+                if score > best_score:
+                    best_score = score
+                    best_path = entry
 
     if best_path is None:
         return None
@@ -1400,7 +1602,7 @@ def _build_idarr_pending_preview_url_with_fallback(
 async def get_maker_idarr_pending_matches_snapshot(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return a structured pending-workflow snapshot payload for external review/audit."""
     scope_token = _resolve_scope_token(db, sync_target_index)
-    items = _build_idarr_pending_items_payload(db, scope_token, sync_target_index)
+    items, _ = _build_idarr_pending_items_payload(db, scope_token, sync_target_index)
     return {
         "format": "idarr_pending_workflow_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1498,7 +1700,9 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
             # Manual TMDB ID not matched to a cached candidate — fetch from TMDB directly.
             tmdb_api_key_for_resolve = _get_maker_idarr_tmdb_key(db)
             if tmdb_api_key_for_resolve:
-                target_type_for_resolve = inferred_type or row.asset_type or "movie"
+                explicit_type = _normalize_idarr_asset_type(payload.tmdb_type) if isinstance(payload.tmdb_type, str) and payload.tmdb_type.strip() else None
+                base_type = row.asset_type if row.asset_type not in (None, "pending") else None
+                target_type_for_resolve = explicit_type or inferred_type or base_type or "movie"
                 tmdb_entity = "tv" if target_type_for_resolve == "tv_series" else ("collection" if target_type_for_resolve == "collection" else "movie")
                 try:
                     tmdb_resp = requests.get(
@@ -1518,6 +1722,40 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                 except Exception as e:
                     log_debug(LogTags.IDARR, f"TMDB fetch for title/year resolution failed: {e}", tmdb_input=tmdb_input)
                     # Runner will re-verify on next run
+        elif resolved_imdb_id or isinstance(resolved_tvdb_id, int):
+            # Resolved by IMDB/TVDB id only (no TMDB id and no cached candidate). Look the
+            # canonical title/year up via TMDB's /find endpoint so the rename uses the official
+            # title instead of the dirty parsed filename title.
+            tmdb_api_key_for_resolve = _get_maker_idarr_tmdb_key(db)
+            if tmdb_api_key_for_resolve:
+                explicit_type = _normalize_idarr_asset_type(payload.tmdb_type) if isinstance(payload.tmdb_type, str) and payload.tmdb_type.strip() else None
+                base_type = row.asset_type if row.asset_type not in (None, "pending") else None
+                target_type_for_resolve = explicit_type or inferred_type or base_type or "movie"
+                external_source, external_id = ("imdb_id", resolved_imdb_id) if resolved_imdb_id else ("tvdb_id", str(resolved_tvdb_id))
+                try:
+                    find_resp = requests.get(
+                        f"https://api.themoviedb.org/3/find/{external_id}",
+                        params={"api_key": tmdb_api_key_for_resolve, "external_source": external_source},
+                        timeout=10,
+                    )
+                    find_resp.raise_for_status()
+                    find_data = find_resp.json()
+                    if isinstance(find_data, dict):
+                        preferred = find_data.get("tv_results") if target_type_for_resolve == "tv_series" else find_data.get("movie_results")
+                        results = preferred if isinstance(preferred, list) and preferred else (
+                            (find_data.get("movie_results") or []) + (find_data.get("tv_results") or [])
+                        )
+                        if isinstance(results, list) and results and isinstance(results[0], dict):
+                            first = results[0]
+                            fetched_title = str(first.get("title") or first.get("name") or "").strip()
+                            if fetched_title:
+                                canonical_title_for_resolve = fetched_title
+                            release_text = str(first.get("release_date") or first.get("first_air_date") or "").strip()
+                            if len(release_text) >= 4 and release_text[:4].isdigit():
+                                canonical_year_for_resolve = int(release_text[:4])
+                except Exception as e:
+                    log_debug(LogTags.IDARR, f"TMDB /find for title/year resolution failed: {e}", external_id=str(external_id))
+                    # Runner will re-verify on next run
 
         resolution_event = {
             "resolved_at": datetime.now(timezone.utc).isoformat(),
@@ -1533,6 +1771,7 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
         cache_payload["resolution_history"] = resolution_history[:20]
         cache_payload["resolved_manually"] = True
         cache_payload["last_resolved_at"] = resolution_event["resolved_at"]
+        cache_payload["pending_status"] = "resolved_renamed" if payload.mark_as_renamed else "resolved"
         cache_payload["status"] = "found"
         cache_payload["last_checked"] = resolution_event["resolved_at"]
         cache_payload["title"] = row.title
@@ -1559,9 +1798,19 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
             or (isinstance(resolution_event["imdb_id"], str) and resolution_event["imdb_id"])
         )
 
-        target_asset_type = _normalize_idarr_asset_type(inferred_type or row.asset_type)
-        if not target_asset_type:
-            target_asset_type = _normalize_idarr_asset_type(row.asset_type)
+        # Never store the resolved cache under the "pending" placeholder type — the
+        # runner indexes by actual type ("movie", "tv_series", "collection") so a
+        # "pending"-typed key would be a cache miss on every subsequent run.
+        _explicit_type = _normalize_idarr_asset_type(payload.tmdb_type) if isinstance(payload.tmdb_type, str) and payload.tmdb_type.strip() else None
+        _candidate_type: str | None = None
+        if isinstance(selected_candidate, dict):
+            _cmt = str(selected_candidate.get("media_type") or "").strip().lower()
+            if _cmt == "show":
+                _candidate_type = "tv_series"
+            elif _cmt in ("collection", "movie"):
+                _candidate_type = _cmt
+        _base_type = row.asset_type if row.asset_type not in (None, "pending") else None
+        target_asset_type = _normalize_idarr_asset_type(_explicit_type or inferred_type or _candidate_type or _base_type) or "movie"
         target_asset_key = _idarr_asset_key(target_asset_type, row.title, row.year, scope_token)
 
         upsert_idarr_asset_cache(
@@ -1578,6 +1827,17 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
         )
         if target_asset_key != row.asset_key and existing_cache:
             db.delete(existing_cache)
+        superseded_keys = {
+            _idarr_asset_key(sibling_type, row.title, row.year, scope_token)
+            for sibling_type in ("movie", "tv_series", "collection", "pending")
+        }
+        superseded_keys.discard(target_asset_key)
+        superseded_keys.discard(row.asset_key)
+        if superseded_keys:
+            db.query(IdarrAssetCache).filter(
+                IdarrAssetCache.asset_key.in_(list(superseded_keys)),
+                IdarrAssetCache.matched.is_(False),
+            ).delete(synchronize_session=False)
     elif requested_action == "ignore":
         ignored = _load_ignored_titles(db, scope_token)
         key = _idarr_asset_key(row.asset_type, row.title, row.year, scope_token)
@@ -1695,60 +1955,37 @@ async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequ
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
 
-    if normalized_media_type not in {"movie", "tv_series", "collection"}:
-        raise HTTPException(status_code=400, detail="type must be one of: movie, show, season, collection, tv_series")
-
-    tmdb_lookup_type = "show" if normalized_media_type == "tv_series" else normalized_media_type
+    if normalized_media_type not in {"movie", "tv_series", "collection", "pending"}:
+        raise HTTPException(status_code=400, detail="type must be one of: movie, show, season, collection, tv_series, pending")
 
     tmdb_api_key = _get_maker_idarr_tmdb_key(db)
     if not tmdb_api_key:
         log_warning(LogTags.MODULE, "idarr TMDB search blocked: TMDB API key is not configured")
         raise HTTPException(status_code=400, detail="TMDB API key is not configured. Add it in Settings → General → API Keys.")
 
-    endpoint = "/search/movie"
-    query_params: dict[str, Any] = {"query": title, "include_adult": "false"}
-
-    if tmdb_lookup_type == "show":
-        endpoint = "/search/tv"
-        if year:
-            query_params["first_air_date_year"] = year
-    elif tmdb_lookup_type == "collection":
-        endpoint = "/search/collection"
+    # "pending" type searches both movie and tv to cover unmatched items with no type hint
+    if normalized_media_type == "pending":
+        lookup_types = ["movie", "show"]
+    elif normalized_media_type == "tv_series":
+        lookup_types = ["show"]
+    elif normalized_media_type == "collection":
+        lookup_types = ["collection"]
     else:
-        endpoint = "/search/movie"
-        if year:
-            query_params["year"] = year
-
-    try:
-        response = requests.get(
-            f"https://api.themoviedb.org/3{endpoint}",
-            params={
-                "api_key": tmdb_api_key,
-                **query_params,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        payload_json = response.json()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"TMDB candidate lookup failed: {exc}")
-
-    results = payload_json.get("results") if isinstance(payload_json, dict) else []
-    if not isinstance(results, list):
-        results = []
+        lookup_types = ["movie"]
 
     candidates: list[dict[str, Any]] = []
     tmdb_external_ids_cache: dict[int, dict[str, Any]] = {}
+    seen_tmdb_ids: set[int] = set()
 
-    def fetch_tmdb_external_ids(tmdb_id: int) -> dict[str, Any]:
+    def fetch_tmdb_external_ids(tmdb_id: int, lookup_type: str) -> dict[str, Any]:
         if tmdb_id in tmdb_external_ids_cache:
             return tmdb_external_ids_cache[tmdb_id]
 
-        if tmdb_lookup_type == "collection":
+        if lookup_type == "collection":
             tmdb_external_ids_cache[tmdb_id] = {}
             return {}
 
-        tmdb_entity = "tv" if tmdb_lookup_type == "show" else "movie"
+        tmdb_entity = "tv" if lookup_type == "show" else "movie"
         try:
             external_response = requests.get(
                 f"https://api.themoviedb.org/3/{tmdb_entity}/{tmdb_id}/external_ids",
@@ -1766,35 +2003,85 @@ async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequ
         tmdb_external_ids_cache[tmdb_id] = {}
         return {}
 
-    for item in results[:10]:
-        if not isinstance(item, dict):
-            continue
-        tmdb_id = item.get("id") if isinstance(item.get("id"), int) else None
-        if tmdb_id is None:
-            continue
-        external_ids_payload = fetch_tmdb_external_ids(tmdb_id)
-        imdb_id = external_ids_payload.get("imdb_id") if isinstance(external_ids_payload.get("imdb_id"), str) else None
-        tvdb_raw = external_ids_payload.get("tvdb_id")
-        tvdb_id = tvdb_raw if isinstance(tvdb_raw, int) else (int(tvdb_raw) if isinstance(tvdb_raw, str) and tvdb_raw.isdigit() else None)
-        candidate_title = str(item.get("title") or item.get("name") or "").strip()
-        release_text = str(item.get("release_date") or item.get("first_air_date") or "").strip()
-        release_year = int(release_text[:4]) if len(release_text) >= 4 and release_text[:4].isdigit() else None
-        reason = _candidate_reason(title, year, candidate_title, release_year)
-        candidates.append(
-            {
-                "tmdb_id": tmdb_id,
-                "tvdb_id": tvdb_id,
-                "imdb_id": imdb_id,
-                "title": candidate_title,
-                "year": release_year,
-                "poster_url": f"https://image.tmdb.org/t/p/w185{item.get('poster_path')}" if isinstance(item.get("poster_path"), str) and item.get("poster_path") else None,
-                "overview": str(item.get("overview") or "").strip(),
-                "popularity": float(item.get("popularity") or 0),
-                "vote_average": float(item.get("vote_average") or 0),
-                "media_type": "show" if tmdb_lookup_type == "show" else ("collection" if tmdb_lookup_type == "collection" else "movie"),
-                "match_reason": reason,
-            }
-        )
+    for tmdb_lookup_type in lookup_types:
+        query_params: dict[str, Any] = {"query": title, "include_adult": "false"}
+        year_param_key: str | None = None
+
+        if tmdb_lookup_type == "show":
+            endpoint = "/search/tv"
+            if year:
+                query_params["first_air_date_year"] = year
+                year_param_key = "first_air_date_year"
+        elif tmdb_lookup_type == "collection":
+            endpoint = "/search/collection"
+        else:
+            endpoint = "/search/movie"
+            if year:
+                query_params["year"] = year
+                year_param_key = "year"
+
+        try:
+            response = requests.get(
+                f"https://api.themoviedb.org/3{endpoint}",
+                params={"api_key": tmdb_api_key, **query_params},
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload_json = response.json()
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"TMDB candidate lookup failed: {exc}")
+
+        results = payload_json.get("results") if isinstance(payload_json, dict) else []
+        if not isinstance(results, list):
+            results = []
+
+        # If year filtering produced no results, retry without year to surface close-name matches
+        if year_param_key and not results:
+            fallback_params = {k: v for k, v in query_params.items() if k != year_param_key}
+            try:
+                fallback_resp = requests.get(
+                    f"https://api.themoviedb.org/3{endpoint}",
+                    params={"api_key": tmdb_api_key, **fallback_params},
+                    timeout=20,
+                )
+                fallback_resp.raise_for_status()
+                fallback_json = fallback_resp.json()
+                results = fallback_json.get("results") if isinstance(fallback_json, dict) else []
+                if not isinstance(results, list):
+                    results = []
+            except requests.RequestException:
+                pass
+
+        for item in results[:10]:
+            if not isinstance(item, dict):
+                continue
+            tmdb_id = item.get("id") if isinstance(item.get("id"), int) else None
+            if tmdb_id is None or tmdb_id in seen_tmdb_ids:
+                continue
+            seen_tmdb_ids.add(tmdb_id)
+            external_ids_payload = fetch_tmdb_external_ids(tmdb_id, tmdb_lookup_type)
+            imdb_id = external_ids_payload.get("imdb_id") if isinstance(external_ids_payload.get("imdb_id"), str) else None
+            tvdb_raw = external_ids_payload.get("tvdb_id")
+            tvdb_id = tvdb_raw if isinstance(tvdb_raw, int) else (int(tvdb_raw) if isinstance(tvdb_raw, str) and tvdb_raw.isdigit() else None)
+            candidate_title = str(item.get("title") or item.get("name") or "").strip()
+            release_text = str(item.get("release_date") or item.get("first_air_date") or "").strip()
+            release_year = int(release_text[:4]) if len(release_text) >= 4 and release_text[:4].isdigit() else None
+            reason = _candidate_reason(title, year, candidate_title, release_year)
+            candidates.append(
+                {
+                    "tmdb_id": tmdb_id,
+                    "tvdb_id": tvdb_id,
+                    "imdb_id": imdb_id,
+                    "title": candidate_title,
+                    "year": release_year,
+                    "poster_url": f"https://image.tmdb.org/t/p/w185{item.get('poster_path')}" if isinstance(item.get("poster_path"), str) and item.get("poster_path") else None,
+                    "overview": str(item.get("overview") or "").strip(),
+                    "popularity": float(item.get("popularity") or 0),
+                    "vote_average": float(item.get("vote_average") or 0),
+                    "media_type": "show" if tmdb_lookup_type == "show" else ("collection" if tmdb_lookup_type == "collection" else "movie"),
+                    "match_reason": reason,
+                }
+            )
 
     cache_row = _filter_cache_query_by_scope(
         db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == asset_key),
@@ -2133,20 +2420,25 @@ async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceReques
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
     deleted = 0
     purged_items: list[dict[str, Any]] = []
+    purged_labels: list[str] = []
 
     if payload.action == "clear_all":
-        deleted = _filter_cache_query_by_scope(db.query(IdarrAssetCache), scope_token).delete(synchronize_session=False)
+        scoped = _filter_cache_query_by_scope(db.query(IdarrAssetCache), scope_token)
+        purged_labels = _collect_idarr_cache_labels(scoped)
+        deleted = scoped.delete(synchronize_session=False)
     elif payload.action == "prune_unmatched":
-        deleted = _filter_cache_query_by_scope(
+        scoped = _filter_cache_query_by_scope(
             db.query(IdarrAssetCache).filter(IdarrAssetCache.matched.is_(False)),
             scope_token,
-        ).delete(synchronize_session=False)
+        )
+        purged_labels = _collect_idarr_cache_labels(scoped)
+        deleted = scoped.delete(synchronize_session=False)
     elif payload.action == "purge_stale":
         days = int(payload.days if payload.days is not None else 30)
         if days < 1:
             raise HTTPException(status_code=400, detail="days must be >= 1")
         threshold = datetime.now(timezone.utc) - timedelta(days=days)
-        deleted = _filter_cache_query_by_scope(
+        scoped = _filter_cache_query_by_scope(
             db.query(IdarrAssetCache)
             .filter(
                 or_(
@@ -2155,7 +2447,9 @@ async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceReques
                 )
             ),
             scope_token,
-        ).delete(synchronize_session=False)
+        )
+        purged_labels = _collect_idarr_cache_labels(scoped)
+        deleted = scoped.delete(synchronize_session=False)
     elif payload.action == "prune_targeted":
         filter_clauses: list[Any] = []
 
@@ -2203,11 +2497,46 @@ async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceReques
             for row in matching_rows
         ]
 
+        purged_labels = _collect_idarr_cache_labels(scoped_query.filter(and_(*filter_clauses)))
         deleted = scoped_query.filter(and_(*filter_clauses)).delete(synchronize_session=False)
     else:
         raise HTTPException(status_code=400, detail="Unsupported maintenance action")
 
     db.commit()
+
+    # Cache rows and pending-match rows are 1:1 by asset_key (a ``pending::`` cache row
+    # always backs an ``idarr_pending_matches`` row). Deleting cache rows here without
+    # dropping their pending matches leaves the pending item orphaned: with no cache row
+    # there is no ``current_filenames``, so the UI can't build ``source_filenames`` and
+    # "resolve and rename" silently no-ops until a later full run recreates the row.
+    # Reconcile by removing any pending match in scope that no longer has a backing cache row.
+    orphaned_pending_removed = 0
+    if int(deleted or 0) > 0:
+        live_cache_keys = {
+            str(key)
+            for (key,) in _filter_cache_query_by_scope(
+                db.query(IdarrAssetCache.asset_key), scope_token
+            ).all()
+        }
+        orphaned_pending_rows = [
+            row
+            for row in _filter_pending_query_by_scope(db.query(IdarrPendingMatch), scope_token).all()
+            if isinstance(row.asset_key, str) and row.asset_key not in live_cache_keys
+        ]
+        if orphaned_pending_rows:
+            orphaned_pending_labels = [_format_pending_match_label(row) for row in orphaned_pending_rows]
+            for row in orphaned_pending_rows:
+                db.delete(row)
+                orphaned_pending_removed += 1
+            db.commit()
+            log_info(
+                LogTags.IDARR,
+                f"Cache maintenance '{payload.action}': removed {orphaned_pending_removed} orphaned pending match(es)",
+                maintenance_action=payload.action,
+                orphaned_pending_removed=orphaned_pending_removed,
+            )
+            for label in orphaned_pending_labels[:_IDARR_PURGE_LOG_CAP]:
+                log_info(LogTags.IDARR, f"• Pending match removed (cache row pruned): {label}")
 
     remaining = _filter_cache_query_by_scope(db.query(IdarrAssetCache), scope_token).count()
     log_user_action(
@@ -2215,7 +2544,22 @@ async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceReques
         maintenance_action=payload.action,
         deleted=int(deleted or 0),
         remaining=int(remaining),
+        orphaned_pending_removed=orphaned_pending_removed,
     )
+    log_info(
+        LogTags.IDARR,
+        f"Cache maintenance '{payload.action}': removed {int(deleted or 0)} cache row(s), {int(remaining)} remaining",
+        maintenance_action=payload.action,
+        deleted=int(deleted or 0),
+        remaining=int(remaining),
+    )
+    # Name each purged item in the log (capped at _IDARR_PURGE_LOG_CAP, with an "and N more"
+    # summary so a full-cache purge can't flood the log).
+    for label in purged_labels:
+        log_info(LogTags.IDARR, f"• Cache row pruned: {label}")
+    _overflow = int(deleted or 0) - len(purged_labels)
+    if _overflow > 0:
+        log_info(LogTags.IDARR, f"…and {_overflow} more cache row(s) pruned")
 
     return {
         "success": True,

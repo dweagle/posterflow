@@ -210,11 +210,54 @@
     min-width: 0;
   }
 
-  .idarr-page .pending-filter-buttons .btn-toolbar,
   .idarr-page .pending-item-actions-primary .btn-toolbar,
   .idarr-page .pending-section-header .action-buttons .btn-toolbar,
   .idarr-page .ignored-section-header .action-buttons .btn-toolbar {
     width: 100%;
+  }
+
+  /* Stack the title/meta above the action buttons so the fixed-width buttons no longer
+     crowd and overlap the title on narrow screens. */
+  .idarr-page .idarr-pending-card .pending-list-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .idarr-page .idarr-pending-card .pending-list-main {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .idarr-page .idarr-pending-card .pending-list-title {
+    text-align: left;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .idarr-page .idarr-pending-card .pending-list-actions {
+    width: 100%;
+  }
+
+  .idarr-page .idarr-pending-card .pending-list-actions .btn-toolbar {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .idarr-page .resolver-modal .modal-footer {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+
+  .idarr-page .resolver-modal .modal-footer > button {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 
   /* Absolute-positioned tooltip inflates scrollWidth */
@@ -224,11 +267,6 @@
 
   .idarr-page .pending-section-header {
     flex-wrap: wrap;
-  }
-
-  .idarr-page .pending-filter-buttons {
-    flex-wrap: wrap;
-    width: 100%;
   }
 
   /* Reorder cards: pending first, Quick Add last */
@@ -270,10 +308,6 @@
   text-transform: uppercase;
 }
 
-.idarr-page .pending-filter-buttons .btn-toolbar {
-  min-width: 130px;
-  justify-content: center;
-}
 
 .idarr-page .pending-item-actions {
   display: grid;
@@ -308,6 +342,26 @@
   padding-right: 0.35rem;
 }
 
+.idarr-page .pending-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.4rem 0;
+}
+
+.idarr-page .pending-pagination .btn-toolbar {
+  min-width: 90px;
+  flex: 0 0 auto;
+}
+
+.idarr-page .pending-pagination-info {
+  flex: 1;
+  text-align: center;
+  color: #aaa;
+  font-size: 0.8rem;
+}
+
 .idarr-page .pending-list::-webkit-scrollbar {
   width: 8px;
 }
@@ -335,6 +389,96 @@
   border: 1px solid #333;
   border-radius: 6px;
   padding: 0.55rem 0.65rem;
+}
+
+.idarr-page .pending-list-card.has-conflict-files {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.idarr-page .conflict-files-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 5px;
+}
+
+.idarr-page .conflict-files-label {
+  color: #888;
+  font-size: 0.73rem;
+}
+
+.idarr-page .conflict-files-grid {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.idarr-page .conflict-file-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+  width: 160px;
+  flex-shrink: 0;
+}
+
+.idarr-page .conflict-cell-thumb-btn {
+  background: #1a1a1a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px;
+  cursor: pointer;
+  overflow: hidden;
+  width: 100%;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s;
+}
+
+.idarr-page .conflict-cell-thumb-btn:hover {
+  border-color: #888;
+}
+
+.idarr-page .conflict-cell-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.idarr-page .conflict-cell-thumb-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #2a2a2a;
+  border-radius: 2px;
+}
+
+.idarr-page .conflict-cell-name {
+  color: #bbb;
+  font-size: 0.72rem;
+  font-family: monospace;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100%;
+  text-align: center;
+}
+
+.idarr-page .conflict-cell-use-btn {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.4rem;
 }
 
 .idarr-page .pending-list-main {
@@ -393,6 +537,12 @@
   color: #e5e7eb;
 }
 
+.idarr-page .pending-type-chip.chip-pending {
+  background: rgba(156, 163, 175, 0.12);
+  border-color: rgba(156, 163, 175, 0.3);
+  color: #9ca3af;
+}
+
 .idarr-page .pending-type-chip.pending-status-chip.chip-conflict {
   background: rgba(244, 67, 54, 0.1);
   border-color: rgba(244, 67, 54, 0.28);
@@ -404,6 +554,7 @@
   border-color: rgba(255, 183, 77, 0.3);
   color: #e5e7eb;
 }
+
 
 .idarr-page .pending-list-actions {
   display: flex;
@@ -746,6 +897,26 @@
   font-weight: 500;
 }
 
+.idarr-page .resolver-candidate-card {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.idarr-page .resolver-candidate-card:hover {
+  border-color: #555;
+  background: #2c2c2c;
+}
+
+.idarr-page .resolver-candidate-card.selected {
+  border-color: #4caf50;
+  background: #1a2e1a;
+}
+
+.idarr-page .resolver-candidate-card.selected:hover {
+  border-color: #66bb6a;
+}
+
 .idarr-info-icon-wrap {
   position: relative;
   display: inline-flex;
@@ -909,6 +1080,24 @@
   grid-column: 1 / -1;
 }
 
+.idarr-sync-targets-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.idarr-sync-targets-header h3 {
+  margin: 0;
+}
+
+.idarr-sync-targets-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.65rem;
+}
+
 .idarr-settings-group {
   background: #252525;
   border: 1px solid #333;
@@ -980,6 +1169,31 @@
 .idarr-sync-target-row-fields .field-group input[type="text"] {
   padding: 0.35rem 0.55rem;
   font-size: 0.8rem;
+}
+
+.idarr-sync-target-row-fields .field-group.field-group-toggle {
+  grid-column: 1 / -1;
+}
+
+/* Drive-type toggles (Assets Drive + PSD Drive) sit side by side, spanning the full row. */
+.idarr-sync-target-row-fields .idarr-drive-type-toggles {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+}
+
+.idarr-sync-target-row-fields .idarr-drive-type-toggles .field-group.field-group-toggle {
+  grid-column: auto;
+  flex: 0 1 auto;
+}
+
+.idarr-sync-target-row-fields .field-group.field-group-toggle label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  cursor: pointer;
 }
 
 .idarr-page .toolbar .action-buttons select {
@@ -1209,9 +1423,27 @@
   font-size: 0.85rem;
 }
 
+.idarr-page .pending-warning-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: left;
+  gap: 0.5rem;
+  background: #2a1f00;
+  border-color: #6b4c00;
+  color: #f0b429;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.idarr-page .pending-warning-icon {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
 .idarr-layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 1rem;
   align-items: start;
 }
@@ -1220,7 +1452,7 @@
 .idarr-pending-card         { grid-column: 1; grid-row: 2 / 4; align-self: stretch; display: flex; flex-direction: column; }
 .idarr-sync-options-card    { grid-column: 2; grid-row: 1; align-self: stretch; }
 .run-cache-actions-section  { grid-column: 2; grid-row: 2; }
-.idarr-ignored-card         { grid-column: 2; grid-row: 3; }
+.idarr-ignored-card         { grid-column: 2; grid-row: 3; align-self: stretch; display: flex; flex-direction: column; }
 
 .idarr-layout .settings-section {
   margin-bottom: 0;
@@ -1302,6 +1534,96 @@
   text-overflow: ellipsis;
 }
 
+.idarr-page .resolver-manual-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #1e1e1e;
+  overflow: hidden;
+  margin-bottom: 0.85rem;
+}
+
+.idarr-page .resolver-manual-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.idarr-page .resolver-manual-section-toggle:hover {
+  background: #2a2a2a;
+}
+
+.idarr-page .resolver-manual-section-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+}
+
+.idarr-page .resolver-manual-section-hint {
+  font-size: 0.75rem;
+  color: #666;
+  margin-left: 0.25rem;
+}
+
+.idarr-page .resolver-manual-section > :not(.resolver-manual-section-toggle) {
+  padding: 0 1rem 1rem;
+}
+
+.idarr-page .resolver-manual-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.idarr-page .resolver-manual-search-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.idarr-page .resolver-manual-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.idarr-page .resolver-type-buttons {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.idarr-page .resolver-type-btn {
+  flex: 1;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted, #aaa);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.idarr-page .resolver-type-btn:hover {
+  border-color: var(--accent, #888);
+  color: var(--text-primary, #fff);
+}
+
+.idarr-page .resolver-type-btn.active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 .idarr-page .resolver-id-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1310,6 +1632,10 @@
 
 .idarr-page .resolver-id-row .form-group {
   margin: 0;
+}
+
+.idarr-page .modal-body .resolver-manual-content > .form-group {
+  margin-bottom: 0;
 }
 
 .idarr-page .resolver-candidate-actions {
@@ -1396,6 +1722,23 @@
   box-shadow: 0 0 0 1px #64b5f6;
 }
 
+.idarr-page .resolver-source-asset {
+  height: 68px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #0d0d0d;
+  display: block;
+  object-fit: contain;
+}
+
+.idarr-page .resolver-source-logo {
+  width: 180px;
+}
+
+.idarr-page .resolver-source-backdrop {
+  width: 121px;
+}
+
 .idarr-page .resolver-candidate-poster-placeholder {
   display: flex;
   align-items: center;
@@ -1404,6 +1747,18 @@
   font-size: 0.65rem;
   text-align: center;
   padding: 0.2rem;
+}
+
+.idarr-page .idarr-psd-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  color: #9aa4b2;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .idarr-page .resolver-candidate-header-text {
@@ -1430,6 +1785,8 @@
   color: #64b5f6;
   font-size: 0.78rem;
   text-decoration: none;
+  justify-self: start;
+  width: fit-content;
 }
 
 .idarr-page .resolver-candidate-tmdb-link:hover {
@@ -1489,6 +1846,17 @@
   border-radius: 6px;
   border: 1px solid #333;
   background: #121212;
+}
+
+.idarr-page .idarr-checkered {
+  background-color: #808080;
+  background-image:
+    linear-gradient(45deg, #aaa 25%, transparent 25%),
+    linear-gradient(-45deg, #aaa 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #aaa 75%),
+    linear-gradient(-45deg, transparent 75%, #aaa 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
 .idarr-page .resolver-candidate-single-action {
@@ -1608,6 +1976,47 @@
 
 .idarr-page .modal-footer .btn-primary:hover:not(:disabled) {
   background: #5B89C4;
+}
+
+.idarr-page .resolver-footer-btn {
+  position: relative;
+  color: #fff;
+  gap: 0.2rem;
+}
+
+.idarr-page .resolver-footer-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: #1a1a1a;
+  color: #ccc;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  white-space: normal;
+  max-width: 210px;
+  text-align: right;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease 0.8s;
+  z-index: 100;
+}
+
+.idarr-page .resolver-footer-btn[data-tooltip]:hover:not(:disabled)::after {
+  opacity: 1;
+}
+
+.idarr-page .resolver-footer-btn .resolver-btn-info-icon {
+  margin-right: 0;
+  margin-left: 0;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+  flex-shrink: 0;
+  color: #fff;
+  opacity: 1;
 }
 
 .idarr-page .ignored-editor-textarea {

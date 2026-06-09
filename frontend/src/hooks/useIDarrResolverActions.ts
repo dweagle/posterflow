@@ -4,19 +4,10 @@ import {
   MakerIdarrPendingCandidate,
   MakerIdarrPendingItem,
   resolveMakerIdarrPendingMatch,
-  reviewMakerIdarrPendingCandidate,
   startIdarr,
 } from '../api/client'
 
 type ToastType = 'success' | 'error' | 'info'
-
-type CandidateReview = {
-  status?: 'accept' | 'reject'
-  reviewed_at?: string
-  note?: string | null
-}
-
-type CandidateReviews = Record<string, CandidateReview>
 
 interface UseIDarrResolverActionsParams {
   selectedSyncTargetIndex: number
@@ -24,11 +15,7 @@ interface UseIDarrResolverActionsParams {
   resolverTmdbId: string
   resolverTvdbId: string
   resolverImdbId: string
-  resolverCandidates: MakerIdarrPendingCandidate[]
-  resolverCandidateReviews: CandidateReviews
-  filteredResolverCandidates: MakerIdarrPendingCandidate[]
-  setResolverCandidateReviews: Dispatch<SetStateAction<CandidateReviews>>
-  setResolverCandidates: Dispatch<SetStateAction<MakerIdarrPendingCandidate[]>>
+  resolverTmdbType: 'movie' | 'tv_series' | 'collection' | ''
   setResolving: Dispatch<SetStateAction<boolean>>
   showToast: (message: string, type?: ToastType) => void
   refreshPendingAndHandleResolverAdvance: (
@@ -37,6 +24,7 @@ interface UseIDarrResolverActionsParams {
   ) => Promise<void>
   loadCacheStats: () => Promise<void>
   loadIgnoredTitles: () => Promise<void>
+  isIdarrJobActive: () => boolean
 }
 
 export const useIDarrResolverActions = ({
@@ -45,128 +33,15 @@ export const useIDarrResolverActions = ({
   resolverTmdbId,
   resolverTvdbId,
   resolverImdbId,
-  resolverCandidates,
-  resolverCandidateReviews,
-  filteredResolverCandidates,
-  setResolverCandidateReviews,
-  setResolverCandidates,
+  resolverTmdbType,
   setResolving,
   showToast,
   refreshPendingAndHandleResolverAdvance,
   loadCacheStats,
   loadIgnoredTitles,
+  isIdarrJobActive,
 }: UseIDarrResolverActionsParams) => {
-  const applyReviewsToCandidates = (nextReviews: CandidateReviews) => {
-    setResolverCandidates((previous) => previous.map((item) => ({
-      ...item,
-      review: nextReviews[String(item.tmdb_id)],
-    })))
-  }
-
-  const handleReviewCandidate = async (candidate: MakerIdarrPendingCandidate, action: 'accept' | 'reject' | 'clear') => {
-    if (!resolverItem) {
-      return
-    }
-
-    try {
-      setResolving(true)
-      const response = await reviewMakerIdarrPendingCandidate({
-        asset_key: resolverItem.asset_key,
-        tmdb_id: candidate.tmdb_id,
-        action,
-        sync_target_index: selectedSyncTargetIndex,
-      })
-      const nextReviews = response.candidate_reviews || {}
-      setResolverCandidateReviews(nextReviews)
-      setResolverCandidates((previous) => previous.map((item) => {
-        if (item.tmdb_id !== candidate.tmdb_id) {
-          return item
-        }
-        const review = nextReviews[String(candidate.tmdb_id)]
-        return {
-          ...item,
-          review,
-        }
-      }))
-      showToast(`Candidate ${action}ed`, 'success')
-    } catch (error) {
-      showToast(getApiErrorMessage(error, 'Failed to review candidate'), 'error')
-    } finally {
-      setResolving(false)
-    }
-  }
-
-  const handleRejectVisibleCandidates = async () => {
-    if (!resolverItem) {
-      return
-    }
-
-    const targets = filteredResolverCandidates.filter((candidate) => resolverCandidateReviews[String(candidate.tmdb_id)]?.status !== 'reject')
-    if (targets.length === 0) {
-      showToast('No visible candidates to reject', 'error')
-      return
-    }
-
-    try {
-      setResolving(true)
-      const nextReviews = { ...resolverCandidateReviews }
-      for (const candidate of targets) {
-        const response = await reviewMakerIdarrPendingCandidate({
-          asset_key: resolverItem.asset_key,
-          tmdb_id: candidate.tmdb_id,
-          action: 'reject',
-          sync_target_index: selectedSyncTargetIndex,
-        })
-        Object.assign(nextReviews, response.candidate_reviews || {})
-      }
-
-      setResolverCandidateReviews(nextReviews)
-      applyReviewsToCandidates(nextReviews)
-      showToast(`Rejected ${targets.length} candidate(s)`, 'success')
-    } catch (error) {
-      showToast(getApiErrorMessage(error, 'Failed to reject visible candidates'), 'error')
-    } finally {
-      setResolving(false)
-    }
-  }
-
-  const handleClearReviewedCandidates = async () => {
-    if (!resolverItem) {
-      return
-    }
-
-    const targets = resolverCandidates.filter((candidate) => {
-      const status = resolverCandidateReviews[String(candidate.tmdb_id)]?.status
-      return status === 'accept' || status === 'reject'
-    })
-
-    if (targets.length === 0) {
-      showToast('No reviewed candidates to clear', 'error')
-      return
-    }
-
-    try {
-      setResolving(true)
-      let nextReviews = { ...resolverCandidateReviews }
-      for (const candidate of targets) {
-        const response = await reviewMakerIdarrPendingCandidate({
-          asset_key: resolverItem.asset_key,
-          tmdb_id: candidate.tmdb_id,
-          action: 'clear',
-          sync_target_index: selectedSyncTargetIndex,
-        })
-        nextReviews = response.candidate_reviews || nextReviews
-      }
-
-      setResolverCandidateReviews(nextReviews)
-      applyReviewsToCandidates(nextReviews)
-      showToast(`Cleared ${targets.length} review(s)`, 'success')
-    } catch (error) {
-      showToast(getApiErrorMessage(error, 'Failed to clear candidate reviews'), 'error')
-    } finally {
-      setResolving(false)
-    }
-  }
+  const IDARR_BUSY_MESSAGE = 'An IDarr run is already in progress — wait for it to finish before resolving and renaming.'
 
   const handleResolvePending = async (options?: { forceAdvance?: boolean }) => {
     if (!resolverItem) {
@@ -178,7 +53,7 @@ export const useIDarrResolverActions = ({
     const imdbValue = resolverImdbId.trim()
 
     if (!tmdbValue && !tvdbValue && !imdbValue) {
-      showToast('Enter at least one ID to resolve', 'error')
+      showToast('Select a candidate card, or enter IDs manually to resolve', 'error')
       return
     }
 
@@ -190,6 +65,11 @@ export const useIDarrResolverActions = ({
       return
     }
 
+    if (tmdbValue && !resolverTmdbType) {
+      showToast('Select a media type (Movie, TV Show, or Collection) before resolving with a TMDB ID', 'error')
+      return
+    }
+
     try {
       setResolving(true)
       await resolveMakerIdarrPendingMatch({
@@ -198,6 +78,7 @@ export const useIDarrResolverActions = ({
         tmdb_id: tmdbId,
         tvdb_id: tvdbId,
         imdb_id: imdbValue || null,
+        tmdb_type: resolverTmdbType || null,
         sync_target_index: selectedSyncTargetIndex,
       })
       showToast('Pending match resolved', 'success')
@@ -221,7 +102,7 @@ export const useIDarrResolverActions = ({
     const imdbValue = resolverImdbId.trim()
 
     if (!tmdbValue && !tvdbValue && !imdbValue) {
-      showToast('Enter at least one ID to resolve', 'error')
+      showToast('Select a candidate card, or enter IDs manually to resolve', 'error')
       return
     }
 
@@ -233,8 +114,17 @@ export const useIDarrResolverActions = ({
       return
     }
 
-    // Capture filenames before resolve since resolverItem may change after advancing
+    if (tmdbValue && !resolverTmdbType) {
+      showToast('Select a media type (Movie, TV Show, or Collection) before resolving with a TMDB ID', 'error')
+      return
+    }
+
     const sourceFilenames = (resolverItem.source_filenames ?? []).filter(Boolean)
+
+    if (sourceFilenames.length > 0 && isIdarrJobActive()) {
+      showToast(IDARR_BUSY_MESSAGE, 'error')
+      return
+    }
 
     try {
       setResolving(true)
@@ -244,7 +134,9 @@ export const useIDarrResolverActions = ({
         tmdb_id: tmdbId,
         tvdb_id: tvdbId,
         imdb_id: imdbValue || null,
+        tmdb_type: resolverTmdbType || null,
         sync_target_index: selectedSyncTargetIndex,
+        mark_as_renamed: sourceFilenames.length > 0,
       })
       showToast('Pending match resolved', 'success')
 
@@ -265,23 +157,48 @@ export const useIDarrResolverActions = ({
     }
   }
 
-  const handleResolveWithCandidate = async (candidate: MakerIdarrPendingCandidate) => {
+  const handleResolveWithCandidate = async (
+    candidate: MakerIdarrPendingCandidate,
+    options?: { forceAdvance?: boolean; andRename?: boolean },
+  ) => {
     if (!resolverItem) {
+      return
+    }
+
+    const candidateTmdbType = candidate.media_type === 'show' ? 'tv_series' : candidate.media_type === 'collection' ? 'collection' : 'movie'
+
+    const sourceFilenames = options?.andRename
+      ? (resolverItem.source_filenames ?? []).filter(Boolean)
+      : []
+
+    if (sourceFilenames.length > 0 && isIdarrJobActive()) {
+      showToast(IDARR_BUSY_MESSAGE, 'error')
       return
     }
 
     try {
       setResolving(true)
+
       await resolveMakerIdarrPendingMatch({
         asset_key: resolverItem.asset_key,
         action: 'resolve',
         tmdb_id: candidate.tmdb_id,
         tvdb_id: candidate.tvdb_id ?? null,
         imdb_id: candidate.imdb_id ?? null,
+        tmdb_type: candidateTmdbType,
         sync_target_index: selectedSyncTargetIndex,
+        mark_as_renamed: sourceFilenames.length > 0,
       })
       showToast(`Resolved with TMDB ${candidate.tmdb_id}`, 'success')
-      await refreshPendingAndHandleResolverAdvance(resolverItem.asset_key, { forceAdvance: true })
+
+      if (sourceFilenames.length > 0) {
+        const job = await startIdarr(false, selectedSyncTargetIndex, sourceFilenames)
+        showToast(`Rename started (Job ID: ${job.id})`, 'info')
+      } else if (options?.andRename) {
+        showToast('Resolved — no source files found to trigger rename', 'info')
+      }
+
+      await refreshPendingAndHandleResolverAdvance(resolverItem.asset_key, { forceAdvance: options?.forceAdvance ?? true })
       await Promise.all([loadCacheStats(), loadIgnoredTitles()])
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to resolve with selected candidate'), 'error')
@@ -291,9 +208,6 @@ export const useIDarrResolverActions = ({
   }
 
   return {
-    handleReviewCandidate,
-    handleRejectVisibleCandidates,
-    handleClearReviewedCandidates,
     handleResolvePending,
     handleResolveAndRename,
     handleResolveWithCandidate,

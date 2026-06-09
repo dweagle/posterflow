@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, prune_idarr_run_history, compact_idarr_run_details_history
+from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, prune_idarr_run_history, compact_idarr_run_details_history, upsert_idarr_asset_cache
 from models.setting import Setting
 from services.idarr_runner import IdarrRunner
 
@@ -399,6 +399,72 @@ def test_idarr_runner_expand_asset_key_aliases_covers_movie_and_show_variants():
     assert "movie::tomandjerry::1940" in expanded_show
 
 
+def test_idarr_runner_expand_asset_key_aliases_pending_covers_all_concrete_types():
+    """An ignore entry saved from the pending list is keyed ``pending::`` (type unknown).
+    It must expand to every concrete type so the ignore still matches once the same item
+    is typed concretely on a later run — otherwise ignored items reappear as unmatched."""
+    pending_key = "pending::astarwarsstorycollection::::scope=t2_abc"
+    expanded = IdarrRunner._expand_asset_key_aliases(pending_key)
+    assert "collection::astarwarsstorycollection::::scope=t2_abc" in expanded
+    assert "movie::astarwarsstorycollection::::scope=t2_abc" in expanded
+    assert "tv_series::astarwarsstorycollection::::scope=t2_abc" in expanded
+    assert "pending::astarwarsstorycollection::::scope=t2_abc" in expanded
+
+
+def test_idarr_runner_asset_drive_keeps_type_inferred_for_unmatched_provisional_cache(test_db, tmp_path):
+    """An ambiguous item that went to pending leaves an unmatched provisional cache row carrying
+    the seed type ("movie"). On a later run that row must NOT settle the type — otherwise the
+    enrichment dual-search is skipped and the item auto-commits the seed type instead of staying
+    pending (the "Little Bear (1995)" pending → movie flip)."""
+    runner = IdarrRunner(test_db)
+    # Unmatched provisional row from a prior ambiguous run: seed type movie, no IDs.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::littlebear::1995",
+        title="Little Bear", year=1995, asset_type="movie",
+        matched=False, payload_json=json.dumps({"status": "not_found"}),
+    ))
+    # A *resolved* row (carries an ID) is a valid type signal and SHOULD settle the type.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::frozen::2013::tmdb=109445",
+        title="Frozen", year=2013, asset_type="movie",
+        tmdb_id=109445, matched=True, payload_json="{}",
+    ))
+    test_db.commit()
+    (tmp_path / "Little Bear (1995).psd").write_bytes(b"x")
+    (tmp_path / "Frozen (2013).psd").write_bytes(b"x")
+
+    assets = runner._scan_assets_for_asset_drive(tmp_path)
+    little_bear = next(a for a in assets if str(a.get("title")) == "Little Bear")
+    frozen = next(a for a in assets if str(a.get("title")) == "Frozen")
+
+    # Unmatched provisional "movie" type must stay inferred so the dual-search re-evaluates.
+    assert little_bear["type_is_inferred"] is True
+    assert little_bear.get("has_id") is False
+    # Resolved cache row (has tmdb) settles the type — inferred flag cleared, id prefilled.
+    assert frozen["type_is_inferred"] is False
+    assert frozen.get("tmdb_id") == 109445
+
+
+def test_idarr_runner_parse_repairs_malformed_year_paren():
+    """A dangling year parenthesis (from an interrupted/partial rename) must be repaired so the
+    year is parsed and stripped, instead of becoming a junk title that never matches and churns
+    as a recurring pending item. Balanced/bare-number titles must be left alone."""
+    # Dangling opening paren.
+    p = IdarrRunner._parse_asset_no_season_hint(Path("/x/Bert Kreischer Lucky (2025.psd"))
+    assert p["title"] == "Bert Kreischer Lucky" and p["year"] == 2025
+    # Dangling closing paren.
+    p = IdarrRunner._parse_asset_no_season_hint(Path("/x/Bert Kreischer Lucky 2025).psd"))
+    assert p["title"] == "Bert Kreischer Lucky" and p["year"] == 2025
+    # Well-formed name is unchanged.
+    p = IdarrRunner._parse_asset_no_season_hint(Path("/x/Bert Kreischer Lucky (2025).psd"))
+    assert p["title"] == "Bert Kreischer Lucky" and p["year"] == 2025
+    # Bare number with no parens is left as part of the title (ambiguous — could be like
+    # "Blade Runner 2049"), so no year is fabricated.
+    p = IdarrRunner._parse_asset_no_season_hint(Path("/x/Blade Runner 2049.psd"))
+    assert p["year"] is None
+    assert "2049" in p["title"]
+
+
 def test_idarr_runner_store_cache_rows_same_title_year_merges_to_one_row(test_db):
     """With title-based keys, two movies of the same title+year share one cache row.
     Both filenames are tracked under that single entry."""
@@ -560,6 +626,51 @@ def test_idarr_runner_store_cache_rows_migration_preserves_freshness_timestamp(t
 
     assert updated is not None
     assert isinstance(updated.last_checked_at, datetime)
+
+
+def test_idarr_runner_store_cache_rows_preserves_resolve_metadata_across_title_rekey(test_db):
+    """A manually-resolved item renamed from a dirty title (e.g. "asdfqwer") to its canonical
+    title changes its cache key wholesale. The resolve audit metadata (resolved_manually /
+    resolution_history / canonical_title) must carry forward to the new ID-keyed row via the
+    same-ID predecessor lookup, instead of being lost on the re-key."""
+    runner = IdarrRunner(test_db)
+    dirty_key = runner._asset_key(asset_type="movie", title="asdfqwer", year=None, tmdb_id=27205)
+    upsert_idarr_asset_cache(
+        test_db,
+        asset_key=dirty_key,
+        title="asdfqwer",
+        year=None,
+        asset_type="movie",
+        tmdb_id=27205,
+        tvdb_id=None,
+        imdb_id=None,
+        matched=True,
+        payload_json=json.dumps({
+            "canonical_title": "Inception",
+            "resolved_manually": True,
+            "resolution_history": [{"action": "resolve", "tmdb_id": 27205}],
+        }),
+    )
+    test_db.commit()
+
+    # Next run: the file has been renamed to its canonical title — produces a new key.
+    runner._store_asset_cache_rows([{
+        "title": "Inception",
+        "year": 2010,
+        "type": "movie",
+        "tmdb_id": 27205,
+        "has_id": True,
+        "file_path": "/x/Inception (2010) {tmdb-27205}.psd",
+    }])
+    test_db.commit()
+
+    new_key = runner._asset_key(asset_type="movie", title="Inception", year=2010, tmdb_id=27205)
+    row = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == new_key).first()
+    assert row is not None
+    payload = json.loads(row.payload_json)
+    assert payload.get("resolved_manually") is True
+    assert payload.get("resolution_history") and isinstance(payload["resolution_history"], list)
+    assert payload.get("canonical_title") == "Inception"
 
 
 def test_enrich_grouped_assets_reuses_single_tmdb_search(test_db, monkeypatch):
@@ -828,6 +939,57 @@ def test_idarr_resolve_pending_match_success_updates_cache_and_removes_pending(c
     assert cache_row.matched is True
 
 
+def test_idarr_resolve_removes_other_type_provisional_unmatched_row(client, test_db):
+    """Resolving a pending match to a different type than the runner inferred must clear the
+    inferred-type provisional unmatched cache row, so it doesn't linger as unmatched/stale."""
+    # The runner originally guessed "movie" and left a provisional unmatched cache row.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::someshow::2021",
+        title="Some Show",
+        year=2021,
+        asset_type="movie",
+        matched=False,
+        payload_json=json.dumps({"status": "not_found"}),
+    ))
+    # A distinct, already-resolved item that merely shares the title/year must NOT be touched.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::someshow::2021::tmdb=999",
+        title="Some Show",
+        year=2021,
+        asset_type="movie",
+        tmdb_id=999,
+        matched=True,
+        payload_json="{}",
+    ))
+    test_db.add(IdarrPendingMatch(
+        asset_key="pending::someshow::2021",
+        title="Some Show",
+        year=2021,
+        asset_type="pending",
+    ))
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/pending-matches/resolve",
+        json={
+            "asset_key": "pending::someshow::2021",
+            "action": "resolve",
+            "tmdb_id": 555,
+            "tmdb_type": "tv_series",
+            "sync_target_index": 0,
+        },
+    )
+    assert response.status_code == 200
+
+    # The inferred-type provisional unmatched row is gone.
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "movie::someshow::2021").first() is None
+    # The pending placeholder is gone, the resolved row exists under the tv_series key.
+    assert test_db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == "pending::someshow::2021").first() is None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "tv_series::someshow::2021").first() is not None
+    # The distinct already-resolved (matched) sibling sharing title/year is untouched.
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "movie::someshow::2021::tmdb=999").first() is not None
+
+
 def test_idarr_cache_stats_and_maintenance_prune_unmatched(client, test_db):
     matched = IdarrAssetCache(
         asset_key="movie::match::2021",
@@ -868,6 +1030,103 @@ def test_idarr_cache_stats_and_maintenance_prune_unmatched(client, test_db):
     assert payload["success"] is True
     assert payload["deleted"] == 1
     assert payload["remaining"] == 1
+
+
+def test_idarr_cache_maintenance_removes_orphaned_pending_matches(client, test_db):
+    """prune_unmatched (and the other cache deletes) must also drop the matching
+    pending-match rows. Otherwise a ``pending::`` cache row is deleted while its pending
+    match survives with no backing cache row, leaving the pending item with no
+    ``source_filenames`` so "resolve and rename" silently no-ops."""
+    config_response = client.post(
+        "/api/idarr/",
+        json={
+            "sync_targets": [{"label": "Drive 1", "personal_drive_id": "folder-123", "source_dir": ""}],
+            "tmdb_api_key": "",
+        },
+    )
+    assert config_response.status_code == 200
+    scope_token = str(client.get("/api/idarr/").json()["sync_targets"][0].get("scope_token") or "").strip()
+
+    pending_key = f"pending::air::2023::scope={scope_token}" if scope_token else "pending::air::2023"
+    test_db.add(
+        IdarrPendingMatch(asset_key=pending_key, title="Air", year=2023, asset_type="pending")
+    )
+    test_db.add(
+        IdarrAssetCache(
+            asset_key=pending_key,
+            title="Air",
+            year=2023,
+            asset_type="pending",
+            matched=False,
+            payload_json=json.dumps({"status": "not_found", "current_filenames": ["Air (2023) - logo.png"]}),
+            last_checked_at=None,
+        )
+    )
+    test_db.commit()
+
+    prune_response = client.post(
+        "/api/idarr/cache/maintenance",
+        json={"action": "prune_unmatched", "sync_target_index": 0},
+    )
+    assert prune_response.status_code == 200
+    assert prune_response.json()["deleted"] == 1
+
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == pending_key).count() == 0
+    # The orphaned pending match must be gone too, not left dangling.
+    assert test_db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == pending_key).count() == 0
+
+
+def test_idarr_pending_matches_recovers_source_filenames_from_run_history(client, test_db):
+    """When the backing ``pending::`` cache row is missing (e.g. pruned by cache
+    maintenance), the pending list must still surface ``source_filenames`` by falling
+    back to the most recent run's unmatched_items source_path, so "resolve and rename"
+    works without first requiring a full run to recreate the cache row."""
+    client.post(
+        "/api/idarr/",
+        json={
+            "sync_targets": [{"label": "Drive 1", "personal_drive_id": "folder-123", "source_dir": ""}],
+            "tmdb_api_key": "",
+        },
+    )
+    scope_token = str(client.get("/api/idarr/").json()["sync_targets"][0].get("scope_token") or "").strip()
+
+    pending_key = f"pending::air::2023::scope={scope_token}" if scope_token else "pending::air::2023"
+    # Orphaned pending match: no cache row at all.
+    test_db.add(
+        IdarrPendingMatch(asset_key=pending_key, title="Air", year=2023, asset_type="pending")
+    )
+    test_db.add(
+        IdarrRun(
+            job_id=None,
+            success=True,
+            source_dir="/logos",
+            destination_dir=None,
+            scope_token=scope_token or None,
+            stats_json="{}",
+            details_json=json.dumps({
+                "unmatched_items": [
+                    {
+                        "title": "Air",
+                        "year": 2023,
+                        "type": "pending",
+                        "source_path": "/logos/Air (2023) - logo.png",
+                        "match_reason": "ambiguous",
+                    }
+                ]
+            }),
+            warnings_json="[]",
+            unmatched_count=1,
+            completed_at=datetime.now(timezone.utc),
+        )
+    )
+    test_db.commit()
+
+    response = client.get("/api/idarr/pending-matches", params={"sync_target_index": 0})
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["asset_key"] == pending_key
+    assert items[0]["source_filenames"] == ["Air (2023) - logo.png"]
 
 
 def test_idarr_cache_maintenance_purge_stale_rejects_invalid_days(client):

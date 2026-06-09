@@ -153,6 +153,8 @@ export interface MakerIdarrSyncTarget {
   source_dir: string
   label?: string
   scope_token?: string
+  is_asset_drive?: boolean
+  is_psd_drive?: boolean
 }
 
 export interface MakerIdarrLastRun {
@@ -220,6 +222,10 @@ export interface MakerIdarrPendingItem {
   created_at?: string | null
   updated_at?: string | null
   source_filenames?: string[] | null
+  asset_subtype?: 'logo' | 'backdrop' | null
+  pending_status?: 'resolved' | 'resolved_renamed' | null
+  conflict_files?: string[] | null
+  conflict_file_previews?: (string | null)[] | null
   suggested_ids?: {
     tmdb_id?: number | null
     tvdb_id?: number | null
@@ -245,7 +251,9 @@ export interface ResolveMakerIdarrPendingPayload {
   tmdb_id?: number | null
   tvdb_id?: number | null
   imdb_id?: string | null
+  tmdb_type?: 'movie' | 'tv_series' | 'collection' | null
   sync_target_index?: number
+  mark_as_renamed?: boolean
 }
 
 export interface MakerIdarrPendingCandidate {
@@ -401,9 +409,17 @@ export const getMakerIdarrLastRun = async (syncTargetIndex?: number): Promise<Ma
   })
 }
 
-export const getMakerIdarrPendingMatches = async (syncTargetIndex?: number): Promise<{ items: MakerIdarrPendingItem[] }> => {
+export const getMakerIdarrPendingMatches = async (
+  syncTargetIndex?: number,
+  limit?: number,
+  offset?: number,
+): Promise<{ items: MakerIdarrPendingItem[]; total: number }> => {
+  const params: Record<string, number> = {}
+  if (syncTargetIndex !== undefined) params.sync_target_index = syncTargetIndex
+  if (limit !== undefined) params.limit = limit
+  if (offset !== undefined) params.offset = offset
   return getData('/api/idarr/pending-matches', {
-    params: syncTargetIndex === undefined ? undefined : { sync_target_index: syncTargetIndex },
+    params: Object.keys(params).length > 0 ? params : undefined,
   })
 }
 
@@ -501,4 +517,11 @@ export const replaceMakerIdarrIgnoredTitles = async (
   payload: MakerIdarrIgnoredBulkPayload,
 ): Promise<MakerIdarrIgnoredBulkResponse> => {
   return postData('/api/idarr/ignored-titles/replace', payload)
+}
+
+export const archiveIdarrSourceFile = async (payload: {
+  filename: string
+  sync_target_index?: number
+}): Promise<{ success: boolean; filename: string; archived_path: string }> => {
+  return postData('/api/idarr/source-file/archive', payload)
 }

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import requests
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -34,14 +35,36 @@ from models.setting import get_setting
 from util.data.normalization import normalize_titles
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
+UNSUPPORTED_IMAGE_EXTENSIONS = {".svg", ".gif", ".bmp", ".tiff", ".tif", ".ico", ".heic", ".heif", ".avif", ".eps"}
 TMDB_ID_REGEX = re.compile(r"tmdb[-_\s]?(\d+)", re.IGNORECASE)
 TVDB_ID_REGEX = re.compile(r"tvdb[-_\s]?(\d+)", re.IGNORECASE)
 IMDB_ID_REGEX = re.compile(r"imdb[-_\s]?(tt\d+)", re.IGNORECASE)
 YEAR_REGEX = re.compile(r"\((\d{4})\)")
+MALFORMED_YEAR_OPEN_PAREN_REGEX = re.compile(r"\((\d{4})(?!\d)(?!\s*\))")
+MALFORMED_YEAR_CLOSE_PAREN_REGEX = re.compile(r"(?<!\()(?<!\d)(\d{4})\)")
 YEAR_IN_COLLECTION_TITLE_REGEX = re.compile(r"\s*\((\d{4})\)(?=\s*Collection\b)", re.IGNORECASE)
+
+
+def repair_year_parens(stem: str) -> str:
+    """Balance a single dangling year parenthesis from an interrupted/partial rename, e.g.
+    ``"Title (2025"`` or ``"Title 2025)"`` → ``"Title (2025)"``.
+
+    Only acts when the stem's parentheses are unbalanced, so a legitimately-parenthesised title
+    (e.g. ``"Movie (Anthology 2025)"``) is never altered. A bare year with no parens
+    (``"Title 2025"``) is intentionally left alone — a 4-digit number isn't necessarily a year
+    (e.g. ``"Blade Runner 2049"``), and the ``(YYYY)`` convention is what disambiguates it.
+    """
+    opens = stem.count("(")
+    closes = stem.count(")")
+    if opens > closes:
+        return MALFORMED_YEAR_OPEN_PAREN_REGEX.sub(r"(\1)", stem, count=1)
+    if closes > opens:
+        return MALFORMED_YEAR_CLOSE_PAREN_REGEX.sub(r"(\1)", stem, count=1)
+    return stem
 COLLECTION_REGEX = re.compile(r"collection", re.IGNORECASE)
 SEASON_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
 SEASON_SUFFIX_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
+ASSET_SUBTYPE_SUFFIX_REGEX = re.compile(r"\s*-\s*(?:logo|backdrop)s?\s*$", re.IGNORECASE)
 ID_TAG_BLOCK_REGEX = re.compile(r"\{(?:tmdb|tvdb|imdb)-[^}]+\}", re.IGNORECASE)
 SETTING_MAKER_IDARR_IGNORED_TITLES = "maker_tools_idarr_ignored_titles"
 
@@ -245,8 +268,12 @@ class IdarrRunner:
 
         movie_aliases = IdarrRunner._asset_type_aliases("movie")
         show_aliases = IdarrRunner._asset_type_aliases("tv_series")
+        collection_aliases = IdarrRunner._asset_type_aliases("collection")
         if aliases & (movie_aliases | show_aliases):
             aliases = aliases | movie_aliases | show_aliases
+
+        if "pending" in aliases:
+            aliases = aliases | movie_aliases | show_aliases | collection_aliases | {"pending"}
 
         expanded = {f"{alias}::{title_part}::{year_part}" for alias in aliases if alias}
         expanded.add(raw_key)
@@ -365,7 +392,7 @@ class IdarrRunner:
 
     @staticmethod
     def _parse_asset(file_path: Path) -> dict[str, Any]:
-        stem = file_path.stem
+        stem = repair_year_parens(file_path.stem)
         lower_stem = stem.lower()
 
         tmdb_match = TMDB_ID_REGEX.search(lower_stem)
@@ -388,10 +415,14 @@ class IdarrRunner:
 
         if COLLECTION_REGEX.search(lower_stem) or is_collection:
             asset_type = "collection"
+            type_is_inferred = False
         elif is_series:
             asset_type = "tv_series"
+            type_is_inferred = False  # Explicit hint (season suffix or TVDB tag)
         else:
             asset_type = "movie"
+            # No explicit type signal — type is a guess; enrichment will search both endpoints
+            type_is_inferred = not bool(tmdb_match or imdb_match)
 
         has_id = bool(tmdb_match or tvdb_match or imdb_match)
 
@@ -402,6 +433,7 @@ class IdarrRunner:
             "title": normalized_title,
             "year": normalized_year,
             "type": normalized_type,
+            "type_is_inferred": type_is_inferred,
             "tmdb_id": int(tmdb_match.group(1)) if tmdb_match else None,
             "tvdb_id": int(tvdb_match.group(1)) if tvdb_match else None,
             "imdb_id": imdb_match.group(1) if imdb_match else None,
@@ -622,6 +654,13 @@ class IdarrRunner:
 
                 if not _conflicts_with_group:
                     asset["type"] = normalized_group_type
+                    _group_has_resolving_id = (
+                        isinstance(group_tmdb_id, int)
+                        or isinstance(group_tvdb_id, int)
+                        or (isinstance(group_imdb_id, str) and group_imdb_id.startswith("tt"))
+                    )
+                    if is_series or _group_has_resolving_id:
+                        asset["type_is_inferred"] = False
 
                 # Only propagate group IDs (tmdb/imdb) to assets that have no IDs of their
                 # own when those assets are explicitly season/specials sub-items of a series.
@@ -646,6 +685,209 @@ class IdarrRunner:
 
     def scan_files_in_flat_folder(self, source_dir: Path) -> list[dict[str, Any]]:
         return self._scan_assets(source_dir)
+
+    @staticmethod
+    def _parse_asset_no_season_hint(file_path: Path) -> dict[str, Any]:
+        """Like _parse_asset but omits the season-suffix regex as a type hint.
+
+        Used for asset drive files (logos, backdrops) where filenames never carry
+        season suffixes, so SEASON_REGEX would only produce false positives.
+        Type detection relies solely on ID tags (tvdb → tv_series) and TMDB lookup.
+        """
+        stem = repair_year_parens(file_path.stem)
+        lower_stem = stem.lower()
+
+        tmdb_match = TMDB_ID_REGEX.search(lower_stem)
+        tvdb_match = TVDB_ID_REGEX.search(lower_stem)
+        imdb_match = IMDB_ID_REGEX.search(lower_stem)
+
+        year_match = YEAR_REGEX.search(stem)
+        year = int(year_match.group(1)) if year_match else None
+
+        clean_title = re.sub(r"\{[^{}]*\}", "", stem)
+        if COLLECTION_REGEX.search(lower_stem):
+            if not YEAR_IN_COLLECTION_TITLE_REGEX.search(clean_title):
+                clean_title = YEAR_REGEX.sub("", clean_title)
+        else:
+            clean_title = YEAR_REGEX.sub("", clean_title)
+        # Strip " - logo" / " - backdrop" subtype labels from the title
+        clean_title = ASSET_SUBTYPE_SUFFIX_REGEX.sub("", clean_title).strip()
+
+        # No SEASON_REGEX hint — only a TVDB tag marks the file as a series
+        is_series = bool(tvdb_match)
+        is_collection = year is None and not is_series
+
+        if COLLECTION_REGEX.search(lower_stem) or is_collection:
+            asset_type = "collection"
+            type_is_inferred = False
+        elif is_series:
+            asset_type = "tv_series"
+            type_is_inferred = False
+        else:
+            asset_type = "movie"
+            type_is_inferred = not bool(tmdb_match or imdb_match)
+
+        has_id = bool(tmdb_match or tvdb_match or imdb_match)
+        normalized_title, normalized_year, normalized_type = ensure_title_year(clean_title or stem, year, asset_type)
+
+        return {
+            "file_path": file_path,
+            "title": normalized_title,
+            "year": normalized_year,
+            "type": normalized_type,
+            "type_is_inferred": type_is_inferred,
+            "tmdb_id": int(tmdb_match.group(1)) if tmdb_match else None,
+            "tvdb_id": int(tvdb_match.group(1)) if tvdb_match else None,
+            "imdb_id": imdb_match.group(1) if imdb_match else None,
+            "has_id": has_id,
+        }
+
+    def _scan_assets_for_asset_drive(self, source_dir: Path) -> list[dict[str, Any]]:
+        """Scan a flat directory with asset-drive matching rules (no season-suffix hints).
+
+        Applies cache hints per file for ID enrichment but skips season grouping
+        entirely — each file is an independent logo or backdrop for a single title.
+        """
+        assets: list[dict[str, Any]] = []
+        cache_rows = self._load_all_cache_rows("index build")
+        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
+        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
+
+        for entry in sorted(source_dir.iterdir()):
+            if not entry.is_file():
+                continue
+            if entry.name.startswith("."):
+                continue
+            if entry.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            assets.append(self._parse_asset_no_season_hint(entry))
+
+        for asset in assets:
+            title = str(asset.get("title") or "")
+            year = asset.get("year")
+            normalized_title = self._normalize_with_aliases(title)
+            asset_tmdb_id = asset.get("tmdb_id") if isinstance(asset.get("tmdb_id"), int) else None
+            asset_tvdb_id = asset.get("tvdb_id") if isinstance(asset.get("tvdb_id"), int) else None
+            asset_imdb_id = asset.get("imdb_id") if isinstance(asset.get("imdb_id"), str) else None
+            cache_type: str | None = None
+
+            cache_hint: dict[str, Any] | None = None
+            if isinstance(asset_tmdb_id, int):
+                tmdb_candidates = group_cache_hints.get("by_tmdb", {}).get(asset_tmdb_id, [])
+                if isinstance(tmdb_candidates, list) and tmdb_candidates:
+                    best_hint: dict[str, Any] | None = None
+                    best_rank = -1
+                    for candidate in tmdb_candidates:
+                        if not isinstance(candidate, dict):
+                            continue
+                        candidate_title = str(candidate.get("normalized_title") or "")
+                        candidate_year = candidate.get("year") if isinstance(candidate.get("year"), int) else None
+                        exact_title = bool(candidate_title and candidate_title == normalized_title)
+                        exact_year = bool(isinstance(year, int) and isinstance(candidate_year, int) and year == candidate_year)
+                        rank = int(candidate.get("_rank") or 0)
+                        if exact_title and exact_year:
+                            rank += 100
+                        elif exact_title:
+                            rank += 50
+                        if rank > best_rank:
+                            best_rank = rank
+                            best_hint = candidate
+                    cache_hint = best_hint
+
+            if not cache_hint:
+                hint_key = f"{normalized_title}::{year if isinstance(year, int) else ''}"
+                candidate_hint = group_cache_hints.get("by_title_year", {}).get(hint_key)
+                if candidate_hint is not None:
+                    hint_tmdb = int(candidate_hint["tmdb_id"]) if isinstance(candidate_hint.get("tmdb_id"), int) else None
+                    if asset_tmdb_id is None or hint_tmdb is None or asset_tmdb_id == hint_tmdb:
+                        cache_hint = candidate_hint
+
+            if cache_hint:
+                cache_type = self._normalize_asset_type(str(cache_hint.get("asset_type") or ""))
+                if asset_tmdb_id is None and isinstance(cache_hint.get("tmdb_id"), int):
+                    asset_tmdb_id = int(cache_hint["tmdb_id"])
+                if asset_tvdb_id is None and isinstance(cache_hint.get("tvdb_id"), int):
+                    asset_tvdb_id = int(cache_hint["tvdb_id"])
+                if asset_imdb_id is None and isinstance(cache_hint.get("imdb_id"), str):
+                    candidate_imdb = str(cache_hint["imdb_id"])
+                    if candidate_imdb.startswith("tt"):
+                        asset_imdb_id = candidate_imdb
+
+            if asset_tmdb_id is None or asset_tvdb_id is None or asset_imdb_id is None:
+                file_name_key = str(asset["file_path"].name).strip().lower()
+                indexed = filename_cache_index.get(file_name_key)
+                if indexed:
+                    cache_type = cache_type or self._normalize_asset_type(str(indexed.get("asset_type") or ""))
+                    if asset_tmdb_id is None and isinstance(indexed.get("tmdb_id"), int):
+                        asset_tmdb_id = int(indexed["tmdb_id"])
+                    if asset_tvdb_id is None and isinstance(indexed.get("tvdb_id"), int):
+                        asset_tvdb_id = int(indexed["tvdb_id"])
+                    if asset_imdb_id is None and isinstance(indexed.get("imdb_id"), str):
+                        candidate_imdb = str(indexed["imdb_id"])
+                        if candidate_imdb.startswith("tt"):
+                            asset_imdb_id = candidate_imdb
+
+            # Re-determine type using enriched IDs (no season regex)
+            is_series = bool(asset_tvdb_id)
+            is_collection = year is None and not is_series
+
+            if is_series:
+                resolved_type = "tv_series"
+            elif cache_type == "collection":
+                resolved_type = "collection"
+            elif cache_type == "tv_series":
+                resolved_type = "tv_series"
+            elif cache_type == "movie":
+                resolved_type = "movie"
+            elif COLLECTION_REGEX.search(str(asset.get("title") or "").lower()) or is_collection:
+                resolved_type = "collection"
+            else:
+                resolved_type = "movie"
+
+            asset["type"] = resolved_type
+            _has_resolving_id = (
+                isinstance(asset_tmdb_id, int)
+                or isinstance(asset_tvdb_id, int)
+                or (isinstance(asset_imdb_id, str) and asset_imdb_id.startswith("tt"))
+            )
+            if is_series or _has_resolving_id:
+                asset["type_is_inferred"] = False
+            if isinstance(asset_tmdb_id, int):
+                asset["tmdb_id"] = asset_tmdb_id
+            if isinstance(asset_tvdb_id, int):
+                asset["tvdb_id"] = asset_tvdb_id
+            if isinstance(asset_imdb_id, str):
+                asset["imdb_id"] = asset_imdb_id
+            asset["has_id"] = bool(asset.get("tmdb_id") or asset.get("tvdb_id") or asset.get("imdb_id"))
+
+        return assets
+
+    def scan_asset_drive_subfolders(self, source_dir: Path) -> list[dict[str, Any]]:
+        """Scan logos/ and backdrops/ subfolders of an asset drive.
+
+        Each returned asset dict includes an ``asset_subtype`` key set to either
+        ``"logo"`` or ``"backdrop"`` based on which subfolder the file came from.
+        """
+        assets: list[dict[str, Any]] = []
+        for subtype, subfolder_name in [("logo", "logos"), ("backdrop", "backdrops")]:
+            subfolder = source_dir / subfolder_name
+            if not subfolder.exists() or not subfolder.is_dir():
+                log_info(
+                    LogTags.IDARR,
+                    f"Asset drive subfolder '{subfolder_name}' not found, skipping",
+                    path=str(subfolder),
+                )
+                continue
+            subfolder_assets = self._scan_assets_for_asset_drive(subfolder)
+            for asset in subfolder_assets:
+                asset["asset_subtype"] = subtype
+            assets.extend(subfolder_assets)
+            log_info(
+                LogTags.IDARR,
+                f"Asset drive: scanned {len(subfolder_assets)} {subtype}(s)",
+                path=str(subfolder),
+            )
+        return assets
 
     def _load_cache_filename_index(self, rows: list | None = None) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
@@ -769,6 +1011,11 @@ class IdarrRunner:
             and (requested_normalized in candidate_normalized or candidate_normalized in requested_normalized)
         )
         year_match = bool(isinstance(year, int) and isinstance(candidate_year, int) and year == candidate_year)
+        year_close = bool(
+            isinstance(year, int)
+            and isinstance(candidate_year, int)
+            and abs(year - candidate_year) <= 1
+        )
 
         score = 0
         reason = "rank_fallback"
@@ -778,10 +1025,14 @@ class IdarrRunner:
             score = 95
             reason = "exact"
             confidence = "high"
-        elif exact_title:
+        elif exact_title and (not isinstance(year, int) or year_close):
             score = 82
             reason = "exact"
             confidence = "high"
+        elif exact_title:
+            score = 68
+            reason = "exact_year_mismatch"
+            confidence = "medium"
         elif title_close and year_match:
             score = 74
             reason = "close_title_year"
@@ -815,6 +1066,10 @@ class IdarrRunner:
             "alternate_transform",
             "fuzzy_alternate",
             "fuzzy_alternate_transform",
+            "exact_year_mismatch",
+            "exact_year_mismatch_transform",
+            "original_title_year_mismatch",
+            "original_title_year_mismatch_transform",
         }
         normalized_reason = str(match_reason or "").strip().lower()
         if normalized_reason not in alternate_reasons:
@@ -881,6 +1136,7 @@ class IdarrRunner:
         *,
         candidates: list[dict[str, Any]],
         title: str,
+        year: int | None = None,
     ) -> dict[str, Any] | None:
         requested = cls._normalize_with_aliases(title)
         if not requested:
@@ -889,8 +1145,13 @@ class IdarrRunner:
             if not isinstance(candidate, dict):
                 continue
             original_title = str(candidate.get("original_title") or candidate.get("original_name") or "")
-            if original_title and cls._normalize_with_aliases(original_title) == requested:
-                return candidate
+            if not original_title or cls._normalize_with_aliases(original_title) != requested:
+                continue
+            if isinstance(year, int):
+                candidate_year = cls._candidate_year(candidate)
+                if isinstance(candidate_year, int) and abs(candidate_year - year) > 1:
+                    continue
+            return candidate
         return None
 
     @classmethod
@@ -1069,13 +1330,27 @@ class IdarrRunner:
                 score += 20
             elif year_close:
                 score += 10
+            elif isinstance(year, int) and isinstance(candidate_year, int):
+                # Penalise large year gaps so wrong-year candidates rank lower
+                year_gap = abs(year - candidate_year)
+                score -= min(year_gap * 4, 20)
 
             if exact_title and year_match:
                 reason = "exact" if exact_primary else "original_title"
                 confidence = "high"
-            elif exact_title:
+            elif exact_title and not isinstance(year, int):
+                # No year in filename — title match alone is high confidence
                 reason = "exact" if exact_primary else "original_title"
                 confidence = "high"
+            elif exact_title and year_close:
+                # Year off by ±1 — medium so an exact-year match of the other
+                # type wins in the dual-search rather than triggering ambiguity
+                reason = "exact" if exact_primary else "original_title"
+                confidence = "medium"
+            elif exact_title:
+                # Year is known and differs by > 1 — downgrade so it goes to pending review
+                reason = "exact_year_mismatch" if exact_primary else "original_title_year_mismatch"
+                confidence = "medium"
             elif ratio >= 0.90 and (year_match or year_close):
                 reason = "fuzzy_title_year"
                 confidence = "medium"
@@ -1282,16 +1557,22 @@ class IdarrRunner:
                 }
                 return selected, reason_label
 
-            original_match = IdarrRunner._tmdb_match_by_original_title(candidates=dict_results, title=title)
+            original_match = IdarrRunner._tmdb_match_by_original_title(candidates=dict_results, title=title, year=year)
             if original_match:
                 selected = dict(original_match)
                 reason_label = "original_transform" if is_transformed_query else "original_title"
+                _orig_candidate_year = IdarrRunner._candidate_year(selected)
+                # Exact year → high; year_close (±1 but not exact) → medium.
+                # A year-close original-title match is a weaker signal than a
+                # same-year primary-title match, so it should lose to one in the
+                # dual-search comparison (e.g. 2022 movie vs 2023 TV show).
+                _orig_year_exact = isinstance(year, int) and _orig_candidate_year == year
                 selected["_idarr_match"] = {
-                    "confidence": "high",
+                    "confidence": "high" if _orig_year_exact else "medium",
                     "reason": reason_label,
-                    "score": 90,
+                    "score": 90 if _orig_year_exact else 80,
                     "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
+                    "candidate_year": _orig_candidate_year,
                 }
                 return selected, reason_label
 
@@ -1683,6 +1964,23 @@ class IdarrRunner:
 
         return resolved_map
 
+    @staticmethod
+    def _search_result_rank(result: dict[str, Any] | None) -> int:
+        """Return a comparable rank for a TMDB search result.
+
+        -1 = no result; 0 = weak (low/unknown confidence or rank_fallback/year_match_only);
+        1 = low; 2 = medium; 3 = high.
+        """
+        if result is None:
+            return -1
+        info = result.get("_idarr_match") or {}
+        confidence = str(info.get("confidence") or "unknown").lower()
+        reason = str(info.get("reason") or "").lower()
+        rank = {"high": 3, "medium": 2, "low": 1, "unknown": 0}.get(confidence, 0)
+        if reason in {"rank_fallback", "year_match_only"}:
+            rank = min(rank, 0)
+        return rank
+
     def _enrich_assets_with_tmdb(
         self,
         assets: list[dict[str, Any]],
@@ -1698,6 +1996,7 @@ class IdarrRunner:
             "tvdb_assigned": 0,
             "imdb_assigned": 0,
             "reclassified_tv": 0,
+            "reclassified_movie": 0,
             "tmdb_search_api_calls": 0,
             "tmdb_external_id_api_calls": 0,
             "tmdb_api_calls": 0,
@@ -1729,8 +2028,8 @@ class IdarrRunner:
                 grouped_season_labels_by_key.setdefault(grouped_cache_key, set()).add(season_label)
 
         total_items = len(assets)
-        progress_interval = 25 if total_items <= 500 else 100
-        cache_checkpoint_interval = progress_interval
+        progress_interval = 25
+        cache_checkpoint_interval = 25 if total_items <= 500 else 100
         cache_checkpoint_assets: list[dict[str, Any]] = []
         grouped_reuse_logged_keys: set[str] = set()
         grouped_unresolved_logged_keys: set[str] = set()
@@ -2065,32 +2364,56 @@ class IdarrRunner:
                         search_result = None
                         search_reason = None
 
-                    if not search_result and str(asset.get("type") or "") == "movie":
+                    # When type was inferred (no TVDB tag / season suffix), search the
+                    # alternate endpoint too and keep whichever result is more confident.
+                    # This avoids committing to “movie” just because no season hint exists.
+                    if bool(asset.get("type_is_inferred")) and str(asset.get("type") or "") in {"movie", "tv_series"}:
+                        _primary_rank = self._search_result_rank(search_result)
+                        _current_type = str(asset.get("type") or "")
+                        _alt_type = "tv_series" if _current_type == "movie" else "movie"
                         if bool(app_settings.debug):
-                            log_info(LogTags.IDARR, f"🔄 Retrying as TV series: “{str(asset.get('title') or '')}”")
-
+                            _title_val = str(asset.get("title") or "")
+                            log_info(LogTags.IDARR, f"Type inferred - also searching {_alt_type}: {_title_val!r}")
                         enrichment_stats["tmdb_search_api_calls"] += 1
-                        series_fallback, fallback_reason = self._tmdb_search(
+                        alt_result, alt_reason = self._tmdb_search(
                             api_key=tmdb_api_key,
                             title=str(asset.get("title") or ""),
-                            asset_type="tv_series",
+                            asset_type=_alt_type,
                             year=asset.get("year") if isinstance(asset.get("year"), int) else None,
                             tmdb_id=asset.get("tmdb_id") if isinstance(asset.get("tmdb_id"), int) else None,
                             tvdb_id=asset.get("tvdb_id") if isinstance(asset.get("tvdb_id"), int) else None,
                             imdb_id=str(asset.get("imdb_id")) if isinstance(asset.get("imdb_id"), str) else None,
                         )
-                        if fallback_reason == "ambiguous":
+                        if alt_reason == "ambiguous":
                             asset["match_reason"] = "ambiguous"
                             grouped_unresolved_map.setdefault(cache_key, "ambiguous")
                             continue
-                        if series_fallback:
-                            search_result = series_fallback
-                            asset["type"] = "tv_series"
-                            enrichment_stats["reclassified_tv"] += 1
-                        elif bool(app_settings.debug):
+                        _alt_rank = self._search_result_rank(alt_result)
+                        _both_confident_and_close = (
+                            alt_result is not None
+                            and _alt_rank >= 1 and _primary_rank >= 1
+                            and (
+                                _alt_rank == _primary_rank
+                                or (_alt_rank >= 2 and _primary_rank >= 2 and abs(_alt_rank - _primary_rank) <= 1)
+                            )
+                        )
+                        if _both_confident_and_close:
+                            asset["match_reason"] = "ambiguous"
+                            grouped_unresolved_map.setdefault(cache_key, "ambiguous")
+                            continue
+                        if alt_result and _alt_rank > _primary_rank:
+                            search_result = alt_result
+                            asset['type'] = _alt_type
+                            if _alt_type == "tv_series":
+                                enrichment_stats["reclassified_tv"] += 1
+                            else:
+                                enrichment_stats["reclassified_movie"] += 1
+                        if bool(app_settings.debug) and not search_result:
+                            _title_warn = str(asset.get("title") or "")
+                            _year_warn = asset.get("year")
                             log_warning(
                                 LogTags.IDARR,
-                                f"🤷 No confident match found for “{str(asset.get('title') or '')}” ({asset.get('year')})",
+                                f"No confident match found for {_title_warn!r} ({_year_warn})",
                             )
                     if (
                         not search_result
@@ -2397,7 +2720,7 @@ class IdarrRunner:
                 finally:
                     cache_checkpoint_assets.clear()
 
-            if total_items > 0 and (index % progress_interval == 0 or index == total_items):
+            if total_items > 0 and (index == 1 or index % progress_interval == 0 or index == total_items):
                 pending_unmatched = max(0, index - matched_with_any_id)
                 live_api_calls = int(enrichment_stats.get("tmdb_search_api_calls", 0)) + int(
                     enrichment_stats.get("tmdb_external_id_api_calls", 0)
@@ -2489,6 +2812,27 @@ class IdarrRunner:
             tvdb_frequency=tvdb_frequency,
             progress_callback=progress_callback,
         )
+
+    def _find_unsupported_image_files(self, source_dir: Path, *, is_asset_drive: bool = False) -> list[Path]:
+        """Return files with recognised-but-unsupported image extensions (e.g. .svg, .gif)."""
+        result: list[Path] = []
+        dirs_to_scan: list[Path]
+        if is_asset_drive:
+            dirs_to_scan = [
+                source_dir / subtype
+                for subtype in ("logos", "backdrops")
+                if (source_dir / subtype).is_dir()
+            ]
+        else:
+            dirs_to_scan = [source_dir]
+        for scan_dir in dirs_to_scan:
+            try:
+                for entry in scan_dir.iterdir():
+                    if entry.is_file() and not entry.name.startswith(".") and entry.suffix.lower() in UNSUPPORTED_IMAGE_EXTENSIONS:
+                        result.append(entry)
+            except Exception:
+                pass
+        return result
 
     def _remove_non_images(self, source_dir: Path, dry_run: bool) -> tuple[int, int]:
         removed_count = 0
@@ -2759,6 +3103,33 @@ class IdarrRunner:
             incoming_tvdb_id = entry["tvdb_id"] if isinstance(entry.get("tvdb_id"), int) else None
             incoming_imdb_id = entry["imdb_id"] if isinstance(entry.get("imdb_id"), str) else None
 
+            predecessor_payload: dict[str, Any] = {}
+            if row is None and provisional_row is None:
+                _id_filter = None
+                if incoming_tmdb_id is not None:
+                    _id_filter = IdarrAssetCache.tmdb_id == incoming_tmdb_id
+                elif incoming_tvdb_id is not None:
+                    _id_filter = IdarrAssetCache.tvdb_id == incoming_tvdb_id
+                elif incoming_imdb_id:
+                    _id_filter = IdarrAssetCache.imdb_id == incoming_imdb_id
+                if _id_filter is not None:
+                    _pred = (
+                        self._cache_query()
+                        .filter(
+                            IdarrAssetCache.asset_key != key,
+                            IdarrAssetCache.asset_type == incoming_asset_type,
+                            _id_filter,
+                        )
+                        .first()
+                    )
+                    if _pred and isinstance(_pred.payload_json, str) and _pred.payload_json.strip():
+                        try:
+                            _parsed_pred = json.loads(_pred.payload_json)
+                            if isinstance(_parsed_pred, dict):
+                                predecessor_payload = _parsed_pred
+                        except Exception:
+                            predecessor_payload = {}
+
             resolved_title = incoming_title
             resolved_year = incoming_year
             # Defer canonical_title resolution until after existing_payload is loaded
@@ -2786,9 +3157,12 @@ class IdarrRunner:
 
             # If the current run did not determine a new_title (entry["canonical_title"] is
             # empty) but the DB already has a good canonical_title (e.g. stored during a
-            # manual resolve), preserve it instead of overwriting with the raw dirty title.
-            if not str(entry.get("canonical_title") or "").strip() and existing_canonical_title:
-                resolved_canonical_title = existing_canonical_title
+            # manual resolve), preserve it instead of overwriting with the raw dirty title. Fall
+            # back to a renamed-from predecessor row's canonical_title when this row is brand new.
+            if not str(entry.get("canonical_title") or "").strip():
+                _fallback_canonical = existing_canonical_title or str(predecessor_payload.get("canonical_title") or "").strip()
+                if _fallback_canonical:
+                    resolved_canonical_title = _fallback_canonical
 
             if row:
                 identity_diffs = {
@@ -2874,12 +3248,13 @@ class IdarrRunner:
                 "rename_history": self._compact_rename_history(existing_history),
                 "status": payload_status,
                 # Preserve resolve-workflow metadata so the enrichment step can detect
-                # manually-resolved items that are still missing a canonical title.
-                "resolved_manually": existing_payload.get("resolved_manually") or None,
-                "last_resolved_at": existing_payload.get("last_resolved_at") or None,
-                "resolution_history": existing_payload.get("resolution_history") or None,
+                # manually-resolved items that are still missing a canonical title. Fall back to a
+                # renamed-from predecessor row so the audit trail survives a wholesale title re-key.
+                "resolved_manually": existing_payload.get("resolved_manually") or predecessor_payload.get("resolved_manually") or None,
+                "last_resolved_at": existing_payload.get("last_resolved_at") or predecessor_payload.get("last_resolved_at") or None,
+                "resolution_history": existing_payload.get("resolution_history") or predecessor_payload.get("resolution_history") or None,
                 "pending_entry": existing_payload.get("pending_entry") or None,
-                "candidate_reviews": existing_payload.get("candidate_reviews") or None,
+                "candidate_reviews": existing_payload.get("candidate_reviews") or predecessor_payload.get("candidate_reviews") or None,
                 "pending_reason": existing_payload.get("pending_reason") or None,
             }
 
@@ -2921,6 +3296,7 @@ class IdarrRunner:
         if not rows:
             return {"removed_cache": 0, "removed_pending": 0}
         keys_to_remove: set[str] = set()
+        removed_labels: list[str] = []
 
         for row in rows:
             if not isinstance(row.asset_key, str) or not row.asset_key.strip():
@@ -2948,6 +3324,7 @@ class IdarrRunner:
 
             if filenames and filenames & source_files:
                 keys_to_remove.add(asset_key)
+                removed_labels.append(self._format_pending_row_label(row))
 
         if not keys_to_remove:
             return {"removed_cache": 0, "removed_pending": 0}
@@ -2969,11 +3346,67 @@ class IdarrRunner:
             removed_cache=int(removed_cache or 0),
             removed_pending=int(removed_pending or 0),
         )
+        for label in removed_labels[:25]:
+            log_info(LogTags.IDARR, f"• Inactive cache entry removed: {label}")
+        if len(removed_labels) > 25:
+            log_info(LogTags.IDARR, f"Additional inactive cache entries removed: {len(removed_labels) - 25}")
 
         return {
             "removed_cache": int(removed_cache or 0),
             "removed_pending": int(removed_pending or 0),
         }
+
+    @staticmethod
+    def _format_pending_row_label(row: Any) -> str:
+        """Human-readable ``Title (Year) [type]`` label for a pending/cache row, used
+        when logging which items were pruned or cleared."""
+        title = str(getattr(row, "title", "") or "").strip() or "unknown"
+        year = getattr(row, "year", None)
+        asset_type = str(getattr(row, "asset_type", "") or "").strip()
+        year_label = str(year) if isinstance(year, int) else "None"
+        type_suffix = f" [{asset_type}]" if asset_type else ""
+        return f"{title} ({year_label}){type_suffix}"
+
+    def _prune_orphaned_pending_cache_rows(self) -> int:
+        """Delete ``pending::``-typed placeholder cache rows that have no backing
+        pending-match row.
+
+        Unmatched items are stored as a ``pending::``-keyed cache row alongside their
+        ``idarr_pending_matches`` entry. When the item is resolved, resolution writes the
+        data under the real-type/ID key and removes the pending-match row; when it is
+        cleared or goes stale the pending-match row is dropped too. In both cases the
+        ``pending::`` cache row can be left dangling. Reconcile against the live
+        pending-match table (scope-aware via ``_cache_query``/``_pending_query``).
+        """
+        cache_rows = self._cache_query().filter(IdarrAssetCache.asset_key.like("pending::%")).all()
+        if not cache_rows:
+            return 0
+
+        live_pending_keys = {
+            str(row.asset_key)
+            for row in self._pending_query().all()
+            if isinstance(row.asset_key, str) and row.asset_key.strip()
+        }
+
+        removed = 0
+        removed_labels: list[str] = []
+        for row in cache_rows:
+            if not isinstance(row.asset_key, str) or row.asset_key in live_pending_keys:
+                continue
+            removed_labels.append(self._format_pending_row_label(row))
+            self.db.delete(row)
+            removed += 1
+
+        if removed:
+            self.db.commit()
+            log_info(
+                LogTags.IDARR,
+                f"Pruned {removed} orphaned pending cache row(s) with no active pending match",
+                removed_orphaned_pending=removed,
+            )
+            for label in removed_labels:
+                log_info(LogTags.IDARR, f"• Orphaned pending cache row removed: {label}")
+        return removed
 
     def _store_pending_assets(
         self,
@@ -3002,6 +3435,8 @@ class IdarrRunner:
             elif pending_reason_raw in {"low_confidence_alternate", "review_required_low_confidence_alternate"}:
                 pending_reason = "low_confidence_alternate"
 
+            raw_conflict_files = item.get("conflict_files")
+            raw_conflict_file_paths = item.get("conflict_file_paths")
             payload.append(
                 {
                     "title": title,
@@ -3009,6 +3444,8 @@ class IdarrRunner:
                     "type": asset_type,
                     "pending_reason": pending_reason,
                     "source_path": str(item.get("source_path") or "").strip() or None,
+                    "conflict_files": raw_conflict_files if isinstance(raw_conflict_files, list) else None,
+                    "conflict_file_paths": raw_conflict_file_paths if isinstance(raw_conflict_file_paths, list) else None,
                 }
             )
 
@@ -3040,11 +3477,17 @@ class IdarrRunner:
                 except Exception:
                     cache_payload = {}
 
+            source_path_str = str(item.get("source_path") or "").strip()
+            if source_path_str and not cache_payload.get("current_filenames"):
+                filename = Path(source_path_str).name
+                if filename:
+                    cache_payload["current_filenames"] = [filename]
+
             pending_entry = make_pending_entry_payload(
                 title=str(item.get("title") or ""),
                 year=item.get("year") if isinstance(item.get("year"), int) else None,
                 files=(
-                    str(item.get("source_path") or "").strip()
+                    source_path_str
                     or cache_payload.get("current_filenames")
                     or cache_payload.get("original_filenames")
                     or cache_payload.get("files")
@@ -3057,6 +3500,16 @@ class IdarrRunner:
             else:
                 cache_payload.pop("pending_reason", None)
                 pending_entry.pop("reason", None)
+            conflict_files = item.get("conflict_files")
+            if isinstance(conflict_files, list) and conflict_files:
+                cache_payload["conflict_files"] = [str(f) for f in conflict_files if f]
+            else:
+                cache_payload.pop("conflict_files", None)
+            conflict_file_paths = item.get("conflict_file_paths")
+            if isinstance(conflict_file_paths, list) and conflict_file_paths:
+                cache_payload["conflict_file_paths"] = [str(p) for p in conflict_file_paths if p]
+            else:
+                cache_payload.pop("conflict_file_paths", None)
             cache_payload["pending_entry"] = pending_entry
             if not str(cache_payload.get("status") or "").strip():
                 cache_payload["status"] = "not_found"
@@ -3085,6 +3538,7 @@ class IdarrRunner:
         existing_keys = [str(row.asset_key) for row in existing_rows if isinstance(row.asset_key, str) and row.asset_key not in desired_keys]
         resolved_cache_keys: set[str] = set()
         unresolved_cache_keys: set[str] = set()
+        manually_reviewed_keys: set[str] = set()
         if existing_keys:
             cache_rows = self._cache_query().filter(IdarrAssetCache.asset_key.in_(existing_keys)).all()
             for row in cache_rows:
@@ -3111,23 +3565,41 @@ class IdarrRunner:
                 status = str(payload.get("status") or "").strip().lower()
                 is_unresolved = not is_resolved and status in {"", "not_found", "tmdb_removed"}
 
+                if payload.get("pending_status"):
+                    manually_reviewed_keys.add(key)
+
                 if is_resolved:
                     resolved_cache_keys.add(key)
                 elif is_unresolved:
                     unresolved_cache_keys.add(key)
 
+        is_targeted_run = scoped_asset_keys is not None
         removed_resolved = 0
         removed_stale = 0
+        removed_resolved_items: list[str] = []
+        removed_stale_items: list[str] = []
+        def _drop_pending_placeholder(asset_key: Any) -> None:
+            if isinstance(asset_key, str) and asset_key.startswith("pending::"):
+                self._cache_query().filter(IdarrAssetCache.asset_key == asset_key).delete(synchronize_session=False)
+
         for row in existing_rows:
             if row.asset_key in desired_keys:
                 continue
             if isinstance(row.asset_key, str) and row.asset_key in resolved_cache_keys:
+                # Rows the user manually resolved stay in the reviewed list until the
+                # next full run — targeted single-file renames must not clear them.
+                if is_targeted_run and row.asset_key in manually_reviewed_keys:
+                    continue
                 self.db.delete(row)
+                _drop_pending_placeholder(row.asset_key)
                 removed_resolved += 1
+                removed_resolved_items.append(self._format_pending_row_label(row))
                 continue
             if isinstance(row.asset_key, str) and row.asset_key not in unresolved_cache_keys:
                 self.db.delete(row)
+                _drop_pending_placeholder(row.asset_key)
                 removed_stale += 1
+                removed_stale_items.append(self._format_pending_row_label(row))
 
         self.db.commit()
         removed_resolved_total = removed_resolved + self._pending_resolved_mid_run
@@ -3139,6 +3611,10 @@ class IdarrRunner:
             removed_resolved_mid_run=self._pending_resolved_mid_run,
             removed_stale=removed_stale,
         )
+        for label in removed_resolved_items:
+            log_info(LogTags.IDARR, f"• Pending match removed (resolved): {label}")
+        for label in removed_stale_items:
+            log_info(LogTags.IDARR, f"• Pending match removed (stale, no longer on disk): {label}")
 
     def _collect_conflict_pending_assets(
         self,
@@ -3171,9 +3647,67 @@ class IdarrRunner:
             if not isinstance(row, dict):
                 continue
 
-            # A successfully resolved replacement (newer incoming archived the older existing
-            # and was renamed correctly) is NOT a conflict that needs review — skip it.
-            if str(row.get("resolution") or "") == "archived_older_existing_renamed_newer_incoming":
+            resolution = str(row.get("resolution") or "")
+
+            # A successfully resolved replacement is NOT a conflict that needs review.
+            if resolution == "archived_older_existing_renamed_newer_incoming":
+                continue
+
+            # Intra-batch conflict: multiple source files → same target filename.
+            # Build one pending entry covering all the conflicting files.
+            if resolution == "intra_batch_filename_conflict":
+                raw_source_paths = row.get("source_paths")
+                source_paths_list = raw_source_paths if isinstance(raw_source_paths, list) else []
+                if not source_paths_list:
+                    sp = str(row.get("source_path") or "").strip()
+                    if sp:
+                        source_paths_list = [sp]
+                if not source_paths_list:
+                    continue
+
+                matched_asset = None
+                for sp in source_paths_list:
+                    matched_asset = asset_by_source_path.get(sp)
+                    if matched_asset is None:
+                        try:
+                            matched_asset = asset_by_source_path.get(str(Path(sp).resolve()))
+                        except Exception:
+                            pass
+                    if matched_asset is not None:
+                        break
+                if matched_asset is None:
+                    continue
+
+                title = str(matched_asset.get("title") or "").strip()
+                asset_type = str(matched_asset.get("type") or "").strip().lower()
+                year = matched_asset.get("year") if isinstance(matched_asset.get("year"), int) else None
+                if not title or not asset_type:
+                    continue
+
+                dedupe_key = self._pending_asset_key(
+                    asset_type=asset_type,
+                    title=title,
+                    year=year,
+                    pending_reason="rename_conflict",
+                    source_path=source_paths_list[0],
+                )
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                conflict_file_names = [Path(sp).name for sp in source_paths_list if sp]
+                conflict_assets.append(
+                    {
+                        "title": title,
+                        "year": year,
+                        "type": asset_type,
+                        "match_reason": "rename_conflict",
+                        "pending_reason": "rename_conflict",
+                        "source_path": source_paths_list[0],
+                        "conflict_files": conflict_file_names,
+                        "conflict_file_paths": [str(sp) for sp in source_paths_list if sp],
+                    }
+                )
                 continue
 
             source_path = str(row.get("source_path") or "").strip()
@@ -3402,6 +3936,17 @@ class IdarrRunner:
         old_stem = Path(stripped_old_filename).stem
         ext = Path(stripped_old_filename).suffix
 
+        # Asset drive files always use a fixed extension and carry a subtype label
+        asset_subtype = str(asset.get("asset_subtype") or "").strip().lower()
+        if asset_subtype == "logo":
+            ext = ".png"
+            asset_subtype_label = " - logo"
+        elif asset_subtype == "backdrop":
+            ext = ".jpg"
+            asset_subtype_label = " - backdrop"
+        else:
+            asset_subtype_label = ""
+
         base_title = str(asset.get("new_title") or asset.get("title") or old_stem).strip()
         base_year: int | None = None
         if isinstance(asset.get("new_year"), int):
@@ -3458,7 +4003,7 @@ class IdarrRunner:
         else:
             base = f"{normalized_base_title}{f' ({base_year})' if base_year else ''}"
 
-        new_name = f"{base}{suffix}{season_suffix}{ext}"
+        new_name = f"{base}{suffix}{season_suffix}{asset_subtype_label}{ext}"
 
         cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "", new_name)
         cleaned = " ".join(cleaned.split()).strip()
@@ -3576,7 +4121,7 @@ class IdarrRunner:
             "dry_run",
         ]
         with csv_path.open("w", newline="", encoding="utf-8") as file_obj:
-            writer = csv.DictWriter(file_obj, fieldnames=fieldnames)
+            writer = csv.DictWriter(file_obj, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
             for row in rows:
                 writer.writerow(row)
@@ -3593,6 +4138,31 @@ class IdarrRunner:
             return True
         source.rename(destination)
         return True
+
+    @staticmethod
+    def _convert_asset_drive_file(file_path: Path, asset_subtype: str) -> None:
+        """Re-encode an asset drive file to its required format.
+
+        Logos are always PNG with alpha preserved; backdrops are always JPEG flattened to RGB.
+        Called after rename when the original extension differed from the target.
+        """
+        try:
+            img = Image.open(file_path)
+            if asset_subtype == "logo":
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                img.save(file_path, "PNG")
+            elif asset_subtype == "backdrop":
+                if img.mode in ("RGBA", "LA", "P"):
+                    background = Image.new("RGB", img.size, (0, 0, 0))
+                    converted = img.convert("RGBA") if img.mode == "P" else img
+                    background.paste(converted, mask=converted.split()[-1])
+                    img = background
+                elif img.mode != "RGB":
+                    img = img.convert("RGB")
+                img.save(file_path, "JPEG", quality=95, subsampling=0)
+        except (UnidentifiedImageError, Exception) as exc:
+            log_warning(LogTags.IDARR, f"Asset format conversion failed for '{file_path.name}': {exc}")
 
     def _transfer_file(
         self,
@@ -3703,9 +4273,52 @@ class IdarrRunner:
         operation_rows: list[dict[str, Any]] = []
         duplicates_dir_for_log: Path | None = None
         total_assets = len(assets)
-        progress_interval = 25 if total_assets <= 500 else 100
+        progress_interval = 25
+
+        _target_to_indices: dict[str, list[int]] = {}
+        _precomputed_filenames: list[str] = []
+        for _pi, _pa in enumerate(assets):
+            _sf = _pa["file_path"]
+            _nf = self.generate_new_filename(_pa, _sf.name)
+            _precomputed_filenames.append(_nf)
+            _key = str(_sf.parent / _nf)
+            _target_to_indices.setdefault(_key, []).append(_pi)
+
+        _intra_conflict_indices: set[int] = set()
+        for _norm_target, _idxs in _target_to_indices.items():
+            if len(_idxs) < 2:
+                continue
+            _src_paths = [str(assets[_i]["file_path"]) for _i in _idxs]
+            conflict_rows.append(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source_path": _src_paths[0],
+                    "source_paths": _src_paths,
+                    "target_path": _norm_target,
+                    "resolution": "intra_batch_filename_conflict",
+                    "archived_path": "",
+                    "action_mode": "rename",
+                    "dry_run": str(dry_run).lower(),
+                }
+            )
+            for _i in _idxs:
+                _intra_conflict_indices.add(_i)
+                duplicate_conflicts += 1
+                skipped_count += 1
+                operation_rows.append(
+                    {
+                        "operation": "rename",
+                        "from_path": str(assets[_i]["file_path"]),
+                        "to_path": _norm_target,
+                        "status": "skipped",
+                        "revert_supported": False,
+                        "reason": "intra_batch_filename_conflict",
+                    }
+                )
 
         for index, asset in enumerate(assets, start=1):
+            if (index - 1) in _intra_conflict_indices:
+                continue
             source_file = asset["file_path"]
             new_filename = self.generate_new_filename(asset, source_file.name)
             original_path = str(source_file)
@@ -3746,6 +4359,12 @@ class IdarrRunner:
                             old_filename=source_file.name,
                             new_filename=new_filename,
                         ) or cache_history_updated
+                        # Convert asset drive files when extension changed (e.g. webp → png/jpg)
+                        _asset_subtype = str(asset.get("asset_subtype") or "").strip().lower()
+                        if _asset_subtype and source_file.suffix.lower() != Path(new_filename).suffix.lower():
+                            self._convert_asset_drive_file(source_file.with_name(new_filename), _asset_subtype)
+
+                        asset["file_path"] = source_file.with_name(new_filename)
                     operation_rows.append(
                         {
                             "operation": "rename",
@@ -3786,6 +4405,7 @@ class IdarrRunner:
                                         old_filename=source_file.name,
                                         new_filename=new_filename,
                                     ) or cache_history_updated
+                                    asset["file_path"] = source_file.with_name(new_filename)
                             conflict_rows.append(
                                 {
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -3869,7 +4489,7 @@ class IdarrRunner:
                         }
                     )
 
-            if progress_callback and total_assets > 0 and (index % progress_interval == 0 or index == total_assets):
+            if progress_callback and total_assets > 0 and (index == 1 or index % progress_interval == 0 or index == total_assets):
                 try:
                     progress_callback(
                         index,
@@ -4032,7 +4652,7 @@ class IdarrRunner:
                 LogTags.IDARR,
                 f"IDarr Settings payload: {json.dumps(compatibility_payload, default=str, sort_keys=True)}",
             )
-            _notify_progress("initializing", 8, "Loaded IDarr runtime settings")
+            _notify_progress("initializing", 3, "Loaded IDarr runtime settings")
 
         pending_only = bool(config_data.get("pending_matches", False))
         allowed_asset_keys: set[str] | None = None
@@ -4073,14 +4693,48 @@ class IdarrRunner:
                 removed=removed_count,
                 dry_run_only=dry_run_count,
             )
-            _notify_progress("cleanup", 12, f"Cleanup complete: removed {removed_count} non-image file(s)")
+            _notify_progress("cleanup", 6, f"Cleanup complete: removed {removed_count} non-image file(s)")
 
         selected_source_filenames = self._extract_selected_source_filenames(config_data)
         single_item_mode = bool(selected_source_filenames)
 
-        log_info(LogTags.IDARR, f"Scanning directory for image assets: {source_dir}", source_dir=str(source_dir))
-        _notify_progress("scanning", 15, f"Scanning source folder: {source_dir}")
-        assets = self.scan_files_in_flat_folder(source_dir)
+        is_asset_drive = bool(config_data.get("is_asset_drive", False))
+        is_psd_drive = bool(config_data.get("is_psd_drive", False))
+        if is_asset_drive:
+            log_info(
+                LogTags.IDARR,
+                f"Asset drive mode: scanning logos/ and backdrops/ subfolders of: {source_dir}",
+                source_dir=str(source_dir),
+            )
+            _notify_progress("scanning", 9, f"Scanning asset drive subfolders: {source_dir}")
+            assets = self.scan_asset_drive_subfolders(source_dir)
+        elif is_psd_drive:
+            # PSD drive: a flat folder using asset-style matching (no season-suffix hints, since
+            # PSD source files don't carry season info) but without the logos/backdrops subfolders.
+            log_info(
+                LogTags.IDARR,
+                f"PSD drive mode: scanning flat folder with asset-style matching: {source_dir}",
+                source_dir=str(source_dir),
+            )
+            _notify_progress("scanning", 9, f"Scanning PSD drive folder: {source_dir}")
+            assets = self._scan_assets_for_asset_drive(source_dir)
+        else:
+            log_info(LogTags.IDARR, f"Scanning directory for image assets: {source_dir}", source_dir=str(source_dir))
+            _notify_progress("scanning", 9, f"Scanning source folder: {source_dir}")
+            assets = self.scan_files_in_flat_folder(source_dir)
+
+        unsupported_files = self._find_unsupported_image_files(source_dir, is_asset_drive=is_asset_drive)
+        if unsupported_files:
+            ext_groups: dict[str, list[str]] = {}
+            for _uf in unsupported_files:
+                ext_groups.setdefault(_uf.suffix.lower(), []).append(_uf.name)
+            for _ext, _names in sorted(ext_groups.items()):
+                _examples = ", ".join(_names[:3])
+                if len(_names) > 3:
+                    _examples += f" (and {len(_names) - 3} more)"
+                _msg = f"Unsupported file format {_ext}: {_examples} — these files cannot be renamed or processed"
+                warnings.append(_msg)
+                log_warning(LogTags.IDARR, _msg)
 
         if selected_source_filenames:
             assets = [
@@ -4098,13 +4752,13 @@ class IdarrRunner:
                     source_dir=str(source_dir),
                     selected_count=len(selected_source_filenames),
                 )
-                _notify_progress("scanning", 25, "No selected upload files were found in source folder")
+                _notify_progress("scanning", 12, "No selected upload files were found in source folder")
             else:
                 log_info(LogTags.IDARR, f"No image assets found in source folder: {source_dir}", source_dir=str(source_dir))
-                _notify_progress("scanning", 25, "No image assets found in source folder")
+                _notify_progress("scanning", 12, "No image assets found in source folder")
         else:
             log_info(LogTags.IDARR, f"Completed scanning: discovered {total_assets} image asset(s)", total_assets=total_assets)
-            _notify_progress("scanning", 25, f"Discovered {total_assets} image asset(s)")
+            _notify_progress("scanning", 12, f"Discovered {total_assets} image asset(s)")
 
         if ignored_asset_keys:
             before_ignored = len(assets)
@@ -4151,7 +4805,7 @@ class IdarrRunner:
             tvdb_frequency = 1
 
         log_info(LogTags.IDARR, "Starting metadata enrichment via TMDB")
-        _notify_progress("enrichment", 35, "Enriching metadata via TMDB")
+        _notify_progress("enrichment", 12, "Enriching metadata via TMDB")
 
         def _map_progress(current: int, total: int, start: int, end: int) -> int:
             if total <= 0:
@@ -4161,7 +4815,7 @@ class IdarrRunner:
             return start + int((bounded_current / total) * span)
 
         def _enrichment_progress(current: int, total: int, message: str) -> None:
-            mapped_progress = _map_progress(current, total, 35, 79)
+            mapped_progress = _map_progress(current, total, 12, 78)
             _notify_progress("enrichment", mapped_progress, message)
 
         enrichment_stats, enrichment_details = self.handle_data(
@@ -4183,7 +4837,7 @@ class IdarrRunner:
                 f"errors={int(enrichment_stats.get('errors', 0))}"
             ),
         )
-        _notify_progress("enrichment", 70, "Metadata enrichment complete")
+        _notify_progress("enrichment", 78, "Metadata enrichment complete")
         tvdb_rehydrated = int(enrichment_stats.get("tvdb_rehydrate_calls", 0))
         if tvdb_rehydrated > 0:
             log_info(LogTags.IDARR, f"\u2705 Rehydrated {tvdb_rehydrated} TV series {'entry' if tvdb_rehydrated == 1 else 'entries'}.")
@@ -4217,23 +4871,6 @@ class IdarrRunner:
             warnings.append(f"Failed to update IDarr cache table: {exc}")
             log_warning(LogTags.IDARR, f"Failed to update IDarr cache table: {exc}")
 
-        unmatched_assets = [
-            {
-                "title": str(asset.get("title") or "").strip(),
-                "year": asset.get("year") if isinstance(asset.get("year"), int) else None,
-                "type": str(asset.get("type") or "").strip().lower(),
-                "match_reason": str(asset.get("match_reason") or "no_match").strip() or "no_match",
-                "pending_reason": str(asset.get("pending_reason") or "").strip().lower() or None,
-                "source_path": str(asset.get("file_path") or "").strip() or None,
-            }
-            for asset in assets
-            if not bool(asset.get("has_id", False))
-        ]
-        if bool(app_settings.debug) and unmatched_assets:
-            for _unmatched in unmatched_assets:
-                _unmatched_title = str(_unmatched.get("title") or "unknown")
-                log_debug(LogTags.IDARR, f"\u274c Unmatched: {_unmatched_title}")
-
         renamed_count = 0
         skipped_count = 0
         duplicate_conflicts = 0
@@ -4263,7 +4900,7 @@ class IdarrRunner:
         duplicates_dir_for_log = rename_results.get("duplicates_dir_for_log") if isinstance(rename_results.get("duplicates_dir_for_log"), Path) else None
         _notify_progress(
             "renaming",
-            90,
+            95,
             f"Rename phase complete: renamed {renamed_count}, skipped {skipped_count}, conflicts {duplicate_conflicts}",
         )
 
@@ -4276,6 +4913,23 @@ class IdarrRunner:
                 self.db.rollback()
                 warnings.append(f"Failed to persist IDarr rename history: {exc}")
                 log_warning(LogTags.IDARR, f"Failed to persist IDarr rename history: {exc}")
+
+        unmatched_assets = [
+            {
+                "title": str(asset.get("title") or "").strip(),
+                "year": asset.get("year") if isinstance(asset.get("year"), int) else None,
+                "type": "pending",
+                "match_reason": str(asset.get("match_reason") or "no_match").strip() or "no_match",
+                "pending_reason": str(asset.get("pending_reason") or "").strip().lower() or None,
+                "source_path": str(asset.get("file_path") or "").strip() or None,
+            }
+            for asset in assets
+            if not bool(asset.get("has_id", False))
+        ]
+        if bool(app_settings.debug) and unmatched_assets:
+            for _unmatched in unmatched_assets:
+                _unmatched_title = str(_unmatched.get("title") or "unknown")
+                log_debug(LogTags.IDARR, f"❌ Unmatched: {_unmatched_title}")
 
         duplicate_log_csv: str | None = None
         if conflict_rows:
@@ -4330,6 +4984,14 @@ class IdarrRunner:
             self.db.rollback()
             warnings.append(f"Failed to finalize ignored/pending sync: {exc}")
             log_warning(LogTags.IDARR, f"Failed to finalize ignored/pending sync: {exc}")
+
+        if not single_item_mode:
+            try:
+                self._prune_orphaned_pending_cache_rows()
+            except Exception as exc:
+                self.db.rollback()
+                warnings.append(f"Failed to prune orphaned pending cache rows: {exc}")
+                log_warning(LogTags.IDARR, f"Failed to prune orphaned pending cache rows: {exc}")
 
         orphan_prune_stats = {"removed_cache": 0, "removed_pending": 0}
         if bool(config_data.get("prune", False)) and not single_item_mode:

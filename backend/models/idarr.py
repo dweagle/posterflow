@@ -365,7 +365,7 @@ def sanitize_idarr_scope_token(value: Any) -> str | None:
 def normalize_idarr_asset_type(asset_type: Any) -> str | None:
     """Return the canonical Idarr asset type string for *asset_type*, or ``None`` if not recognised.
 
-    Canonical values: ``"movie"``, ``"tv_series"``, ``"collection"``.
+    Canonical values: ``"movie"``, ``"tv_series"``, ``"collection"``, ``"pending"``.
     """
     raw = str(asset_type or "").strip().lower()
     if raw in {"movie", "movies"}:
@@ -374,6 +374,8 @@ def normalize_idarr_asset_type(asset_type: Any) -> str | None:
         return "tv_series"
     if raw in {"collection", "collections"}:
         return "collection"
+    if raw == "pending":
+        return "pending"
     return None
 
 

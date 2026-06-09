@@ -67,6 +67,7 @@ export {
   getMakerIdarrPendingMatches,
   getPlexLibraries,
   getPlexLibraryConfigs,
+  archiveIdarrSourceFile,
   getSettings,
   importMakerIdarrIgnoredTitles,
   removeMakerIdarrIgnoredTitle,

@@ -317,6 +317,8 @@ def run_idarr_for_schedule(idarr_scope: Optional[str] = None, sync_after_run: bo
         scheduled_config_data["sync_after_run"] = sync_after_run
         scheduled_config_data["force_sync_after_run"] = force_sync_after_run
         scheduled_config_data["tmdb_api_key"] = tmdb_api_key
+        scheduled_config_data["is_asset_drive"] = bool(selected_target.get("is_asset_drive", False))
+        scheduled_config_data["is_psd_drive"] = bool(selected_target.get("is_psd_drive", False))
 
         _queue_pending_job(
             db,
