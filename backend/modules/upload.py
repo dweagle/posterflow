@@ -1663,22 +1663,28 @@ def run_plex_upload_background_job(
                 )
 
         mode_label = "Dry Run" if dry_run else "Live"
+        year_discrepancy_text = _format_year_discrepancy_text(stats.get("year_discrepancies", []) or [])
         if not skip_discord:
+            discord_fields = [
+                {"name": "Movies", "value": str(movies_uploaded), "inline": True},
+                {"name": "Shows", "value": str(shows_uploaded), "inline": True},
+                {"name": "Seasons", "value": str(seasons_uploaded), "inline": True},
+                {"name": "Collections", "value": str(collections_uploaded), "inline": True},
+                {"name": "Matched", "value": f"{matched_count:,}/{scanned_count:,}", "inline": True},
+                {"name": "Mode", "value": mode_label, "inline": True},
+            ]
+            if year_discrepancy_text:
+                discord_fields.append(
+                    {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
+                )
             send_discord_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
                 title="Plex Upload Completed",
                 description=f"{uploaded_count:,} poster(s) uploaded ({mode_label.lower()})",
-                fields=[
-                    {"name": "Movies", "value": str(movies_uploaded), "inline": True},
-                    {"name": "Shows", "value": str(shows_uploaded), "inline": True},
-                    {"name": "Seasons", "value": str(seasons_uploaded), "inline": True},
-                    {"name": "Collections", "value": str(collections_uploaded), "inline": True},
-                    {"name": "Matched", "value": f"{matched_count:,}/{scanned_count:,}", "inline": True},
-                    {"name": "Mode", "value": mode_label, "inline": True},
-                ],
-                color=0x4CAF50,
+                fields=discord_fields,
+                color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
             )
 
         log_section_end(LogTags.UPLOADER, "Plex Upload Complete")
@@ -1743,6 +1749,25 @@ def _has_destination_assets_for_target(
         return bool(matched_assets)
     except Exception:
         return False
+
+
+def _format_year_discrepancy_text(year_discrepancies: list) -> str:
+    """Human-readable summary of ID-matched uploads whose folder year (Radarr/Sonarr)
+    disagrees with the Plex item year. Returns '' when there are none."""
+    if not year_discrepancies:
+        return ""
+    if len(year_discrepancies) == 1:
+        disc = year_discrepancies[0]
+        return (
+            f"{disc.get('title')}: Plex year {disc.get('plex_year')} differs from "
+            f"Radarr/Sonarr folder year {disc.get('folder_year')}; matched by ID and uploaded anyway"
+        )
+    titles = ", ".join(str(d.get("title")) for d in year_discrepancies[:3])
+    more = f" (+{len(year_discrepancies) - 3} more)" if len(year_discrepancies) > 3 else ""
+    return (
+        f"{len(year_discrepancies)} item(s) matched by ID despite a Plex vs Radarr/Sonarr "
+        f"year mismatch: {titles}{more}"
+    )
 
 
 def _build_no_local_assets_warning_message(media_type: str | None, title: str | None) -> str:
@@ -2190,6 +2215,7 @@ def run_plex_webhook_background_job(
         result = None
         saw_retryable_preflight_failure = False
         saw_non_preflight_processing = False
+        year_discrepancies: list = []
 
         def _is_retryable_preflight_error(error_text: str) -> bool:
             normalized = str(error_text or "").strip().lower()
@@ -2284,6 +2310,7 @@ def run_plex_webhook_background_job(
                 "errors": 0,
                 "plex_seasons_missing": 0,
             }
+            year_discrepancies = []
 
             for target in webhook_targets:
                 target_season_number = target.get("season_number")
@@ -2360,6 +2387,9 @@ def run_plex_webhook_background_job(
                     raise Exception(target_error)
 
                 target_stats = target_result.get("stats", {})
+                for disc in target_stats.get("year_discrepancies", []) or []:
+                    if disc not in year_discrepancies:
+                        year_discrepancies.append(disc)
                 saw_non_preflight_processing = True
                 log_info(
                     LogTags.UPLOADER,
@@ -2544,19 +2574,35 @@ def run_plex_webhook_background_job(
         media_label = str(media_type or "item").strip().lower()
         pretty_media = "Movie" if media_label == "movie" else "Show" if media_label == "show" else "Season" if media_label == "season" else media_label.title()
 
+        year_discrepancy_text = _format_year_discrepancy_text(year_discrepancies)
+        if year_discrepancy_text:
+            log_debug(
+                LogTags.UPLOADER,
+                f"Webhook year discrepancy: {year_discrepancy_text}",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+                discrepancies=year_discrepancies,
+            )
+
         if uploaded_count > 0:
+            discord_fields = [
+                {"name": "Media", "value": pretty_media, "inline": True},
+                {"name": "Title", "value": str(title), "inline": True},
+                {"name": "Uploaded", "value": str(uploaded_count), "inline": True},
+            ]
+            if year_discrepancy_text:
+                discord_fields.append(
+                    {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
+                )
             send_discord_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
                 title="Plex Upload",
                 description=f"Uploaded {pretty_media}: {title}{season_text}",
-                fields=[
-                    {"name": "Media", "value": pretty_media, "inline": True},
-                    {"name": "Title", "value": str(title), "inline": True},
-                    {"name": "Uploaded", "value": str(uploaded_count), "inline": True},
-                ],
-                color=0x4CAF50,
+                fields=discord_fields,
+                color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
             )
 
         log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Complete")
@@ -2652,6 +2698,27 @@ def run_plex_single_manual_background_job(
             log_info(LogTags.UPLOADER, "Skipping rename pass before upload (rename_before_upload=False)")
 
         service = PlexUploadService(db, upload_delay_ms=_get_manual_upload_delay_ms(db))
+
+        # Build a targeted Plex index scoped to just this item
+        targeted_context_error = service.prepare_webhook_context(
+            tmdb_id=payload.get("tmdb_id"),
+            tvdb_id=payload.get("tvdb_id"),
+            imdb_id=payload.get("imdb_id"),
+            title=title,
+            year=payload.get("year"),
+            media_type=media_type,
+            allow_full_fallback=True,
+        )
+        if targeted_context_error:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Manual single upload: targeted Plex index build failed — '{targeted_context_error}'; "
+                "run_single_upload will rebuild context",
+                title=title,
+                media_type=media_type,
+                error=targeted_context_error,
+            )
+
         callback_start = max(35, int(job.progress or 0))
         callback_end = 95
         last_progress = int(job.progress or 0)

@@ -235,6 +235,10 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
         def __init__(self, _db, **_kwargs):
             pass
 
+        def prepare_webhook_context(self, **kwargs):
+            captured["targeted_context"] = kwargs
+            return None
+
         def run_single_upload(self, **_kwargs):
             return {
                 "success": True,
@@ -259,6 +263,7 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
             "media_type": "movie",
             "title": "The Matrix",
             "year": 1999,
+            "tmdb_id": 603,
             "dry_run": True,
             "remove_overlay_label": False,
         },
@@ -270,6 +275,14 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
     assert captured["dry_run"] is True
     assert refreshed.message is not None
     assert "prep: rename matched 2, border would_change 1" in refreshed.message
+
+    # Manual single upload should build a targeted (single-item) index, not a full scan.
+    assert captured.get("targeted_context") is not None
+    assert captured["targeted_context"]["tmdb_id"] == 603
+    assert captured["targeted_context"]["title"] == "The Matrix"
+    assert captured["targeted_context"]["year"] == 1999
+    assert captured["targeted_context"]["media_type"] == "movie"
+    assert captured["targeted_context"]["allow_full_fallback"] is True
 
 
 def test_webhook_settings_default_disabled(client):
@@ -2756,6 +2769,175 @@ def test_select_local_assets_for_target_collection_no_suffix_also_added(test_db)
 
     assert len(result) == 1
     assert result[0]["media_key"] == "meninblackcollection"
+
+
+def test_select_local_assets_for_target_id_match_ignores_year_mismatch(test_db):
+    """An asset matched by a unique ID must not be discarded by the year filter when
+    the on-disk folder year disagrees with the Plex-reported year (regression: folder
+    'Michael (2025)' vs Plex year 2026 caused the webhook to skip the upload)."""
+    service = PlexUploadService(test_db)
+
+    # Destination folder named (2025) but Plex reports the movie as 2026.
+    asset = {
+        "media_key": "michael2025",
+        "path": "/assets/Michael (2025) {tmdb-936075} {imdb-tt11378946}/poster.jpg",
+        "display_name": "Michael",
+        "asset_type": "main",
+        "folder_year": 2025,
+    }
+
+    result = service._select_local_assets_for_target(
+        [asset],
+        media_type="movie",
+        title="Michael",
+        year=2026,
+        tmdb_id=936075,
+        imdb_id="tt11378946",
+    )
+
+    assert len(result) == 1
+    assert result[0]["path"] == "/assets/Michael (2025) {tmdb-936075} {imdb-tt11378946}/poster.jpg"
+
+
+def test_select_local_assets_for_target_title_match_still_year_filtered(test_db):
+    """Without an ID match, the year filter must still reject a folder whose year
+    differs from the target (e.g. 'Hairspray (1988)' should not satisfy a 2007 lookup)."""
+    service = PlexUploadService(test_db)
+
+    asset = {
+        "media_key": "hairspray",
+        "path": "/assets/Hairspray (1988)/poster.jpg",
+        "display_name": "Hairspray",
+        "asset_type": "main",
+        "folder_year": 1988,
+    }
+
+    result = service._select_local_assets_for_target(
+        [asset],
+        media_type="movie",
+        title="Hairspray",
+        year=2007,
+    )
+
+    assert result == []
+
+
+def test_resolve_index_candidates_id_match_trusts_id_over_year(test_db):
+    """A unique ID match against a Plex item is authoritative: a folder year that
+    disagrees with the Plex item's year (folder 'Michael (2025)' vs Plex year 2026)
+    must NOT discard the ID match and force a retry."""
+    service = PlexUploadService(test_db)
+
+    plex_item = _FakePlexItem("movie", "Michael", year=2026, rating_key="m1")
+    index_map = {"id:tmdb:936075": [plex_item], "id:imdb:tt11378946": [plex_item]}
+
+    result = service._resolve_index_candidates(
+        index_map,
+        media_key="michael",
+        asset_id_keys=["id:tmdb:936075", "id:imdb:tt11378946"],
+        folder_year=2025,
+    )
+
+    assert len(result) == 1
+    assert result[0] is plex_item
+
+
+def test_resolve_index_candidates_id_match_prefers_year_when_multiple(test_db):
+    """When a single ID key maps to multiple Plex items, the folder year is still
+    used to narrow to the year-correct one (year as tie-breaker, not a reject)."""
+    service = PlexUploadService(test_db)
+
+    item_2025 = _FakePlexItem("movie", "Michael", year=2025, rating_key="m1")
+    item_2026 = _FakePlexItem("movie", "Michael", year=2026, rating_key="m2")
+    index_map = {"id:tmdb:936075": [item_2025, item_2026]}
+
+    result = service._resolve_index_candidates(
+        index_map,
+        media_key="michael",
+        asset_id_keys=["id:tmdb:936075"],
+        folder_year=2025,
+    )
+
+    assert result == [item_2025]
+
+
+def test_note_year_discrepancy_records_id_match_with_year_mismatch(test_db):
+    """An ID-matched upload whose folder year disagrees with the Plex item year should be
+    recorded (for log/Discord surfacing) without blocking the upload."""
+    service = PlexUploadService(test_db)
+    service._year_discrepancies = []
+
+    asset = {
+        "media_key": "michael",
+        "display_name": "Michael (2025)",
+        "path": "/assets/Michael (2025) {tmdb-936075} {imdb-tt11378946}/poster.jpg",
+        "asset_type": "main",
+        "folder_year": 2025,
+    }
+    matched_items = [_FakePlexItem("movie", "Michael", year=2026, rating_key="m1")]
+
+    service._note_year_discrepancy(asset, matched_items, ["id:tmdb:936075"], asset["path"])
+
+    assert service._year_discrepancies == [
+        {"title": "Michael (2025)", "folder_year": 2025, "plex_year": 2026}
+    ]
+
+    # Idempotent: re-recording the same discrepancy does not duplicate it.
+    service._note_year_discrepancy(asset, matched_items, ["id:tmdb:936075"], asset["path"])
+    assert len(service._year_discrepancies) == 1
+
+
+def test_note_year_discrepancy_silent_when_years_match(test_db):
+    """No discrepancy is recorded when the folder year matches the Plex item year."""
+    service = PlexUploadService(test_db)
+    service._year_discrepancies = []
+
+    asset = {"media_key": "michael", "folder_year": 2026, "asset_type": "main"}
+    matched_items = [_FakePlexItem("movie", "Michael", year=2026)]
+
+    service._note_year_discrepancy(asset, matched_items, ["id:tmdb:936075"], "/p")
+
+    assert service._year_discrepancies == []
+
+
+def test_note_year_discrepancy_skipped_for_title_only_match(test_db):
+    """Without an ID match (title-only), a year mismatch should not be flagged as an ID
+    discrepancy — title matches are already year-filtered upstream."""
+    service = PlexUploadService(test_db)
+    service._year_discrepancies = []
+
+    asset = {"media_key": "michael", "folder_year": 2025, "asset_type": "main"}
+    matched_items = [_FakePlexItem("movie", "Michael", year=2026)]
+
+    service._note_year_discrepancy(asset, matched_items, [], "/p")
+
+    assert service._year_discrepancies == []
+
+
+def test_format_year_discrepancy_text_empty_single_and_multiple():
+    """The shared Discord/log formatter handles none, one, and many discrepancies."""
+    import modules.upload as upload_module
+
+    assert upload_module._format_year_discrepancy_text([]) == ""
+
+    single = upload_module._format_year_discrepancy_text(
+        [{"title": "Michael (2025)", "folder_year": 2025, "plex_year": 2026}]
+    )
+    assert "Michael (2025)" in single
+    assert "Plex year 2026" in single
+    assert "folder year 2025" in single
+
+    many = upload_module._format_year_discrepancy_text(
+        [
+            {"title": "A", "folder_year": 2001, "plex_year": 2002},
+            {"title": "B", "folder_year": 2003, "plex_year": 2004},
+            {"title": "C", "folder_year": 2005, "plex_year": 2006},
+            {"title": "D", "folder_year": 2007, "plex_year": 2008},
+        ]
+    )
+    assert many.startswith("4 item(s)")
+    assert "A, B, C" in many
+    assert "(+1 more)" in many
 
 
 def test_plex_upload_cache_entries_limit_and_offset_safety(client, test_db):

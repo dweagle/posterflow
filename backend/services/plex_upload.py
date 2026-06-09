@@ -38,6 +38,7 @@ class PlexUploadService:
         self.db = db
         self.upload_delay_ms = max(0, upload_delay_ms)
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
+        self._year_discrepancies: List[Dict[str, Any]] = []  # ID-matched uploads where folder year != Plex year
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._preflight_context_cache: Optional[
@@ -313,6 +314,7 @@ class PlexUploadService:
             return self._no_assets_result(self.MESSAGE_NO_POSTER_ASSETS)
 
         stats = self._build_run_stats(local_assets, library_totals)
+        self._year_discrepancies = []
         arr_availability = self._get_arr_availability_index()
         self._process_assets_for_upload(
             local_assets=local_assets,
@@ -323,6 +325,7 @@ class PlexUploadService:
             remove_overlay_label=remove_overlay_label,
             progress_callback=progress_callback,
         )
+        stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
 
@@ -401,6 +404,7 @@ class PlexUploadService:
             return self._no_assets_result(f"No local assets found for '{title}'.")
 
         stats = self._build_run_stats(local_assets, library_totals)
+        self._year_discrepancies = []
         arr_availability = self._get_arr_availability_index(media_type_filter=media_type_normalized)
         self._process_assets_for_upload(
             local_assets=local_assets,
@@ -412,6 +416,7 @@ class PlexUploadService:
             media_type_filter=media_type_normalized,
             progress_callback=progress_callback,
         )
+        stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
 
@@ -684,6 +689,7 @@ class PlexUploadService:
         target_id_keys = self._target_asset_id_keys(tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id)
 
         local_assets = [asset for asset in all_assets if asset.get("media_key") in media_keys]
+        id_matched = False
         if target_id_keys:
             id_matched_assets = [
                 asset
@@ -692,9 +698,13 @@ class PlexUploadService:
             ]
             if id_matched_assets:
                 local_assets = id_matched_assets
+                id_matched = True
 
-        # Year-based filtering
-        if year is not None:
+        # Year-based filtering. Only disambiguates title-based matches (e.g.
+        # "Hairspray (1988)" vs "(2007)"). A unique ID match is authoritative even
+        # when the on-disk folder year disagrees with Plex (e.g. folder "Michael
+        # (2025)" vs Plex year 2026), so we must not year-filter ID matches.
+        if year is not None and not id_matched:
             local_assets = [
                 a for a in local_assets
                 if a.get("folder_year") is None or a.get("folder_year") == year
@@ -1510,6 +1520,8 @@ class PlexUploadService:
                         file=file_path,
                     )
                     return uploaded, True, len(shows_raw), len(shows), media_counts, 1
+            if uploaded > 0:
+                self._note_year_discrepancy(asset, shows, asset_id_keys, file_path)
             return uploaded, True, len(shows_raw), len(shows), media_counts, 0
 
         inferred_filter, resolution_reason = self._resolve_target_media_type(
@@ -1668,7 +1680,51 @@ class PlexUploadService:
                 )
             log_info(LogTags.UPLOADER, f"Uploaded {item_label}", file=file_path, asset=asset_label)
 
+        if uploaded > 0:
+            self._note_year_discrepancy(asset, matched_items, asset_id_keys, file_path)
+
         return uploaded, True, raw_candidate_count, len(matched_items), media_counts, 0
+
+    def _note_year_discrepancy(
+        self,
+        asset: Dict[str, Any],
+        matched_items: List[Any],
+        asset_id_keys: List[Any],
+        file_path: str,
+    ) -> None:
+        """Record (and warn) when a poster was matched to a Plex item by unique ID but the
+        on-disk folder year (from Radarr/Sonarr) disagrees with the Plex item's year.
+
+        The upload is correct — the ID is authoritative — but the year mismatch signals
+        stale metadata on one side that the user may want to reconcile."""
+        folder_year = asset.get("folder_year")
+        if folder_year is None or not asset_id_keys:
+            return
+
+        for item in matched_items:
+            plex_year = getattr(item, "year", None)
+            if not isinstance(plex_year, int) or plex_year == folder_year:
+                continue
+
+            title = str(asset.get("display_name") or asset.get("media_key") or "Unknown")
+            descriptor = {
+                "title": title,
+                "folder_year": int(folder_year),
+                "plex_year": int(plex_year),
+            }
+            if descriptor not in self._year_discrepancies:
+                self._year_discrepancies.append(descriptor)
+
+            log_warning(
+                LogTags.UPLOADER,
+                f"Year discrepancy: matched '{title}' by ID and uploaded, but Plex year "
+                f"{plex_year} differs from Radarr/Sonarr folder year {folder_year}",
+                file=file_path,
+                title=title,
+                plex_year=plex_year,
+                folder_year=folder_year,
+            )
+            return
 
     def _remove_overlay_label_if_present(self, item: Any, *, file_path: str) -> None:
         try:
@@ -1950,10 +2006,11 @@ class PlexUploadService:
                     year_filtered = [item for item in deduped_id_candidates if _item_year(item) == folder_year]
                     if year_filtered:
                         return year_filtered
-                    # ID matched but year is wrong — wrong ID entered or stale metadata.
-                    # Fall through to year-filtered title lookup below.
-                else:
-                    return deduped_id_candidates
+                    # ID matched but folder year disagrees with Plex (e.g. folder
+                    # "Michael (2025)" vs Plex year 2026). A unique ID match is
+                    # authoritative — trust it over the folder year rather than
+                    # discarding it and falling back to a title+year lookup.
+                return deduped_id_candidates
             # IDs were present but nothing matched in the Plex index. Two possible causes:
             # (a) Plex hasn't scanned the item yet — we must not fall back to a same-title
             #     different-year item (e.g. plex_1957 when we want plex_2007).
