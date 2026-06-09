@@ -83,6 +83,46 @@ def test_download_file_returns_true_or_false_from_rclone_result(monkeypatch, tmp
     assert service.download_file("drive-123", "remote/poster.jpg", local_file) is False
 
 
+def test_sync_folder_restricts_to_poster_filetypes_and_size(monkeypatch, tmp_path):
+    """sync_folder must constrain the download to poster/PSD file types and a max
+    file size so a shared Drive cannot push arbitrary or oversized files to disk."""
+    from services.rclone import SYNC_INCLUDE_REGEX, SYNC_MAX_FILE_SIZE
+
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
+    service = RcloneService()
+    monkeypatch.setattr(service, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
+    monkeypatch.setattr(service, "_sync_refreshed_token_to_db", lambda _original: None)
+
+    captured = {}
+
+    class _FakeProcess:
+        stdout = iter([])
+        returncode = 0
+
+        def wait(self):
+            return None
+
+    def _fake_popen(args, **_kwargs):
+        captured["args"] = args
+        return _FakeProcess()
+
+    monkeypatch.setattr("services.rclone.subprocess.Popen", _fake_popen)
+
+    result = service.sync_folder("drive-123", tmp_path / "local")
+    assert result["success"] is True
+
+    args = captured["args"]
+    # --include must immediately precede the regex value, and --max-size the size.
+    assert "--include" in args
+    assert args[args.index("--include") + 1] == SYNC_INCLUDE_REGEX
+    assert "--max-size" in args
+    assert args[args.index("--max-size") + 1] == SYNC_MAX_FILE_SIZE
+    # The regex is case-insensitive and ends each allowed extension at the path end.
+    assert SYNC_INCLUDE_REGEX == r"{{(?i).*\.(jpg|jpeg|png|webp|psd)$}}"
+    assert SYNC_MAX_FILE_SIZE == "250M"
+
+
 # ---------------------------------------------------------------------------
 # _build_remote_root_path — injection-prevention validation
 # ---------------------------------------------------------------------------

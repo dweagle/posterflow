@@ -13,6 +13,12 @@ SyncProgressCallback = Callable[[str, int, int, str, int], None]
 BatchProgressCallback = Callable[[int, str, str, int, int, str, int], None]
 UploadProgressCallback = Callable[[int, int, str, str], None]
 
+SYNC_ALLOWED_EXTENSIONS = ("jpg", "jpeg", "png", "webp", "psd")
+
+SYNC_INCLUDE_REGEX = "{{(?i).*\\.(" + "|".join(SYNC_ALLOWED_EXTENSIONS) + ")$}}"
+
+SYNC_MAX_FILE_SIZE = "250M"
+
 class RcloneService:
     """Service for managing rclone operations with Google Drive"""
 
@@ -232,6 +238,8 @@ scope = drive.readonly
                     self.rclone_binary, 'sync', remote_path, str(local_path),
                     '--config', str(self.config_path),
                     *auth_args,
+                    '--include', SYNC_INCLUDE_REGEX,  # Only pull poster/PSD file types, never arbitrary files
+                    '--max-size', SYNC_MAX_FILE_SIZE,  # Skip oversized files (disk-fill protection)
                     '--fast-list',  # Faster for large folders
                     '--tpslimit=8',  # Limit API calls to 8/sec to avoid rate limits
                     '--size-only',  # Compare by size only (fast)
