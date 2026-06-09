@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from core.logging import LogTags, log_debug, log_error, log_info, log_warning
 from models.plex_upload import PlexUploadRecord
-from models.setting import get_setting, upsert_setting
+from models.setting import get_setting
 from util.arr.client import create_arr_client
 from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
@@ -27,6 +27,7 @@ class PlexUploadService:
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
     SETTING_RADARR_INSTANCES = "radarr_instances"
     SETTING_SONARR_INSTANCES = "sonarr_instances"
+    SETTING_INSTANCE_LIBRARY_MAP = "plex_upload_instance_library_map"
     DEFAULT_EDITION_MOVIE = "default_edition"
     ERROR_NO_PLEX_INSTANCES = "No Plex instances configured. Configure in Settings → Media tab."
     ERROR_NO_LIBRARIES_SELECTED = "No Plex libraries selected. Configure in Settings → Media tab."
@@ -41,6 +42,7 @@ class PlexUploadService:
         self._year_discrepancies: List[Dict[str, Any]] = []  # ID-matched uploads where folder year != Plex year
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
+        self._arr_availability_incomplete: bool = False
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -58,6 +60,9 @@ class PlexUploadService:
 
     def invalidate_arr_availability_cache(self) -> None:
         self._arr_availability_cache = {}
+
+    def arr_availability_was_incomplete(self) -> bool:
+        return self._arr_availability_incomplete
 
     def invalidate_record_cache(self) -> None:
         self._record_cache = {}
@@ -906,6 +911,71 @@ class PlexUploadService:
                 selected[instance_name] = enabled_libraries
         return selected
 
+    def _filter_libraries_for_instance(
+        self,
+        selected_libraries: Dict[str, List[Dict[str, Any]]],
+        arr_instance: Optional[str],
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], Optional[str]]:
+        """Restrict selected Plex libraries to those mapped to the firing Arr instance.
+
+        Returns ``(filtered_libraries, error)``. When the instance is unidentified or
+        has no mapping configured, the full selected set is returned unchanged (today's
+        fan-out behavior). When a mapping exists but resolves to none of the currently
+        enabled libraries, an error is returned so the caller surfaces it instead of
+        silently uploading nowhere.
+
+        The map is stored under ``plex_upload_instance_library_map`` as
+        ``{ "<arr instance>": [ {"plex_instance": "<name>", "library_key": "<key>"}, ... ] }``.
+        """
+        if not isinstance(arr_instance, str) or not arr_instance.strip():
+            return selected_libraries, None
+
+        instance_map = self._load_json_setting(
+            self.SETTING_INSTANCE_LIBRARY_MAP,
+            missing_default={},
+            invalid_json_log_level="warning",
+        )
+        if not isinstance(instance_map, dict):
+            return selected_libraries, None
+
+        mapping = instance_map.get(arr_instance.strip())
+        if not isinstance(mapping, list) or not mapping:
+            # No mapping for this instance — keep current behavior (all selected libraries).
+            return selected_libraries, None
+
+        allowed: Dict[str, set[str]] = {}
+        for entry in mapping:
+            if not isinstance(entry, dict):
+                continue
+            plex_instance = str(entry.get("plex_instance", "")).strip()
+            library_key = str(entry.get("library_key", "")).strip()
+            if plex_instance and library_key:
+                allowed.setdefault(plex_instance, set()).add(library_key)
+
+        filtered: Dict[str, List[Dict[str, Any]]] = {}
+        for plex_instance, libraries in selected_libraries.items():
+            allowed_keys = allowed.get(plex_instance)
+            if not allowed_keys:
+                continue
+            kept = [lib for lib in libraries if str(lib.get("key", "")).strip() in allowed_keys]
+            if kept:
+                filtered[plex_instance] = kept
+
+        if not filtered:
+            return {}, (
+                f"Plex Upload instance '{arr_instance}' is mapped to libraries that are not "
+                "enabled/selected. Update the instance→library map on the Plex Upload page."
+            )
+
+        log_info(
+            LogTags.UPLOADER,
+            "Plex Upload: scoped libraries to mapped Arr instance",
+            arr_instance=arr_instance,
+            plex_instances=sorted(filtered.keys()),
+            libraries=sum(len(libs) for libs in filtered.values()),
+        )
+        return filtered, None
+
     def _load_plex_upload_library_override(self) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
         invalid_marker = object()
         parsed = self._load_json_setting(
@@ -1238,6 +1308,7 @@ class PlexUploadService:
         year: Optional[int] = None,
         media_type: Optional[str] = None,
         allow_full_fallback: bool = True,
+        arr_instance: Optional[str] = None,
     ) -> Optional[str]:
         """Build and cache a targeted Plex index for a webhook job.
 
@@ -1264,6 +1335,14 @@ class PlexUploadService:
         selected_libraries, selected_libraries_error = self._get_selected_libraries(plex_instances)
         if selected_libraries_error:
             return selected_libraries_error
+
+        # Scope the upload to the libraries the firing Arr instance feeds. Unmapped
+        # instances (or no map configured) keep the full selected set unchanged.
+        selected_libraries, instance_scope_error = self._filter_libraries_for_instance(
+            selected_libraries, arr_instance
+        )
+        if instance_scope_error:
+            return instance_scope_error
 
         # Try targeted search first.
         index, library_totals = self._build_plex_index_targeted(
@@ -2097,6 +2176,7 @@ class PlexUploadService:
     def _build_arr_availability_index(self, media_type_filter: Optional[str] = None) -> Dict[str, Any]:
         movies_index: Dict[str, Dict[str, Any]] = {}
         shows_index: Dict[str, Dict[str, Any]] = {}
+        incomplete = False  # set when an ARR instance we meant to include couldn't be reached
 
         normalized_filter = str(media_type_filter or "").strip().lower()
         include_movies = normalized_filter in {"", "movie"}
@@ -2106,6 +2186,7 @@ class PlexUploadService:
             for instance in self._get_arr_instances(self.SETTING_RADARR_INSTANCES):
                 client = create_arr_client(instance["url"], instance["api_key"], "radarr", logger=None)
                 if not client or not client.connect_status:
+                    incomplete = True
                     continue
                 for movie in client.get_parsed_media(include_unmonitored=True):
                     movie_keys = self._availability_keys_for_item(
@@ -2135,6 +2216,7 @@ class PlexUploadService:
             for instance in self._get_arr_instances(self.SETTING_SONARR_INSTANCES):
                 client = create_arr_client(instance["url"], instance["api_key"], "sonarr", logger=None)
                 if not client or not client.connect_status:
+                    incomplete = True
                     continue
                 for show in client.get_parsed_media(include_unmonitored=True):
                     show_keys = self._availability_keys_for_item(
@@ -2168,6 +2250,7 @@ class PlexUploadService:
                         if existing is None or (has_episodes and not existing.get("has_episodes", False)):
                             shows_index[key] = show_entry
 
+        self._arr_availability_incomplete = incomplete
         return {
             "movies": movies_index,
             "shows": shows_index,

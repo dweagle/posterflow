@@ -328,6 +328,7 @@ class PlexUploadCacheClearRequest(BaseModel):
 class PlexWebhookDedupeClearRequest(BaseModel):
     """Payload for clearing webhook duplicate suppression cache."""
     clear_all: bool = False
+    instance: Optional[str] = None
     source: Optional[str] = None
     event_type: Optional[str] = None
     media_type: Optional[str] = None
@@ -806,6 +807,62 @@ async def run_plex_single_manual_upload(
         raise_internal_error("Failed to start plex single upload", e)
 
 
+def _load_arr_instances(db: Session, source: str) -> list[Dict[str, str]]:
+    """Return configured ``{name, url}`` entries for the given source (radarr/sonarr)."""
+    if source not in ("radarr", "sonarr"):
+        return []
+    setting = get_setting(db, f"{source}_instances")
+    if not setting or not setting.value:
+        return []
+    try:
+        instances = json.loads(setting.value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(instances, list):
+        return []
+    valid: list[Dict[str, str]] = []
+    for inst in instances:
+        if isinstance(inst, dict):
+            name = str(inst.get("name", "")).strip()
+            url = str(inst.get("url", "")).strip()
+            if name:
+                valid.append({"name": name, "url": url})
+    return valid
+
+
+def resolve_arr_instance(db: Session, request: Request, parsed: Dict[str, Any]) -> Optional[str]:
+    """Resolve the configured Arr instance name that fired this webhook.
+
+    Priority: explicit ``?instance=`` URL token, then the payload's ``instanceName``,
+    then its ``applicationUrl`` — each matched against the configured
+    ``radarr_instances`` / ``sonarr_instances``. Returns the configured instance name,
+    or ``None`` when the event cannot be attributed (treated as unmapped downstream).
+    """
+    source = str(parsed.get("source") or "").strip().lower()
+    configured = _load_arr_instances(db, source)
+    if not configured:
+        return None
+
+    names_by_lower = {inst["name"].lower(): inst["name"] for inst in configured}
+    urls_by_lower = {
+        inst["url"].rstrip("/").lower(): inst["name"] for inst in configured if inst["url"]
+    }
+
+    token = (request.query_params.get("instance") or "").strip()
+    if token and token.lower() in names_by_lower:
+        return names_by_lower[token.lower()]
+
+    payload_name = str(parsed.get("instance_name") or "").strip()
+    if payload_name and payload_name.lower() in names_by_lower:
+        return names_by_lower[payload_name.lower()]
+
+    app_url = str(parsed.get("application_url") or "").strip().rstrip("/").lower()
+    if app_url and app_url in urls_by_lower:
+        return urls_by_lower[app_url]
+
+    return None
+
+
 @router.post("/plex-upload/webhook")
 async def handle_plex_upload_webhook(
     payload: Dict[str, Any],
@@ -855,6 +912,8 @@ async def handle_plex_upload_webhook(
                 "queued": False,
                 "message": parsed.get("reason", "Webhook ignored"),
             }
+
+        parsed["arr_instance"] = resolve_arr_instance(db, request, parsed)
 
         if is_duplicate_webhook_event(db, parsed):
             log_info(
@@ -1088,6 +1147,7 @@ async def clear_plex_webhook_dedupe(
     """Clear webhook duplicate suppression cache globally or for one target item."""
     try:
         clear_all = bool(payload.clear_all) if payload else False
+        instance = payload.instance if payload else None
         source = payload.source if payload else None
         event_type = payload.event_type if payload else None
         media_type = payload.media_type.strip().lower() if payload and payload.media_type else None
@@ -1098,15 +1158,16 @@ async def clear_plex_webhook_dedupe(
         if media_type and media_type not in {"movie", "series"}:
             raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'.")
 
-        if not clear_all and not any([source, event_type, media_type, title, year is not None, season_number is not None]):
+        if not clear_all and not any([instance, source, event_type, media_type, title, year is not None, season_number is not None]):
             raise HTTPException(
                 status_code=400,
-                detail="Provide clear_all=true or at least one filter (title/media_type/year/season/source/event_type).",
+                detail="Provide clear_all=true or at least one filter (instance/title/media_type/year/season/source/event_type).",
             )
 
         return clear_webhook_dedupe_cache(
             db,
             clear_all=clear_all,
+            instance=instance,
             source=source,
             event_type=event_type,
             media_type=media_type,

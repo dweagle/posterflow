@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from core.logging import (
     LogTags,
     add_job_log_handler,
-    logger,
     log_debug,
     log_error,
     log_info,
@@ -814,6 +813,7 @@ def _default_webhook_stats() -> Dict[str, Any]:
         "duplicates": 0,
         "skipped_test": 0,
         "skipped_cached": 0,
+        "skipped_no_asset": 0,
         "rejected_disabled": 0,
         "parse_errors": 0,
         "internal_errors": 0,
@@ -1236,6 +1236,10 @@ def _to_int(value: Any) -> Optional[int]:
 def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     event_type = str(payload.get("eventType") or payload.get("event") or "unknown").strip().lower()
 
+    # Instance nams and url fallback
+    instance_name = str(payload.get("instanceName") or "").strip() or None
+    application_url = str(payload.get("applicationUrl") or "").strip() or None
+
     if event_type == "test":
         return {
             "skip": True,
@@ -1265,6 +1269,8 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tvdb_id": None,
             "is_upgrade": bool(payload.get("isUpgrade", False)),
             "movie_file_path": movie_file_path,
+            "instance_name": instance_name,
+            "application_url": application_url,
         }
 
     if isinstance(payload.get("series"), dict):
@@ -1291,6 +1297,8 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tmdb_id": None,
             "imdb_id": str(series.get("imdbId") or payload.get("imdbId") or "").strip() or None,
             "tvdb_id": _to_int(series.get("tvdbId") or payload.get("tvdbId")),
+            "instance_name": instance_name,
+            "application_url": application_url,
         }
 
     raise ValueError("Unsupported webhook payload: expected Radarr movie or Sonarr series object")
@@ -1309,44 +1317,133 @@ def _load_webhook_dedupe_cache(db: Session) -> Dict[str, Any]:
     return cache
 
 
-def _prune_webhook_dedupe_cache(cache: Dict[str, Any], cutoff_ts: int) -> Dict[str, int]:
+def _normalize_dedupe_entry(value: Any) -> Optional[Dict[str, Any]]:
+    """Coerce a stored dedupe-cache value into the structured record shape.
+
+    The cache is ``{ identity_string: record }`` where ``record`` carries the event
+    fields plus a ``ts`` timestamp. Entries written by older builds stored a bare
+    integer timestamp keyed by a delimited string; those are kept only for pruning
+    (``legacy=True``) and ignored by field-based search/clear filters — they age out
+    within the dedupe window after an upgrade.
+    """
+    if isinstance(value, dict) and isinstance(value.get("ts"), int):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return {"ts": value, "legacy": True}
+    return None
+
+
+def _prune_webhook_dedupe_cache(cache: Dict[str, Any], cutoff_ts: int) -> Dict[str, Dict[str, Any]]:
+    pruned: Dict[str, Dict[str, Any]] = {}
+    for key, value in cache.items():
+        entry = _normalize_dedupe_entry(value)
+        if entry is None:
+            continue
+        if int(entry.get("ts", 0)) >= cutoff_ts:
+            pruned[key] = entry
+    return pruned
+
+
+def _load_pruned_webhook_dedupe_cache(db: Session, cutoff_ts: int) -> Dict[str, Dict[str, Any]]:
+    cache = _load_webhook_dedupe_cache(db)
+    return _prune_webhook_dedupe_cache(cache, cutoff_ts)
+
+
+def _media_id_token(parsed_payload: Dict[str, Any]) -> Optional[str]:
+    """Return a canonical external-ID token for dedupe identity, or None.
+
+    Prefers tmdb, then tvdb, then imdb — whichever the ARR payload supplies. When an
+    ID is present it makes the identity collision-proof; when absent the identity
+    falls back to normalized title+year.
+    """
+    tmdb_id = parsed_payload.get("tmdb_id")
+    tvdb_id = parsed_payload.get("tvdb_id")
+    imdb_id = parsed_payload.get("imdb_id")
+    if isinstance(tmdb_id, int):
+        return f"tmdb-{tmdb_id}"
+    if isinstance(tvdb_id, int):
+        return f"tvdb-{tvdb_id}"
+    if isinstance(imdb_id, str) and imdb_id.strip():
+        return f"imdb-{imdb_id.strip()}"
+    return None
+
+
+def _webhook_dedupe_record(parsed_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the structured dedupe record for a parsed webhook payload (no ``ts``)."""
+    year = parsed_payload.get("year")
+    season = parsed_payload.get("season_number")
     return {
-        key: value
-        for key, value in cache.items()
-        if isinstance(value, int) and value >= cutoff_ts
+        "instance": parsed_payload.get("arr_instance") or None,
+        "source": parsed_payload.get("source", "unknown"),
+        "event": parsed_payload.get("event_type", "unknown"),
+        "media": parsed_payload.get("media_type", "unknown"),
+        "id": _media_id_token(parsed_payload),
+        "title": normalize_titles(parsed_payload.get("title", "")),
+        "year": year if isinstance(year, int) else None,
+        "season": season if isinstance(season, int) else None,
     }
 
 
-def _load_pruned_webhook_dedupe_cache(db: Session, cutoff_ts: int) -> Dict[str, int]:
-    cache = _load_webhook_dedupe_cache(db)
-    return _prune_webhook_dedupe_cache(cache, cutoff_ts)
+def _webhook_dedupe_identity(record: Dict[str, Any]) -> str:
+    """Compute the opaque dedupe identity for a structured record.
+
+    When a media ID is present it is authoritative (so the same item dedupes even if
+    its title string varies between events, and two different items sharing a
+    title+year never collide). Without an ID, identity falls back to title+year.
+    The ``id``/``tt`` discriminator prevents a title from masquerading as an ID token.
+    """
+    parts = [
+        _dedupe_instance_token(record.get("instance")),
+        str(record.get("source") or ""),
+        str(record.get("event") or ""),
+        str(record.get("media") or ""),
+    ]
+    media_id = record.get("id")
+    if media_id:
+        parts += ["id", str(media_id)]
+    else:
+        parts += [
+            "tt",
+            str(record.get("title") or ""),
+            str(record.get("year") if record.get("year") is not None else ""),
+        ]
+    parts.append(str(record.get("season") if record.get("season") is not None else ""))
+    return "|".join(parts)
+
+
+def _dedupe_instance_token(arr_instance: Optional[str]) -> str:
+    """Normalize a resolved Arr instance name into a delimiter-safe identity token.
+
+    ``|`` (and ``:`` for legacy safety) are identity delimiters, so they are stripped
+    from the instance name. Unmapped/unidentified events collapse to ``"_"`` so
+    single-instance setups behave exactly as before this attribution was added.
+    """
+    if not isinstance(arr_instance, str):
+        return "_"
+    token = arr_instance.replace("|", "_").replace(":", "_").strip()
+    return token or "_"
 
 
 def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any]) -> bool:
     now_ts = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts - PLEX_WEBHOOK_DEDUPE_WINDOW_SECONDS
 
-    # Season number IS included in the dedupe key for series.
-    # Sonarr fires one webhook per episode import, so all per-episode webhooks for
-    # the same season collapse to a single job (same season_number → same key).
-    # Different seasons of the same show each get their own dedupe slot, so Season 2
-    # arriving within the window after Season 1 is NOT treated as a duplicate.
-    # For movies, season_number is always None, so this has no effect on movie dedup.
-    dedupe_key = ":".join(
-        [
-            parsed_payload.get("source", "unknown"),
-            parsed_payload.get("event_type", "unknown"),
-            parsed_payload.get("media_type", "unknown"),
-            normalize_titles(parsed_payload.get("title", "")),
-            str(parsed_payload.get("year") or ""),
-            str(parsed_payload.get("season_number") if parsed_payload.get("season_number") is not None else ""),
-        ]
-    )
+    # The dedupe identity leads with the resolved Arr instance, then keys on the
+    # external media ID when present (collision-proof) or normalized title+year when
+    # not. Season IS part of the identity for series: Sonarr fires one webhook per
+    # episode import, so per-episode webhooks for the same season collapse to a single
+    # job, while different seasons each get their own slot. Movies have season=None,
+    # so it has no effect on movie dedup.
+    record = _webhook_dedupe_record(parsed_payload)
+    identity = _webhook_dedupe_identity(record)
 
     pruned_cache = _load_pruned_webhook_dedupe_cache(db, cutoff_ts)
 
-    is_duplicate = dedupe_key in pruned_cache
-    pruned_cache[dedupe_key] = now_ts
+    is_duplicate = identity in pruned_cache
+    record["ts"] = now_ts
+    pruned_cache[identity] = record
 
     upsert_setting(db, SETTING_PLEX_WEBHOOK_DEDUPE_CACHE, json.dumps(pruned_cache))
     db.commit()
@@ -1358,6 +1455,7 @@ def _clear_webhook_dedupe_cache(
     db: Session,
     *,
     clear_all: bool = False,
+    instance: Optional[str] = None,
     source: Optional[str] = None,
     event_type: Optional[str] = None,
     media_type: Optional[str] = None,
@@ -1368,54 +1466,50 @@ def _clear_webhook_dedupe_cache(
     now_ts = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts - PLEX_WEBHOOK_DEDUPE_WINDOW_SECONDS
 
+    instance_key = _dedupe_instance_token(instance) if isinstance(instance, str) and instance.strip() else None
     source_key = source.strip().lower() if isinstance(source, str) and source.strip() else None
     event_key = event_type.strip().lower() if isinstance(event_type, str) and event_type.strip() else None
     media_key = media_type.strip().lower() if isinstance(media_type, str) and media_type.strip() else None
     title_key = normalize_titles(title) if isinstance(title, str) and title.strip() else None
-    year_key = str(year) if isinstance(year, int) else None
-    season_key = str(season_number) if isinstance(season_number, int) else None
+    year_key = year if isinstance(year, int) else None
+    season_key = season_number if isinstance(season_number, int) else None
 
     pruned_cache = _load_pruned_webhook_dedupe_cache(db, cutoff_ts)
 
-    filtered_cache: Dict[str, int] = {}
+    filtered_cache: Dict[str, Dict[str, Any]] = {}
     removed = 0
 
-    for dedupe_key, timestamp in pruned_cache.items():
+    for identity, entry in pruned_cache.items():
         if clear_all:
             removed += 1
             continue
 
-        # Support both the current 6-part key (source:event:media:title:year:season)
-        # and legacy 5-part keys (source:event:media:title:year) from before season was added.
-        parts = str(dedupe_key).split(":", 5)
-        if len(parts) == 6:
-            key_source, key_event, key_media, key_title, key_year, key_season = parts
-        elif len(parts) == 5:
-            key_source, key_event, key_media, key_title, key_year = parts
-            key_season = None
-        else:
-            filtered_cache[dedupe_key] = timestamp
+        # Legacy bare-timestamp entries carry no structured fields; leave them on any
+        # field-scoped clear (they expire within the window on their own).
+        if entry.get("legacy"):
+            filtered_cache[identity] = entry
             continue
 
-        if source_key and key_source != source_key:
-            filtered_cache[dedupe_key] = timestamp
+        if instance_key and _dedupe_instance_token(entry.get("instance")) != instance_key:
+            filtered_cache[identity] = entry
             continue
-        if event_key and key_event != event_key:
-            filtered_cache[dedupe_key] = timestamp
+        if source_key and str(entry.get("source") or "") != source_key:
+            filtered_cache[identity] = entry
             continue
-        if media_key and key_media != media_key:
-            filtered_cache[dedupe_key] = timestamp
+        if event_key and str(entry.get("event") or "") != event_key:
+            filtered_cache[identity] = entry
             continue
-        if title_key and key_title != title_key:
-            filtered_cache[dedupe_key] = timestamp
+        if media_key and str(entry.get("media") or "") != media_key:
+            filtered_cache[identity] = entry
             continue
-        if year_key and key_year != year_key:
-            filtered_cache[dedupe_key] = timestamp
+        if title_key and str(entry.get("title") or "") != title_key:
+            filtered_cache[identity] = entry
             continue
-        # Only filter by season when the entry has a season component; legacy 5-part
-        # entries (key_season is None) are left untouched when a season filter is given.
-        if season_key and key_season is not None and key_season != season_key:
-            filtered_cache[dedupe_key] = timestamp
+        if year_key is not None and entry.get("year") != year_key:
+            filtered_cache[identity] = entry
+            continue
+        if season_key is not None and entry.get("season") != season_key:
+            filtered_cache[identity] = entry
             continue
 
         removed += 1
@@ -1449,38 +1543,46 @@ def _search_webhook_dedupe_entries(
     pruned_cache = _load_pruned_webhook_dedupe_cache(db, cutoff_ts)
 
     entries: list[Dict[str, Any]] = []
-    for dedupe_key, timestamp in pruned_cache.items():
-        # Support both the current 6-part key (source:event:media:title:year:season)
-        # and legacy 5-part keys (source:event:media:title:year) from before season was added.
-        parts = str(dedupe_key).split(":", 5)
-        if len(parts) == 6:
-            key_source, key_event, key_media, key_title, key_year, key_season = parts
-        elif len(parts) == 5:
-            key_source, key_event, key_media, key_title, key_year = parts
-            key_season = None
-        else:
+    for identity, entry in pruned_cache.items():
+        # Legacy bare-timestamp entries carry no structured fields to display.
+        if entry.get("legacy"):
             continue
 
+        key_media = str(entry.get("media") or "")
         if media_type_normalized and key_media != media_type_normalized:
             continue
 
-        haystack = " ".join([key_source, key_event, key_media, key_title, key_year]).strip()
+        instance_value = entry.get("instance") or None
+        year_value = entry.get("year") if isinstance(entry.get("year"), int) else None
+        haystack = " ".join(
+            part
+            for part in [
+                instance_value,
+                str(entry.get("source") or ""),
+                str(entry.get("event") or ""),
+                key_media,
+                str(entry.get("title") or ""),
+                str(year_value) if year_value is not None else "",
+                str(entry.get("id") or ""),
+            ]
+            if part
+        ).strip()
         if query_normalized and query_normalized not in haystack:
             continue
 
-        year_value = int(key_year) if key_year.isdigit() else None
-        season_value = int(key_season) if key_season is not None and key_season.isdigit() else None
-        last_seen = datetime.fromtimestamp(int(timestamp), timezone.utc).isoformat()
+        last_seen = datetime.fromtimestamp(int(entry.get("ts", 0)), timezone.utc).isoformat()
 
         entries.append(
             {
-                "source": key_source,
-                "event_type": key_event,
+                "instance": instance_value,
+                "source": str(entry.get("source") or ""),
+                "event_type": str(entry.get("event") or ""),
                 "media_type": key_media,
-                "title": key_title,
+                "media_id": entry.get("id"),
+                "title": str(entry.get("title") or ""),
                 "year": year_value,
-                "season_number": season_value,
-                "dedupe_key": dedupe_key,
+                "season_number": entry.get("season") if isinstance(entry.get("season"), int) else None,
+                "dedupe_key": identity,
                 "last_seen_at": last_seen,
             }
         )
@@ -1795,6 +1897,8 @@ def _complete_no_local_assets_warning(
 ) -> None:
     warning_message = _build_no_local_assets_warning_message(media_type, title)
 
+    _increment_webhook_stat(db, "skipped_no_asset")
+
     update_job_state(
         db,
         job,
@@ -2045,6 +2149,7 @@ def run_plex_webhook_background_job(
             year=parsed_payload.get("year"),
             media_type=media_type,
             allow_full_fallback=False,
+            arr_instance=parsed_payload.get("arr_instance"),
         )
         if webhook_context_error:
             raise Exception(webhook_context_error)
@@ -2236,7 +2341,8 @@ def run_plex_webhook_background_job(
         for attempt in range(1, attempts + 1):
             result = None
             if attempt > 1:
-                service.invalidate_arr_availability_cache()
+                if service.arr_availability_was_incomplete():
+                    service.invalidate_arr_availability_cache()
 
                 retry_progress = min(5 + (attempt * 10), 40)
                 update_job_state(
@@ -2266,6 +2372,7 @@ def run_plex_webhook_background_job(
                     year=parsed_payload.get("year"),
                     media_type=media_type,
                     allow_full_fallback=(attempt == attempts),
+                    arr_instance=parsed_payload.get("arr_instance"),
                 )
                 if retry_context_error:
                     log_warning(

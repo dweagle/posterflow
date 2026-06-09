@@ -118,6 +118,7 @@ export interface PlexWebhookStats {
   duplicates: number
   skipped_test: number
   skipped_cached: number
+  skipped_no_asset: number
   rejected_disabled: number
   parse_errors: number
   internal_errors: number
@@ -128,6 +129,7 @@ export interface PlexWebhookStats {
 
 export interface PlexWebhookDedupeClearPayload {
   clear_all?: boolean
+  instance?: string
   source?: string
   event_type?: string
   media_type?: 'movie' | 'series'
@@ -145,9 +147,11 @@ export interface PlexWebhookDedupeClearResponse {
 }
 
 export interface PlexWebhookDedupeEntry {
+  instance?: string | null
   source: string
   event_type: string
   media_type: 'movie' | 'series' | string
+  media_id?: string | null
   title: string
   year: number | null
   season_number?: number | null
@@ -185,6 +189,23 @@ export interface PlexUploadLibraryOverrideSettings {
 export interface PlexUploadLibraryOverridePayload {
   enabled: boolean
   configs: PlexUploadLibraryConfig[]
+}
+
+export interface PlexUploadInstanceMapEntry {
+  plex_instance: string
+  library_key: string
+}
+
+export type PlexUploadInstanceMap = Record<string, PlexUploadInstanceMapEntry[]>
+
+export const getPlexUploadInstanceMap = async (): Promise<{ map: PlexUploadInstanceMap }> => {
+  return getData('/api/settings/plex-upload-instance-map')
+}
+
+export const savePlexUploadInstanceMap = async (
+  map: PlexUploadInstanceMap,
+): Promise<{ message: string; map: PlexUploadInstanceMap }> => {
+  return postData('/api/settings/plex-upload-instance-map', { map })
 }
 
 export interface PlexUploadCacheEntry {

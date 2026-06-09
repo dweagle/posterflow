@@ -24,6 +24,10 @@ import {
   downloadPlexUploadCacheExport,
   getPlexUploadLibraryOverrideSettings,
   savePlexUploadLibraryOverrideSettings,
+  getPlexUploadInstanceMap,
+  savePlexUploadInstanceMap,
+  PlexUploadInstanceMap,
+  getSettings,
   PlexSearchItem,
   runPlexSingleUpload,
   searchPlexItems,
@@ -166,10 +170,15 @@ function PlexUpload() {
   const [overrideEnabled, setOverrideEnabled] = useState(false)
   const [globalLibraryConfigs, setGlobalLibraryConfigs] = useState<PlexUploadLibraryConfig[]>([])
   const [overrideConfigs, setOverrideConfigs] = useState<PlexUploadLibraryConfig[]>([])
+  const [instanceMap, setInstanceMap] = useState<PlexUploadInstanceMap>({})
+  const [arrInstanceNames, setArrInstanceNames] = useState<string[]>([])
+  const [instanceMapLoading, setInstanceMapLoading] = useState(false)
+  const [instanceMapSaving, setInstanceMapSaving] = useState(false)
   const [cacheLoading, setCacheLoading] = useState(false)
   const [cacheClearing, setCacheClearing] = useState(false)
   const [uploadCache, setUploadCache] = useState<PlexUploadCacheSummary | null>(null)
   const [showCacheBrowser, setShowCacheBrowser] = useState(false)
+  const [showLibraryModal, setShowLibraryModal] = useState(false)
   const [cacheBrowserQuery, setCacheBrowserQuery] = useState('')
   const [cacheBrowserEntries, setCacheBrowserEntries] = useState<PlexUploadCacheSummary['entries']>([])
   const [cacheBrowserTotal, setCacheBrowserTotal] = useState(0)
@@ -760,6 +769,141 @@ function PlexUpload() {
     }
   }
 
+  const parseArrInstanceNames = (settings: Record<string, string>): string[] => {
+    const names: string[] = []
+    for (const key of ['radarr_instances', 'sonarr_instances']) {
+      const raw = settings[key]
+      if (!raw) {
+        continue
+      }
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            const name = String((entry as { name?: unknown })?.name ?? '').trim()
+            if (name) {
+              names.push(name)
+            }
+          }
+        }
+      } catch {
+        // Ignore malformed instance settings — the map editor simply shows fewer rows.
+      }
+    }
+    return Array.from(new Set(names))
+  }
+
+  const fetchInstanceRoutingMap = async () => {
+    setInstanceMapLoading(true)
+    try {
+      const [mapResponse, settings] = await Promise.all([getPlexUploadInstanceMap(), getSettings()])
+      setInstanceMap(mapResponse.map || {})
+      setArrInstanceNames(parseArrInstanceNames(settings))
+    } catch (error) {
+      console.error('Failed to load Plex Upload instance routing map:', error)
+      showToast(getApiErrorMessage(error, 'Failed to load instance routing map'), 'error')
+    } finally {
+      setInstanceMapLoading(false)
+    }
+  }
+
+  const isInstanceLibraryChecked = (instanceName: string, plexInstance: string, libraryKey: string): boolean => {
+    return (instanceMap[instanceName] || []).some(
+      (entry) => entry.plex_instance === plexInstance && entry.library_key === libraryKey,
+    )
+  }
+
+  const toggleInstanceLibrary = (
+    instanceName: string,
+    plexInstance: string,
+    libraryKey: string,
+    enabled: boolean,
+  ) => {
+    setInstanceMap((current) => {
+      const existing = current[instanceName] || []
+      const filtered = existing.filter(
+        (entry) => !(entry.plex_instance === plexInstance && entry.library_key === libraryKey),
+      )
+      const nextEntries = enabled ? [...filtered, { plex_instance: plexInstance, library_key: libraryKey }] : filtered
+      const next = { ...current }
+      if (nextEntries.length > 0) {
+        next[instanceName] = nextEntries
+      } else {
+        delete next[instanceName]
+      }
+      return next
+    })
+  }
+
+  const saveInstanceRoutingMap = async () => {
+    setInstanceMapSaving(true)
+    try {
+      const response = await savePlexUploadInstanceMap(instanceMap)
+      setInstanceMap(response.map || {})
+      showToast('Instance → library routing saved', 'success')
+    } catch (error) {
+      console.error('Failed to save Plex Upload instance routing map:', error)
+      showToast(getApiErrorMessage(error, 'Failed to save instance routing map'), 'error')
+    } finally {
+      setInstanceMapSaving(false)
+    }
+  }
+
+  // The per-instance webhook URL adds an &instance= token so each Radarr/Sonarr
+  // instance is attributed even when its payload instanceName doesn't match config.
+  const instanceWebhookUrl = (instanceName: string): string => {
+    const separator = effectiveWebhookUrl.includes('?') ? '&' : '?'
+    return `${effectiveWebhookUrl}${separator}instance=${encodeURIComponent(instanceName)}`
+  }
+
+  // Resolve a (plex instance, library key) pair to its human-readable library title
+  // for the compact routing summary shown on the page.
+  const libraryTitleFor = (plexInstance: string, libraryKey: string): string => {
+    const instanceConfig = globalLibraryConfigs.find((config) => config.instance_name === plexInstance)
+    const library = (instanceConfig?.libraries || []).find((lib) => lib.key === libraryKey)
+    return library?.title || libraryKey
+  }
+
+  // One-line summary of where an instance routes, for the collapsed page card.
+  const instanceRoutingSummary = (instanceName: string): string => {
+    const entries = instanceMap[instanceName] || []
+    if (entries.length === 0) {
+      return 'all selected libraries (default)'
+    }
+    return entries.map((entry) => libraryTitleFor(entry.plex_instance, entry.library_key)).join(', ')
+  }
+
+  const libraryModalSnapshotRef = useRef<{
+    overrideEnabled: boolean
+    overrideConfigs: PlexUploadLibraryConfig[]
+    instanceMap: PlexUploadInstanceMap
+  } | null>(null)
+
+  const openLibraryModal = () => {
+    libraryModalSnapshotRef.current = {
+      overrideEnabled,
+      overrideConfigs: JSON.parse(JSON.stringify(overrideConfigs)),
+      instanceMap: JSON.parse(JSON.stringify(instanceMap)),
+    }
+    setShowLibraryModal(true)
+  }
+
+  const cancelLibraryModal = () => {
+    const snapshot = libraryModalSnapshotRef.current
+    if (snapshot) {
+      setOverrideEnabled(snapshot.overrideEnabled)
+      setOverrideConfigs(snapshot.overrideConfigs)
+      setInstanceMap(snapshot.instanceMap)
+    }
+    setShowLibraryModal(false)
+  }
+
+  const saveLibraryTargeting = async () => {
+    await saveLibraryOverrideSettings()
+    await saveInstanceRoutingMap()
+    setShowLibraryModal(false)
+  }
+
   const fetchUploadCache = async (showLoading: boolean = true) => {
     if (showLoading) {
       setCacheLoading(true)
@@ -941,7 +1085,7 @@ function PlexUpload() {
     fetchWebhookStats()
 
     const loadToggleSettings = async () => {
-      await Promise.all([fetchManualSettings(), fetchWebhookSettings(), fetchLibraryOverrideSettings()])
+      await Promise.all([fetchManualSettings(), fetchWebhookSettings(), fetchLibraryOverrideSettings(), fetchInstanceRoutingMap()])
 
       if (cancelled) {
         return
@@ -1470,6 +1614,28 @@ function PlexUpload() {
                       <li>
                         Save each connector, then use the built-in <strong>Test</strong> button in Radarr/Sonarr to confirm delivery.
                       </li>
+                      <li className="walkthrough-multi-instance">
+                        <strong>Running multiple Radarr/Sonarr instances?</strong> Open <strong>Library Targeting →
+                        Configure libraries</strong> below. Each instance has its own webhook URL there ending in
+                        <code>&instance=&lt;name&gt;</code> — paste <em>that</em> instance's URL into its own connector
+                        instead of the generic URL above. Why it matters:
+                        <ul className="walkthrough-substeps walkthrough-multi-instance-list">
+                          <li>
+                            <strong>Attribution:</strong> the <code>&instance=</code> token tells PosterFlow which
+                            instance fired, so it can route the upload to that instance's libraries — reliably, even if
+                            the instance's name in Radarr/Sonarr doesn't match what you configured here.
+                          </li>
+                          <li>
+                            <strong>No cross-suppression:</strong> without it, two instances importing the same title
+                            within ~10 minutes can be treated as duplicates and one upload gets skipped. Distinct
+                            instance URLs keep them separate.
+                          </li>
+                          <li>
+                            <strong>Optional:</strong> a single-instance setup can keep using the generic URL above.
+                            Instances left unmapped simply upload to all selected libraries.
+                          </li>
+                        </ul>
+                      </li>
                     </ul>
                   </li>
                   <li>
@@ -1622,67 +1788,50 @@ function PlexUpload() {
                   </>
                 )}
               </section>
-              <section className="plex-upload-card">
+              <section className="plex-upload-card library-targeting-card">
                 <div className="plex-card-header-row">
-                  <h2>Plex Upload Library Override</h2>
+                  <h2>Library Targeting</h2>
                   <button
                     type="button"
                     className={`plex-refresh-btn ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
-                    onClick={saveLibraryOverrideSettings}
-                    disabled={!toggleSettingsReady || overrideLoading || overrideSaving}
+                    onClick={openLibraryModal}
+                    disabled={!toggleSettingsReady}
                   >
-                    {overrideSaving ? 'Saving…' : 'Save Override'}
+                    Configure libraries…
                   </button>
                 </div>
                 <p className="card-description">
-                  Override Media tab Plex library selection for Plex Upload only. Useful for testing on smaller libraries or test libraries that may not be in your usual library config.
+                  Choose which Plex libraries Plex Upload targets — globally (override) and per Radarr/Sonarr
+                  instance. Opens a focused editor so the selection boxes don't crowd this page.
                 </p>
 
                 {!toggleSettingsReady ? (
-                  <p className="card-description">Loading override settings…</p>
+                  <p className="card-description">Loading library settings…</p>
                 ) : (
-                  <>
-                    <label className="plex-checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={overrideEnabled}
-                        onChange={(event) => setOverrideEnabled(event.target.checked)}
-                        disabled={overrideLoading || overrideSaving}
-                      />
-                      <span>Enable Plex Upload-only library override</span>
-                    </label>
-
-                    <p className="card-description override-count">
-                      Selected override libraries: <strong>{getEnabledOverrideCount()}</strong>
-                    </p>
-
-                    {overrideLoading ? (
-                      <p className="card-description">Loading library selections…</p>
-                    ) : globalLibraryConfigs.length === 0 ? (
-                      <p className="card-description">No global Plex library configuration found. Configure libraries in Settings → Media first.</p>
+                  <div className="library-targeting-summary">
+                    <div className="library-targeting-summary-row">
+                      <span className="library-targeting-summary-label">Override</span>
+                      <span>
+                        {overrideEnabled ? (
+                          <><strong>On</strong> — {getEnabledOverrideCount()} {getEnabledOverrideCount() === 1 ? 'library' : 'libraries'}</>
+                        ) : (
+                          <>Off — using Media-tab library selection</>
+                        )}
+                      </span>
+                    </div>
+                    {arrInstanceNames.length === 0 ? (
+                      <p className="card-description library-targeting-summary-empty">
+                        No Radarr/Sonarr instances configured — add them in Settings → Media to route per instance.
+                      </p>
                     ) : (
-                      <div className="override-library-groups">
-                        {globalLibraryConfigs.map((instanceConfig) => (
-                          <div key={instanceConfig.instance_name} className="override-library-instance">
-                            <h3>{instanceConfig.instance_name}</h3>
-                            <div className="override-library-list">
-                              {(instanceConfig.libraries || []).map((library) => (
-                                <label key={`${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={isOverrideLibraryChecked(instanceConfig.instance_name, library.key)}
-                                    onChange={(event) => toggleOverrideLibrary(instanceConfig.instance_name, library.key, event.target.checked)}
-                                    disabled={overrideLoading || overrideSaving}
-                                  />
-                                  <span>{library.title} <em>({library.type})</em></span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      arrInstanceNames.map((instanceName) => (
+                        <div key={instanceName} className="library-targeting-summary-row">
+                          <span className="library-targeting-summary-label">{instanceName}</span>
+                          <span>→ {instanceRoutingSummary(instanceName)}</span>
+                        </div>
+                      ))
                     )}
-                  </>
+                  </div>
                 )}
               </section>
             </div>
@@ -1721,6 +1870,7 @@ function PlexUpload() {
                     <div className="webhook-stat-chip chip-duplicates"><span>Duplicates</span><strong>{webhookStats.duplicates}</strong></div>
                     <div className="webhook-stat-chip chip-test"><span>Test events</span><strong>{webhookStats.skipped_test}</strong></div>
                     <div className="webhook-stat-chip chip-duplicates"><span>Skipped (cached)</span><strong>{webhookStats.skipped_cached}</strong></div>
+                    <div className="webhook-stat-chip chip-parse"><span>Skipped (no asset)</span><strong>{webhookStats.skipped_no_asset ?? 0}</strong></div>
                     <div className="webhook-stat-chip chip-disabled"><span>Disabled rejects</span><strong>{webhookStats.rejected_disabled}</strong></div>
                     <div className="webhook-stat-chip chip-parse"><span>Parse errors</span><strong>{webhookStats.parse_errors}</strong></div>
                     <div className="webhook-stat-chip chip-internal"><span>Internal errors</span><strong>{webhookStats.internal_errors}</strong></div>
@@ -1917,6 +2067,152 @@ function PlexUpload() {
         onCancel={handleCancelDiscard}
         onDiscard={handleDiscardChanges}
       />
+
+      {showLibraryModal && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              cancelLibraryModal()
+            }
+          }}
+        >
+          <div className="modal-content schedule-modal library-targeting-modal">
+            <div className="modal-header">
+              <h2>Library Targeting</h2>
+              <button className="modal-close" onClick={cancelLibraryModal}>×</button>
+            </div>
+
+            <div className="modal-body library-targeting-modal-body">
+              {/* Global override */}
+              <div className="library-targeting-block">
+                <div className="plex-card-header-row">
+                  <h3>Library Override</h3>
+                </div>
+                <p className="card-description">
+                  Override the Media-tab Plex library selection for Plex Upload only — handy for testing on a
+                  smaller or separate library. Applies to all uploads unless an instance below routes elsewhere.
+                </p>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={overrideEnabled}
+                    onChange={(event) => setOverrideEnabled(event.target.checked)}
+                    disabled={overrideLoading || overrideSaving}
+                  />
+                  <span>Enable Plex Upload-only library override</span>
+                </label>
+
+                <p className="card-description override-count">
+                  Selected override libraries: <strong>{getEnabledOverrideCount()}</strong>
+                </p>
+
+                {overrideLoading ? (
+                  <p className="card-description">Loading library selections…</p>
+                ) : globalLibraryConfigs.length === 0 ? (
+                  <p className="card-description">No global Plex library configuration found. Configure libraries in Settings → Media first.</p>
+                ) : (
+                  <div className="override-library-groups">
+                    {globalLibraryConfigs.map((instanceConfig) => (
+                      <div key={instanceConfig.instance_name} className="override-library-instance">
+                        <h4>{instanceConfig.instance_name}</h4>
+                        <div className="override-library-list">
+                          {(instanceConfig.libraries || []).map((library) => (
+                            <label key={`${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+                              <input
+                                type="checkbox"
+                                checked={isOverrideLibraryChecked(instanceConfig.instance_name, library.key)}
+                                onChange={(event) => toggleOverrideLibrary(instanceConfig.instance_name, library.key, event.target.checked)}
+                                disabled={overrideLoading || overrideSaving}
+                              />
+                              <span>{library.title} <em>({library.type})</em></span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Per-instance routing */}
+              <div className="library-targeting-block">
+                <div className="plex-card-header-row">
+                  <h3>Instance → Library Routing</h3>
+                </div>
+                <p className="card-description">
+                  Send each Radarr/Sonarr instance's imports to specific Plex libraries. Instances left unmapped
+                  upload to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL
+                  (below) into its connector so events are attributed even when the payload's instance name
+                  doesn't match.
+                </p>
+
+                {instanceMapLoading ? (
+                  <p className="card-description">Loading instance routing…</p>
+                ) : arrInstanceNames.length === 0 ? (
+                  <p className="card-description">No Radarr/Sonarr instances configured. Add them in Settings → Media first.</p>
+                ) : globalLibraryConfigs.length === 0 ? (
+                  <p className="card-description">No global Plex library configuration found. Configure libraries in Settings → Media first.</p>
+                ) : (
+                  <div className="instance-routing-groups">
+                    {arrInstanceNames.map((instanceName) => (
+                      <div key={instanceName} className="instance-routing-instance" data-testid={`instance-routing-${instanceName}`}>
+                        <h4>{instanceName}</h4>
+                        <div className="walkthrough-endpoint webhook-url-block instance-routing-url">
+                          <code className="webhook-url-value">{instanceWebhookUrl(instanceName)}</code>
+                          <button
+                            type="button"
+                            className="plex-refresh-btn webhook-copy-btn"
+                            onClick={() => copyWebhookUrl(instanceWebhookUrl(instanceName))}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <div className="override-library-groups">
+                          {globalLibraryConfigs.map((instanceConfig) => (
+                            <div key={`${instanceName}-${instanceConfig.instance_name}`} className="override-library-instance">
+                              <h5>{instanceConfig.instance_name}</h5>
+                              <div className="override-library-list">
+                                {(instanceConfig.libraries || []).map((library) => (
+                                  <label key={`${instanceName}-${instanceConfig.instance_name}-${library.key}`} className="plex-checkbox-row">
+                                    <input
+                                      type="checkbox"
+                                      checked={isInstanceLibraryChecked(instanceName, instanceConfig.instance_name, library.key)}
+                                      onChange={(event) =>
+                                        toggleInstanceLibrary(instanceName, instanceConfig.instance_name, library.key, event.target.checked)
+                                      }
+                                      disabled={instanceMapLoading || instanceMapSaving}
+                                    />
+                                    <span>{library.title} <em>({library.type})</em></span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={cancelLibraryModal} disabled={overrideSaving || instanceMapSaving}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={saveLibraryTargeting}
+                disabled={!toggleSettingsReady || overrideSaving || instanceMapSaving}
+              >
+                {overrideSaving || instanceMapSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCacheBrowser && (
         <div className="modal-overlay" onClick={handleCacheBrowserOverlayClick}>

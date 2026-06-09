@@ -725,6 +725,70 @@ async def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depe
 
 
 # ---------------------------------------------------------------------------
+# Plex Upload: Radarr/Sonarr instance -> Plex library routing map
+# ---------------------------------------------------------------------------
+
+PLEX_UPLOAD_INSTANCE_MAP_KEY = "plex_upload_instance_library_map"
+
+
+class PlexUploadInstanceMapEntry(BaseModel):
+    plex_instance: str
+    library_key: str
+
+
+class PlexUploadInstanceMapRequest(BaseModel):
+    # Full replacement of the map: { "<arr instance name>": [ {plex_instance, library_key}, ... ] }
+    map: Dict[str, List[PlexUploadInstanceMapEntry]]
+
+
+@router.get("/plex-upload-instance-map")
+async def get_plex_upload_instance_map(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return the Radarr/Sonarr instance -> Plex library routing map for Plex Upload."""
+    setting = get_setting(db, PLEX_UPLOAD_INSTANCE_MAP_KEY)
+    if not setting or not setting.value:
+        return {"map": {}}
+    try:
+        parsed = json.loads(setting.value)
+        return {"map": parsed if isinstance(parsed, dict) else {}}
+    except json.JSONDecodeError as e:
+        log_error(LogTags.API, f"Invalid JSON in {PLEX_UPLOAD_INSTANCE_MAP_KEY}: {e}\n{traceback.format_exc()}")
+        return {"map": {}}
+
+
+@router.post("/plex-upload-instance-map")
+async def save_plex_upload_instance_map(
+    payload: PlexUploadInstanceMapRequest, db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Replace the Plex Upload instance -> library routing map.
+
+    Instances absent from the map fall back to uploading to all enabled libraries.
+    Empty library lists are dropped so an instance with no targets stays unmapped.
+    """
+    cleaned: Dict[str, List[Dict[str, str]]] = {}
+    for instance_name, entries in payload.map.items():
+        name = instance_name.strip()
+        if not name:
+            continue
+        rows = [
+            {"plex_instance": e.plex_instance.strip(), "library_key": e.library_key.strip()}
+            for e in entries
+            if e.plex_instance.strip() and e.library_key.strip()
+        ]
+        if rows:
+            cleaned[name] = rows
+
+    upsert_setting(db, PLEX_UPLOAD_INSTANCE_MAP_KEY, json.dumps(cleaned))
+    try:
+        db.commit()
+        log_info(LogTags.API, "Saved Plex Upload instance->library map", instances=len(cleaned))
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.API, f"Database error saving {PLEX_UPLOAD_INSTANCE_MAP_KEY}: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to save instance routing map")
+    return {"message": "Instance routing map saved", "map": cleaned}
+
+
+# ---------------------------------------------------------------------------
 # GDrive storage path
 # ---------------------------------------------------------------------------
 

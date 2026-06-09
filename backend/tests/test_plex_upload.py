@@ -1020,6 +1020,10 @@ def test_webhook_background_job_completes_with_warning_when_no_local_assets(test
     assert refreshed.error in (None, "")
     assert _FakePlexUploadService.run_calls == 1
 
+    # The otherwise-silent no-asset outcome is now surfaced as a webhook stat.
+    stats = upload_module._load_webhook_stats(test_db)
+    assert stats["skipped_no_asset"] == 1
+
 
 def test_webhook_background_job_completes_without_retry_on_matched_zero_upload(test_db, monkeypatch):
     """Webhook should treat matched zero-upload as already up-to-date without cache clearing or retry."""
@@ -3620,6 +3624,9 @@ def test_webhook_background_job_retry_rebuilds_targeted_index(test_db, monkeypat
         def invalidate_arr_availability_cache(self) -> None:
             pass
 
+        def arr_availability_was_incomplete(self) -> bool:
+            return False
+
         def invalidate_preflight_cache(self) -> None:
             pass
 
@@ -4045,3 +4052,455 @@ def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
     assert raw == 0
     assert unique == 0
     assert uploaded == 0
+
+
+# ---------------------------------------------------------------------------
+# Per-instance attribution: identity, dedupe scoping, and library routing
+# ---------------------------------------------------------------------------
+
+
+def test_parse_arr_webhook_payload_captures_instance_fields():
+    from modules.upload import _parse_arr_webhook_payload
+
+    movie = _parse_arr_webhook_payload({
+        "eventType": "Download",
+        "instanceName": "Radarr-4K",
+        "applicationUrl": "http://radarr4k:7878",
+        "movie": {"title": "Aliens", "year": 1986, "tmdbId": 679},
+    })
+    assert movie["instance_name"] == "Radarr-4K"
+    assert movie["application_url"] == "http://radarr4k:7878"
+
+    series = _parse_arr_webhook_payload({
+        "eventType": "Download",
+        "instanceName": "Sonarr-Anime",
+        "series": {"title": "Cowboy Bebop", "year": 1998, "tvdbId": 76885},
+        "seasonNumber": 1,
+    })
+    assert series["instance_name"] == "Sonarr-Anime"
+    assert series["application_url"] is None
+
+
+def test_parse_arr_webhook_payload_instance_fields_default_none():
+    from modules.upload import _parse_arr_webhook_payload
+
+    result = _parse_arr_webhook_payload({
+        "eventType": "Download",
+        "movie": {"title": "Aliens", "year": 1986, "tmdbId": 679},
+    })
+    assert result["instance_name"] is None
+    assert result["application_url"] is None
+
+
+def _make_request_stub(instance_token=None):
+    import types
+
+    query = {"instance": instance_token} if instance_token is not None else {}
+    return types.SimpleNamespace(query_params=query)
+
+
+def _seed_radarr_instances(test_db):
+    import json as _json
+    from models.setting import upsert_setting as _upsert_setting
+
+    _upsert_setting(test_db, "radarr_instances", _json.dumps([
+        {"name": "Radarr-4K", "url": "http://radarr4k:7878", "api_key": "a"},
+        {"name": "Radarr-1080p", "url": "http://radarr1080:7878", "api_key": "b"},
+    ]))
+    test_db.commit()
+
+
+def test_resolve_arr_instance_prefers_url_token(test_db):
+    from api.plex_upload import resolve_arr_instance
+
+    _seed_radarr_instances(test_db)
+    parsed = {"source": "radarr", "instance_name": "Radarr-1080p"}
+    # URL token wins over the payload instanceName.
+    assert resolve_arr_instance(test_db, _make_request_stub("Radarr-4K"), parsed) == "Radarr-4K"
+
+
+def test_resolve_arr_instance_falls_back_to_payload_name(test_db):
+    from api.plex_upload import resolve_arr_instance
+
+    _seed_radarr_instances(test_db)
+    parsed = {"source": "radarr", "instance_name": "Radarr-1080p"}
+    assert resolve_arr_instance(test_db, _make_request_stub(), parsed) == "Radarr-1080p"
+
+
+def test_resolve_arr_instance_falls_back_to_application_url(test_db):
+    from api.plex_upload import resolve_arr_instance
+
+    _seed_radarr_instances(test_db)
+    parsed = {"source": "radarr", "instance_name": None, "application_url": "http://radarr4k:7878/"}
+    assert resolve_arr_instance(test_db, _make_request_stub(), parsed) == "Radarr-4K"
+
+
+def test_resolve_arr_instance_returns_none_when_unmatched(test_db):
+    from api.plex_upload import resolve_arr_instance
+
+    _seed_radarr_instances(test_db)
+    parsed = {"source": "radarr", "instance_name": "Radarr-Unknown"}
+    assert resolve_arr_instance(test_db, _make_request_stub("nope"), parsed) is None
+
+
+def test_dedupe_does_not_collapse_distinct_instances(client, test_db, monkeypatch):
+    """Two different Radarr instances importing the same movie should both queue."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _seed_radarr_instances(test_db)
+    assert client.post("/api/posterflow/plex-upload/webhook-settings", json={"enabled": True}).status_code == 200
+
+    base_movie = {"title": "The Matrix", "year": 1999, "tmdbId": 603, "imdbId": "tt0133093"}
+
+    first = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "instanceName": "Radarr-4K", "movie": base_movie,
+    })
+    second = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "instanceName": "Radarr-1080p", "movie": base_movie,
+    })
+
+    assert first.json()["queued"] is True
+    assert second.json()["queued"] is True
+
+
+def test_dedupe_still_collapses_same_instance(client, test_db, monkeypatch):
+    """The same instance importing the same movie twice still dedupes."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _seed_radarr_instances(test_db)
+    assert client.post("/api/posterflow/plex-upload/webhook-settings", json={"enabled": True}).status_code == 200
+
+    payload = {
+        "eventType": "Download", "instanceName": "Radarr-4K",
+        "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+    }
+    first = client.post("/api/posterflow/plex-upload/webhook", json=payload)
+    second = client.post("/api/posterflow/plex-upload/webhook", json=payload)
+
+    assert first.json()["queued"] is True
+    assert second.json()["queued"] is False
+    assert second.json()["duplicate"] is True
+
+
+def test_clear_dedupe_parses_legacy_keys(test_db):
+    """Legacy 5/6-part dedupe keys (no instance prefix) still clear correctly."""
+    import json as _json
+    import time as _time
+    from models.setting import upsert_setting as _upsert_setting
+    from modules.upload import _clear_webhook_dedupe_cache, SETTING_PLEX_WEBHOOK_DEDUPE_CACHE
+
+    now = int(_time.time())
+    cache = {
+        "radarr:download:movie:thematrix:1999:": now,          # legacy 6-part
+        "radarr:download:movie:inception:2010": now,           # legacy 5-part
+        "Radarr-4K:radarr:download:movie:dune:2021:": now,     # new 7-part
+    }
+    _upsert_setting(test_db, SETTING_PLEX_WEBHOOK_DEDUPE_CACHE, _json.dumps(cache))
+    test_db.commit()
+
+    result = _clear_webhook_dedupe_cache(test_db, clear_all=True)
+    assert result["removed"] == 3
+    assert result["remaining"] == 0
+
+
+def _filter_service(test_db, instance_map=None):
+    import json as _json
+    from models.setting import upsert_setting as _upsert_setting
+
+    if instance_map is not None:
+        _upsert_setting(test_db, "plex_upload_instance_library_map", _json.dumps(instance_map))
+        test_db.commit()
+    return PlexUploadService(test_db)
+
+
+def _sample_selected():
+    return {
+        "Main": [
+            {"key": "k_movies", "title": "Movies", "enabled": True},
+            {"key": "k_movies4k", "title": "Movies 4K", "enabled": True},
+        ]
+    }
+
+
+def test_filter_libraries_unmapped_instance_returns_all(test_db):
+    service = _filter_service(test_db)
+    selected = _sample_selected()
+    filtered, error = service._filter_libraries_for_instance(selected, None)
+    assert error is None
+    assert filtered == selected
+
+
+def test_filter_libraries_no_map_returns_all(test_db):
+    service = _filter_service(test_db)
+    selected = _sample_selected()
+    filtered, error = service._filter_libraries_for_instance(selected, "Radarr-4K")
+    assert error is None
+    assert filtered == selected
+
+
+def test_filter_libraries_scopes_to_mapped_library(test_db):
+    service = _filter_service(test_db, instance_map={
+        "Radarr-4K": [{"plex_instance": "Main", "library_key": "k_movies4k"}],
+    })
+    filtered, error = service._filter_libraries_for_instance(_sample_selected(), "Radarr-4K")
+    assert error is None
+    assert list(filtered.keys()) == ["Main"]
+    assert [lib["key"] for lib in filtered["Main"]] == ["k_movies4k"]
+
+
+def test_filter_libraries_error_when_mapping_matches_no_enabled_library(test_db):
+    service = _filter_service(test_db, instance_map={
+        "Radarr-4K": [{"plex_instance": "Main", "library_key": "does_not_exist"}],
+    })
+    filtered, error = service._filter_libraries_for_instance(_sample_selected(), "Radarr-4K")
+    assert filtered == {}
+    assert error is not None and "Radarr-4K" in error
+
+
+def test_plex_upload_instance_map_endpoints_round_trip(client):
+    empty = client.get("/api/settings/plex-upload-instance-map")
+    assert empty.status_code == 200
+    assert empty.json()["map"] == {}
+
+    save = client.post("/api/settings/plex-upload-instance-map", json={
+        "map": {
+            "Radarr-4K": [{"plex_instance": "Main", "library_key": "k_movies4k"}],
+            "Radarr-Empty": [],
+        }
+    })
+    assert save.status_code == 200
+    saved_map = save.json()["map"]
+    assert saved_map["Radarr-4K"] == [{"plex_instance": "Main", "library_key": "k_movies4k"}]
+    # Instances with no usable rows are dropped.
+    assert "Radarr-Empty" not in saved_map
+
+    fetched = client.get("/api/settings/plex-upload-instance-map")
+    assert fetched.json()["map"]["Radarr-4K"][0]["library_key"] == "k_movies4k"
+
+
+# ---------------------------------------------------------------------------
+# Structured dedupe cache: ID-aware identity (problem 4)
+# ---------------------------------------------------------------------------
+
+
+def _enable_webhook(client):
+    assert client.post("/api/posterflow/plex-upload/webhook-settings", json={"enabled": True}).status_code == 200
+
+
+def test_dedupe_distinguishes_movies_sharing_title_year(client, monkeypatch):
+    """Two different movies with the same title+year but different tmdbId must not collide."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _enable_webhook(client)
+
+    first = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "Crash", "year": 2004, "tmdbId": 1640},
+    })
+    second = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "Crash", "year": 2004, "tmdbId": 75},
+    })
+
+    assert first.json()["queued"] is True
+    assert second.json()["queued"] is True
+
+
+def test_dedupe_collapses_same_id_despite_title_variation(client, monkeypatch):
+    """Same tmdbId with a different title string is still a duplicate (ID is authoritative)."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _enable_webhook(client)
+
+    first = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+    })
+    second = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "Matrix, The", "year": 1999, "tmdbId": 603},
+    })
+
+    assert first.json()["queued"] is True
+    assert second.json()["queued"] is False
+    assert second.json()["duplicate"] is True
+
+
+def test_dedupe_yearless_movies_with_distinct_ids_do_not_collide(client, monkeypatch):
+    """Year-less imports with different IDs must not collapse into one (old title:'' bug)."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _enable_webhook(client)
+
+    first = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "Untitled", "tmdbId": 111},
+    })
+    second = client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "Untitled", "tmdbId": 222},
+    })
+
+    assert first.json()["queued"] is True
+    assert second.json()["queued"] is True
+
+
+def test_media_id_token_prefers_tmdb_then_tvdb_then_imdb():
+    from modules.upload import _media_id_token
+
+    assert _media_id_token({"tmdb_id": 603, "tvdb_id": 1, "imdb_id": "tt1"}) == "tmdb-603"
+    assert _media_id_token({"tmdb_id": None, "tvdb_id": 73244, "imdb_id": "tt1"}) == "tvdb-73244"
+    assert _media_id_token({"tmdb_id": None, "tvdb_id": None, "imdb_id": "tt0133093"}) == "imdb-tt0133093"
+    assert _media_id_token({"tmdb_id": None, "tvdb_id": None, "imdb_id": None}) is None
+
+
+def test_dedupe_identity_falls_back_to_title_year_without_id():
+    from modules.upload import _webhook_dedupe_record, _webhook_dedupe_identity
+
+    with_id = _webhook_dedupe_identity(_webhook_dedupe_record(
+        {"source": "radarr", "event_type": "download", "media_type": "movie", "title": "The Matrix", "year": 1999, "tmdb_id": 603}
+    ))
+    no_id = _webhook_dedupe_identity(_webhook_dedupe_record(
+        {"source": "radarr", "event_type": "download", "media_type": "movie", "title": "The Matrix", "year": 1999}
+    ))
+
+    assert "id|tmdb-603" in with_id
+    assert "tmdb-603" not in no_id
+    assert no_id.endswith("|tt|thematrix|1999|")
+
+
+def test_structured_dedupe_cache_persists_record_fields(client, test_db, monkeypatch):
+    """The persisted dedupe cache stores structured records (not delimited strings)."""
+    import json as _json
+    from models.setting import get_setting as _get_setting
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+    _enable_webhook(client)
+
+    client.post("/api/posterflow/plex-upload/webhook", json={
+        "eventType": "Download", "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+    })
+
+    setting = _get_setting(test_db, "plex_webhook_dedupe_cache")
+    cache = _json.loads(setting.value)
+    record = next(iter(cache.values()))
+    assert isinstance(record, dict)
+    assert record["id"] == "tmdb-603"
+    assert record["media"] == "movie"
+    assert record["title"] == "thematrix"
+    assert isinstance(record["ts"], int)
+
+
+# ---------------------------------------------------------------------------
+# Webhook retries: don't reconnect to all ARR instances on Plex-scan-lag retries
+# ---------------------------------------------------------------------------
+
+
+def test_arr_availability_incomplete_flag_tracks_connection_failures(test_db, monkeypatch):
+    import services.plex_upload as svc_mod
+
+    service = PlexUploadService(test_db)
+    monkeypatch.setattr(
+        service,
+        "_get_arr_instances",
+        lambda key: (
+            [{"name": "A", "url": "u1", "api_key": "k"}, {"name": "B", "url": "u2", "api_key": "k"}]
+            if key == PlexUploadService.SETTING_RADARR_INSTANCES
+            else []
+        ),
+    )
+
+    class _FakeClient:
+        def __init__(self, ok):
+            self.connect_status = ok
+
+        def get_parsed_media(self, include_unmonitored=True):
+            return []
+
+    # Second instance fails to connect -> build is incomplete.
+    seq = []
+
+    def _make(url, api_key, itype, logger=None):
+        seq.append(1)
+        return _FakeClient(len(seq) == 1)
+
+    monkeypatch.setattr(svc_mod, "create_arr_client", _make)
+    service._build_arr_availability_index(media_type_filter="movie")
+    assert service.arr_availability_was_incomplete() is True
+
+    # Both instances connect -> build is complete.
+    monkeypatch.setattr(svc_mod, "create_arr_client", lambda *a, **k: _FakeClient(True))
+    service._build_arr_availability_index(media_type_filter="movie")
+    assert service.arr_availability_was_incomplete() is False
+
+
+def _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete):
+    import modules.upload as upload_module
+
+    job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    job_id = job.id
+
+    monkeypatch.setattr("modules.upload.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *a, **k: 1)
+    monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *a, **k: None)
+    monkeypatch.setattr("modules.upload.time.sleep", lambda _s: None)
+
+    runs = []
+    invalidations = []
+
+    class _Fake:
+        ERROR_INDEX_BUILD_FAILED = "Unable to build Plex index from configured instances/libraries."
+
+        def __init__(self, _db, **k):
+            pass
+
+        def prepare_webhook_context(self, **k):
+            return None
+
+        def is_single_target_fully_cached(self, **k):
+            return False
+
+        def is_series_show_poster_cached(self, **k):
+            return False
+
+        def run_single_upload(self, **k):
+            runs.append(1)
+            if len(runs) == 1:
+                return {"success": False, "error": _Fake.ERROR_INDEX_BUILD_FAILED}
+            return {
+                "success": True,
+                "stats": {"scanned": 1, "matched": 1, "uploaded": 1,
+                          "candidate_matches_raw": 1, "candidate_matches_unique": 1,
+                          "skipped": 0, "errors": 0},
+            }
+
+        def invalidate_arr_availability_cache(self):
+            invalidations.append(1)
+
+        def arr_availability_was_incomplete(self):
+            return incomplete
+
+        def invalidate_preflight_cache(self):
+            pass
+
+        def invalidate_local_assets_cache(self):
+            pass
+
+        def _get_destination_dir(self):
+            from pathlib import Path
+            return Path("/tmp")
+
+        def _get_local_assets(self, _d):
+            return [{"media_key": "x", "asset_type": "main"}]
+
+        def _select_local_assets_for_target(self, a, **k):
+            return a
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+    upload_module.run_plex_webhook_background_job(
+        job_id,
+        {"media_type": "movie", "title": "X", "year": 2020, "season_number": None, "tmdb_id": 1},
+        False, False, 2, 1,
+    )
+    return len(invalidations)
+
+
+def test_webhook_retry_skips_arr_reconnect_when_availability_complete(test_db, monkeypatch):
+    # End-of-job cleanup always invalidates once; with a complete availability build
+    # the retry adds no extra invalidation (i.e. no reconnect to all ARR instances).
+    assert _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete=False) == 1
+
+
+def test_webhook_retry_rebuilds_arr_when_availability_was_incomplete(test_db, monkeypatch):
+    # A prior incomplete build -> retry invalidates (1) + end-of-job cleanup (1) = 2.
+    assert _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete=True) == 2

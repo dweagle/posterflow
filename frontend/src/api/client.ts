@@ -132,9 +132,13 @@ export {
 export {
   type PlexUploadCacheSummary,
   type PlexUploadLibraryConfig,
+  type PlexUploadInstanceMap,
+  type PlexUploadInstanceMapEntry,
   type PlexSearchItem,
   type PlexWebhookDedupeEntry,
   type PlexWebhookStats,
+  getPlexUploadInstanceMap,
+  savePlexUploadInstanceMap,
   clearPlexUploadCache,
   clearPlexWebhookDedupe,
   downloadPlexUploadCacheExport,

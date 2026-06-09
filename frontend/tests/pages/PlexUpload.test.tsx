@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PlexUpload from '../../src/pages/PlexUpload'
@@ -20,6 +20,9 @@ const mockSavePlexUploadLibraryOverrideSettings = vi.fn()
 const mockGetPlexUploadCache = vi.fn()
 const mockClearPlexUploadCache = vi.fn()
 const mockDownloadPlexUploadCacheExport = vi.fn()
+const mockGetPlexUploadInstanceMap = vi.fn()
+const mockSavePlexUploadInstanceMap = vi.fn()
+const mockGetSettings = vi.fn()
 
 vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
@@ -42,6 +45,9 @@ vi.mock('../../src/api/client', () => ({
   getPlexUploadCache: (...args: unknown[]) => mockGetPlexUploadCache(...args),
   clearPlexUploadCache: (...args: unknown[]) => mockClearPlexUploadCache(...args),
   downloadPlexUploadCacheExport: (...args: unknown[]) => mockDownloadPlexUploadCacheExport(...args),
+  getPlexUploadInstanceMap: (...args: unknown[]) => mockGetPlexUploadInstanceMap(...args),
+  savePlexUploadInstanceMap: (...args: unknown[]) => mockSavePlexUploadInstanceMap(...args),
+  getSettings: (...args: unknown[]) => mockGetSettings(...args),
 }))
 
 describe('PlexUpload', () => {
@@ -68,6 +74,7 @@ describe('PlexUpload', () => {
       duplicates: 0,
       skipped_test: 0,
       skipped_cached: 0,
+      skipped_no_asset: 0,
       rejected_disabled: 0,
       parse_errors: 0,
       internal_errors: 0,
@@ -115,6 +122,9 @@ describe('PlexUpload', () => {
       entries: [],
     })
     mockDownloadPlexUploadCacheExport.mockReturnValue('/api/poster-manager/plex-upload/upload-cache/export')
+    mockGetPlexUploadInstanceMap.mockResolvedValue({ map: {} })
+    mockSavePlexUploadInstanceMap.mockResolvedValue({ message: 'saved', map: {} })
+    mockGetSettings.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -181,5 +191,109 @@ describe('PlexUpload', () => {
         retry_delay_seconds: 30,
       }))
     })
+  })
+
+  it('loads the instance routing map and arr instances on mount', async () => {
+    render(<PlexUpload />)
+
+    await waitFor(() => {
+      expect(mockGetPlexUploadInstanceMap).toHaveBeenCalledTimes(1)
+      expect(mockGetSettings).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('renders a per-instance webhook URL and saves a library mapping', async () => {
+    const user = userEvent.setup()
+    mockGetSettings.mockResolvedValue({
+      radarr_instances: JSON.stringify([{ name: 'Radarr-4K', url: 'http://radarr4k:7878', api_key: 'x' }]),
+    })
+    mockGetPlexUploadLibraryOverrideSettings.mockResolvedValue({
+      enabled: false,
+      configs: [],
+      global_configs: [
+        {
+          instance_name: 'Main',
+          libraries: [{ key: 'k_movies4k', title: 'Movies 4K', type: 'movie', enabled: true }],
+        },
+      ],
+    })
+
+    render(<PlexUpload />)
+
+    // The per-instance selection now lives in the Library Targeting modal.
+    const configureButton = await screen.findByRole('button', { name: /Configure libraries/i })
+    await user.click(configureButton)
+
+    const routingBlock = await screen.findByTestId('instance-routing-Radarr-4K')
+    expect(routingBlock).toBeTruthy()
+    // Per-instance webhook URL carries the &instance= attribution token.
+    expect(screen.getByText(/instance=Radarr-4K/)).toBeTruthy()
+
+    const checkbox = within(routingBlock).getByLabelText(/Movies 4K/i)
+    await user.click(checkbox)
+    // Single footer Save persists override + routing together.
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => {
+      expect(mockSavePlexUploadInstanceMap).toHaveBeenCalledWith({
+        'Radarr-4K': [{ plex_instance: 'Main', library_key: 'k_movies4k' }],
+      })
+    })
+  })
+
+  it('reverts unsaved modal toggles when cancelled', async () => {
+    const user = userEvent.setup()
+    mockGetSettings.mockResolvedValue({
+      radarr_instances: JSON.stringify([{ name: 'Radarr-4K', url: 'http://radarr4k:7878', api_key: 'x' }]),
+    })
+    mockGetPlexUploadLibraryOverrideSettings.mockResolvedValue({
+      enabled: false,
+      configs: [],
+      global_configs: [
+        { instance_name: 'Main', libraries: [{ key: 'k_movies4k', title: 'Movies 4K', type: 'movie', enabled: true }] },
+      ],
+    })
+
+    render(<PlexUpload />)
+    await user.click(await screen.findByRole('button', { name: /Configure libraries/i }))
+
+    const routingBlock = await screen.findByTestId('instance-routing-Radarr-4K')
+    await user.click(within(routingBlock).getByLabelText(/Movies 4K/i))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    // Nothing persisted, and the page summary still shows the default (reverted) routing.
+    expect(mockSavePlexUploadInstanceMap).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByText(/→ all selected libraries/i)).toBeTruthy()
+    })
+  })
+
+  it('shows a compact routing summary on the page and keeps the selection in a modal', async () => {
+    mockGetSettings.mockResolvedValue({
+      radarr_instances: JSON.stringify([{ name: 'Radarr-4K', url: 'http://radarr4k:7878', api_key: 'x' }]),
+    })
+    mockGetPlexUploadInstanceMap.mockResolvedValue({
+      map: { 'Radarr-4K': [{ plex_instance: 'Main', library_key: 'k_movies4k' }] },
+    })
+    mockGetPlexUploadLibraryOverrideSettings.mockResolvedValue({
+      enabled: false,
+      configs: [],
+      global_configs: [
+        {
+          instance_name: 'Main',
+          libraries: [{ key: 'k_movies4k', title: 'Movies 4K', type: 'movie', enabled: true }],
+        },
+      ],
+    })
+
+    render(<PlexUpload />)
+
+    // Summary resolves the mapped library to its title on the page itself…
+    await waitFor(() => {
+      expect(screen.getByText(/→ Movies 4K/)).toBeTruthy()
+    })
+    // …while the checkbox grid is not rendered until the modal is opened.
+    expect(screen.queryByTestId('instance-routing-Radarr-4K')).toBeNull()
+    expect(screen.getByRole('button', { name: /Configure libraries/i })).toBeTruthy()
   })
 })

@@ -140,6 +140,54 @@
   font-size: 0.85rem;
 }
 
+/* Highlighted "running multiple instances" callout — brighter + easier to scan */
+.walkthrough-multi-instance {
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  background: #1c2630;
+  border: 1px solid #2f4456;
+  border-left: 3px solid #64b5f6;
+  border-radius: 7px;
+  color: #eef4fb;
+  font-size: 0.9rem;
+}
+
+.walkthrough-multi-instance > strong:first-child {
+  color: #82b1ff;
+}
+
+.walkthrough-multi-instance code {
+  color: #ffd479;
+}
+
+.walkthrough-multi-instance-list {
+  margin-top: 0.5rem;
+  padding-left: 0;
+  list-style: none;
+  gap: 0.4rem;
+  color: #dfe7f0;
+  font-size: 0.86rem;
+}
+
+.walkthrough-multi-instance-list li {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+/* Alternate row tints so each point reads as its own line */
+.walkthrough-multi-instance-list li:nth-child(odd) {
+  background: #233140;
+}
+
+.walkthrough-multi-instance-list li:nth-child(even) {
+  background: #1f2a36;
+}
+
+.walkthrough-multi-instance-list li strong {
+  color: #80cbc4;
+}
+
 .walkthrough-endpoint {
   margin-top: 0.25rem;
   background: #2a2a2a;
@@ -1025,6 +1073,108 @@ input.no-spinner {
 
 .override-library-list .plex-checkbox-row {
   margin: 0;
+}
+
+.instance-routing-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.instance-routing-instance {
+  border: 1px solid #333;
+  border-radius: 7px;
+  padding: 0.65rem;
+  background: #1f1f1f;
+}
+
+.instance-routing-instance > h3 {
+  margin: 0 0 0.5rem;
+  color: #81c784;
+  font-size: 0.95rem;
+}
+
+.instance-routing-instance .override-library-instance h4 {
+  margin: 0 0 0.4rem;
+  color: #64b5f6;
+  font-size: 0.85rem;
+}
+
+.instance-routing-url {
+  margin-bottom: 0.55rem;
+}
+
+/* Compact on-page Library Targeting summary */
+.library-targeting-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.library-targeting-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  background: #222;
+}
+
+.library-targeting-summary-label {
+  flex: 0 0 auto;
+  min-width: 110px;
+  color: #81c784;
+  font-weight: 600;
+}
+
+.library-targeting-summary-empty {
+  margin: 0.2rem 0 0;
+}
+
+/* Library Targeting modal */
+.library-targeting-modal {
+  max-width: 760px;
+  width: min(760px, 94vw);
+}
+
+.library-targeting-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.library-targeting-block {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #1f1f1f;
+}
+
+.library-targeting-block > .plex-card-header-row {
+  margin-bottom: 0.35rem;
+}
+
+.library-targeting-block h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.library-targeting-block .instance-routing-instance h4,
+.library-targeting-block .override-library-instance h4 {
+  color: #81c784;
+  font-size: 0.9rem;
+  margin: 0 0 0.4rem;
+}
+
+.library-targeting-block .override-library-instance h5 {
+  margin: 0 0 0.35rem;
+  color: #64b5f6;
+  font-size: 0.82rem;
 }
 
 .override-library-list {
