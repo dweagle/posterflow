@@ -83,6 +83,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_remove_borders",
     "border_replacer_season_mode",
     "border_replacer_season_colors",
+    "border_replacer_season_width",
     "auto_run_border",
     # GDrive storage path
     "gdrive_storage_path",

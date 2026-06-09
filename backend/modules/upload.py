@@ -613,6 +613,12 @@ def _run_webhook_preupload_rename_pass(
         except json.JSONDecodeError:
             season_colors = []
 
+        season_width_setting = get_setting(db, "border_replacer_season_width")
+        try:
+            season_width = int(season_width_setting.value) if season_width_setting and season_width_setting.value else None
+        except ValueError:
+            season_width = None
+
         border_service = BorderReplacerService(db)
         border_result = border_service.process_posters(
             source_dir=tmp_source_dir,
@@ -625,6 +631,7 @@ def _run_webhook_preupload_rename_pass(
             mode=mode,
             season_mode=season_mode,
             season_border_colors=season_colors if isinstance(season_colors, list) and season_colors else None,
+            season_border_width=season_width,
         )
 
         if border_result.get("success", False):

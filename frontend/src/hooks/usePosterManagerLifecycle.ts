@@ -22,6 +22,7 @@ interface UsePosterManagerLifecycleOptions {
   removeBorders: boolean
   seasonMode: 'inherit' | 'remove' | 'colors'
   seasonColors: string[]
+  seasonWidth: number
   originalBorderSettingsRef: React.MutableRefObject<{
     colors: string[]
     width: number
@@ -32,6 +33,7 @@ interface UsePosterManagerLifecycleOptions {
     removeBorders: boolean
     seasonMode: 'inherit' | 'remove' | 'colors'
     seasonColors: string[]
+    seasonWidth: number
   } | null>
   setHasUnsavedBorderChanges: React.Dispatch<React.SetStateAction<boolean>>
   selectedLibraries: Set<string>
@@ -74,6 +76,7 @@ export function usePosterManagerLifecycle({
   removeBorders,
   seasonMode,
   seasonColors,
+  seasonWidth,
   originalBorderSettingsRef,
   setHasUnsavedBorderChanges,
   selectedLibraries,
@@ -128,8 +131,9 @@ export function usePosterManagerLifecycle({
     const removeBordersChanged = removeBorders !== originalBorderSettingsRef.current.removeBorders
     const seasonModeChanged = seasonMode !== originalBorderSettingsRef.current.seasonMode
     const seasonColorsChanged = JSON.stringify(seasonColors) !== JSON.stringify(originalBorderSettingsRef.current.seasonColors)
+    const seasonWidthChanged = seasonWidth !== originalBorderSettingsRef.current.seasonWidth
 
-    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged)
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged)
   }, [
     autoRunBorder,
     borderColors,
@@ -140,6 +144,7 @@ export function usePosterManagerLifecycle({
     removeBorders,
     seasonMode,
     seasonColors,
+    seasonWidth,
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
   ])

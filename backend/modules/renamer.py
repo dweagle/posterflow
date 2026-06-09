@@ -262,6 +262,28 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                     except json.JSONDecodeError:
                         log_warning(LogTags.BORDER_REPLACER, "Failed to parse exclusions, using empty list")
 
+                season_mode = get_setting_value(db, "border_replacer_season_mode", "inherit")
+                if season_mode not in ("inherit", "remove", "colors"):
+                    season_mode = "inherit"
+
+                season_colors = []
+                season_colors_value = get_setting_value(db, "border_replacer_season_colors")
+                if season_colors_value:
+                    try:
+                        season_colors = json.loads(season_colors_value)
+                    except json.JSONDecodeError:
+                        log_warning(LogTags.BORDER_REPLACER, "Failed to parse season border colors, using empty list")
+                        season_colors = []
+
+                season_width = None
+                season_width_value = get_setting_value(db, "border_replacer_season_width")
+                if season_width_value:
+                    try:
+                        season_width = int(season_width_value)
+                    except ValueError:
+                        log_warning(LogTags.BORDER_REPLACER, f"Invalid season border width '{season_width_value}', falling back to main width")
+                        season_width = None
+
                 action = "Removing borders" if remove_borders else "Adding borders"
                 log_info(
                     LogTags.BORDER_REPLACER,
@@ -287,7 +309,10 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                         border_width=border_width,
                         exclusion_list=exclusions,
                         dry_run=config_data.get("dry_run", False),
-                        mode=border_mode
+                        mode=border_mode,
+                        season_mode=season_mode,
+                        season_border_colors=season_colors if season_colors else None,
+                        season_border_width=season_width,
                     )
 
                     if border_result.get("success"):

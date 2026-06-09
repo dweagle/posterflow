@@ -56,6 +56,7 @@ type BorderTabProps = {
   removeBorders: boolean
   seasonMode: 'inherit' | 'remove' | 'colors'
   seasonColors: string[]
+  seasonWidth: number
   newSeasonColor: string
   onSaveSettings: () => void
   onRunBorderReplacer: (dryRun: boolean) => void
@@ -69,6 +70,7 @@ type BorderTabProps = {
   onAddHolidaySchedule: (holiday: HolidaySchedule) => void
   onRemoveHolidaySchedule: (name: string) => void
   onSetSeasonMode: (mode: 'inherit' | 'remove' | 'colors') => void
+  onSetSeasonWidth: (width: number) => void
   onSetNewSeasonColor: (color: string) => void
   onAddSeasonBorderColor: () => void
   onRemoveSeasonBorderColor: (color: string) => void
@@ -87,6 +89,7 @@ function BorderTab({
   removeBorders,
   seasonMode,
   seasonColors,
+  seasonWidth,
   newSeasonColor,
   onSaveSettings,
   onRunBorderReplacer,
@@ -100,6 +103,7 @@ function BorderTab({
   onAddHolidaySchedule,
   onRemoveHolidaySchedule,
   onSetSeasonMode,
+  onSetSeasonWidth,
   onSetNewSeasonColor,
   onAddSeasonBorderColor,
   onRemoveSeasonBorderColor,
@@ -411,6 +415,23 @@ function BorderTab({
                 <span>Custom colors</span>
               </label>
             </div>
+
+            {seasonMode !== 'inherit' && (
+              <div style={{ marginTop: '1rem' }}>
+                <label>Season Border Width (pixels)</label>
+                <input
+                  type="number"
+                  value={seasonWidth}
+                  onChange={(e) => onSetSeasonWidth(parseInt(e.target.value) || 26)}
+                  min="1"
+                  max="200"
+                  style={{ maxWidth: '120px' }}
+                />
+                <small style={{ display: 'block' }}>
+                  Border width applied to season posters. Independent of the main poster width above.
+                </small>
+              </div>
+            )}
 
             {seasonMode === 'colors' && (
               <div style={{ marginTop: '1rem' }}>

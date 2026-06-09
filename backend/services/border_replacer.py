@@ -71,18 +71,20 @@ class BorderReplacerService:
         processing_profile: Optional[str] = None,
         season_mode: str = "inherit",
         season_border_colors: Optional[List[str]] = None,
+        season_border_width: Optional[int] = None,
     ) -> str:
         """
         Calculate a hash of border replacer settings to detect changes.
         When settings change, we need to reprocess all files even in incremental mode.
-        
+
         Args:
             border_colors: List of hex colors or None
             border_width: Border width in pixels
             exclusion_list: List of titles to exclude
             season_mode: Season border mode ("inherit", "remove", "colors")
             season_border_colors: Colors to use for season posters when season_mode is "colors"
-            
+            season_border_width: Border width for season posters when season_mode is not "inherit"
+
         Returns:
             MD5 hash of the settings as a hex string
         """
@@ -93,6 +95,7 @@ class BorderReplacerService:
             "profile": processing_profile or "default",
             "season_mode": season_mode,
             "season_colors": sorted(season_border_colors or []),
+            "season_width": season_border_width,
         }
         settings_json = json.dumps(settings_dict, sort_keys=True)
         return hashlib.md5(settings_json.encode(), usedforsecurity=False).hexdigest()
@@ -107,6 +110,7 @@ class BorderReplacerService:
         processing_profile: Optional[str] = None,
         season_mode: str = "inherit",
         season_border_colors: Optional[List[str]] = None,
+        season_border_width: Optional[int] = None,
     ) -> bool:
         """
         Check if border replacer settings have changed since last run.
@@ -134,8 +138,9 @@ class BorderReplacerService:
             processing_profile=processing_profile,
             season_mode=season_mode,
             season_border_colors=season_border_colors,
+            season_border_width=season_border_width,
         )
-        
+
         # Get stored hash from database
         stored_hash_setting = get_setting(self.db, "border_replacer_settings_hash")
         
@@ -652,6 +657,7 @@ class BorderReplacerService:
         mode: str = "full",
         season_mode: str = "inherit",
         season_border_colors: Optional[List[str]] = None,
+        season_border_width: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Process posters by applying or removing borders.
@@ -669,6 +675,8 @@ class BorderReplacerService:
             season_mode: How to handle season posters — "inherit" (same as main), "remove"
                          (strip borders), or "colors" (use season_border_colors)
             season_border_colors: Hex colors used when season_mode is "colors"
+            season_border_width: Border width (px) for season posters when season_mode is
+                                 not "inherit". Falls back to border_width when not set.
 
         Returns:
             Dictionary with results including processed count and messages
@@ -766,6 +774,13 @@ class BorderReplacerService:
                     # Fall back to inherit if colors mode is selected but no colors configured
                     effective_season_mode = "inherit"
 
+            # Resolve season border width — only used when seasons are handled separately
+            # (remove/colors mode). Falls back to the main border width when not set or <= 0.
+            if effective_season_mode != "inherit" and season_border_width and season_border_width > 0:
+                effective_season_width = int(season_border_width)
+            else:
+                effective_season_width = border_width
+
             # Convert hex colors to RGB
             rgb_border_colors: List[Tuple[int, int, int]] = []
             if not remove_borders and effective_border_colors:
@@ -783,7 +798,8 @@ class BorderReplacerService:
             log_info(LogTags.BORDER_REPLACER, f"{action} {mode_str}")
             if effective_season_mode != "inherit":
                 season_action = "remove" if effective_season_mode == "remove" else f"custom colors ({len(rgb_season_colors)})"
-                log_info(LogTags.BORDER_REPLACER, f"Season poster override: {season_action}")
+                width_note = f", width {effective_season_width}px" if effective_season_width != border_width else ""
+                log_info(LogTags.BORDER_REPLACER, f"Season poster override: {season_action}{width_note}")
 
             # Import Poster model for incremental tracking
             from models.poster import Poster
@@ -805,6 +821,7 @@ class BorderReplacerService:
                     processing_profile=profile,
                     season_mode=effective_season_mode,
                     season_border_colors=effective_season_colors,
+                    season_border_width=effective_season_width if effective_season_mode != "inherit" else None,
                 )
 
             incremental_tracking_records: Dict[str, Poster] = {}
@@ -1192,7 +1209,7 @@ class BorderReplacerService:
                             result = self.remove_borders(
                                 input_file,
                                 destination_dir,
-                                border_width,
+                                effective_season_width,
                                 excluded,
                                 folder,
                             )
@@ -1203,7 +1220,7 @@ class BorderReplacerService:
                                 input_file,
                                 destination_dir,
                                 rgb_season_color,
-                                border_width,
+                                effective_season_width,
                                 folder,
                             )
                             current_season_color_index = (current_season_color_index + 1) % len(rgb_season_colors)

@@ -13,6 +13,7 @@ interface OriginalBorderSettings {
   removeBorders: boolean
   seasonMode: 'inherit' | 'remove' | 'colors'
   seasonColors: string[]
+  seasonWidth: number
 }
 
 export interface BorderHolidaySchedule {
@@ -44,6 +45,7 @@ export const usePosterManagerBorder = ({
   const [removeBorders, setRemoveBorders] = useState(false)
   const [seasonMode, setSeasonMode] = useState<'inherit' | 'remove' | 'colors'>('inherit')
   const [seasonColors, setSeasonColors] = useState<string[]>([])
+  const [seasonWidth, setSeasonWidth] = useState(26)
   const [newSeasonColor, setNewSeasonColor] = useState('#000000')
 
   const fetchBorderSettings = async () => {
@@ -119,6 +121,10 @@ export const usePosterManagerBorder = ({
         setSeasonColors([])
       }
 
+      const seasonWidthStr = settings['border_replacer_season_width'] || String(width)
+      const loadedSeasonWidth = parseInt(seasonWidthStr) || width
+      setSeasonWidth(loadedSeasonWidth)
+
       originalBorderSettingsRef.current = {
         colors: [...colors],
         width,
@@ -129,6 +135,7 @@ export const usePosterManagerBorder = ({
         removeBorders: removeBordersEnabled,
         seasonMode: resolvedSeasonMode,
         seasonColors: [...loadedSeasonColors],
+        seasonWidth: loadedSeasonWidth,
       }
     } catch (error) {
       console.error('Error fetching border settings:', error)
@@ -161,6 +168,7 @@ export const usePosterManagerBorder = ({
         border_replacer_remove_borders: removeBorders ? 'true' : 'false',
         border_replacer_season_mode: seasonMode,
         border_replacer_season_colors: JSON.stringify(seasonColors),
+        border_replacer_season_width: seasonWidth.toString(),
       })
 
       originalBorderSettingsRef.current = {
@@ -173,6 +181,7 @@ export const usePosterManagerBorder = ({
         removeBorders,
         seasonMode,
         seasonColors: [...seasonColors],
+        seasonWidth,
       }
       setHasUnsavedBorderChanges(false)
       showToast('Border settings saved successfully', 'success')
@@ -237,6 +246,7 @@ export const usePosterManagerBorder = ({
     setRemoveBorders(original.removeBorders)
     setSeasonMode(original.seasonMode)
     setSeasonColors([...original.seasonColors])
+    setSeasonWidth(original.seasonWidth)
     setHasUnsavedBorderChanges(false)
   }
 
@@ -251,6 +261,7 @@ export const usePosterManagerBorder = ({
     removeBorders,
     seasonMode,
     seasonColors,
+    seasonWidth,
     newSeasonColor,
     setBorderWidth,
     setBorderMode,
@@ -259,6 +270,7 @@ export const usePosterManagerBorder = ({
     setSkipRunOutsideHoliday,
     setRemoveBorders,
     setSeasonMode,
+    setSeasonWidth,
     setNewSeasonColor,
     fetchBorderSettings,
     saveBorderSettings,

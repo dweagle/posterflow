@@ -83,6 +83,7 @@ function PosterManager() {
     removeBorders: boolean
     seasonMode: 'inherit' | 'remove' | 'colors'
     seasonColors: string[]
+    seasonWidth: number
   } | null>(null)
   const originalLibrarySelectionRef = useRef<Set<string> | null>(null)
   
@@ -147,8 +148,10 @@ function PosterManager() {
     removeHolidaySchedule,
     seasonMode,
     seasonColors,
+    seasonWidth,
     newSeasonColor,
     setSeasonMode,
+    setSeasonWidth,
     setNewSeasonColor,
   } = usePosterManagerBorder({
     originalBorderSettingsRef,
@@ -357,6 +360,7 @@ function PosterManager() {
     removeBorders,
     seasonMode,
     seasonColors,
+    seasonWidth,
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
     selectedLibraries,
@@ -516,6 +520,7 @@ function PosterManager() {
           removeBorders={removeBorders}
           seasonMode={seasonMode}
           seasonColors={seasonColors}
+          seasonWidth={seasonWidth}
           newSeasonColor={newSeasonColor}
           onSaveSettings={saveBorderSettings}
           onRunBorderReplacer={handleRunBorderReplacer}
@@ -529,6 +534,7 @@ function PosterManager() {
           onAddHolidaySchedule={addHolidaySchedule}
           onRemoveHolidaySchedule={removeHolidaySchedule}
           onSetSeasonMode={setSeasonMode}
+          onSetSeasonWidth={setSeasonWidth}
           onSetNewSeasonColor={setNewSeasonColor}
           onAddSeasonBorderColor={addSeasonBorderColor}
           onRemoveSeasonBorderColor={removeSeasonBorderColor}
