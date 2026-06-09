@@ -64,7 +64,7 @@ def repair_year_parens(stem: str) -> str:
 COLLECTION_REGEX = re.compile(r"collection", re.IGNORECASE)
 SEASON_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
 SEASON_SUFFIX_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
-ASSET_SUBTYPE_SUFFIX_REGEX = re.compile(r"\s*-\s*(?:logo|backdrop)s?\s*$", re.IGNORECASE)
+ASSET_SUBTYPE_SUFFIX_REGEX = re.compile(r"\s*-\s*(?:logo|background)s?\s*$", re.IGNORECASE)
 ID_TAG_BLOCK_REGEX = re.compile(r"\{(?:tmdb|tvdb|imdb)-[^}]+\}", re.IGNORECASE)
 SETTING_MAKER_IDARR_IGNORED_TITLES = "maker_tools_idarr_ignored_titles"
 
@@ -690,7 +690,7 @@ class IdarrRunner:
     def _parse_asset_no_season_hint(file_path: Path) -> dict[str, Any]:
         """Like _parse_asset but omits the season-suffix regex as a type hint.
 
-        Used for asset drive files (logos, backdrops) where filenames never carry
+        Used for asset drive files (logos, backgrounds) where filenames never carry
         season suffixes, so SEASON_REGEX would only produce false positives.
         Type detection relies solely on ID tags (tvdb → tv_series) and TMDB lookup.
         """
@@ -710,7 +710,7 @@ class IdarrRunner:
                 clean_title = YEAR_REGEX.sub("", clean_title)
         else:
             clean_title = YEAR_REGEX.sub("", clean_title)
-        # Strip " - logo" / " - backdrop" subtype labels from the title
+        # Strip " - logo" / " - background" subtype labels from the title
         clean_title = ASSET_SUBTYPE_SUFFIX_REGEX.sub("", clean_title).strip()
 
         # No SEASON_REGEX hint — only a TVDB tag marks the file as a series
@@ -746,7 +746,7 @@ class IdarrRunner:
         """Scan a flat directory with asset-drive matching rules (no season-suffix hints).
 
         Applies cache hints per file for ID enrichment but skips season grouping
-        entirely — each file is an independent logo or backdrop for a single title.
+        entirely — each file is an independent logo or background for a single title.
         """
         assets: list[dict[str, Any]] = []
         cache_rows = self._load_all_cache_rows("index build")
@@ -863,13 +863,13 @@ class IdarrRunner:
         return assets
 
     def scan_asset_drive_subfolders(self, source_dir: Path) -> list[dict[str, Any]]:
-        """Scan logos/ and backdrops/ subfolders of an asset drive.
+        """Scan logos/ and backgrounds/ subfolders of an asset drive.
 
         Each returned asset dict includes an ``asset_subtype`` key set to either
-        ``"logo"`` or ``"backdrop"`` based on which subfolder the file came from.
+        ``"logo"`` or ``"background"`` based on which subfolder the file came from.
         """
         assets: list[dict[str, Any]] = []
-        for subtype, subfolder_name in [("logo", "logos"), ("backdrop", "backdrops")]:
+        for subtype, subfolder_name in [("logo", "logos"), ("background", "backgrounds")]:
             subfolder = source_dir / subfolder_name
             if not subfolder.exists() or not subfolder.is_dir():
                 log_info(
@@ -2820,7 +2820,7 @@ class IdarrRunner:
         if is_asset_drive:
             dirs_to_scan = [
                 source_dir / subtype
-                for subtype in ("logos", "backdrops")
+                for subtype in ("logos", "backgrounds")
                 if (source_dir / subtype).is_dir()
             ]
         else:
@@ -3941,9 +3941,9 @@ class IdarrRunner:
         if asset_subtype == "logo":
             ext = ".png"
             asset_subtype_label = " - logo"
-        elif asset_subtype == "backdrop":
+        elif asset_subtype == "background":
             ext = ".jpg"
-            asset_subtype_label = " - backdrop"
+            asset_subtype_label = " - background"
         else:
             asset_subtype_label = ""
 
@@ -4143,7 +4143,7 @@ class IdarrRunner:
     def _convert_asset_drive_file(file_path: Path, asset_subtype: str) -> None:
         """Re-encode an asset drive file to its required format.
 
-        Logos are always PNG with alpha preserved; backdrops are always JPEG flattened to RGB.
+        Logos are always PNG with alpha preserved; backgrounds are always JPEG flattened to RGB.
         Called after rename when the original extension differed from the target.
         """
         try:
@@ -4152,7 +4152,7 @@ class IdarrRunner:
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
                 img.save(file_path, "PNG")
-            elif asset_subtype == "backdrop":
+            elif asset_subtype == "background":
                 if img.mode in ("RGBA", "LA", "P"):
                     background = Image.new("RGB", img.size, (0, 0, 0))
                     converted = img.convert("RGBA") if img.mode == "P" else img
@@ -4703,14 +4703,14 @@ class IdarrRunner:
         if is_asset_drive:
             log_info(
                 LogTags.IDARR,
-                f"Asset drive mode: scanning logos/ and backdrops/ subfolders of: {source_dir}",
+                f"Asset drive mode: scanning logos/ and backgrounds/ subfolders of: {source_dir}",
                 source_dir=str(source_dir),
             )
             _notify_progress("scanning", 9, f"Scanning asset drive subfolders: {source_dir}")
             assets = self.scan_asset_drive_subfolders(source_dir)
         elif is_psd_drive:
             # PSD drive: a flat folder using asset-style matching (no season-suffix hints, since
-            # PSD source files don't carry season info) but without the logos/backdrops subfolders.
+            # PSD source files don't carry season info) but without the logos/backgrounds subfolders.
             log_info(
                 LogTags.IDARR,
                 f"PSD drive mode: scanning flat folder with asset-style matching: {source_dir}",
