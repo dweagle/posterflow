@@ -148,6 +148,14 @@ function SettingsSecuritySection({ showToast }: SettingsSecuritySectionProps) {
         )}
       </div>
 
+      <div className="security-webhook-note">
+        <strong>Using Radarr/Sonarr webhooks?</strong> The Plex auto-upload webhook can't send this
+        password, so {isAuthRequired ? 'it now requires' : 'setting a password will require'} a token in
+        its URL. {isAuthRequired
+          ? 'Open the Plex Upload page and copy the tokenized webhook URL (it includes ?token=…) into Radarr/Sonarr, or those webhooks will be rejected with 401.'
+          : 'After you set a password, open the Plex Upload page and copy the tokenized webhook URL into Radarr/Sonarr.'}
+      </div>
+
       {!isAuthRequired ? (
         <div className="security-form-block">
           <h3>Set a Password</h3>

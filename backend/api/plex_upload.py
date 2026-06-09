@@ -5,17 +5,24 @@ import traceback
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from core.auth import (
+    get_or_create_webhook_token,
+    is_password_set,
+    regenerate_webhook_token,
+    verify_webhook_token,
+)
 from core.job_queue import job_queue
 from core.logging import (
     LogTags,
     log_error,
     log_info,
+    log_warning,
 )
 from database import get_db
 from models.job import (
@@ -802,14 +809,38 @@ async def run_plex_single_manual_upload(
 @router.post("/plex-upload/webhook")
 async def handle_plex_upload_webhook(
     payload: Dict[str, Any],
+    request: Request,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
     Handle ARR webhook and queue single-item Plex upload.
     This endpoint is intended for Radarr/Sonarr webhook payloads.
+
+    The path is exempt from the app-password middleware (external callers can't
+    send the Bearer token). When a password IS set, the caller must instead
+    supply the webhook token via ``?token=`` or the ``X-Webhook-Token`` header.
     """
     try:
         increment_webhook_stat(db, "received")
+
+        if is_password_set(db):
+            provided_token = request.query_params.get("token") or request.headers.get("X-Webhook-Token", "")
+            if not verify_webhook_token(db, provided_token):
+                # Surface the reason in the webhook "last error" field without
+                # incrementing a misleading counter (key is intentionally not a stat).
+                increment_webhook_stat(
+                    db,
+                    "auth_rejected",
+                    last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Plex Upload page.",
+                )
+                log_warning(
+                    LogTags.UPLOADER,
+                    "Rejected Plex webhook: missing/invalid token while app password is set",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or missing webhook token. An app password is set — use the tokenized webhook URL from the Plex Upload page.",
+                )
 
         if not is_webhook_enabled(db):
             increment_webhook_stat(db, "rejected_disabled", last_error="Webhook disabled")
@@ -876,6 +907,35 @@ async def handle_plex_upload_webhook(
     except Exception as e:
         increment_webhook_stat(db, "internal_errors", last_error=str(e))
         raise_internal_error("Failed processing plex upload webhook", e)
+
+
+@router.get("/plex-upload/webhook-token")
+async def get_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return the webhook token (generating one on first read) and whether a password is set.
+
+    The token only needs to be included in the webhook URL when an app password
+    is configured, but it is always available so the UI can show the secure URL.
+    """
+    try:
+        token = get_or_create_webhook_token(db)
+        db.commit()
+        return {"token": token, "password_set": is_password_set(db)}
+    except Exception as e:
+        raise_internal_error("Failed to get plex webhook token", e)
+
+
+@router.post("/plex-upload/webhook-token/regenerate")
+async def regenerate_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Generate a fresh webhook token, invalidating the previous one.
+
+    Existing Radarr/Sonarr webhook URLs using the old token must be updated.
+    """
+    try:
+        token = regenerate_webhook_token(db)
+        db.commit()
+        return {"success": True, "token": token, "password_set": is_password_set(db)}
+    except Exception as e:
+        raise_internal_error("Failed to regenerate plex webhook token", e)
 
 
 @router.get("/plex-upload/webhook-settings")

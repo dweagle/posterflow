@@ -260,6 +260,19 @@ export const searchPlexItems = async (
   return getData(`/api/posterflow/plex-upload/plex-search?${params.toString()}`)
 }
 
+export interface PlexWebhookTokenResponse {
+  token: string
+  password_set: boolean
+}
+
+export const getPlexWebhookToken = async (): Promise<PlexWebhookTokenResponse> => {
+  return getData('/api/posterflow/plex-upload/webhook-token')
+}
+
+export const regeneratePlexWebhookToken = async (): Promise<PlexWebhookTokenResponse & { success: boolean }> => {
+  return postData('/api/posterflow/plex-upload/webhook-token/regenerate', {})
+}
+
 export const getPlexWebhookSettings = async (): Promise<PlexWebhookSettings> => {
   return getData('/api/posterflow/plex-upload/webhook-settings')
 }

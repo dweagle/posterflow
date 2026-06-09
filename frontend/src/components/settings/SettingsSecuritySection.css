@@ -2,6 +2,21 @@
   margin-bottom: 1.5rem;
 }
 
+.security-webhook-note {
+  margin-bottom: 1.5rem;
+  padding: 0.65rem 1rem;
+  background-color: rgba(255, 183, 77, 0.1);
+  border: 1px solid rgba(255, 183, 77, 0.4);
+  border-radius: 6px;
+  color: #ffcc80;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.security-webhook-note strong {
+  color: #ffb74d;
+}
+
 .security-badge {
   display: inline-flex;
   align-items: center;

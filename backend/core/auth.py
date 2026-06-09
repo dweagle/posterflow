@@ -18,6 +18,7 @@ from core.logging import LogTags, log_info, log_warning
 
 APP_PASSWORD_HASH_KEY = "app_password_hash"  # nosec B105 - this is a DB setting key name, not a password value
 APP_PASSWORD_SALT_KEY = "app_password_salt"  # nosec B105 - this is a DB setting key name, not a password value
+WEBHOOK_TOKEN_KEY = "plex_webhook_token"  # nosec B105 - this is a DB setting key name, not a password value
 
 # Paths always exempt from auth (must be reachable before the user unlocks the app)
 _EXEMPT_PATHS: frozenset[str] = frozenset({
@@ -26,6 +27,7 @@ _EXEMPT_PATHS: frozenset[str] = frozenset({
     "/api/version/update",
     "/api/auth/status",
     "/api/auth/verify",
+    "/api/posterflow/plex-upload/webhook",
 })
 
 # Path prefixes that are always exempt (static frontend assets, WebSocket, etc.)
@@ -100,6 +102,47 @@ def set_password(db: Session, new_password: str) -> None:
         upsert_setting(db, APP_PASSWORD_HASH_KEY, hash_hex)
         upsert_setting(db, APP_PASSWORD_SALT_KEY, salt_hex)
         log_info(LogTags.API, "App password updated")
+
+
+# ---------------------------------------------------------------------------
+# Webhook token
+# ---------------------------------------------------------------------------
+# Inbound ARR/Plex webhooks can't carry the app Bearer token, so the webhook
+# path is exempt from the password middleware. When a password IS set, the
+# webhook handler instead authenticates the caller with this standalone token
+# (appended to the webhook URL as ?token=...), so the endpoint isn't left open.
+
+def get_webhook_token(db: Session) -> str:
+    """Return the stored webhook token, or '' if none has been generated yet."""
+    setting = get_setting(db, WEBHOOK_TOKEN_KEY)
+    return setting.value if setting and setting.value else ""
+
+
+def get_or_create_webhook_token(db: Session) -> str:
+    """Return the webhook token, generating and persisting one if absent."""
+    existing = get_webhook_token(db)
+    if existing:
+        return existing
+    token = secrets.token_urlsafe(32)
+    upsert_setting(db, WEBHOOK_TOKEN_KEY, token)
+    log_info(LogTags.API, "Generated Plex webhook token")
+    return token
+
+
+def regenerate_webhook_token(db: Session) -> str:
+    """Generate a fresh webhook token, replacing any existing one."""
+    token = secrets.token_urlsafe(32)
+    upsert_setting(db, WEBHOOK_TOKEN_KEY, token)
+    log_info(LogTags.API, "Regenerated Plex webhook token")
+    return token
+
+
+def verify_webhook_token(db: Session, candidate: str) -> bool:
+    """Constant-time comparison of a candidate webhook token against the stored value."""
+    stored = get_webhook_token(db)
+    if not stored or not candidate:
+        return False
+    return secrets.compare_digest(candidate, stored)
 
 
 # ---------------------------------------------------------------------------

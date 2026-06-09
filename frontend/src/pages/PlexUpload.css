@@ -156,6 +156,69 @@
   margin-bottom: 0;
 }
 
+.webhook-url-block {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.webhook-url-value {
+  flex: 1;
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+  color: #e5e7eb;
+}
+
+.webhook-copy-btn {
+  flex: 0 0 auto;
+}
+
+.webhook-token-warning {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  background-color: rgba(255, 183, 77, 0.12);
+  border: 1px solid rgba(255, 183, 77, 0.45);
+  border-radius: 6px;
+  color: #ffcc80;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.webhook-token-warning strong {
+  color: #ffb74d;
+}
+
+.webhook-token-warning code,
+.webhook-token-inline-warning code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.webhook-token-actions {
+  margin-top: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.webhook-token-hint {
+  color: #999;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.webhook-token-inline-warning {
+  color: #ffcc80 !important;
+}
+
+.webhook-token-inline-warning strong {
+  color: #ffb74d;
+}
+
 .card-description {
   color: #999;
   margin-bottom: 0.55rem;

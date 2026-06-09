@@ -27,6 +27,8 @@ import {
   PlexSearchItem,
   runPlexSingleUpload,
   searchPlexItems,
+  getPlexWebhookToken,
+  regeneratePlexWebhookToken,
 } from '../api/client'
 import { useToast } from '../components/Toast'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
@@ -200,10 +202,30 @@ function PlexUpload() {
     ),
   )
   const { showToast } = useToast()
+  const [webhookToken, setWebhookToken] = useState<string>('')
+  const [passwordSet, setPasswordSet] = useState(false)
+  const [regeneratingToken, setRegeneratingToken] = useState(false)
 
   useEffect(() => {
     localStorage.setItem(PLEX_UPLOAD_TAB_STORAGE_KEY, activeTab)
   }, [activeTab])
+
+  useEffect(() => {
+    let cancelled = false
+    getPlexWebhookToken()
+      .then((res) => {
+        if (!cancelled) {
+          setWebhookToken(res.token)
+          setPasswordSet(res.password_set)
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load webhook token:', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const sourceMatchCount = useMemo(() => sourceResults.length, [sourceResults])
 
@@ -244,6 +266,65 @@ function PlexUpload() {
     }
     return `${window.location.origin}${webhookPath}`
   }, [])
+
+  // When an app password is set, inbound webhooks must carry the token in the
+  // URL (the password's Bearer header can't be sent by Radarr/Sonarr).
+  const tokenizedWebhookUrl = useMemo(() => {
+    if (!webhookToken) {
+      return webhookUrl
+    }
+    return `${webhookUrl}?token=${encodeURIComponent(webhookToken)}`
+  }, [webhookUrl, webhookToken])
+
+  // The URL the user should paste into Radarr/Sonarr: tokenized when a password
+  // is set, plain otherwise.
+  const effectiveWebhookUrl = passwordSet ? tokenizedWebhookUrl : webhookUrl
+
+  const copyWebhookUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      showToast('Webhook URL copied to clipboard')
+    } catch {
+      // Fallback for non-secure (HTTP) contexts where Clipboard API is unavailable
+      try {
+        const textArea = document.createElement('textarea')
+        textArea.value = url
+        textArea.style.position = 'fixed'
+        textArea.style.left = '-9999px'
+        textArea.style.top = '-9999px'
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        // Cast through unknown to avoid deprecated type annotation on execCommand
+        ;(document as unknown as { execCommand(cmd: string): boolean }).execCommand('copy')
+        document.body.removeChild(textArea)
+        showToast('Webhook URL copied to clipboard')
+      } catch (fallbackError) {
+        console.error('Failed to copy webhook URL:', fallbackError)
+        showToast('Could not copy — copy the URL manually', 'error')
+      }
+    }
+  }
+
+  const handleRegenerateToken = async () => {
+    const confirmed = window.confirm(
+      'Generate a new webhook token? Any Radarr/Sonarr webhook URLs using the current token will stop working until you update them with the new URL.',
+    )
+    if (!confirmed) {
+      return
+    }
+    try {
+      setRegeneratingToken(true)
+      const res = await regeneratePlexWebhookToken()
+      setWebhookToken(res.token)
+      setPasswordSet(res.password_set)
+      showToast('Webhook token regenerated — update your Radarr/Sonarr URLs')
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to regenerate webhook token'), 'error')
+    } finally {
+      setRegeneratingToken(false)
+    }
+  }
 
   const fetchLatestPlexJob = async (showLoading: boolean = true) => {
     if (showLoading) {
@@ -1340,7 +1421,43 @@ function PlexUpload() {
                   </li>
                   <li>
                     Enable webhook processing below, then use this webhook URL in both Radarr and Sonarr:
-                    <div className="walkthrough-endpoint">{webhookUrl}</div>
+                    <div className="walkthrough-endpoint webhook-url-block">
+                      <code className="webhook-url-value">{effectiveWebhookUrl}</code>
+                      <button
+                        type="button"
+                        className="plex-refresh-btn webhook-copy-btn"
+                        onClick={() => copyWebhookUrl(effectiveWebhookUrl)}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    {passwordSet ? (
+                      <div className="webhook-token-warning">
+                        <strong>App password is enabled.</strong> You must use the URL above — it
+                        includes a <code>?token=</code> that authenticates the webhook. Without it,
+                        Radarr/Sonarr requests are rejected with <code>401 Unauthorized</code> and no
+                        posters upload. If you remove the app password later, the plain URL (without
+                        the token) works again.
+                        <div className="webhook-token-actions">
+                          <button
+                            type="button"
+                            className="plex-refresh-btn"
+                            onClick={handleRegenerateToken}
+                            disabled={regeneratingToken}
+                          >
+                            {regeneratingToken ? 'Regenerating…' : 'Regenerate token'}
+                          </button>
+                          <span className="webhook-token-hint">
+                            Rotating the token invalidates the old URL — update Radarr/Sonarr afterwards.
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="card-description webhook-token-hint">
+                        No app password is set, so this webhook needs no token. If you set a password
+                        later (Settings → Security), come back here and copy the tokenized URL.
+                      </p>
+                    )}
                     <ul className="walkthrough-substeps">
                       <li>
                         <strong>Radarr:</strong> Settings → Connect → + → Webhook.
@@ -1401,6 +1518,13 @@ function PlexUpload() {
                 </div>
 
                 <p className="card-description webhook-compact-description">Endpoint: <strong>{webhookPath}</strong></p>
+                {passwordSet && (
+                  <p className="card-description webhook-compact-description webhook-token-inline-warning">
+                    ⚠ App password is set — Radarr/Sonarr must call the <strong>tokenized</strong> URL
+                    (see <strong>Setup Walkthrough</strong> above for the full URL and copy button), or
+                    webhooks are rejected.
+                  </p>
+                )}
                 <p className="card-description webhook-compact-description">Webhook pre-upload preparation follows your configured <strong>Poster Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
 
                 {!toggleSettingsReady ? (

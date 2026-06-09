@@ -145,6 +145,8 @@ export {
   getPlexWebhookDedupeEntries,
   getPlexWebhookSettings,
   getPlexWebhookStats,
+  getPlexWebhookToken,
+  regeneratePlexWebhookToken,
   resetPlexWebhookStats,
   runPlexSingleUpload,
   runPlexUpload,

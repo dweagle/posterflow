@@ -135,6 +135,15 @@ class TestAuthMiddleware:
             _cache.salt_val = ""
             _cache.loaded_at = 0.0
 
+    def test_plex_webhook_reachable_without_token_when_no_password(self, client):
+        """The webhook path is exempt from the password middleware: with no app
+        password configured it must be reachable without any token. (Token-based
+        enforcement when a password IS set is covered in test_plex_upload.py.)"""
+        resp = client.post("/api/posterflow/plex-upload/webhook", json={})
+        # The handler answers (400/403/200 depending on payload/enabled state),
+        # but the middleware must never 401 this path.
+        assert resp.status_code != 401
+
     def test_protected_route_passes_with_correct_token(self, client):
         """Seed the cache directly so the middleware enforces the password."""
         salt_hex, hash_hex = hash_password("testpass")

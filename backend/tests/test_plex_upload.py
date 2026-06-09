@@ -430,6 +430,85 @@ def test_webhook_queue_passes_rename_then_upload_setting(client, monkeypatch):
     assert submit_args[7] == 11
 
 
+def test_webhook_token_endpoint_generates_and_regenerates(client):
+    """The token endpoint mints a stable token and can rotate it on demand."""
+    resp = client.get("/api/posterflow/plex-upload/webhook-token")
+    assert resp.status_code == 200
+    body = resp.json()
+    token1 = body["token"]
+    assert token1
+    assert body["password_set"] is False
+
+    # Stable across repeated reads.
+    assert client.get("/api/posterflow/plex-upload/webhook-token").json()["token"] == token1
+
+    # Regenerate replaces it.
+    regen = client.post("/api/posterflow/plex-upload/webhook-token/regenerate")
+    assert regen.status_code == 200
+    token2 = regen.json()["token"]
+    assert token2 and token2 != token1
+
+
+def test_webhook_requires_token_when_password_set(client, test_db, monkeypatch):
+    """With an app password set, the webhook must reject callers lacking a valid token."""
+    from core.auth import set_password, get_or_create_webhook_token, invalidate_auth_cache
+
+    submitted = []
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *a, **k: submitted.append((a, k)))
+
+    # Enable the webhook while no password is set.
+    save_resp = client.post(
+        "/api/posterflow/plex-upload/webhook-settings",
+        json={
+            "enabled": True,
+            "remove_overlay_label": False,
+            "rename_then_upload": True,
+            "retry_attempts": 5,
+            "retry_delay_seconds": 10,
+        },
+    )
+    assert save_resp.status_code == 200
+
+    token = get_or_create_webhook_token(test_db)
+    set_password(test_db, "secret123")
+    test_db.commit()
+    invalidate_auth_cache()
+
+    payload = {
+        "eventType": "Download",
+        "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+    }
+
+    try:
+        # No token -> rejected, nothing queued.
+        no_token = client.post("/api/posterflow/plex-upload/webhook", json=payload)
+        assert no_token.status_code == 401
+        assert not submitted
+
+        # Wrong token -> rejected.
+        wrong = client.post("/api/posterflow/plex-upload/webhook?token=nope", json=payload)
+        assert wrong.status_code == 401
+        assert not submitted
+
+        # Valid token via query string -> queued.
+        via_query = client.post(f"/api/posterflow/plex-upload/webhook?token={token}", json=payload)
+        assert via_query.status_code == 200
+        assert via_query.json()["queued"] is True
+        assert submitted
+
+        # Valid token via header -> accepted.
+        via_header = client.post(
+            "/api/posterflow/plex-upload/webhook",
+            json=payload,
+            headers={"X-Webhook-Token": token},
+        )
+        assert via_header.status_code == 200
+    finally:
+        set_password(test_db, "")
+        test_db.commit()
+        invalidate_auth_cache()
+
+
 def test_webhook_preupload_rename_pass_uses_targeted_scope(test_db, monkeypatch):
     """Webhook rename-then-upload prepass should pass single-item target filters to rename service."""
     import modules.upload as plex_upload_module

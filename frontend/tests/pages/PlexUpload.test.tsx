@@ -11,6 +11,8 @@ const mockRunPlexUpload = vi.fn()
 const mockGetPlexWebhookSettings = vi.fn()
 const mockGetPlexWebhookStats = vi.fn()
 const mockSavePlexWebhookSettings = vi.fn()
+const mockGetPlexWebhookToken = vi.fn()
+const mockRegeneratePlexWebhookToken = vi.fn()
 const mockGetPlexManualSettings = vi.fn()
 const mockSavePlexManualSettings = vi.fn()
 const mockGetPlexUploadLibraryOverrideSettings = vi.fn()
@@ -31,6 +33,8 @@ vi.mock('../../src/api/client', () => ({
   getPlexWebhookSettings: (...args: unknown[]) => mockGetPlexWebhookSettings(...args),
   getPlexWebhookStats: (...args: unknown[]) => mockGetPlexWebhookStats(...args),
   savePlexWebhookSettings: (...args: unknown[]) => mockSavePlexWebhookSettings(...args),
+  getPlexWebhookToken: (...args: unknown[]) => mockGetPlexWebhookToken(...args),
+  regeneratePlexWebhookToken: (...args: unknown[]) => mockRegeneratePlexWebhookToken(...args),
   getPlexManualSettings: (...args: unknown[]) => mockGetPlexManualSettings(...args),
   savePlexManualSettings: (...args: unknown[]) => mockSavePlexManualSettings(...args),
   getPlexUploadLibraryOverrideSettings: (...args: unknown[]) => mockGetPlexUploadLibraryOverrideSettings(...args),
@@ -56,6 +60,8 @@ describe('PlexUpload', () => {
       retry_delay_seconds: 30,
       upload_delay_ms: 50,
     })
+    mockGetPlexWebhookToken.mockResolvedValue({ token: 'test-token', password_set: false })
+    mockRegeneratePlexWebhookToken.mockResolvedValue({ success: true, token: 'new-token', password_set: false })
     mockGetPlexWebhookStats.mockResolvedValue({
       received: 0,
       queued: 0,
