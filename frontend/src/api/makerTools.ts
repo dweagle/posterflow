@@ -157,6 +157,10 @@ export const getSeasonImages = async (tmdb_id: number, season_number: number, la
 export interface PsdExportRequest {
   title: string
   year: string
+  tmdb_id?: string
+  tvdb_id?: string
+  imdb_id?: string
+  media_type?: string
   poster_paths: string[]
   backdrop_paths: string[]
   logo_paths: string[]
@@ -218,9 +222,20 @@ export const exportToPsd = async (
       return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false }
     }
 
-    // Blob download path
+    // Blob download path. Prefer the server's Content-Disposition filename so the download is
+    // named identically to a saved export (ID-tagged the way IDarr would name it); fall back to
+    // the tagless title/year when the header is absent.
     const safeName = titleForFilename.replace(/[<>:"/\\|?*]/g, '').trim()
-    const filename = yearForFilename ? `${safeName} (${yearForFilename}).psd` : `${safeName}.psd`
+    let filename = yearForFilename ? `${safeName} (${yearForFilename}).psd` : `${safeName}.psd`
+    const disposition = (resp.headers['content-disposition'] as string | undefined) ?? ''
+    const dispositionMatch = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+    if (dispositionMatch?.[1]) {
+      try {
+        filename = decodeURIComponent(dispositionMatch[1].trim())
+      } catch {
+        filename = dispositionMatch[1].trim()
+      }
+    }
     return { mode: 'download', blob: resp.data as Blob, filename }
   } catch (err: unknown) {
     const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string }

@@ -41,6 +41,7 @@ MAKER_MONITOR_DEFAULT_MISSING_RETENTION_DAYS = 2
 MAKER_MONITOR_TODAY_GRACE_DAYS = 1
 TMDB_REGEX = re.compile(r"\{tmdb-(\d+)\}", re.IGNORECASE)
 TVDB_REGEX = re.compile(r"\{tvdb-(\d+)\}", re.IGNORECASE)
+PSD_ID_TAG_REGEX = re.compile(r"\s*\{(?:tmdb|tvdb|imdb)-[^}]+\}", re.IGNORECASE)
 SEASON_NUMBER_REGEX = re.compile(r"(?i)\s-\sseason\s*(\d+)")
 SPECIALS_REGEX = re.compile(r"(?i)\s-\sspecials")
 _LIKE_UNSAFE_RE = re.compile(r'[<>:"/\\|?*%\x00-\x1f]')
@@ -1314,6 +1315,12 @@ _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_temp
 class PsdExportRequest(BaseModel):
     title: str
     year: str = ""
+    tmdb_id: str = ""                # TMDB id of the item — used to disambiguate existing PSDs that
+                                     # share a title/year but carry different {tmdb-…} tags, and to
+                                     # tag newly created PSDs the same way IDarr would
+    tvdb_id: str = ""                # only tagged for shows (media_type == "tv"), matching IDarr
+    imdb_id: str = ""                # only tagged when it starts with "tt", matching IDarr
+    media_type: str = ""             # "movie" | "tv" | "collection"
     poster_paths: list[str] = []     # TMDB file_paths e.g. ["/abc.jpg"] — each becomes a separate pixel layer
     backdrop_paths: list[str] = []   # TMDB backdrop file_paths — fit-to-height, no crop, placed below posters
     logo_paths: list[str] = []       # TMDB file_paths — each becomes a separate logo layer
@@ -1596,6 +1603,79 @@ def _build_psd(
     return buf.read()
 
 
+def _build_idarr_id_suffix(payload: "PsdExportRequest") -> str:
+    """Build the ID-tag suffix (e.g. ``" {tmdb-27205} {imdb-tt1375666}"``) exactly as IDarr
+    would for this item: tmdb → tvdb (shows only) → imdb (must start with ``tt``)."""
+    parts: list[str] = []
+    tmdb_id = str(payload.tmdb_id or "").strip()
+    if tmdb_id:
+        parts.append(f"tmdb-{tmdb_id}")
+    tvdb_id = str(payload.tvdb_id or "").strip()
+    if tvdb_id and str(payload.media_type or "").strip().lower() == "tv":
+        parts.append(f"tvdb-{tvdb_id}")
+    imdb_id = str(payload.imdb_id or "").strip()
+    if imdb_id.startswith("tt"):
+        parts.append(f"imdb-{imdb_id}")
+    return "".join(f" {{{part}}}" for part in parts)
+
+
+class _PsdMatchAmbiguous(Exception):
+    """Raised when several PSDs share the title/year stem but none can be tied to the
+    requested TMDB id, so reusing one would risk injecting layers into the wrong file."""
+
+
+def _find_existing_psd(save_dir: Path, base_stem: str, tmdb_id: str = "") -> Path | None:
+    """Find an existing ``.psd`` in *save_dir* for the title/year *base_stem*
+    (e.g. ``"Inception (2010)"``), tolerant of IDarr ID tags appended to the name.
+
+    Resolution order (TMDB id is the collision-safe key, mirroring poster matching):
+      1. A file carrying the matching ``{tmdb-<id>}`` tag — unambiguous.
+      2. The plain untagged ``"<base_stem>.psd"`` — not yet renamed by IDarr.
+      3. The single remaining stem-match (tags stripped) when there's exactly one.
+
+    Returns ``None`` when nothing matches. Raises ``_PsdMatchAmbiguous`` when multiple
+    stem-matches exist but none can be tied to *tmdb_id* (so we don't guess wrong).
+    """
+    target = base_stem.strip().lower()
+    requested_id = str(tmdb_id or "").strip()
+
+    stem_matches: list[Path] = []
+    try:
+        for entry in save_dir.iterdir():
+            if not entry.is_file() or entry.suffix.lower() != ".psd":
+                continue
+            if PSD_ID_TAG_REGEX.sub("", entry.stem).strip().lower() == target:
+                stem_matches.append(entry)
+    except OSError:
+        return None
+
+    if not stem_matches:
+        return None
+
+    # 1. Prefer the file whose {tmdb-<id>} tag matches the requested item.
+    if requested_id:
+        id_matches = [
+            p for p in stem_matches
+            if (m := TMDB_REGEX.search(p.name)) and m.group(1) == requested_id
+        ]
+        if id_matches:
+            return max(id_matches, key=lambda p: p.stat().st_mtime)
+
+    # 2. Fall back to a plain, untagged title/year file (not yet ID-tagged by IDarr).
+    untagged = [p for p in stem_matches if not TMDB_REGEX.search(p.name)]
+    if untagged:
+        exact = save_dir / f"{base_stem}.psd"
+        if exact in untagged:
+            return exact
+        return max(untagged, key=lambda p: p.stat().st_mtime)
+
+    # 3. Exactly one stem-match left → safe to use. More than one with differing ids and no
+    #    way to disambiguate → ambiguous; don't guess.
+    if len(stem_matches) == 1:
+        return stem_matches[0]
+    raise _PsdMatchAmbiguous()
+
+
 @router.post("/tmdb/psd-export")
 def tmdb_psd_export(payload: PsdExportRequest, db: Session = Depends(get_db)):
     """Download selected TMDB images and return a layered PSD file.
@@ -1645,7 +1725,11 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     # Construct safe filename and resolve save destination early so we can
     # check for an existing PSD before deciding which template to use.
     safe_title = re.sub(r'[<>:"/\\|?*]', "", payload.title).strip()
-    filename = f"{safe_title} ({payload.year}).psd" if payload.year else f"{safe_title}.psd"
+    base_stem = f"{safe_title} ({payload.year})" if payload.year else safe_title
+
+    filename = f"{base_stem}.psd"
+
+    output_filename = f"{base_stem}{_build_idarr_id_suffix(payload)}.psd"
 
     # Determine save behaviour:
     #   - If export_folder is set → save there (user-configured path)
@@ -1671,15 +1755,26 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
                 status_code=400,
                 detail="No export folder is configured. Configure a PSD export folder in Settings to use this feature.",
             )
-        existing_psd = save_dir / filename
-        if not existing_psd.is_file():
+        try:
+            existing_psd = _find_existing_psd(save_dir, base_stem, payload.tmdb_id)
+        except _PsdMatchAmbiguous:
+            # Multiple PSDs share this title/year but none match the TMDB id — don't guess and
+            # risk layering into the wrong file. Surface as not-found so the UI offers "create new".
+            log_info(
+                LogTags.API,
+                f"Existing PSD ambiguous for {filename} (tmdb-{payload.tmdb_id or '?'}); not reusing",
+                folder=str(save_dir),
+            )
+            existing_psd = None
+        if existing_psd is None:
             from fastapi.responses import JSONResponse as _JSONResponse
             return _JSONResponse(
                 status_code=404,
                 content={"not_found": True, "expected_filename": filename},
             )
         template_path = existing_psd
-        log_info(LogTags.API, f"Existing PSD found — adding poster layers: {filename}", folder=str(save_dir))
+        output_filename = existing_psd.name
+        log_info(LogTags.API, f"Existing PSD found — adding poster layers: {existing_psd.name}", folder=str(save_dir))
     else:
         template_setting = get_setting_value(db, SETTING_PSD_TEMPLATE_PATH)
         if template_setting:
@@ -1715,8 +1810,8 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     if save_dir is not None:
         try:
             save_dir.mkdir(parents=True, exist_ok=True)
-            (save_dir / filename).write_bytes(psd_bytes)
-            log_info(LogTags.API, f"PSD saved: {filename}", folder=str(save_dir))
+            (save_dir / output_filename).write_bytes(psd_bytes)
+            log_info(LogTags.API, f"PSD saved: {output_filename}", folder=str(save_dir))
         except Exception as exc:
             log_warning(LogTags.API, f"PSD save failed: {exc}")
             raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
@@ -1724,8 +1819,8 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
         from fastapi.responses import JSONResponse
         return JSONResponse({
-            "filename": filename,
-            "psd_url": f"/api/maker-tools/psd-exports/{filename}",
+            "filename": output_filename,
+            "psd_url": f"/api/maker-tools/psd-exports/{output_filename}",
             "open_photopea": open_photopea,
         })
 
@@ -1734,7 +1829,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     return Response(
         content=psd_bytes,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{output_filename}"'},
     )
 
 

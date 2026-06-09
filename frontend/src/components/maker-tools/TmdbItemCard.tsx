@@ -455,6 +455,10 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
         {
           title: item.title,
           year: item.year ?? '',
+          tmdb_id: item.tmdb_id != null ? String(item.tmdb_id) : '',
+          tvdb_id: item.tvdb_id != null ? String(item.tvdb_id) : '',
+          imdb_id: item.imdb_id ?? '',
+          media_type: item.media_type ?? '',
           poster_paths: psdSelection.posters,
           backdrop_paths: psdSelection.backdrops,
           logo_paths: psdSelection.logos,
