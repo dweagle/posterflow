@@ -2124,6 +2124,7 @@ def run_plex_webhook_background_job(
         )
 
         service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
+        service.set_arr_instance_scope(parsed_payload.get("arr_instance"))
 
         # For Radarr upgrade events, use the movieFile path to detect edition changes without
         # relying on Plex scan state (which may lag behind the actual file import).

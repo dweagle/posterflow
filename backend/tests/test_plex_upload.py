@@ -232,6 +232,9 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
         }
 
     class _FakePlexUploadService:
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def __init__(self, _db, **_kwargs):
             pass
 
@@ -571,6 +574,9 @@ def test_webhook_preupload_rename_pass_runs_border_with_tmp_when_enabled(test_db
     captured_border_kwargs = {}
 
     class _FakePlexUploadService:
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def __init__(self, _db, **_kwargs):
             pass
 
@@ -743,6 +749,9 @@ def test_webhook_preupload_fast_path_skips_when_exact_target_is_already_current(
     source_file = "/tmp/source/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}.jpg"
 
     class _FakePlexUploadService:
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def __init__(self, _db, **_kwargs):
             pass
 
@@ -810,6 +819,9 @@ def test_webhook_preupload_fast_path_runs_when_source_changed_after_last_process
     source_file = "/tmp/source/Zootopia (2016) {tmdb-269149} {imdb-tt2948356}.jpg"
 
     class _FakePlexUploadService:
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def __init__(self, _db, **_kwargs):
             pass
 
@@ -876,6 +888,9 @@ def test_webhook_preupload_adopt_existing_skips_when_destination_has_target_asse
     rename_called = {"value": False}
 
     class _FakePlexUploadService:
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def __init__(self, _db, **_kwargs):
             pass
 
@@ -976,6 +991,9 @@ def test_webhook_background_job_completes_with_warning_when_no_local_assets(test
         def is_series_show_poster_cached(self, **_kwargs):
             return False
 
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def invalidate_preflight_cache(self) -> None:
             pass
 
@@ -1073,6 +1091,9 @@ def test_webhook_background_job_completes_without_retry_on_matched_zero_upload(t
 
         def is_series_show_poster_cached(self, **_kwargs):
             return False
+
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
 
         def invalidate_preflight_cache(self) -> None:
             pass
@@ -1391,6 +1412,9 @@ def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_
         def is_series_show_poster_cached(self, **_kwargs):
             return False
 
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def invalidate_preflight_cache(self) -> None:
             pass
 
@@ -1485,6 +1509,9 @@ def test_webhook_background_job_series_season_runs_season_and_show_posters(test_
         def is_series_show_poster_cached(self, **_kwargs):
             return False
 
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def invalidate_preflight_cache(self) -> None:
             pass
 
@@ -1577,6 +1604,9 @@ def test_webhook_background_job_series_season_cache_gate_requires_both_targets(t
 
         def is_series_show_poster_cached(self, **_kwargs):
             return False
+
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
 
         def invalidate_preflight_cache(self) -> None:
             pass
@@ -3627,6 +3657,9 @@ def test_webhook_background_job_retry_rebuilds_targeted_index(test_db, monkeypat
         def arr_availability_was_incomplete(self) -> bool:
             return False
 
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
         def invalidate_preflight_cache(self) -> None:
             pass
 
@@ -4422,6 +4455,52 @@ def test_arr_availability_incomplete_flag_tracks_connection_failures(test_db, mo
     assert service.arr_availability_was_incomplete() is False
 
 
+def test_arr_availability_scope_limits_to_firing_instance(test_db, monkeypatch):
+    import services.plex_upload as svc_mod
+
+    service = PlexUploadService(test_db)
+    monkeypatch.setattr(
+        service,
+        "_get_arr_instances",
+        lambda key: (
+            [{"name": "Sonarr", "url": "u-sonarr", "api_key": "k"},
+             {"name": "Sonarr 4k", "url": "u-sonarr4k", "api_key": "k"}]
+            if key == PlexUploadService.SETTING_SONARR_INSTANCES
+            else []
+        ),
+    )
+
+    class _FakeClient:
+        connect_status = True
+
+        def get_parsed_media(self, include_unmonitored=True):
+            return []
+
+    calls: list[str] = []
+
+    def _make(url, api_key, itype, logger=None):
+        calls.append(url)
+        return _FakeClient()
+
+    monkeypatch.setattr(svc_mod, "create_arr_client", _make)
+
+    # No scope -> every Sonarr instance is queried.
+    service._build_arr_availability_index(media_type_filter="series")
+    assert calls == ["u-sonarr", "u-sonarr4k"]
+
+    # Scope to the firing instance -> only that instance is connected to.
+    calls.clear()
+    service.set_arr_instance_scope("Sonarr")
+    service._build_arr_availability_index(media_type_filter="series")
+    assert calls == ["u-sonarr"]
+
+    # An unknown scope falls back to all instances (never connects to nothing).
+    calls.clear()
+    service.set_arr_instance_scope("Nonexistent")
+    service._build_arr_availability_index(media_type_filter="series")
+    assert calls == ["u-sonarr", "u-sonarr4k"]
+
+
 def _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete):
     import modules.upload as upload_module
 
@@ -4442,6 +4521,9 @@ def _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete):
         ERROR_INDEX_BUILD_FAILED = "Unable to build Plex index from configured instances/libraries."
 
         def __init__(self, _db, **k):
+            pass
+
+        def set_arr_instance_scope(self, _arr_instance=None):
             pass
 
         def prepare_webhook_context(self, **k):

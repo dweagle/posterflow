@@ -43,6 +43,7 @@ class PlexUploadService:
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._arr_availability_incomplete: bool = False
+        self._arr_instance_scope: Optional[str] = None
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -63,6 +64,18 @@ class PlexUploadService:
 
     def arr_availability_was_incomplete(self) -> bool:
         return self._arr_availability_incomplete
+
+    def set_arr_instance_scope(self, arr_instance: Optional[str]) -> None:
+        """Limit the ARR availability lookup to a single firing instance (webhook path).
+
+        When set, ``_build_arr_availability_index`` only connects to the matching
+        instance instead of every configured Radarr/Sonarr instance of that media
+        type. Clears any cached availability so the scope takes effect immediately.
+        """
+        new_scope = arr_instance.strip() if isinstance(arr_instance, str) and arr_instance.strip() else None
+        if new_scope != self._arr_instance_scope:
+            self._arr_availability_cache = {}
+        self._arr_instance_scope = new_scope
 
     def invalidate_record_cache(self) -> None:
         self._record_cache = {}
@@ -253,7 +266,7 @@ class PlexUploadService:
         return context
 
     def _get_arr_availability_index(self, media_type_filter: Optional[str] = None, *, force_refresh: bool = False) -> Dict[str, Any]:
-        cache_key = str(media_type_filter or "").strip().lower()
+        cache_key = f"{self._arr_instance_scope or ''}|{str(media_type_filter or '').strip().lower()}"
         if not force_refresh and cache_key in self._arr_availability_cache:
             return self._arr_availability_cache[cache_key]
 
@@ -2183,7 +2196,7 @@ class PlexUploadService:
         include_shows = normalized_filter in {"", "series", "show"}
 
         if include_movies:
-            for instance in self._get_arr_instances(self.SETTING_RADARR_INSTANCES):
+            for instance in self._availability_arr_instances(self.SETTING_RADARR_INSTANCES):
                 client = create_arr_client(instance["url"], instance["api_key"], "radarr", logger=None)
                 if not client or not client.connect_status:
                     incomplete = True
@@ -2213,7 +2226,7 @@ class PlexUploadService:
                             movies_index[key] = entry
 
         if include_shows:
-            for instance in self._get_arr_instances(self.SETTING_SONARR_INSTANCES):
+            for instance in self._availability_arr_instances(self.SETTING_SONARR_INSTANCES):
                 client = create_arr_client(instance["url"], instance["api_key"], "sonarr", logger=None)
                 if not client or not client.connect_status:
                     incomplete = True
@@ -2317,6 +2330,18 @@ class PlexUploadService:
             if name and url and api_key:
                 valid.append({"name": name, "url": url, "api_key": api_key})
         return valid
+
+    def _availability_arr_instances(self, setting_key: str) -> List[Dict[str, str]]:
+        """Configured instances for an availability build, narrowed to the firing
+        instance when an instance scope is active (webhook path). When no scope is set,
+        or the scope doesn't match any instance for this setting (e.g. a Sonarr scope
+        while building the movie index), the full list is returned unchanged."""
+        instances = self._get_arr_instances(setting_key)
+        scope = self._arr_instance_scope
+        if not scope:
+            return instances
+        scoped = [i for i in instances if i["name"].strip().lower() == scope.strip().lower()]
+        return scoped or instances
 
     def _dedupe_plex_items(self, items: List[Any]) -> List[Any]:
         deduped: List[Any] = []
