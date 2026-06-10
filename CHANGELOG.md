@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-09
+### Added
+- Plex Upload: per-instance library routing — map each Radarr/Sonarr instance to the specific Plex libraries it feeds, configured in a new "Library Targeting" editor. Each instance gets its own webhook URL (ending in `&instance=`) so events are attributed correctly; unmapped instances continue uploading to all selected libraries.
+- Plex Upload: webhook token generation and validation so inbound Radarr/Sonarr webhooks can be authenticated when an app password is set.
+- IDarr: asset (logos, backgrounds, and squareart) and PSD drive support with a new resolver workflow and accompanying UI.  Improved and precise matching without season hints for logos and PSDs.
+- Maker Tools: PSD export now includes TMDB, TVDB, and IMDb tags in file names, with improved filename handling.
+- Border Replacer: configurable season border width independent of the main poster.
+
+### Changed
+- Plex Upload: webhook duplicate detection is now scoped per Radarr/Sonarr instance and keyed by external ID (TMDB/TVDB/IMDb). Two instances importing the same title no longer suppress each other, and different titles sharing a name/year no longer collide.
+- Plex Upload: the library override and per-instance routing are consolidated into a single Library Targeting modal to keep the settings page compact.
+- Plex Upload: scan-lag webhook retries now only re-query Plex instead of reconnecting to every Radarr/Sonarr instance on each attempt.
+- Plex Upload: ID-matched candidates are now filtered by year when a year is provided, and year discrepancies (Arr path vs Plex media path) on ID-matched uploads are handled with Discord notifications.
+-Plex Upload: Single item upload now indexes single instead of a full library index
+- Sync: rclone sync folders are now restricted to poster/PSD file types and enforce a maximum file size.
+
+### Fixed
+- IDarr: matching and cache fixes
+- Unmatched Assets: collections input now supports newline separation.
+- Security: Plex upload no longer fails with password set.
+
 ## [0.7.5] - 2026-06-06
 ### Fixed
 - Plex Upload: improved year handling and folder resolution for more accurate library matching
