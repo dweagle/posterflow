@@ -474,7 +474,23 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
       if (result.mode === 'photopea') {
         if (result.openPhotopea) {
           const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(result.filename)}`
-          const config = { files: [result.psdUrl], server: { version: 1, url: saveUrl, formats: ['psd:true'] } }
+          // Photopea hard-caps the document tab name (which fills the Save-for-web Name field) at
+          // 50 chars.  Prevents parts of id's getting cut off.
+          const PHOTOPEA_NAME_CAP = 50
+          const idTagPattern = / \{(?:tmdb|tvdb|imdb)-[^}]*\}/g
+          const noExt = result.filename.replace(/\.psd$/i, '')
+          const idTags = noExt.match(idTagPattern) ?? []
+          let tabName = noExt.replace(idTagPattern, '') // "Title (Year)"
+          for (const tag of idTags) {
+            if ((tabName + tag).length > PHOTOPEA_NAME_CAP) break
+            tabName += tag
+          }
+          const renameScript = `app.activeDocument.name = ${JSON.stringify(tabName)};`
+          const config = {
+            files: [result.psdUrl],
+            script: renameScript,
+            server: { version: 1, url: saveUrl, formats: ['psd:true'] },
+          }
           const photopea = `https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`
           window.open(photopea, '_blank')
           showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
