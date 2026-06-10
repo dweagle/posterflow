@@ -222,7 +222,7 @@ export interface MakerIdarrPendingItem {
   created_at?: string | null
   updated_at?: string | null
   source_filenames?: string[] | null
-  asset_subtype?: 'logo' | 'background' | null
+  asset_subtype?: 'logo' | 'background' | 'squareart' | null
   pending_status?: 'resolved' | 'resolved_renamed' | null
   conflict_files?: string[] | null
   conflict_file_previews?: (string | null)[] | null

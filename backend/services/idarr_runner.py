@@ -64,7 +64,7 @@ def repair_year_parens(stem: str) -> str:
 COLLECTION_REGEX = re.compile(r"collection", re.IGNORECASE)
 SEASON_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
 SEASON_SUFFIX_REGEX = re.compile(r"(?:\s*-\s*Season\s*\d+|_Season\d{1,2}|\s*-\s*Specials|_Specials)", re.IGNORECASE)
-ASSET_SUBTYPE_SUFFIX_REGEX = re.compile(r"\s*-\s*(?:logo|background)s?\s*$", re.IGNORECASE)
+ASSET_SUBTYPE_SUFFIX_REGEX = re.compile(r"\s*-\s*(?:logo|background|squareart)s?\s*$", re.IGNORECASE)
 ID_TAG_BLOCK_REGEX = re.compile(r"\{(?:tmdb|tvdb|imdb)-[^}]+\}", re.IGNORECASE)
 SETTING_MAKER_IDARR_IGNORED_TITLES = "maker_tools_idarr_ignored_titles"
 
@@ -863,13 +863,14 @@ class IdarrRunner:
         return assets
 
     def scan_asset_drive_subfolders(self, source_dir: Path) -> list[dict[str, Any]]:
-        """Scan logos/ and backgrounds/ subfolders of an asset drive.
+        """Scan logos/, backgrounds/ and squareart/ subfolders of an asset drive.
 
-        Each returned asset dict includes an ``asset_subtype`` key set to either
-        ``"logo"`` or ``"background"`` based on which subfolder the file came from.
+        Each returned asset dict includes an ``asset_subtype`` key set to
+        ``"logo"``, ``"background"`` or ``"squareart"`` based on which subfolder
+        the file came from.
         """
         assets: list[dict[str, Any]] = []
-        for subtype, subfolder_name in [("logo", "logos"), ("background", "backgrounds")]:
+        for subtype, subfolder_name in [("logo", "logos"), ("background", "backgrounds"), ("squareart", "squareart")]:
             subfolder = source_dir / subfolder_name
             if not subfolder.exists() or not subfolder.is_dir():
                 log_info(
@@ -2820,7 +2821,7 @@ class IdarrRunner:
         if is_asset_drive:
             dirs_to_scan = [
                 source_dir / subtype
-                for subtype in ("logos", "backgrounds")
+                for subtype in ("logos", "backgrounds", "squareart")
                 if (source_dir / subtype).is_dir()
             ]
         else:
@@ -3944,6 +3945,9 @@ class IdarrRunner:
         elif asset_subtype == "background":
             ext = ".jpg"
             asset_subtype_label = " - background"
+        elif asset_subtype == "squareart":
+            ext = ".jpg"
+            asset_subtype_label = " - squareart"
         else:
             asset_subtype_label = ""
 
@@ -4143,8 +4147,9 @@ class IdarrRunner:
     def _convert_asset_drive_file(file_path: Path, asset_subtype: str) -> None:
         """Re-encode an asset drive file to its required format.
 
-        Logos are always PNG with alpha preserved; backgrounds are always JPEG flattened to RGB.
-        Called after rename when the original extension differed from the target.
+        Logos are always PNG with alpha preserved; backgrounds and square art are
+        always JPEG flattened to RGB. Called after rename when the original
+        extension differed from the target.
         """
         try:
             img = Image.open(file_path)
@@ -4152,7 +4157,7 @@ class IdarrRunner:
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
                 img.save(file_path, "PNG")
-            elif asset_subtype == "background":
+            elif asset_subtype in ("background", "squareart"):
                 if img.mode in ("RGBA", "LA", "P"):
                     background = Image.new("RGB", img.size, (0, 0, 0))
                     converted = img.convert("RGBA") if img.mode == "P" else img
@@ -4703,14 +4708,14 @@ class IdarrRunner:
         if is_asset_drive:
             log_info(
                 LogTags.IDARR,
-                f"Asset drive mode: scanning logos/ and backgrounds/ subfolders of: {source_dir}",
+                f"Asset drive mode: scanning logos/, backgrounds/ and squareart/ subfolders of: {source_dir}",
                 source_dir=str(source_dir),
             )
             _notify_progress("scanning", 9, f"Scanning asset drive subfolders: {source_dir}")
             assets = self.scan_asset_drive_subfolders(source_dir)
         elif is_psd_drive:
             # PSD drive: a flat folder using asset-style matching (no season-suffix hints, since
-            # PSD source files don't carry season info) but without the logos/backgrounds subfolders.
+            # PSD source files don't carry season info) but without the logos/backgrounds/squareart subfolders.
             log_info(
                 LogTags.IDARR,
                 f"PSD drive mode: scanning flat folder with asset-style matching: {source_dir}",

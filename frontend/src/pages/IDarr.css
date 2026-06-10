@@ -1739,6 +1739,10 @@
   width: 121px;
 }
 
+.idarr-page .resolver-source-squareart {
+  width: 68px;
+}
+
 .idarr-page .resolver-candidate-poster-placeholder {
   display: flex;
   align-items: center;

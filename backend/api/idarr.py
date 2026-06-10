@@ -173,7 +173,7 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
                 normalized_target["label"] = label
             if scope_token:
                 normalized_target["scope_token"] = scope_token
-            # A drive is normal, an assets drive (logos/backgrounds subfolders), or a PSD drive
+            # A drive is normal, an assets drive (logos/backgrounds/squareart subfolders), or a PSD drive
             # (flat folder, asset-style matching). The toggle UI keeps these mutually exclusive.
             is_asset_drive = bool(item.get("is_asset_drive", False))
             if is_asset_drive:
@@ -948,13 +948,15 @@ async def upload_maker_idarr_files(
             skipped.append(filename)
             continue
 
-        # For asset drives, route to logos/ or backgrounds/ based on the filename
+        # For asset drives, route to logos/, backgrounds/ or squareart/ based on the filename
         if is_asset_drive:
             name_lower = filename.lower()
             if "logo" in name_lower:
                 dest_dir = source_dir / "logos"
             elif "background" in name_lower:
                 dest_dir = source_dir / "backgrounds"
+            elif "squareart" in name_lower:
+                dest_dir = source_dir / "squareart"
             else:
                 dest_dir = source_dir / "logos"
             try:
@@ -1428,12 +1430,14 @@ def _resolve_authorized_idarr_source_image_path(source_path_raw: str, source_dir
 
 
 def _derive_asset_subtype(pending_entry: dict[str, Any]) -> str | None:
-    """Return 'logo' or 'background' from the source file path, else None."""
+    """Return 'logo', 'background' or 'squareart' from the source file path, else None."""
     file_path = str(pending_entry.get("files") or "").replace("\\", "/").lower()
     if "/logos/" in file_path:
         return "logo"
     if "/backgrounds/" in file_path:
         return "background"
+    if "/squareart/" in file_path:
+        return "squareart"
     return None
 
 
@@ -1545,7 +1549,7 @@ def _build_idarr_pending_preview_url_with_fallback(
 
     for source_dir in source_dirs:
         dirs_to_scan = [source_dir]
-        for subdir_name in ("logos", "backgrounds"):
+        for subdir_name in ("logos", "backgrounds", "squareart"):
             subdir = source_dir / subdir_name
             if subdir.is_dir():
                 dirs_to_scan.append(subdir)

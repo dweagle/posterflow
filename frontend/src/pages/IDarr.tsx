@@ -1719,7 +1719,7 @@ const {
                           <span className="idarr-info-icon-wrap">
                             <Info size={13} className="idarr-info-icon" />
                             <span className="idarr-info-tooltip">
-                              When enabled, this drive is treated as an assets drive. IDarr will scan <strong>logos/</strong> and <strong>backgrounds/</strong> subfolders inside the sync folder instead of the root. Season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only.
+                              When enabled, this drive is treated as an assets drive. IDarr will scan <strong>logos/</strong>, <strong>backgrounds/</strong> and <strong>squareart/</strong> subfolders inside the sync folder instead of the root. Season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only.
                             </span>
                           </span>
                         </span>
@@ -1746,7 +1746,7 @@ const {
                           <span className="idarr-info-icon-wrap">
                             <Info size={13} className="idarr-info-icon" />
                             <span className="idarr-info-tooltip">
-                              When enabled, this drive is treated as a PSD drive. IDarr scans the sync folder directly (no <strong>logos/</strong>/<strong>backgrounds/</strong> subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. Mutually exclusive with Assets Drive.
+                              When enabled, this drive is treated as a PSD drive. IDarr scans the sync folder directly (no <strong>logos/</strong>/<strong>backgrounds/</strong>/<strong>squareart/</strong> subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. Mutually exclusive with Assets Drive.
                             </span>
                           </span>
                         </span>
@@ -2265,8 +2265,16 @@ const {
       ? 'resolver-source-asset resolver-source-logo'
       : assetSubtype === 'background'
         ? 'resolver-source-asset resolver-source-background'
-        : 'resolver-candidate-poster'
-    const sourcePlaceholderLabel = assetSubtype === 'logo' ? 'No Logo' : assetSubtype === 'background' ? 'No Background' : 'No Poster'
+        : assetSubtype === 'squareart'
+          ? 'resolver-source-asset resolver-source-squareart'
+          : 'resolver-candidate-poster'
+    const sourcePlaceholderLabel = assetSubtype === 'logo'
+      ? 'No Logo'
+      : assetSubtype === 'background'
+        ? 'No Background'
+        : assetSubtype === 'squareart'
+          ? 'No Square Art'
+          : 'No Poster'
     // PSD sources can't be rendered as an <img>; show a PSD placeholder instead of a broken image.
     const sourceIsPsd = isPsd(resolverItem.preview_url)
       || (Array.isArray(resolverItem.source_filenames) && resolverItem.source_filenames.some((f) => isPsd(f)))
@@ -2928,7 +2936,7 @@ const {
       <ConfirmDialog
         isOpen={pendingAssetDriveToggleIndex !== null}
         title="Enable Assets Drive?"
-        message="Assets drives behave differently from poster drives. IDarr will scan logos/ and backgrounds/ subfolders instead of the root folder, and season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only. Make sure your sync folder contains these subfolders before running."
+        message="Assets drives behave differently from poster drives. IDarr will scan logos/, backgrounds/ and squareart/ subfolders instead of the root folder, and season-suffix hints are disabled — type detection relies on ID tags and TMDB lookup only. Make sure your sync folder contains these subfolders before running."
         confirmText="Enable Assets Drive"
         cancelText="Cancel"
         variant="warning"
@@ -2944,7 +2952,7 @@ const {
       <ConfirmDialog
         isOpen={pendingPsdDriveToggleIndex !== null}
         title="Enable PSD Drive?"
-        message="PSD drives behave differently from poster drives. IDarr will scan the sync folder directly (no logos/ or backgrounds/ subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. This will turn off Assets Drive for this target."
+        message="PSD drives behave differently from poster drives. IDarr will scan the sync folder directly (no logos/, backgrounds/ or squareart/ subfolders) using asset-style matching — season-suffix hints are disabled, so type detection relies on ID tags and TMDB lookup only. This will turn off Assets Drive for this target."
         confirmText="Enable PSD Drive"
         cancelText="Cancel"
         variant="warning"

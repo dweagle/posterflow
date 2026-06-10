@@ -2676,3 +2676,15 @@ def test_store_cache_rows_does_not_persist_tvdb_for_movie_asset(test_db, tmp_pat
     assert stored.tvdb_id is None, (
         f"tvdb_id must not be stored for movie cache rows; got {stored.tvdb_id}"
     )
+
+
+def test_derive_asset_subtype_maps_each_subfolder():
+    """Asset-drive subtype is derived from the subfolder in the source path."""
+    from api.idarr import _derive_asset_subtype
+
+    assert _derive_asset_subtype({"files": "/drive/logos/Air (2023) - logo.png"}) == "logo"
+    assert _derive_asset_subtype({"files": "/drive/backgrounds/Air (2023) - background.jpg"}) == "background"
+    assert _derive_asset_subtype({"files": "/drive/squareart/Air (2023) - squareart.jpg"}) == "squareart"
+    # Windows-style separators and the flat root resolve to no subtype.
+    assert _derive_asset_subtype({"files": r"C:\drive\squareart\Air (2023) - squareart.jpg"}) == "squareart"
+    assert _derive_asset_subtype({"files": "/drive/Air (2023).jpg"}) is None
