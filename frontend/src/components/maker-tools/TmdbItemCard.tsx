@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -27,6 +27,7 @@ import {
   getSeasonImages,
   getTmdbImages,
   getTmdbImageProxyUrl,
+  getTmdbOriginCountry,
   getTvDetails,
   getApiErrorMessage,
   getSettings,
@@ -37,138 +38,143 @@ import { useToast } from '../Toast'
 // Constants
 // ---------------------------------------------------------------------------
 
+// value = Apple storefront id (matches Ben Dodson's region dropdown 1:1),
+// iso = ISO 3166-1 alpha-2 used to auto-match a TMDB origin_country.
 const APPLE_TV_STOREFRONTS = [
-  { value: '143441', label: 'United States of America' },
-  { value: '143444', label: 'United Kingdom' },
-  { value: '143460', label: 'Australia' },
-  { value: '143455', label: 'Canada' },
-  { value: '143442', label: 'France' },
-  { value: '143443', label: 'Germany' },
-  { value: '143450', label: 'Italy' },
-  { value: '143462', label: 'Japan' },
-  { value: '143452', label: 'Netherlands' },
-  { value: '143461', label: 'New Zealand' },
-  { value: '143457', label: 'Norway' },
-  { value: '143454', label: 'Spain' },
-  { value: '143456', label: 'Sweden' },
-  { value: '143459', label: 'Switzerland' },
-  { value: '143563', label: 'Algeria' },
-  { value: '143564', label: 'Angola' },
-  { value: '143538', label: 'Anguilla' },
-  { value: '143540', label: 'Antigua & Barbuda' },
-  { value: '143505', label: 'Argentina' },
-  { value: '143524', label: 'Armenia' },
-  { value: '143445', label: 'Austria' },
-  { value: '143568', label: 'Azerbaijan' },
-  { value: '143559', label: 'Bahrain' },
-  { value: '143490', label: 'Bangladesh' },
-  { value: '143541', label: 'Barbados' },
-  { value: '143565', label: 'Belarus' },
-  { value: '143446', label: 'Belgium' },
-  { value: '143555', label: 'Belize' },
-  { value: '143542', label: 'Bermuda' },
-  { value: '143556', label: 'Bolivia' },
-  { value: '143525', label: 'Botswana' },
-  { value: '143503', label: 'Brazil' },
-  { value: '143543', label: 'British Virgin Islands' },
-  { value: '143560', label: 'Brunei' },
-  { value: '143526', label: 'Bulgaria' },
-  { value: '143544', label: 'Cayman Islands' },
-  { value: '143483', label: 'Chile' },
-  { value: '143465', label: 'China' },
-  { value: '143501', label: 'Colombia' },
-  { value: '143495', label: 'Costa Rica' },
-  { value: '143527', label: "Cote D'Ivoire" },
-  { value: '143494', label: 'Croatia' },
-  { value: '143557', label: 'Cyprus' },
-  { value: '143489', label: 'Czech Republic' },
-  { value: '143458', label: 'Denmark' },
-  { value: '143545', label: 'Dominica' },
-  { value: '143508', label: 'Dominican Rep.' },
-  { value: '143509', label: 'Ecuador' },
-  { value: '143516', label: 'Egypt' },
-  { value: '143506', label: 'El Salvador' },
-  { value: '143518', label: 'Estonia' },
-  { value: '143447', label: 'Finland' },
-  { value: '143573', label: 'Ghana' },
-  { value: '143448', label: 'Greece' },
-  { value: '143546', label: 'Grenada' },
-  { value: '143504', label: 'Guatemala' },
-  { value: '143553', label: 'Guyana' },
-  { value: '143510', label: 'Honduras' },
-  { value: '143463', label: 'Hong Kong' },
-  { value: '143482', label: 'Hungary' },
-  { value: '143558', label: 'Iceland' },
-  { value: '143467', label: 'India' },
-  { value: '143476', label: 'Indonesia' },
-  { value: '143449', label: 'Ireland' },
-  { value: '143491', label: 'Israel' },
-  { value: '143511', label: 'Jamaica' },
-  { value: '143528', label: 'Jordan' },
-  { value: '143517', label: 'Kazakstan' },
-  { value: '143529', label: 'Kenya' },
-  { value: '143466', label: 'Korea, Republic Of' },
-  { value: '143493', label: 'Kuwait' },
-  { value: '143519', label: 'Latvia' },
-  { value: '143497', label: 'Lebanon' },
-  { value: '143522', label: 'Liechtenstein' },
-  { value: '143520', label: 'Lithuania' },
-  { value: '143451', label: 'Luxembourg' },
-  { value: '143515', label: 'Macau' },
-  { value: '143530', label: 'Macedonia' },
-  { value: '143531', label: 'Madagascar' },
-  { value: '143473', label: 'Malaysia' },
-  { value: '143488', label: 'Maldives' },
-  { value: '143532', label: 'Mali' },
-  { value: '143521', label: 'Malta' },
-  { value: '143533', label: 'Mauritius' },
-  { value: '143468', label: 'Mexico' },
-  { value: '143523', label: 'Moldova, Republic Of' },
-  { value: '143547', label: 'Montserrat' },
-  { value: '143484', label: 'Nepal' },
-  { value: '143512', label: 'Nicaragua' },
-  { value: '143534', label: 'Niger' },
-  { value: '143561', label: 'Nigeria' },
-  { value: '143562', label: 'Oman' },
-  { value: '143477', label: 'Pakistan' },
-  { value: '143485', label: 'Panama' },
-  { value: '143513', label: 'Paraguay' },
-  { value: '143507', label: 'Peru' },
-  { value: '143474', label: 'Philippines' },
-  { value: '143478', label: 'Poland' },
-  { value: '143453', label: 'Portugal' },
-  { value: '143498', label: 'Qatar' },
-  { value: '143487', label: 'Romania' },
-  { value: '143469', label: 'Russia' },
-  { value: '143479', label: 'Saudi Arabia' },
-  { value: '143535', label: 'Senegal' },
-  { value: '143500', label: 'Serbia' },
-  { value: '143464', label: 'Singapore' },
-  { value: '143496', label: 'Slovakia' },
-  { value: '143499', label: 'Slovenia' },
-  { value: '143472', label: 'South Africa' },
-  { value: '143486', label: 'Sri Lanka' },
-  { value: '143548', label: 'St. Kitts & Nevis' },
-  { value: '143549', label: 'St. Lucia' },
-  { value: '143550', label: 'St. Vincent & The Grenadines' },
-  { value: '143554', label: 'Suriname' },
-  { value: '143470', label: 'Taiwan' },
-  { value: '143572', label: 'Tanzania' },
-  { value: '143475', label: 'Thailand' },
-  { value: '143539', label: 'The Bahamas' },
-  { value: '143551', label: 'Trinidad & Tobago' },
-  { value: '143536', label: 'Tunisia' },
-  { value: '143480', label: 'Turkey' },
-  { value: '143552', label: 'Turks & Caicos' },
-  { value: '143537', label: 'Uganda' },
-  { value: '143492', label: 'Ukraine' },
-  { value: '143481', label: 'United Arab Emirates' },
-  { value: '143514', label: 'Uruguay' },
-  { value: '143566', label: 'Uzbekistan' },
-  { value: '143502', label: 'Venezuela' },
-  { value: '143471', label: 'Vietnam' },
-  { value: '143571', label: 'Yemen' },
+  { value: '143441', label: 'United States of America', iso: 'US' },
+  { value: '143444', label: 'United Kingdom', iso: 'GB' },
+  { value: '143460', label: 'Australia', iso: 'AU' },
+  { value: '143455', label: 'Canada', iso: 'CA' },
+  { value: '143442', label: 'France', iso: 'FR' },
+  { value: '143443', label: 'Germany', iso: 'DE' },
+  { value: '143450', label: 'Italy', iso: 'IT' },
+  { value: '143462', label: 'Japan', iso: 'JP' },
+  { value: '143452', label: 'Netherlands', iso: 'NL' },
+  { value: '143461', label: 'New Zealand', iso: 'NZ' },
+  { value: '143457', label: 'Norway', iso: 'NO' },
+  { value: '143454', label: 'Spain', iso: 'ES' },
+  { value: '143456', label: 'Sweden', iso: 'SE' },
+  { value: '143459', label: 'Switzerland', iso: 'CH' },
+  { value: '143563', label: 'Algeria', iso: 'DZ' },
+  { value: '143564', label: 'Angola', iso: 'AO' },
+  { value: '143538', label: 'Anguilla', iso: 'AI' },
+  { value: '143540', label: 'Antigua & Barbuda', iso: 'AG' },
+  { value: '143505', label: 'Argentina', iso: 'AR' },
+  { value: '143524', label: 'Armenia', iso: 'AM' },
+  { value: '143445', label: 'Austria', iso: 'AT' },
+  { value: '143568', label: 'Azerbaijan', iso: 'AZ' },
+  { value: '143559', label: 'Bahrain', iso: 'BH' },
+  { value: '143490', label: 'Bangladesh', iso: 'BD' },
+  { value: '143541', label: 'Barbados', iso: 'BB' },
+  { value: '143565', label: 'Belarus', iso: 'BY' },
+  { value: '143446', label: 'Belgium', iso: 'BE' },
+  { value: '143555', label: 'Belize', iso: 'BZ' },
+  { value: '143542', label: 'Bermuda', iso: 'BM' },
+  { value: '143556', label: 'Bolivia', iso: 'BO' },
+  { value: '143525', label: 'Botswana', iso: 'BW' },
+  { value: '143503', label: 'Brazil', iso: 'BR' },
+  { value: '143543', label: 'British Virgin Islands', iso: 'VG' },
+  { value: '143560', label: 'Brunei', iso: 'BN' },
+  { value: '143526', label: 'Bulgaria', iso: 'BG' },
+  { value: '143544', label: 'Cayman Islands', iso: 'KY' },
+  { value: '143483', label: 'Chile', iso: 'CL' },
+  { value: '143465', label: 'China', iso: 'CN' },
+  { value: '143501', label: 'Colombia', iso: 'CO' },
+  { value: '143495', label: 'Costa Rica', iso: 'CR' },
+  { value: '143527', label: "Cote D'Ivoire", iso: 'CI' },
+  { value: '143494', label: 'Croatia', iso: 'HR' },
+  { value: '143557', label: 'Cyprus', iso: 'CY' },
+  { value: '143489', label: 'Czech Republic', iso: 'CZ' },
+  { value: '143458', label: 'Denmark', iso: 'DK' },
+  { value: '143545', label: 'Dominica', iso: 'DM' },
+  { value: '143508', label: 'Dominican Rep.', iso: 'DO' },
+  { value: '143509', label: 'Ecuador', iso: 'EC' },
+  { value: '143516', label: 'Egypt', iso: 'EG' },
+  { value: '143506', label: 'El Salvador', iso: 'SV' },
+  { value: '143518', label: 'Estonia', iso: 'EE' },
+  { value: '143447', label: 'Finland', iso: 'FI' },
+  { value: '143573', label: 'Ghana', iso: 'GH' },
+  { value: '143448', label: 'Greece', iso: 'GR' },
+  { value: '143546', label: 'Grenada', iso: 'GD' },
+  { value: '143504', label: 'Guatemala', iso: 'GT' },
+  { value: '143553', label: 'Guyana', iso: 'GY' },
+  { value: '143510', label: 'Honduras', iso: 'HN' },
+  { value: '143463', label: 'Hong Kong', iso: 'HK' },
+  { value: '143482', label: 'Hungary', iso: 'HU' },
+  { value: '143558', label: 'Iceland', iso: 'IS' },
+  { value: '143467', label: 'India', iso: 'IN' },
+  { value: '143476', label: 'Indonesia', iso: 'ID' },
+  { value: '143449', label: 'Ireland', iso: 'IE' },
+  { value: '143491', label: 'Israel', iso: 'IL' },
+  { value: '143511', label: 'Jamaica', iso: 'JM' },
+  { value: '143528', label: 'Jordan', iso: 'JO' },
+  { value: '143517', label: 'Kazakstan', iso: 'KZ' },
+  { value: '143529', label: 'Kenya', iso: 'KE' },
+  { value: '143466', label: 'Korea, Republic Of', iso: 'KR' },
+  { value: '143493', label: 'Kuwait', iso: 'KW' },
+  { value: '143519', label: 'Latvia', iso: 'LV' },
+  { value: '143497', label: 'Lebanon', iso: 'LB' },
+  { value: '143522', label: 'Liechtenstein', iso: 'LI' },
+  { value: '143520', label: 'Lithuania', iso: 'LT' },
+  { value: '143451', label: 'Luxembourg', iso: 'LU' },
+  { value: '143515', label: 'Macau', iso: 'MO' },
+  { value: '143530', label: 'Macedonia', iso: 'MK' },
+  { value: '143531', label: 'Madagascar', iso: 'MG' },
+  { value: '143473', label: 'Malaysia', iso: 'MY' },
+  { value: '143488', label: 'Maldives', iso: 'MV' },
+  { value: '143532', label: 'Mali', iso: 'ML' },
+  { value: '143521', label: 'Malta', iso: 'MT' },
+  { value: '143533', label: 'Mauritius', iso: 'MU' },
+  { value: '143468', label: 'Mexico', iso: 'MX' },
+  { value: '143523', label: 'Moldova, Republic Of', iso: 'MD' },
+  { value: '143547', label: 'Montserrat', iso: 'MS' },
+  { value: '143484', label: 'Nepal', iso: 'NP' },
+  { value: '143512', label: 'Nicaragua', iso: 'NI' },
+  { value: '143534', label: 'Niger', iso: 'NE' },
+  { value: '143561', label: 'Nigeria', iso: 'NG' },
+  { value: '143562', label: 'Oman', iso: 'OM' },
+  { value: '143477', label: 'Pakistan', iso: 'PK' },
+  { value: '143485', label: 'Panama', iso: 'PA' },
+  { value: '143513', label: 'Paraguay', iso: 'PY' },
+  { value: '143507', label: 'Peru', iso: 'PE' },
+  { value: '143474', label: 'Philippines', iso: 'PH' },
+  { value: '143478', label: 'Poland', iso: 'PL' },
+  { value: '143453', label: 'Portugal', iso: 'PT' },
+  { value: '143498', label: 'Qatar', iso: 'QA' },
+  { value: '143487', label: 'Romania', iso: 'RO' },
+  { value: '143469', label: 'Russia', iso: 'RU' },
+  { value: '143479', label: 'Saudi Arabia', iso: 'SA' },
+  { value: '143535', label: 'Senegal', iso: 'SN' },
+  { value: '143500', label: 'Serbia', iso: 'RS' },
+  { value: '143464', label: 'Singapore', iso: 'SG' },
+  { value: '143496', label: 'Slovakia', iso: 'SK' },
+  { value: '143499', label: 'Slovenia', iso: 'SI' },
+  { value: '143472', label: 'South Africa', iso: 'ZA' },
+  { value: '143486', label: 'Sri Lanka', iso: 'LK' },
+  { value: '143548', label: 'St. Kitts & Nevis', iso: 'KN' },
+  { value: '143549', label: 'St. Lucia', iso: 'LC' },
+  { value: '143550', label: 'St. Vincent & The Grenadines', iso: 'VC' },
+  { value: '143554', label: 'Suriname', iso: 'SR' },
+  { value: '143470', label: 'Taiwan', iso: 'TW' },
+  { value: '143572', label: 'Tanzania', iso: 'TZ' },
+  { value: '143475', label: 'Thailand', iso: 'TH' },
+  { value: '143539', label: 'The Bahamas', iso: 'BS' },
+  { value: '143551', label: 'Trinidad & Tobago', iso: 'TT' },
+  { value: '143536', label: 'Tunisia', iso: 'TN' },
+  { value: '143480', label: 'Turkey', iso: 'TR' },
+  { value: '143552', label: 'Turks & Caicos', iso: 'TC' },
+  { value: '143537', label: 'Uganda', iso: 'UG' },
+  { value: '143492', label: 'Ukraine', iso: 'UA' },
+  { value: '143481', label: 'United Arab Emirates', iso: 'AE' },
+  { value: '143514', label: 'Uruguay', iso: 'UY' },
+  { value: '143566', label: 'Uzbekistan', iso: 'UZ' },
+  { value: '143502', label: 'Venezuela', iso: 'VE' },
+  { value: '143471', label: 'Vietnam', iso: 'VN' },
+  { value: '143571', label: 'Yemen', iso: 'YE' },
 ]
+
+// ISO 3166-1 alpha-2 → Apple storefront id, for auto-selecting the region from origin country.
+const STOREFRONT_BY_ISO = new Map(APPLE_TV_STOREFRONTS.map((s) => [s.iso, s.value]))
 
 const TMDB_IMAGE_LANGUAGES = [
   { value: 'all', label: 'All Languages' },
@@ -280,6 +286,8 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
   const [appleTvStorefront, setAppleTvStorefront] = useState(() =>
     localStorage.getItem('apple-tv-storefront') ?? '143441'
   )
+  const appleTvUserPickedRef = useRef(false)     // user manually chose a region → stop auto-selecting
+  const appleTvOriginFetchedRef = useRef(false)  // origin country resolved once per card
 
   // Poster lightbox
   const [previewPoster, setPreviewPoster] = useState<string | null>(null)
@@ -296,6 +304,23 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
     void ensureTvDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.tmdb_id])
+
+  // Lazily resolve the item's origin country the first time the Apple TV popup opens, and
+  // pre-select the matching region — unless the user has already chosen one manually.
+  useEffect(() => {
+    if (!appleTvPopupOpen || appleTvOriginFetchedRef.current || appleTvUserPickedRef.current) return
+    if (item.media_type !== 'movie' && item.media_type !== 'tv') return
+    appleTvOriginFetchedRef.current = true
+    getTmdbOriginCountry(item.tmdb_id, item.media_type)
+      .then((countries) => {
+        if (appleTvUserPickedRef.current) return
+        for (const iso of countries) {
+          const storefront = STOREFRONT_BY_ISO.get(iso.toUpperCase())
+          if (storefront) { setAppleTvStorefront(storefront); break }
+        }
+      })
+      .catch(() => { /* keep the current default */ })
+  }, [appleTvPopupOpen, item.tmdb_id, item.media_type])
 
   // Close Apple TV popup on outside click
   useEffect(() => {
@@ -674,6 +699,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
                       className="apple-tv-storefront-select"
                       value={appleTvStorefront}
                       onChange={(e) => {
+                        appleTvUserPickedRef.current = true
                         setAppleTvStorefront(e.target.value)
                         localStorage.setItem('apple-tv-storefront', e.target.value)
                       }}
@@ -683,6 +709,9 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
                       ))}
                     </select>
                   </div>
+                  <p className="apple-tv-popup-hint">
+                    Defaults to the title's country of origin. If no artwork comes back, try again with United States selected.
+                  </p>
                   <a
                     className="apple-tv-open-btn"
                     href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}

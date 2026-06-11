@@ -1263,6 +1263,55 @@ def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetail
     )
 
 
+class TmdbOriginCountry(BaseModel):
+    countries: list[str] = []  # ISO 3166-1 alpha-2, preference-ordered
+
+
+@router.get("/tmdb/origin-country", response_model=TmdbOriginCountry)
+def tmdb_origin_country(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) -> TmdbOriginCountry:
+    """Return a movie/TV item's country of origin as ISO 3166-1 alpha-2 codes.
+
+    Used to pre-select the Apple TV artwork region. Prefers TMDB's ``origin_country``
+    (always set for TV, sometimes for movies), then falls back to ``production_countries``.
+    """
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv"):
+        return TmdbOriginCountry(countries=[])
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    url = f"https://api.themoviedb.org/3/{mt}/{tmdb_id}"
+    try:
+        resp = requests.get(url, params={"api_key": api_key, "language": "en-US"}, timeout=10)
+    except Exception as exc:
+        log_error(LogTags.MONITOR, f"TMDB origin-country request failed: {exc}", tmdb_id=tmdb_id)
+        raise HTTPException(status_code=502, detail="TMDB request failed")
+
+    if resp.status_code == 401:
+        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+
+    countries: list[str] = []
+    for c in (data.get("origin_country") or []):
+        code = str(c).strip().upper()
+        if code and code not in countries:
+            countries.append(code)
+    for pc in (data.get("production_countries") or []):
+        code = str(pc.get("iso_3166_1") or "").strip().upper()
+        if code and code not in countries:
+            countries.append(code)
+
+    return TmdbOriginCountry(countries=countries)
+
+
 @router.get("/tmdb/season-images", response_model=TmdbImagesResponse)
 def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+textless", db: Session = Depends(get_db)) -> TmdbImagesResponse:
     """Fetch poster images for a specific TV season."""

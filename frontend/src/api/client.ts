@@ -184,6 +184,7 @@ export {
   getSeasonImages,
   getTmdbImages,
   getTmdbImageProxyUrl,
+  getTmdbOriginCountry,
   getTvDetails,
   runMakerMonitor,
   saveMakerMonitorConfig,

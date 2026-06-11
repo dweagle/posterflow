@@ -1258,6 +1258,13 @@
   font-size: 0.75rem;
 }
 
+.apple-tv-popup-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: #999;
+}
+
 .apple-tv-open-btn {
   display: inline-flex;
   align-items: center;

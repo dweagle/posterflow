@@ -154,6 +154,14 @@ export const getSeasonImages = async (tmdb_id: number, season_number: number, la
   return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
 
+/** Origin country/countries (ISO 3166-1 alpha-2, preference-ordered) of a movie/TV item. */
+export const getTmdbOriginCountry = async (tmdb_id: number, media_type: string): Promise<string[]> => {
+  const data = await getData<{ countries: string[] }>(
+    `/api/maker-tools/tmdb/origin-country?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
+  )
+  return data.countries ?? []
+}
+
 export interface PsdExportRequest {
   title: string
   year: string

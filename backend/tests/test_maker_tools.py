@@ -517,6 +517,52 @@ def test_tmdb_tv_details_tmdb_error_returns_502(client, test_db):
 
 
 # ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/tmdb/origin-country
+# ---------------------------------------------------------------------------
+
+
+def test_origin_country_tv_uses_origin_country_field(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"origin_country": ["GB"], "production_countries": [{"iso_3166_1": "US"}]}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=1396&media_type=tv")
+
+    assert response.status_code == 200
+    # origin_country is preferred and de-duped ahead of production_countries
+    assert response.json()["countries"] == ["GB", "US"]
+
+
+def test_origin_country_movie_falls_back_to_production_countries(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"production_countries": [{"iso_3166_1": "fr"}, {"iso_3166_1": "DE"}]}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=550&media_type=movie")
+
+    assert response.status_code == 200
+    assert response.json()["countries"] == ["FR", "DE"]
+
+
+def test_origin_country_non_movie_tv_returns_empty_without_call(client, test_db):
+    # Collections have no origin country; the endpoint short-circuits before any TMDB call.
+    with patch("api.maker_tools.requests.get") as mock_get:
+        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=10&media_type=collection")
+    assert response.status_code == 200
+    assert response.json()["countries"] == []
+    mock_get.assert_not_called()
+
+
+def test_origin_country_no_api_key_returns_400(client):
+    response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=1396&media_type=tv")
+    assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/tmdb/season-images
 # ---------------------------------------------------------------------------
 
