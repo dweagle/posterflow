@@ -45,6 +45,9 @@ class PlexUploadService:
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
         self._expected_edition: Optional[str] = None
+        self._series_show_poster_status: Optional[str] = None
+        self._logged_missing_show_keys: set[str] = set()
+        self._quiet_unmatched_logging: bool = False
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -93,6 +96,19 @@ class PlexUploadService:
 
     def invalidate_record_cache(self) -> None:
         self._record_cache = {}
+
+    def _log_unmatched(self, message: str, **context: Any) -> None:
+        if self._quiet_unmatched_logging:
+            log_debug(LogTags.UPLOADER, message, **context)
+        else:
+            log_info(LogTags.UPLOADER, message, **context)
+
+    def _begin_upload_run(self, *, single_target: bool) -> None:
+        self._year_discrepancies = []
+        self._quiet_unmatched_logging = single_target
+        # Single-target = a webhook job's many passes share one dedupe scope, so don't reset it.
+        if not single_target:
+            self._logged_missing_show_keys = set()
 
     @staticmethod
     def _empty_media_upload_counts() -> Dict[str, int]:
@@ -346,7 +362,7 @@ class PlexUploadService:
             return self._no_assets_result(self.MESSAGE_NO_POSTER_ASSETS)
 
         stats = self._build_run_stats(local_assets, library_totals)
-        self._year_discrepancies = []
+        self._begin_upload_run(single_target=False)
         arr_availability = self._get_arr_availability_index()
         self._process_assets_for_upload(
             local_assets=local_assets,
@@ -436,7 +452,7 @@ class PlexUploadService:
             return self._no_assets_result(f"No local assets found for '{title}'.")
 
         stats = self._build_run_stats(local_assets, library_totals)
-        self._year_discrepancies = []
+        self._begin_upload_run(single_target=True)
         arr_availability = self._get_arr_availability_index(media_type_filter=media_type_normalized)
         self._process_assets_for_upload(
             local_assets=local_assets,
@@ -516,11 +532,11 @@ class PlexUploadService:
         tvdb_id: Optional[int] = None,
         imdb_id: Optional[str] = None,
     ) -> bool:
-        """Return True when the main show poster asset is already cached for all matched Plex targets."""
+        """True when the show poster is current. Read-only; also records why-not in _series_show_poster_status (current/re_added/not_uploaded/needs_apply) for webhook logging."""
+        self._series_show_poster_status = "not_uploaded"
         preflight_error, destination_dir, index, _library_totals = self._prepare_upload_context()
-        if preflight_error:
-            return False
-        if destination_dir is None or index is None:
+        if preflight_error or destination_dir is None or index is None:
+            self._series_show_poster_status = "needs_apply"
             return False
 
         all_assets = self._get_local_assets(destination_dir)
@@ -545,6 +561,8 @@ class PlexUploadService:
             return False
 
         arr_availability = self._get_arr_availability_index(media_type_filter="series")
+        saw_prior_upload = False
+        saw_re_added = False
         for asset in show_main_assets:
             if self._is_asset_fully_cached_for_targets(
                 asset,
@@ -552,8 +570,30 @@ class PlexUploadService:
                 media_type_filter="series",
                 arr_availability=arr_availability,
             ):
+                self._series_show_poster_status = "current"
                 return True
 
+            record = self._get_uploaded_record(str(asset.get("path") or ""))
+            uploaded_rating_keys = set(record.get("uploaded_to_rating_keys", []))
+            if record.get("uploaded_to_libraries") or record.get("uploaded_to_library_keys") or uploaded_rating_keys:
+                saw_prior_upload = True
+                shows = self._dedupe_plex_items(
+                    self._resolve_index_candidates(
+                        index["shows"],
+                        str(asset.get("media_key") or ""),
+                        self._extract_asset_id_keys(asset),
+                        asset.get("folder_year"),
+                    )
+                )
+                if any(self._rating_key_indicates_change(self._item_rating_key(s), uploaded_rating_keys) for s in shows):
+                    saw_re_added = True
+
+        if saw_re_added:
+            self._series_show_poster_status = "re_added"
+        elif saw_prior_upload:
+            self._series_show_poster_status = "needs_apply"
+        else:
+            self._series_show_poster_status = "not_uploaded"
         return False
 
     def _is_asset_fully_cached_for_targets(
@@ -568,6 +608,7 @@ class PlexUploadService:
         uploaded_record = self._get_uploaded_record(file_path)
         uploaded_to_libraries = set(uploaded_record.get("uploaded_to_libraries", []))
         uploaded_to_library_keys = set(uploaded_record.get("uploaded_to_library_keys", []))
+        uploaded_rating_keys = set(uploaded_record.get("uploaded_to_rating_keys", []))
         uploaded_editions = set(uploaded_record.get("uploaded_editions", []))
         uploaded_media_types = set(uploaded_record.get("uploaded_media_types", []))
 
@@ -603,6 +644,9 @@ class PlexUploadService:
                     uploaded_to_library_keys=uploaded_to_library_keys,
                 ):
                     return False
+                # Show re-added since last upload (new ratingKey) — re-apply.
+                if self._rating_key_indicates_change(self._item_rating_key(show), uploaded_rating_keys):
+                    return False
 
             return available_season_targets > 0
 
@@ -636,6 +680,9 @@ class PlexUploadService:
                 item_type = str(getattr(item, "type", "")).lower()
             except Exception:
                 # Stale/404 item — treat as not cached so we re-upload.
+                return False
+            # Item removed and re-added (fresh ratingKey) — not cached, re-apply.
+            if self._rating_key_indicates_change(self._item_rating_key(item), uploaded_rating_keys):
                 return False
             library_name = self._item_library_name(item)
             library_key = self._item_library_key(item)
@@ -1041,8 +1088,19 @@ class PlexUploadService:
             if parsed:
                 assets.append(parsed)
 
+        # rglob() order is arbitrary; sort by title, main before seasons, seasons ascending.
+        assets.sort(key=self._asset_sort_key)
+
         log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local poster assets", count=len(assets))
         return assets
+
+    @staticmethod
+    def _asset_sort_key(asset: Dict[str, Any]) -> Tuple[str, int, int]:
+        media_key = str(asset.get("media_key") or "")
+        is_season = 1 if str(asset.get("asset_type") or "") == "season" else 0
+        season_number = asset.get("season_number")
+        season_rank = season_number if isinstance(season_number, int) else -1
+        return (media_key, is_season, season_rank)
 
     def _parse_asset_folder_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
         folder_name = file_path.parent.name
@@ -1527,6 +1585,7 @@ class PlexUploadService:
         uploaded_record = self._get_uploaded_record(file_path)
         uploaded_to_libraries = set(uploaded_record.get("uploaded_to_libraries", []))
         uploaded_to_library_keys = set(uploaded_record.get("uploaded_to_library_keys", []))
+        uploaded_rating_keys = set(uploaded_record.get("uploaded_to_rating_keys", []))
         uploaded_editions = set(uploaded_record.get("uploaded_editions", []))
         uploaded_media_types = set(uploaded_record.get("uploaded_media_types", []))
 
@@ -1538,7 +1597,14 @@ class PlexUploadService:
         if asset["asset_type"] == "season":
             shows = self._dedupe_plex_items(shows_raw)
             if not shows:
-                log_debug(LogTags.UPLOADER, f"No show match for season asset: {asset_label}", file=file_path)
+                if media_key not in self._logged_missing_show_keys:
+                    self._logged_missing_show_keys.add(media_key)
+                    show_label = str(asset.get("display_name") or media_key)
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"No Plex show match for '{show_label}'; its season posters can't be applied yet",
+                        file=file_path,
+                    )
                 return 0, False, 0, 0, media_counts, 0
 
             uploaded = 0
@@ -1547,16 +1613,23 @@ class PlexUploadService:
                 season_number = asset["season_number"]
                 library_name = self._item_library_name(show)
                 library_key = self._item_library_key(show)
-                if self._is_item_cached_for_library(
+                # Use the show's ratingKey (a single re-added season under an unchanged show isn't caught, but that avoids a seasons() call per cached item).
+                rating_key = self._item_rating_key(show)
+                rating_key_changed = self._rating_key_indicates_change(rating_key, uploaded_rating_keys)
+                if not rating_key_changed and self._is_item_cached_for_library(
                     library_name=library_name,
                     library_key=library_key,
                     uploaded_to_libraries=uploaded_to_libraries,
                     uploaded_to_library_keys=uploaded_to_library_keys,
                 ):
-                    log_debug(
-                        LogTags.UPLOADER,
-                        f"Skipping cached season upload for {asset_label} in {library_name}",
-                        file=file_path,
+                    self._record_rating_key_if_new(
+                        file_path,
+                        rating_key,
+                        uploaded_rating_keys,
+                        dry_run=dry_run,
+                        library_name=library_name,
+                        library_key=library_key,
+                        media_type="seasons",
                     )
                     cached_skips += 1
                     continue
@@ -1584,11 +1657,14 @@ class PlexUploadService:
                     uploaded_to_libraries.add(library_name)
                 if library_key:
                     uploaded_to_library_keys.add(library_key)
+                if rating_key:
+                    uploaded_rating_keys.add(rating_key)
                 self._mark_uploaded(
                     file_path,
                     library_name=library_name,
                     library_key=library_key,
                     media_type="seasons",
+                    rating_key=rating_key,
                 )
                 log_info(
                     LogTags.UPLOADER,
@@ -1607,7 +1683,7 @@ class PlexUploadService:
                 elif season_number is not None:
                     library_labels = self._library_labels_for_items(shows)
                     libraries_text = ", ".join(library_labels) if library_labels else "Plex"
-                    log_info(
+                    log_debug(
                         LogTags.UPLOADER,
                         f"No Season {int(season_number):02} found in {libraries_text} for {asset.get('display_name', media_key)}",
                         file=file_path,
@@ -1634,7 +1710,7 @@ class PlexUploadService:
                 )
                 ambiguous_raw_candidates = len(movies_raw) + len(shows_raw)
                 return 0, False, ambiguous_raw_candidates, 0, media_counts, 0
-            log_info(LogTags.UPLOADER, f"No Plex match for asset: {asset_label}", file=file_path)
+            self._log_unmatched(f"No Plex match for asset: {asset_label}", file=file_path)
             return 0, False, 0, 0, media_counts, 0
 
         available, unavailable_reason = self._asset_has_arr_availability(
@@ -1664,8 +1740,7 @@ class PlexUploadService:
                 break
 
         if not matched_items:
-            log_info(
-                LogTags.UPLOADER,
+            self._log_unmatched(
                 f"No Plex match for asset: {asset_label} (inferred_filter={inferred_filter}, "
                 f"movies_raw={len(movies_raw)}, shows_raw={len(shows_raw)}, collections_raw={len(collections_raw)})",
                 file=file_path,
@@ -1688,6 +1763,26 @@ class PlexUploadService:
                 )
                 return 0, False, raw_candidate_count, 0, media_counts, 0
 
+        if inferred_filter == "movie" and uploaded_editions:
+            live_editions = {self._movie_edition_title(m) for m in matched_items}
+            stale_editions = uploaded_editions - live_editions
+            if stale_editions:
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Edition change for {asset_label}: cached edition(s) {sorted(stale_editions)} no longer "
+                    f"on Plex (live: {sorted(live_editions)}); re-uploading current edition(s)",
+                    file=file_path,
+                )
+                if not dry_run:
+                    self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).delete()
+                    self.db.commit()
+                    self._record_cache.pop(file_path, None)
+                uploaded_to_libraries = set()
+                uploaded_to_library_keys = set()
+                uploaded_rating_keys = set()
+                uploaded_editions = set()
+                uploaded_media_types = set()
+
         uploaded = 0
         for item in matched_items:
             item_label = self._describe_plex_item(item)
@@ -1701,10 +1796,23 @@ class PlexUploadService:
                 uploaded_to_libraries=uploaded_to_libraries,
                 uploaded_to_library_keys=uploaded_to_library_keys,
             )
+            rating_key = self._item_rating_key(item)
+            rating_key_changed = self._rating_key_indicates_change(rating_key, uploaded_rating_keys)
+            item_already_applied = item_cached_for_library and not rating_key_changed
 
             if item_type == "movie":
                 edition_title = self._movie_edition_title(item)
-                if edition_title in uploaded_editions and item_cached_for_library:
+                if edition_title in uploaded_editions and item_already_applied:
+                    self._record_rating_key_if_new(
+                        file_path,
+                        rating_key,
+                        uploaded_rating_keys,
+                        dry_run=dry_run,
+                        library_name=library_name,
+                        library_key=library_key,
+                        edition_title=edition_title,
+                        media_type="movies",
+                    )
                     log_debug(
                         LogTags.UPLOADER,
                         f"Skipping cached movie edition upload for {item_label} ({edition_title})",
@@ -1715,14 +1823,17 @@ class PlexUploadService:
                 if (
                     edition_title == self.DEFAULT_EDITION_MOVIE
                     and not uploaded_editions
-                    and item_cached_for_library
+                    and item_already_applied
                 ):
+                    if rating_key:
+                        uploaded_rating_keys.add(rating_key)
                     self._mark_uploaded(
                         file_path,
                         library_name=library_name,
                         library_key=library_key,
                         edition_title=edition_title,
                         media_type="movies",
+                        rating_key=rating_key,
                     )
                     uploaded_editions.add(edition_title)
                     log_debug(
@@ -1732,7 +1843,16 @@ class PlexUploadService:
                     )
                     continue
             else:
-                if item_cached_for_library and (not uploaded_media_types or item_media_type in uploaded_media_types):
+                if item_already_applied and (not uploaded_media_types or item_media_type in uploaded_media_types):
+                    self._record_rating_key_if_new(
+                        file_path,
+                        rating_key,
+                        uploaded_rating_keys,
+                        dry_run=dry_run,
+                        library_name=library_name,
+                        library_key=library_key,
+                        media_type=item_media_type,
+                    )
                     log_debug(
                         LogTags.UPLOADER,
                         f"Skipping cached upload for {item_label} in {library_name}",
@@ -1761,6 +1881,8 @@ class PlexUploadService:
                 uploaded_to_libraries.add(library_name)
             if library_key:
                 uploaded_to_library_keys.add(library_key)
+            if rating_key:
+                uploaded_rating_keys.add(rating_key)
             if item_type == "movie":
                 edition_title = self._movie_edition_title(item)
                 uploaded_editions.add(edition_title)
@@ -1770,6 +1892,7 @@ class PlexUploadService:
                     library_key=library_key,
                     edition_title=edition_title,
                     media_type="movies",
+                    rating_key=rating_key,
                 )
             else:
                 self._mark_uploaded(
@@ -1777,6 +1900,7 @@ class PlexUploadService:
                     library_name=library_name,
                     library_key=library_key,
                     media_type=item_media_type,
+                    rating_key=rating_key,
                 )
             log_info(LogTags.UPLOADER, f"Uploaded {item_label}", file=file_path, asset=asset_label)
 
@@ -2587,9 +2711,58 @@ class PlexUploadService:
         return {
             "uploaded_to_libraries": [],
             "uploaded_to_library_keys": [],
+            "uploaded_to_rating_keys": [],
             "uploaded_editions": [],
             "uploaded_media_types": [],
         }
+
+    @staticmethod
+    def _item_rating_key(item: Any) -> Optional[str]:
+        """Return a Plex item's ratingKey as a string, or None when unavailable."""
+        try:
+            rating_key = getattr(item, "ratingKey", None)
+        except Exception:
+            return None
+        if rating_key is None:
+            return None
+        rating_key = str(rating_key).strip()
+        return rating_key or None
+
+    @staticmethod
+    def _rating_key_indicates_change(rating_key: Optional[str], uploaded_rating_keys: set[str]) -> bool:
+        """True when this item's ratingKey is unseen (re-added). False if no keys recorded yet (baseline) or key unreadable."""
+        if not uploaded_rating_keys:
+            return False
+        if rating_key is None:
+            return False
+        return rating_key not in uploaded_rating_keys
+
+    def _record_rating_key_if_new(
+        self,
+        file_path: str,
+        rating_key: Optional[str],
+        uploaded_rating_keys: set[str],
+        *,
+        dry_run: bool,
+        library_name: Optional[str] = None,
+        library_key: Optional[str] = None,
+        edition_title: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> None:
+        """Backfill a ratingKey onto an already-applied item (no re-upload), so a later re-add is detectable. Skips DB write on dry run."""
+        if not rating_key or rating_key in uploaded_rating_keys:
+            return
+        uploaded_rating_keys.add(rating_key)
+        if dry_run:
+            return
+        self._mark_uploaded(
+            file_path,
+            library_name=library_name,
+            library_key=library_key,
+            edition_title=edition_title,
+            media_type=media_type,
+            rating_key=rating_key,
+        )
 
     def _compute_file_hash(self, file_path: str) -> Optional[str]:
         """Compute sha256 hex digest of file contents. Returns None if the file is unreadable."""
@@ -2629,10 +2802,12 @@ class PlexUploadService:
         library_key: Optional[str] = None,
         edition_title: Optional[str] = None,
         media_type: Optional[str] = None,
+        rating_key: Optional[str] = None,
     ) -> None:
         existing_record = self._get_uploaded_record(file_path)
         libraries = set(existing_record["uploaded_to_libraries"])
         library_keys = set(existing_record.get("uploaded_to_library_keys", []))
+        rating_keys = set(existing_record.get("uploaded_to_rating_keys", []))
         editions = set(existing_record["uploaded_editions"])
         media_types = set(existing_record["uploaded_media_types"])
 
@@ -2640,6 +2815,8 @@ class PlexUploadService:
             libraries.add(library_name)
         if library_key:
             library_keys.add(library_key)
+        if rating_key:
+            rating_keys.add(str(rating_key))
         if edition_title:
             editions.add(edition_title)
         if media_type:
@@ -2657,6 +2834,7 @@ class PlexUploadService:
             db_record.file_mtime = file_mtime
             db_record.uploaded_to_libraries = json.dumps(sorted(libraries))
             db_record.uploaded_to_library_keys = json.dumps(sorted(library_keys))
+            db_record.uploaded_to_rating_keys = json.dumps(sorted(rating_keys))
             db_record.uploaded_editions = json.dumps(sorted(editions))
             db_record.uploaded_media_types = json.dumps(sorted(media_types))
         else:
@@ -2666,6 +2844,7 @@ class PlexUploadService:
                 file_mtime=file_mtime,
                 uploaded_to_libraries=json.dumps(sorted(libraries)),
                 uploaded_to_library_keys=json.dumps(sorted(library_keys)),
+                uploaded_to_rating_keys=json.dumps(sorted(rating_keys)),
                 uploaded_editions=json.dumps(sorted(editions)),
                 uploaded_media_types=json.dumps(sorted(media_types)),
             )
@@ -2676,6 +2855,7 @@ class PlexUploadService:
         updated = {
             "uploaded_to_libraries": sorted(libraries),
             "uploaded_to_library_keys": sorted(library_keys),
+            "uploaded_to_rating_keys": sorted(rating_keys),
             "uploaded_editions": sorted(editions),
             "uploaded_media_types": sorted(media_types),
         }

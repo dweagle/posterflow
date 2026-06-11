@@ -2181,15 +2181,22 @@ def run_plex_webhook_background_job(
             else:
                 webhook_targets = [
                     {"season_number": season_number, "label": f"Season {int(season_number):02d}"},
-                    {"season_number": None, "label": "series-bootstrap", "reason": "show poster missing/not uploaded"},
+                    {"season_number": None, "label": "series-bootstrap", "bootstrap": True},
                 ]
+                show_poster_status = getattr(service, "_series_show_poster_status", None)
+                strategy_detail = {
+                    "re_added": "show was removed and re-added in Plex (new rating key) — re-applying show poster plus seasons",
+                    "not_uploaded": "show poster not yet uploaded — uploading show poster plus seasons",
+                    "needs_apply": "show poster needs re-applying — uploading show poster plus seasons",
+                }.get(show_poster_status, "show poster needs applying — uploading show poster plus seasons")
                 log_info(
                     LogTags.UPLOADER,
-                    "Webhook target strategy: show poster cache is missing; processing season plus full-series bootstrap",
+                    f"Webhook target strategy: {strategy_detail}",
                     media_type=media_type,
                     title=title,
                     season_number=season_number,
                     targets=len(webhook_targets),
+                    reason=show_poster_status or "unknown",
                 )
 
         target_cache_checks: list[Dict[str, Any]] = []
@@ -2212,15 +2219,16 @@ def run_plex_webhook_background_job(
                 }
             )
 
-        for check in target_cache_checks:
+        if target_cache_checks:
+            checks_summary = ", ".join(
+                f"{check.get('label')}={'cached' if check.get('cached') else 'uncached'}"
+                for check in target_cache_checks
+            )
             log_debug(
                 LogTags.UPLOADER,
-                "Webhook cache check",
+                f"Webhook cache check: {checks_summary}",
                 media_type=media_type,
                 title=title,
-                target=check.get("label"),
-                season_number=check.get("season_number"),
-                cached=bool(check.get("cached", False)),
             )
 
         if target_cache_checks and all(bool(check.get("cached", False)) for check in target_cache_checks):
@@ -2251,15 +2259,16 @@ def run_plex_webhook_background_job(
 
         destination_presence_checks = _build_destination_presence_checks(webhook_targets, service, media_type, title, parsed_payload)
 
-        for check in destination_presence_checks:
+        if destination_presence_checks:
+            presence_summary = ", ".join(
+                f"{check.get('label')}={'present' if check.get('exists') else 'missing'}"
+                for check in destination_presence_checks
+            )
             log_debug(
                 LogTags.UPLOADER,
-                "Webhook destination asset check",
+                f"Webhook destination asset check: {presence_summary}",
                 media_type=media_type,
                 title=title,
-                target=check.get("label"),
-                season_number=check.get("season_number"),
-                exists=bool(check.get("exists", False)),
             )
 
         destination_has_any_target = any(bool(check.get("exists", False)) for check in destination_presence_checks)
@@ -2432,26 +2441,10 @@ def run_plex_webhook_background_job(
             for target in webhook_targets:
                 target_season_number = target.get("season_number")
                 target_label = str(target.get("label") or "target")
-                target_reason = target.get("reason")
-                pass_start_label = (
-                    f"{title}{year_label} — {target_label} ({target_reason})"
-                    if target_reason
-                    else f"{title}{year_label} ({target_label})"
-                )
-                pass_complete_label = (
+                pass_label = (
                     f"{title}{year_label} — {target_label}"
-                    if target_reason
+                    if target.get("bootstrap")
                     else f"{title}{year_label} ({target_label})"
-                )
-                log_info(
-                    LogTags.UPLOADER,
-                    f"Webhook upload pass start: {pass_start_label}",
-                    attempt=attempt,
-                    max_attempts=attempts,
-                    media_type=media_type,
-                    title=title,
-                    target=target_label,
-                    season_number=target_season_number,
                 )
 
                 target_result = service.run_single_upload(
@@ -2508,21 +2501,34 @@ def run_plex_webhook_background_job(
                     if disc not in year_discrepancies:
                         year_discrepancies.append(disc)
                 saw_non_preflight_processing = True
-                log_info(
-                    LogTags.UPLOADER,
-                    f"Webhook upload pass complete: {pass_complete_label}",
-                    attempt=attempt,
-                    max_attempts=attempts,
-                    media_type=media_type,
-                    title=title,
-                    target=target_label,
-                    season_number=target_season_number,
-                    scanned=int(target_stats.get("scanned", 0)),
-                    matched=int(target_stats.get("matched", 0)),
-                    uploaded=int(target_stats.get("uploaded", 0)),
-                    skipped=int(target_stats.get("skipped", 0)),
-                    errors=int(target_stats.get("errors", 0)),
-                )
+                uploaded_n = int(target_stats.get("uploaded", 0))
+                matched_n = int(target_stats.get("matched", 0))
+                seasons_missing_n = int(target_stats.get("plex_seasons_missing", 0))
+                # Skip the per-pass line on a no-match pass; the attempt-level summary already reports it.
+                if uploaded_n > 0:
+                    pass_outcome = f"uploaded {uploaded_n}"
+                elif matched_n > 0 and seasons_missing_n > 0:
+                    pass_outcome = "show found, season not scanned in Plex yet"
+                elif matched_n > 0:
+                    pass_outcome = "already up to date, nothing to upload"
+                else:
+                    pass_outcome = None
+                if pass_outcome is not None:
+                    log_info(
+                        LogTags.UPLOADER,
+                        f"Webhook upload pass: {pass_label} — {pass_outcome}",
+                        attempt=attempt,
+                        max_attempts=attempts,
+                        media_type=media_type,
+                        title=title,
+                        target=target_label,
+                        season_number=target_season_number,
+                        scanned=int(target_stats.get("scanned", 0)),
+                        matched=matched_n,
+                        uploaded=uploaded_n,
+                        skipped=int(target_stats.get("skipped", 0)),
+                        errors=int(target_stats.get("errors", 0)),
+                    )
                 for key in aggregated_stats:
                     aggregated_stats[key] += int(target_stats.get(key, 0))
 

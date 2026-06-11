@@ -37,7 +37,7 @@ class _FakePlexItem:
         if rating_key:
             self.ratingKey = rating_key
 
-    def uploadPoster(self, _filepath: str) -> None:
+    def uploadPoster(self, filepath: str) -> None:
         return None
 
 
@@ -2561,6 +2561,472 @@ def test_mark_uploaded_persists_library_key(test_db, tmp_path):
     assert record is not None
     assert json.loads(record.uploaded_to_libraries) == ["Movies"]
     assert json.loads(record.uploaded_to_library_keys) == ["plex-main:1"]
+
+
+def test_discover_local_assets_sorted_show_then_seasons(test_db, tmp_path):
+    """Discovery returns assets grouped by title, main poster before seasons, seasons ascending."""
+    show_dir = tmp_path / "Chicago Fire (2012)"
+    show_dir.mkdir(parents=True, exist_ok=True)
+    # Create on disk in deliberately scrambled order.
+    for name in ["Season03.jpg", "Season01.jpg", "poster.jpg", "Season14.jpg", "Season02.jpg"]:
+        (show_dir / name).write_bytes(b"x")
+
+    service = PlexUploadService(test_db)
+    assets = service._discover_local_assets(tmp_path)
+
+    order = [
+        (a.get("asset_type"), a.get("season_number"))
+        for a in assets
+        if a.get("media_key") == "chicagofire"
+    ]
+    assert order == [
+        ("main", None),
+        ("season", 1),
+        ("season", 2),
+        ("season", 3),
+        ("season", 14),
+    ]
+
+
+def test_missing_show_match_logged_once_per_run(test_db, monkeypatch):
+    """When a show isn't in Plex yet, its season assets log the no-match line once, not per season."""
+    messages = []
+    monkeypatch.setattr("services.plex_upload.log_debug", lambda _tag, msg, **_kw: messages.append(msg))
+
+    service = PlexUploadService(test_db)
+    index = {"movies": {}, "shows": {}, "collections": {}}
+    for season in (1, 2, 3):
+        asset = {
+            "media_key": "chicagofire",
+            "display_name": "Chicago Fire",
+            "asset_type": "season",
+            "path": f"/tmp/Chicago Fire/Season{season:02d}.jpg",
+            "season_number": season,
+            "folder_year": 2012,
+        }
+        service._upload_asset(asset, index, dry_run=True, media_type_filter="series")
+
+    missing_lines = [m for m in messages if "No Plex show match" in m]
+    assert len(missing_lines) == 1
+    assert "Chicago Fire" in missing_lines[0]
+
+
+def test_no_match_log_level_depends_on_run_type(test_db, monkeypatch):
+    """No-match lines are INFO for full runs (auditing) but DEBUG for single/webhook uploads."""
+    info_msgs, debug_msgs = [], []
+    monkeypatch.setattr("services.plex_upload.log_info", lambda _t, m, **_k: info_msgs.append(m))
+    monkeypatch.setattr("services.plex_upload.log_debug", lambda _t, m, **_k: debug_msgs.append(m))
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "nomatch",
+        "path": "/tmp/No Match (2020)/poster.jpg",
+        "display_name": "No Match",
+        "asset_type": "main",
+        "folder_year": 2020,
+    }
+    index = {"movies": {}, "shows": {}, "collections": {}}
+
+    service._quiet_unmatched_logging = False  # full run
+    service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
+    assert any("No Plex match for asset" in m for m in info_msgs)
+    assert not any("No Plex match for asset" in m for m in debug_msgs)
+
+    info_msgs.clear()
+    debug_msgs.clear()
+    service._quiet_unmatched_logging = True  # single/webhook upload
+    service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
+    assert any("No Plex match for asset" in m for m in debug_msgs)
+    assert not any("No Plex match for asset" in m for m in info_msgs)
+
+
+def test_movie_reverted_edition_reuploads_and_prunes_stale(test_db, tmp_path):
+    """A movie reverted from a special edition back to default re-uploads and drops the stale edition."""
+    file_path = tmp_path / "Movie X (2020)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "moviex",
+        "path": str(file_path),
+        "display_name": "Movie X",
+        "asset_type": "main",
+        "folder_year": 2020,
+    }
+    # Live Plex item is default edition (no editionTitle).
+    index = {
+        "movies": {"moviex": [_FakePlexItem("movie", "Movie X", 2020, "Movies", section_id=1, server_id="plex-a", rating_key="rk-1")]},
+        "shows": {},
+        "collections": {},
+    }
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["Movies"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1"]),
+        uploaded_to_rating_keys=json.dumps(["rk-1"]),
+        uploaded_editions=json.dumps(["default_edition", "Extended Cut"]),
+        uploaded_media_types=json.dumps(["movies"]),
+    ))
+    test_db.commit()
+
+    uploaded, *_rest = service._upload_asset(asset, index, dry_run=False, media_type_filter="movie")
+
+    assert uploaded == 1
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert json.loads(record.uploaded_editions) == ["default_edition"]
+
+
+def test_movie_multi_library_editions_not_treated_as_stale(test_db, tmp_path):
+    """Editions still present across libraries must not trigger a spurious re-upload."""
+    file_path = tmp_path / "Movie X (2020)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "moviex",
+        "path": str(file_path),
+        "display_name": "Movie X",
+        "asset_type": "main",
+        "folder_year": 2020,
+    }
+    default_item = _FakePlexItem("movie", "Movie X", 2020, "Movies", section_id=1, server_id="plex-a", rating_key="rk-1")
+    extended_item = _FakePlexItem("movie", "Movie X", 2020, "4k Movies", section_id=2, server_id="plex-a", rating_key="rk-2")
+    extended_item.editionTitle = "Extended Cut"
+    index = {"movies": {"moviex": [default_item, extended_item]}, "shows": {}, "collections": {}}
+
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["Movies", "4k Movies"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1", "plex-a:2"]),
+        uploaded_to_rating_keys=json.dumps(["rk-1", "rk-2"]),
+        uploaded_editions=json.dumps(["default_edition", "Extended Cut"]),
+        uploaded_media_types=json.dumps(["movies"]),
+    ))
+    test_db.commit()
+
+    uploaded, *_rest = service._upload_asset(asset, index, dry_run=False, media_type_filter="movie")
+
+    assert uploaded == 0  # both editions still live and cached — nothing to do
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert set(json.loads(record.uploaded_editions)) == {"default_edition", "Extended Cut"}
+
+
+def test_two_libraries_one_edition_changes_reuploads_both(test_db, tmp_path):
+    """When one library's edition changes, the flat-set cache re-syncs the whole movie:
+    both libraries get the (identical) poster re-applied and the cache reflects live editions."""
+    file_path = tmp_path / "Movie X (2020)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "moviex",
+        "path": str(file_path),
+        "display_name": "Movie X",
+        "asset_type": "main",
+        "folder_year": 2020,
+    }
+    # Library A used to be default; it is now "Director's Cut". Library B is unchanged.
+    changed_item = _FakePlexItem("movie", "Movie X", 2020, "Movies", section_id=1, server_id="plex-a", rating_key="rk-1")
+    changed_item.editionTitle = "Director's Cut"
+    unchanged_item = _FakePlexItem("movie", "Movie X", 2020, "4k Movies", section_id=2, server_id="plex-a", rating_key="rk-2")
+    unchanged_item.editionTitle = "Extended Cut"
+    index = {"movies": {"moviex": [changed_item, unchanged_item]}, "shows": {}, "collections": {}}
+
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["Movies", "4k Movies"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1", "plex-a:2"]),
+        uploaded_to_rating_keys=json.dumps(["rk-1", "rk-2"]),
+        uploaded_editions=json.dumps(["default_edition", "Extended Cut"]),
+        uploaded_media_types=json.dumps(["movies"]),
+    ))
+    test_db.commit()
+
+    uploaded, *_rest = service._upload_asset(asset, index, dry_run=False, media_type_filter="movie")
+
+    # The vanished "default_edition" triggers a whole-movie re-sync, so both items are
+    # re-applied (the unchanged library redundantly but harmlessly — same poster).
+    assert uploaded == 2
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert set(json.loads(record.uploaded_editions)) == {"Director's Cut", "Extended Cut"}
+
+
+def test_movie_reverted_edition_dry_run_preserves_cache(test_db, tmp_path):
+    """Dry run reports the re-upload but must not delete the cache record."""
+    file_path = tmp_path / "Movie X (2020)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "moviex",
+        "path": str(file_path),
+        "display_name": "Movie X",
+        "asset_type": "main",
+        "folder_year": 2020,
+    }
+    index = {
+        "movies": {"moviex": [_FakePlexItem("movie", "Movie X", 2020, "Movies", section_id=1, server_id="plex-a", rating_key="rk-1")]},
+        "shows": {},
+        "collections": {},
+    }
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["Movies"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1"]),
+        uploaded_to_rating_keys=json.dumps(["rk-1"]),
+        uploaded_editions=json.dumps(["default_edition", "Extended Cut"]),
+        uploaded_media_types=json.dumps(["movies"]),
+    ))
+    test_db.commit()
+
+    uploaded, *_rest = service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
+
+    assert uploaded == 1  # would re-upload
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert record is not None  # dry run did not delete the record
+
+
+def test_mark_uploaded_persists_rating_key(test_db, tmp_path):
+    """Uploader cache should persist the Plex ratingKey the file was applied to."""
+    file_path = tmp_path / "The Matrix (1999)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+
+    service = PlexUploadService(test_db)
+    service._mark_uploaded(
+        str(file_path),
+        library_name="Movies",
+        library_key="plex-main:1",
+        media_type="movies",
+        rating_key="rk-42",
+    )
+
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert record is not None
+    assert json.loads(record.uploaded_to_rating_keys) == ["rk-42"]
+
+
+def _readded_movie_index(rating_key: str) -> dict:
+    return {
+        "movies": {
+            "duallibmovie": [
+                _FakePlexItem(
+                    "movie",
+                    "Dual Lib Movie",
+                    2026,
+                    "Movies",
+                    section_id=1,
+                    server_id="plex-a",
+                    rating_key=rating_key,
+                ),
+            ]
+        },
+        "shows": {},
+        "collections": {},
+    }
+
+
+def _seed_movie_record(test_db, file_path, *, rating_keys):
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["Movies"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1"]),
+        uploaded_to_rating_keys=json.dumps(rating_keys),
+        uploaded_editions=json.dumps(["default_edition"]),
+        uploaded_media_types=json.dumps(["movies"]),
+    ))
+    test_db.commit()
+
+
+def test_readded_movie_with_new_rating_key_is_reuploaded(test_db, tmp_path):
+    """A library-cached movie whose Plex ratingKey changed (deleted + re-added) re-uploads."""
+    file_path = tmp_path / "Dual Lib Movie (2026)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "duallibmovie",
+        "path": str(file_path),
+        "display_name": "Dual Lib Movie",
+        "asset_type": "main",
+        "folder_year": 2026,
+    }
+    _seed_movie_record(test_db, file_path, rating_keys=["rk-OLD"])
+
+    uploaded, matched, *_rest = service._upload_asset(
+        asset,
+        _readded_movie_index("rk-NEW"),
+        dry_run=False,
+        media_type_filter="movie",
+    )
+
+    assert uploaded == 1
+    assert matched is True
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert "rk-NEW" in json.loads(record.uploaded_to_rating_keys)
+
+
+def test_unchanged_rating_key_movie_is_skipped(test_db, tmp_path):
+    """A library-cached movie whose ratingKey is unchanged is still skipped."""
+    file_path = tmp_path / "Dual Lib Movie (2026)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "duallibmovie",
+        "path": str(file_path),
+        "display_name": "Dual Lib Movie",
+        "asset_type": "main",
+        "folder_year": 2026,
+    }
+    _seed_movie_record(test_db, file_path, rating_keys=["rk-1"])
+
+    uploaded, *_rest = service._upload_asset(
+        asset,
+        _readded_movie_index("rk-1"),
+        dry_run=False,
+        media_type_filter="movie",
+    )
+
+    assert uploaded == 0
+
+
+def test_legacy_record_backfills_rating_key_without_reupload(test_db, tmp_path):
+    """A legacy record with no rating keys establishes a baseline (backfill) without re-uploading."""
+    file_path = tmp_path / "Dual Lib Movie (2026)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "duallibmovie",
+        "path": str(file_path),
+        "display_name": "Dual Lib Movie",
+        "asset_type": "main",
+        "folder_year": 2026,
+    }
+    _seed_movie_record(test_db, file_path, rating_keys=[])
+
+    uploaded, *_rest = service._upload_asset(
+        asset,
+        _readded_movie_index("rk-1"),
+        dry_run=False,
+        media_type_filter="movie",
+    )
+
+    assert uploaded == 0  # baseline run does not re-upload existing items
+    record = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(file_path)).first()
+    assert json.loads(record.uploaded_to_rating_keys) == ["rk-1"]
+
+
+def test_is_asset_fully_cached_returns_false_when_rating_key_changed(test_db, tmp_path):
+    """Webhook cache gate should treat a re-added item (new ratingKey) as not cached."""
+    file_path = tmp_path / "Dual Lib Movie (2026)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"poster")
+
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "duallibmovie",
+        "path": str(file_path),
+        "display_name": "Dual Lib Movie",
+        "asset_type": "main",
+        "season_number": None,
+        "folder_year": 2026,
+    }
+    _seed_movie_record(test_db, file_path, rating_keys=["rk-OLD"])
+
+    assert service._is_asset_fully_cached_for_targets(
+        asset,
+        index=_readded_movie_index("rk-NEW"),
+        media_type_filter="movie",
+        arr_availability={"movies": {}, "shows": {}},
+    ) is False
+
+    service.invalidate_record_cache()
+    assert service._is_asset_fully_cached_for_targets(
+        asset,
+        index=_readded_movie_index("rk-OLD"),
+        media_type_filter="movie",
+        arr_availability={"movies": {}, "shows": {}},
+    ) is True
+
+
+def _series_show_poster_status(service, asset, index):
+    """Drive is_series_show_poster_cached with stubbed context and return the recorded reason."""
+    service._prepare_upload_context = lambda *a, **k: (None, Path("/tmp"), index, [])
+    service._get_local_assets = lambda *a, **k: [asset]
+    service._select_local_assets_for_target = lambda assets, **k: assets
+    service._get_arr_availability_index = lambda *a, **k: {}
+    service.is_series_show_poster_cached(title="Chicago Fire", year=2012, tvdb_id=258541)
+    return service._series_show_poster_status
+
+
+def test_series_show_poster_status_detects_re_added(test_db, tmp_path):
+    """When the show was removed and re-added in Plex (new ratingKey), the status is 're_added'."""
+    file_path = tmp_path / "Chicago Fire (2012)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+    asset = {
+        "media_key": "chicagofire",
+        "path": str(file_path),
+        "display_name": "Chicago Fire",
+        "asset_type": "main",
+        "season_number": None,
+        "folder_year": 2012,
+    }
+    index = {
+        "movies": {},
+        "shows": {"chicagofire": [_FakePlexItem("show", "Chicago Fire", 2012, "TV Shows", section_id=1, server_id="plex-a", rating_key="rk-NEW")]},
+        "collections": {},
+    }
+    test_db.add(PlexUploadRecord(
+        file_path=str(file_path),
+        file_hash=None,
+        uploaded_to_libraries=json.dumps(["TV Shows"]),
+        uploaded_to_library_keys=json.dumps(["plex-a:1"]),
+        uploaded_to_rating_keys=json.dumps(["rk-OLD"]),
+        uploaded_editions=json.dumps([]),
+        uploaded_media_types=json.dumps(["shows"]),
+    ))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    assert _series_show_poster_status(service, asset, index) == "re_added"
+
+
+def test_series_show_poster_status_not_uploaded_without_record(test_db, tmp_path):
+    """With no prior upload record, the status is 'not_uploaded' (not the re-add reason)."""
+    file_path = tmp_path / "Chicago Fire (2012)" / "poster.jpg"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(b"x")
+    asset = {
+        "media_key": "chicagofire",
+        "path": str(file_path),
+        "display_name": "Chicago Fire",
+        "asset_type": "main",
+        "season_number": None,
+        "folder_year": 2012,
+    }
+    index = {
+        "movies": {},
+        "shows": {"chicagofire": [_FakePlexItem("show", "Chicago Fire", 2012, "TV Shows", section_id=1, server_id="plex-a", rating_key="rk-NEW")]},
+        "collections": {},
+    }
+
+    service = PlexUploadService(test_db)
+    assert _series_show_poster_status(service, asset, index) == "not_uploaded"
 
 
 def test_run_single_upload_series_season_only_processes_season_asset(test_db, monkeypatch):

@@ -8,20 +8,7 @@ from database import Base
 
 
 class PlexUploadRecord(Base):
-    """
-    Tracks which local poster files have been successfully uploaded to Plex.
-
-    Replaces the old JSON blob stored under the 'plex_upload_file_cache' settings key.
-    Stored in the database so records survive container rebuilds and config volume
-    changes without being silently lost.
-
-    file_hash is the sha256 hex digest of the file at upload time. If a local file
-    is re-synced from a drive (new poster), its hash will differ and the record
-    is treated as stale — triggering a fresh upload. Records migrated from the old
-    JSON cache have file_hash=None and are treated as valid legacy entries (no
-    hash comparison is possible, so they are accepted as-is to avoid spurious
-    re-uploads on first migration).
-    """
+    """Per-file record of posters uploaded to Plex, kept in the DB so it survives rebuilds (see column comments)."""
 
     __tablename__ = "plex_upload_records"
 
@@ -31,6 +18,7 @@ class PlexUploadRecord(Base):
     file_mtime = Column(Float, nullable=True)    # st_mtime at upload time; used as fast pre-check
     uploaded_to_libraries = Column(String, nullable=True)       # JSON list of library names
     uploaded_to_library_keys = Column(String, nullable=True)    # JSON list of stable library keys
+    uploaded_to_rating_keys = Column(String, nullable=True)     # JSON list of Plex ratingKeys; an unseen key = item re-added → re-upload
     uploaded_editions = Column(String, nullable=True)           # JSON list of edition titles
     uploaded_media_types = Column(String, nullable=True)        # JSON list of media types
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -54,6 +42,7 @@ class PlexUploadRecord(Base):
         d: Dict[str, Any] = {
             "uploaded_to_libraries": _parse(self.uploaded_to_libraries),
             "uploaded_to_library_keys": _parse(self.uploaded_to_library_keys),
+            "uploaded_to_rating_keys": _parse(self.uploaded_to_rating_keys),
             "uploaded_editions": _parse(self.uploaded_editions),
             "uploaded_media_types": _parse(self.uploaded_media_types),
         }
