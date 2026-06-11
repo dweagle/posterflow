@@ -2030,6 +2030,7 @@ def _handle_radarr_upgrade_edition_check(
             title=title,
             removed_entries=removed,
         )
+        service.set_expected_edition(PlexUploadService.DEFAULT_EDITION_MOVIE)
         return
 
     cached_editions = service.get_cached_editions_for_target(
@@ -2071,6 +2072,7 @@ def _handle_radarr_upgrade_edition_check(
         title=title,
         removed_entries=removed,
     )
+    service.set_expected_edition(edition_hint)
 
 
 def run_plex_webhook_background_job(

@@ -44,6 +44,7 @@ class PlexUploadService:
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
+        self._expected_edition: Optional[str] = None
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -76,6 +77,19 @@ class PlexUploadService:
         if new_scope != self._arr_instance_scope:
             self._arr_availability_cache = {}
         self._arr_instance_scope = new_scope
+
+    def set_expected_edition(self, edition: Optional[str]) -> None:
+        """Constrain movie matching to a specific edition for an edition-change upgrade.
+
+        Pass the new edition title (or DEFAULT_EDITION_MOVIE for an edition removal).
+        Until Plex has rescanned and an item with this edition exists, matching reports
+        no match, so the webhook retry loop waits instead of uploading to the old item.
+        """
+        self._expected_edition = edition.strip() if isinstance(edition, str) and edition.strip() else None
+
+    @staticmethod
+    def _normalize_edition(edition: Optional[str]) -> str:
+        return str(edition or "").strip().lower()
 
     def invalidate_record_cache(self) -> None:
         self._record_cache = {}
@@ -1675,6 +1689,22 @@ class PlexUploadService:
                 file=file_path,
             )
             return 0, False, raw_candidate_count, 0, media_counts, 0
+
+        if inferred_filter == "movie" and self._expected_edition is not None:
+            expected = self._normalize_edition(self._expected_edition)
+            present_editions = [self._movie_edition_title(m) for m in matched_items]
+            matched_items = [
+                m for m in matched_items
+                if self._normalize_edition(self._movie_edition_title(m)) == expected
+            ]
+            if not matched_items:
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Edition upgrade: Plex does not have edition '{self._expected_edition}' yet for "
+                    f"{asset_label} (present: {sorted(set(present_editions))}); deferring upload to retry",
+                    file=file_path,
+                )
+                return 0, False, raw_candidate_count, 0, media_counts, 0
 
         uploaded = 0
         for item in matched_items:

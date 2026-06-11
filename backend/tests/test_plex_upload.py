@@ -1237,6 +1237,8 @@ def test_handle_radarr_upgrade_clears_cache_when_new_edition_detected(test_db, t
     # DB record for this file should have been removed (cache cleared)
     remaining = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(poster)).first()
     assert remaining is None
+    # And matching is now constrained to the new edition so we wait for Plex to rescan.
+    assert service._expected_edition == "Extended Cut"
 
 
 def test_handle_radarr_upgrade_skips_clear_when_edition_already_cached(test_db, tmp_path):
@@ -1365,6 +1367,48 @@ def test_handle_radarr_upgrade_clears_cache_when_edition_removed(test_db, tmp_pa
     # DB record should have been cleared so the no-edition Plex entry gets a poster.
     remaining = test_db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == str(poster)).first()
     assert remaining is None
+    # Matching now targets the no-edition item (waits for Plex to create it).
+    assert service._expected_edition == PlexUploadService.DEFAULT_EDITION_MOVIE
+
+
+def test_upload_asset_defers_until_expected_edition_present(test_db, monkeypatch):
+    """An edition-change upgrade must not land the poster on the old-edition item:
+    while only the old edition exists in Plex, matching defers (matched=False) so the
+    webhook retries; once the new-edition item appears, it matches and uploads."""
+    service = PlexUploadService(test_db)
+
+    old = _SimplePlex("movie", "Aliens", key="100")
+    old.editionTitle = "Theatrical"
+    new = _SimplePlex("movie", "Aliens", key="200")
+    new.editionTitle = "Extended Cut"
+
+    movies_marker = object()
+    index = {"movies": movies_marker, "shows": {}, "collections": {}}
+    current_items: list = []
+
+    monkeypatch.setattr(service, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+    monkeypatch.setattr(service, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+    monkeypatch.setattr(
+        service, "_resolve_index_candidates",
+        lambda sub, *a, **k: list(current_items) if sub is movies_marker else [],
+    )
+
+    asset = {"media_key": "aliens", "path": "/x/aliens.jpg", "asset_type": "main",
+             "display_name": "Aliens", "folder_year": 1986}
+
+    service.set_expected_edition("Extended Cut")
+
+    # Only the old edition present -> deferred (no match), so the webhook will retry.
+    current_items = [old]
+    uploaded, matched, *_ = service._upload_asset(asset, index, dry_run=True)
+    assert matched is False
+    assert uploaded == 0
+
+    # New edition now scanned in -> matches and uploads (to the new item only).
+    current_items = [old, new]
+    uploaded, matched, *_ = service._upload_asset(asset, index, dry_run=True)
+    assert matched is True
+    assert uploaded == 1
 
 
 def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_db, monkeypatch):
