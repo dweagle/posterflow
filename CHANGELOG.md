@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-11
+### Added
+- Plex Upload: track Plex rating keys to detect items that were removed and re-added, triggering a fresh upload; clearer logging throughout the upload process.
+
+### Changed
+- Maker Tools: improved PSD export conflict detection and handling of existing files.
+- Maker Tools: export buttons are now available without first selecting an image.
+- Maker Tools: TMDB origin-country auto-selects in Ben Dodson search
+- Plex Upload: limit ARR availability checks to the relevant instance scope, eliminating wasted API calls.
+
+### Fixed
+- Plex Upload: handle expected-edition changes so edition-change upgrades trigger a re-upload.
+- Maker Tools: trim or remove ID tags in Photopea tab names to respect the 50-character tab-name limit (filenames are unaffected).
+
 ## [0.8.0] - 2026-06-09
 ### Added
 - Plex Upload: per-instance library routing — map each Radarr/Sonarr instance to the specific Plex libraries it feeds, configured in a new "Library Targeting" editor. Each instance gets its own webhook URL (ending in `&instance=`) so events are attributed correctly; unmapped instances continue uploading to all selected libraries.
