@@ -617,15 +617,9 @@ class PlexUploadService:
         if not inferred_filter:
             return False
 
-        candidate_groups: List[List[Any]]
-        if inferred_filter == "movie":
-            candidate_groups = [movies_raw]
-        elif inferred_filter == "series":
-            candidate_groups = [shows_raw]
-        elif inferred_filter == "collection":
-            candidate_groups = [collections_raw]
-        else:
-            candidate_groups = [collections_raw]
+        candidate_groups = self._candidate_groups_for_filter(
+            inferred_filter, movies_raw, shows_raw, collections_raw
+        )
 
         matched_items: List[Any] = []
         for candidates in candidate_groups:
@@ -1458,18 +1452,23 @@ class PlexUploadService:
             log_warning(LogTags.UPLOADER, f"Failed indexing collections for '{section.title}': {e}")
         return indexed
 
+    @staticmethod
+    def _title_year_key(item: Any) -> Optional[str]:
+        """Normalized fallback key from an item's title (and year when present)."""
+        title = getattr(item, "title", None)
+        year = getattr(item, "year", None)
+        if title and year:
+            return normalize_titles(f"{title} ({year})")
+        if title:
+            return normalize_titles(str(title))
+        return None
+
     def _movie_folder_key(self, movie: Any) -> Optional[str]:
         try:
             part_file = movie.media[0].parts[0].file
             return normalize_titles(Path(part_file).parent.name)
         except Exception:
-            title = getattr(movie, "title", None)
-            year = getattr(movie, "year", None)
-            if title and year:
-                return normalize_titles(f"{title} ({year})")
-            if title:
-                return normalize_titles(str(title))
-            return None
+            return self._title_year_key(movie)
 
     _SEASON_FOLDER_RE = re.compile(r"^(season\s*\d+|specials?|extras?|featurettes?)$", re.IGNORECASE)
 
@@ -1504,21 +1503,9 @@ class PlexUploadService:
                 else:
                     folder_name = parent.name
                 return normalize_titles(folder_name)
-            title = getattr(show, "title", None)
-            year = getattr(show, "year", None)
-            if title and year:
-                return normalize_titles(f"{title} ({year})")
-            if title:
-                return normalize_titles(str(title))
-            return None
+            return self._title_year_key(show)
         except Exception:
-            title = getattr(show, "title", None)
-            year = getattr(show, "year", None)
-            if title and year:
-                return normalize_titles(f"{title} ({year})")
-            if title:
-                return normalize_titles(str(title))
-            return None
+            return self._title_year_key(show)
 
     def _upload_asset(
         self,
@@ -1654,6 +1641,7 @@ class PlexUploadService:
             asset,
             inferred_filter,
             arr_availability,
+            asset_id_keys=asset_id_keys,
         )
         if not available:
             log_info(
@@ -1662,15 +1650,9 @@ class PlexUploadService:
                 file=file_path,
             )
             return 0, False, 0, 0, media_counts, 0
-        candidate_groups: List[List[Any]] = []
-        if inferred_filter == "movie":
-            candidate_groups = [movies_raw]
-        elif inferred_filter == "series":
-            candidate_groups = [shows_raw]
-        elif inferred_filter == "collection":
-            candidate_groups = [collections_raw]
-        else:
-            candidate_groups = [collections_raw]
+        candidate_groups = self._candidate_groups_for_filter(
+            inferred_filter, movies_raw, shows_raw, collections_raw
+        )
 
         raw_candidate_count = 0
         matched_items: List[Any] = []
@@ -1710,6 +1692,7 @@ class PlexUploadService:
         for item in matched_items:
             item_label = self._describe_plex_item(item)
             item_type = str(getattr(item, "type", "")).lower()
+            item_media_type = self._classify_plex_item(item)
             library_name = self._item_library_name(item)
             library_key = self._item_library_key(item)
             item_cached_for_library = self._is_item_cached_for_library(
@@ -1749,7 +1732,6 @@ class PlexUploadService:
                     )
                     continue
             else:
-                item_media_type = self._classify_plex_item(item)
                 if item_cached_for_library and (not uploaded_media_types or item_media_type in uploaded_media_types):
                     log_debug(
                         LogTags.UPLOADER,
@@ -1766,7 +1748,7 @@ class PlexUploadService:
                     asset=asset_label,
                 )
                 uploaded += 1
-                media_counts[self._classify_plex_item(item)] += 1
+                media_counts[item_media_type] += 1
                 continue
             item.uploadPoster(filepath=file_path)
             self._drop_file_cache(file_path)
@@ -1774,13 +1756,13 @@ class PlexUploadService:
             if remove_overlay_label:
                 self._remove_overlay_label_if_present(item, file_path=file_path)
             uploaded += 1
-            media_counts[self._classify_plex_item(item)] += 1
+            media_counts[item_media_type] += 1
+            if library_name:
+                uploaded_to_libraries.add(library_name)
+            if library_key:
+                uploaded_to_library_keys.add(library_key)
             if item_type == "movie":
                 edition_title = self._movie_edition_title(item)
-                if library_name:
-                    uploaded_to_libraries.add(library_name)
-                if library_key:
-                    uploaded_to_library_keys.add(library_key)
                 uploaded_editions.add(edition_title)
                 self._mark_uploaded(
                     file_path,
@@ -1790,15 +1772,11 @@ class PlexUploadService:
                     media_type="movies",
                 )
             else:
-                if library_name:
-                    uploaded_to_libraries.add(library_name)
-                if library_key:
-                    uploaded_to_library_keys.add(library_key)
                 self._mark_uploaded(
                     file_path,
                     library_name=library_name,
                     library_key=library_key,
-                    media_type=self._classify_plex_item(item),
+                    media_type=item_media_type,
                 )
             log_info(LogTags.UPLOADER, f"Uploaded {item_label}", file=file_path, asset=asset_label)
 
@@ -1922,6 +1900,38 @@ class PlexUploadService:
             return "series"
         return None
 
+    def _resolve_movie_show_filter(
+        self,
+        asset: Dict[str, Any],
+        arr_availability: Optional[Dict[str, Any]],
+        *,
+        has_movies: bool,
+        has_shows: bool,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Disambiguate a movie-vs-series asset via the ARR title index, falling
+        back to which Plex sections produced matches.
+
+        When ARR reports the title in both catalogs ("ambiguous"), a Plex section
+        that found it unambiguously is trusted over the title-based ARR collision;
+        otherwise the collision is reported to the caller.
+        """
+        arr_inferred_filter = self._infer_media_type_filter_from_arr(asset, arr_availability)
+        if arr_inferred_filter == "ambiguous":
+            if has_movies and not has_shows:
+                return "movie", None
+            if has_shows and not has_movies:
+                return "series", None
+            return None, "ARR matched both movie and series"
+        if arr_inferred_filter:
+            return arr_inferred_filter, None
+        if has_movies and has_shows:
+            return None, "matched in both movie and show sections"
+        if has_movies:
+            return "movie", None
+        if has_shows:
+            return "series", None
+        return None, None
+
     def _resolve_target_media_type(
         self,
         asset: Dict[str, Any],
@@ -1959,48 +1969,35 @@ class PlexUploadService:
         # collection (e.g. "300 Collection") just because both share the
         # normalized media_key "300".
         if asset.get("folder_year") is not None:
-            arr_inferred_filter = self._infer_media_type_filter_from_arr(asset, arr_availability)
-            if arr_inferred_filter == "ambiguous":
-                if has_movies and not has_shows:
-                    return "movie", None
-                if has_shows and not has_movies:
-                    return "series", None
-                return None, "ARR matched both movie and series"
-            if arr_inferred_filter:
-                return arr_inferred_filter, None
-            if has_movies and has_shows:
-                return None, "matched in both movie and show sections"
-            if has_movies:
-                return "movie", None
-            if has_shows:
-                return "series", None
-            return None, None
+            return self._resolve_movie_show_filter(
+                asset, arr_availability, has_movies=has_movies, has_shows=has_shows
+            )
 
         # No folder year → collection-style asset; prefer collections when available.
         if has_collections:
             return "collection", None
 
-        arr_inferred_filter = self._infer_media_type_filter_from_arr(asset, arr_availability)
-        if arr_inferred_filter == "ambiguous":
-            # ARR matched both types by title, but Plex may have already disambiguated
-            # via ID-based section lookup. If Plex unambiguously found it in only one
-            # section, trust that result over the title-based ARR collision.
-            if has_movies and not has_shows:
-                return "movie", None
-            if has_shows and not has_movies:
-                return "series", None
-            return None, "ARR matched both movie and series"
-        if arr_inferred_filter:
-            return arr_inferred_filter, None
+        return self._resolve_movie_show_filter(
+            asset, arr_availability, has_movies=has_movies, has_shows=has_shows
+        )
 
-        if has_movies and has_shows:
-            return None, "matched in both movie and show sections"
-        if has_movies:
-            return "movie", None
-        if has_shows:
-            return "series", None
+    @staticmethod
+    def _candidate_groups_for_filter(
+        inferred_filter: Optional[str],
+        movies_raw: List[Any],
+        shows_raw: List[Any],
+        collections_raw: List[Any],
+    ) -> List[List[Any]]:
+        """Order the raw candidate lists to try for a resolved media-type filter.
 
-        return None, None
+        Movies/series map to their own section; everything else (collections and
+        any unrecognized filter) falls back to the collections candidates.
+        """
+        if inferred_filter == "movie":
+            return [movies_raw]
+        if inferred_filter == "series":
+            return [shows_raw]
+        return [collections_raw]
 
     def _extract_asset_id_keys(self, asset: Dict[str, Any]) -> List[str]:
         path = str(asset.get("path", ""))
@@ -2167,6 +2164,7 @@ class PlexUploadService:
         asset: Dict[str, Any],
         inferred_filter: Optional[str],
         arr_availability: Optional[Dict[str, Any]],
+        asset_id_keys: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[str]]:
         if not arr_availability:
             return True, None
@@ -2199,7 +2197,8 @@ class PlexUploadService:
             # 1. Asset ID keys (tmdb/imdb) — most specific, unambiguous
             # 2. Year-qualified title key — rules out same-name future remakes
             # 3. Plain title key — broadest fallback
-            asset_id_keys = self._extract_asset_id_keys(asset)
+            if asset_id_keys is None:
+                asset_id_keys = self._extract_asset_id_keys(asset)
             year_key = f"{media_key}::{asset['folder_year']}" if asset.get("folder_year") else None
             candidate_keys = list(asset_id_keys)
             if year_key:
@@ -2571,7 +2570,7 @@ class PlexUploadService:
                 db_record.file_mtime = current_mtime
                 self.db.commit()
                 result["file_mtime"] = current_mtime
-            except (OSError, Exception):
+            except Exception:  # nosec B110
                 pass
 
         # Evict the ORM object from the session identity map immediately after extracting
@@ -2620,7 +2619,7 @@ class PlexUploadService:
         try:
             with open(file_path, "rb") as f:
                 os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
-        except (AttributeError, OSError, Exception):
+        except Exception:  # nosec B110
             pass
 
     def _mark_uploaded(

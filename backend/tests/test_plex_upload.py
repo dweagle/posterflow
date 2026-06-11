@@ -3925,6 +3925,54 @@ def test_arr_id_keys_for_asset_movie_filter_skips_shows_index(test_db):
 
 
 # ---------------------------------------------------------------------------
+# _asset_has_arr_availability — uses caller-supplied (augmented) id keys
+# ---------------------------------------------------------------------------
+
+def test_asset_has_arr_availability_movie_uses_supplied_id_keys(test_db):
+    """Caller-supplied id keys are consulted by the movie availability check."""
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "thematrix",
+        "path": "/posters/The Matrix/poster.jpg",  # no {tmdb-}/{imdb-} tokens
+        "asset_type": "main",
+        "folder_year": 1999,
+    }
+    # Artificial index: record present only under the id key.
+    arr_availability = {
+        "movies": {"id:tmdb:603": {"has_file": False, "tmdb_id": 603}},
+        "shows": {},
+    }
+
+    # Path-only extraction finds no id keys and no title match in this index.
+    assert service._asset_has_arr_availability(asset, "movie", arr_availability) == (True, None)
+
+    # Supplying the id key lets the no-file record be reached.
+    available, reason = service._asset_has_arr_availability(
+        asset, "movie", arr_availability, asset_id_keys=["id:tmdb:603"]
+    )
+    assert available is False
+    assert reason == "no Radarr file available"
+
+
+def test_asset_has_arr_availability_movie_supplied_id_keys_with_file(test_db):
+    """Supplied id key resolving to a has_file record reports availability."""
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "thematrix",
+        "path": "/posters/The Matrix/poster.jpg",
+        "asset_type": "main",
+        "folder_year": 1999,
+    }
+    arr_availability = {
+        "movies": {"id:tmdb:603": {"has_file": True, "tmdb_id": 603}},
+        "shows": {},
+    }
+    assert service._asset_has_arr_availability(
+        asset, "movie", arr_availability, asset_id_keys=["id:tmdb:603"]
+    ) == (True, None)
+
+
+# ---------------------------------------------------------------------------
 # _build_arr_availability_index — ID fields stored in entries
 # ---------------------------------------------------------------------------
 
