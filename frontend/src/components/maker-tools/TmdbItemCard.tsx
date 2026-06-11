@@ -21,7 +21,7 @@ import {
   type TmdbImagesResponse,
   type TmdbTvDetails,
   type PosterAvailability,
-  checkPsdExists,
+  buildPhotopeaUrl,
   exportToPsd,
   uploadPsdToExportFolder,
   getSeasonImages,
@@ -214,6 +214,15 @@ export type PsdConfig = {
   openPhotopea: boolean
 }
 
+/** Derive the read-only PSD config from a settings map (shared by every consumer). */
+export function derivePsdConfig(s: Record<string, string>): PsdConfig {
+  return {
+    exportFolder: (s.psd_export_folder || '').trim(),
+    templatePath: (s.psd_template_path || '').trim(),
+    openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
+  }
+}
+
 export type TmdbItemCardProps = {
   item: TmdbSearchResult
   posterAvailability?: PosterAvailability
@@ -255,13 +264,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
   }, [psdConfigProp])
   useEffect(() => {
     if (psdConfigProp === undefined) {
-      getSettings().then((s) => {
-        setPsdConfig({
-          exportFolder: (s.psd_export_folder || '').trim(),
-          templatePath: (s.psd_template_path || '').trim(),
-          openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
-        })
-      }).catch(() => { /* non-blocking */ })
+      getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => { /* non-blocking */ })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -438,17 +441,10 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
     })
   }, [])
 
-  const handlePsdExport = useCallback(async (useExisting = false, confirmed = false) => {
-    if (!psdSelection.posters.length && !psdSelection.backdrops.length && !psdSelection.logos.length) return
-    if (!useExisting && !confirmed) {
-      const safeName = item.title.replace(/[<>:"/\\|?*]/g, '').trim()
-      const expectedFilename = item.year ? `${safeName} (${item.year}).psd` : `${safeName}.psd`
-      const exists = await checkPsdExists(expectedFilename)
-      if (exists) {
-        setPsdOverwriteConfirm({ filename: expectedFilename })
-        return
-      }
-    }
+  const handlePsdExport = useCallback(async (useExisting = false, confirmOverwrite = false) => {
+    // No selection is required — a New Export yields a blank template, Use Existing opens the saved
+    // PSD. The server owns conflict detection: one call returns 'exists' (a New Export would
+    // overwrite a saved title) or 'not-found' (Use Existing has no file), so we don't pre-check.
     setPsdExporting(true)
     try {
       const result = await exportToPsd(
@@ -463,36 +459,22 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
           backdrop_paths: psdSelection.backdrops,
           logo_paths: psdSelection.logos,
           use_existing: useExisting,
+          confirm_overwrite: confirmOverwrite,
         },
         item.title,
         item.year ?? '',
       )
+      if (result.mode === 'exists') {
+        setPsdOverwriteConfirm({ filename: result.existingFilename })
+        return
+      }
       if (result.mode === 'not-found') {
         setPsdNotFound({ expectedFilename: result.expectedFilename })
         return
       }
       if (result.mode === 'photopea') {
         if (result.openPhotopea) {
-          const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(result.filename)}`
-          // Photopea hard-caps the document tab name (which fills the Save-for-web Name field) at
-          // 50 chars.  Prevents parts of id's getting cut off.
-          const PHOTOPEA_NAME_CAP = 50
-          const idTagPattern = / \{(?:tmdb|tvdb|imdb)-[^}]*\}/g
-          const noExt = result.filename.replace(/\.psd$/i, '')
-          const idTags = noExt.match(idTagPattern) ?? []
-          let tabName = noExt.replace(idTagPattern, '') // "Title (Year)"
-          for (const tag of idTags) {
-            if ((tabName + tag).length > PHOTOPEA_NAME_CAP) break
-            tabName += tag
-          }
-          const renameScript = `app.activeDocument.name = ${JSON.stringify(tabName)};`
-          const config = {
-            files: [result.psdUrl],
-            script: renameScript,
-            server: { version: 1, url: saveUrl, formats: ['psd:true'] },
-          }
-          const photopea = `https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`
-          window.open(photopea, '_blank')
+          window.open(buildPhotopeaUrl(result.psdUrl, result.filename), '_blank')
           showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
         } else {
           showToast(`PSD saved: ${result.filename}`, 'success')
@@ -514,7 +496,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, psdSelection, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, psdSelection, showToast])
 
   const handlePsdNotFoundUpload = useCallback(async (file: File) => {
     if (!psdNotFound) return
@@ -546,8 +528,6 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
           ...(item.media_type === 'tv' ? [{ id: 'season-posters' as const, label: 'Seasons', count: null }] : []),
         ]
       : []
-
-  const hasPsdSelection = !!(psdSelection.posters.length || psdSelection.backdrops.length || psdSelection.logos.length)
 
   // -------------------------------------------------------------------------
   // Render
@@ -788,30 +768,28 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
                 ))}
               </select>
             </div>
-            {hasPsdSelection && (
-              <div className="tmdb-psd-export-group">
-                <button
-                  type="button"
-                  className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
-                  onClick={() => void handlePsdExport(false)}
-                  disabled={psdExporting}
-                  title="Create a new PSD from the selected images"
-                >
-                  <FileDown size={13} />
-                  {psdExporting ? 'Exporting…' : 'New Export'}
-                </button>
-                <button
-                  type="button"
-                  className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
-                  onClick={() => void handlePsdExport(true)}
-                  disabled={psdExporting}
-                  title="Add selected images to an existing PSD in your export folder"
-                >
-                  <Layers size={13} />
-                  {psdExporting ? 'Exporting…' : 'Use Existing PSD'}
-                </button>
-              </div>
-            )}
+            <div className="tmdb-psd-export-group">
+              <button
+                type="button"
+                className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
+                onClick={() => void handlePsdExport(false)}
+                disabled={psdExporting}
+                title="Create a new PSD from the selected images, or a blank template if none are selected"
+              >
+                <FileDown size={13} />
+                {psdExporting ? 'Exporting…' : 'New Export'}
+              </button>
+              <button
+                type="button"
+                className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
+                onClick={() => void handlePsdExport(true)}
+                disabled={psdExporting}
+                title="Open an existing PSD from your export folder and add any selected images to it"
+              >
+                <Layers size={13} />
+                {psdExporting ? 'Exporting…' : 'Use Existing PSD'}
+              </button>
+            </div>
           </div>
 
           {activeGalleryTab === 'season-posters'
@@ -1008,7 +986,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
             </div>
             <div className="modal-body">
               <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                A PSD with this name already exists in your export folder:
+                A PSD for this title already exists in your export folder:
               </p>
               <div className="psd-not-found-filename">
                 <code>{psdOverwriteConfirm.filename}</code>

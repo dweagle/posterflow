@@ -689,11 +689,22 @@ def test_build_psd_no_poster_only_logo_returns_bytes():
 # ---------------------------------------------------------------------------
 
 
-def test_psd_export_no_images_returns_400(client, test_db):
+def test_psd_export_no_images_streams_blank_psd(client, test_db):
+    """No images selected → blank PSD from the template is exported (no selection required)."""
     _seed_tmdb_key(test_db)
-    response = client.post("/api/maker-tools/tmdb/psd-export", json={"title": "Test", "year": "2026"})
-    assert response.status_code == 400
-    assert "required" in response.json()["detail"].lower()
+    with patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+        response = client.post("/api/maker-tools/tmdb/psd-export", json={"title": "Test", "year": "2026"})
+    assert response.status_code == 200
+    assert response.content == b"FAKEPSD"
+    assert response.headers["content-type"] == "application/octet-stream"
+
+
+def test_psd_export_no_images_no_api_key_still_succeeds(client):
+    """A blank export needs no image fetch, so it works without a TMDB key configured."""
+    with patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+        response = client.post("/api/maker-tools/tmdb/psd-export", json={"title": "Test", "year": "2026"})
+    assert response.status_code == 200
+    assert response.content == b"FAKEPSD"
 
 
 def test_psd_export_invalid_path_no_leading_slash_returns_400(client, test_db):
@@ -893,4 +904,85 @@ def test_serve_psd_export_cors_header_present(client, test_db):
         response = client.get("/api/maker-tools/psd-exports/Test.psd")
 
     assert response.headers.get("access-control-allow-origin") == "*"
+
+
+# ---------------------------------------------------------------------------
+# API: POST /api/maker-tools/tmdb/psd-export — New Export overwrite guard
+# A New Export must flag (409) any existing "Title (Year)" PSD before overwriting,
+# regardless of its ID tag, unless confirm_overwrite is set.
+# ---------------------------------------------------------------------------
+
+
+def test_psd_export_conflict_existing_untagged_returns_409(client, test_db):
+    _seed_tmdb_key(test_db)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026).psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        response = client.post(
+            "/api/maker-tools/tmdb/psd-export",
+            json={"title": "My Show", "year": "2026", "poster_paths": ["/p1.jpg"]},
+        )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["exists"] is True
+    assert body["existing_filename"] == "My Show (2026).psd"
+
+
+def test_psd_export_conflict_matches_despite_different_id_tag(client, test_db):
+    """A wrong/reordered ID tag must still flag — the guard matches on title (year) alone."""
+    _seed_tmdb_key(test_db)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Saved file carries a different tmdb id than the item being exported.
+        (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        response = client.post(
+            "/api/maker-tools/tmdb/psd-export",
+            json={"title": "My Show", "year": "2026", "tmdb_id": "123", "poster_paths": ["/p1.jpg"]},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["existing_filename"] == "My Show (2026) {tmdb-999}.psd"
+
+
+def test_psd_export_confirm_overwrite_proceeds_and_saves(client, test_db):
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026).psd").write_bytes(b"OLD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "poster_paths": ["/p1.jpg"], "confirm_overwrite": True},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026).psd"
+        assert (Path(tmpdir) / "My Show (2026).psd").read_bytes() == b"FAKEPSD"
+
+
+def test_psd_export_no_conflict_for_different_title_proceeds(client, test_db):
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "Other Show (2020).psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "poster_paths": ["/p1.jpg"]},
+            )
+
+    assert response.status_code == 200
 

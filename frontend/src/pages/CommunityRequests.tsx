@@ -6,7 +6,7 @@ import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, sa
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
-import TmdbItemCard, { type PsdConfig } from '../components/maker-tools/TmdbItemCard'
+import TmdbItemCard, { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import './CommunityRequests.css'
 
@@ -83,11 +83,7 @@ export default function CommunityRequests() {
 
   useEffect(() => {
     getSettings().then((settings) => {
-      setPsdConfig({
-        exportFolder: (settings.psd_export_folder || '').trim(),
-        templatePath: (settings.psd_template_path || '').trim(),
-        openPhotopea: (settings.psd_open_photopea || '').trim().toLowerCase() === 'true',
-      })
+      setPsdConfig(derivePsdConfig(settings))
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
       setIdarrQuickAddEnabled((settings.idarr_quick_add_community || '').trim().toLowerCase() === 'true')
     }).catch(() => {})

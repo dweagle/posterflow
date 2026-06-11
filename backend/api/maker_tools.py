@@ -10,11 +10,12 @@ from typing import Any, Callable
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from core.config import settings as app_settings
 from core.job_queue import job_queue
 from core.logging import LogIcons, LogTags, log_debug, log_error, log_info, log_success, log_user_action, log_warning
 from database import SessionLocal, get_db
@@ -1312,6 +1313,43 @@ SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
 _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_template.psd"
 
 
+def _validate_psd_filename(filename: str) -> None:
+    """Reject path traversal and non-PSD names. Raises HTTP 400 on failure."""
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+
+def _psd_storage_dir(db: Session) -> Path:
+    """Directory where saved PSDs live: the configured export folder, else the
+    temp ``psd_cache`` under the config dir."""
+    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    return Path(export_folder) if export_folder else app_settings.config_dir / "psd_cache"
+
+
+def _find_psd_by_title(save_dir: Path, base_stem: str) -> Path | None:
+    """Return an existing PSD in *save_dir* whose name matches "Title (Year)" once
+    IDarr ID tags are stripped — regardless of which ``{tmdb-…}``/``{tvdb-…}``/
+    ``{imdb-…}`` tag it carries. Prefers the exact untagged name, else the most
+    recently modified match.
+
+    This is the New Export overwrite guard: a wrong or reordered ID can't slip
+    past it and overwrite an existing file silently.
+    """
+    target_stem = PSD_ID_TAG_REGEX.sub("", base_stem).strip().lower()
+    matches: list[Path] = []
+    try:
+        for entry in save_dir.iterdir():
+            if (entry.is_file() and entry.suffix.lower() == ".psd"
+                    and PSD_ID_TAG_REGEX.sub("", entry.stem).strip().lower() == target_stem):
+                matches.append(entry)
+    except OSError:
+        return None
+    if not matches:
+        return None
+    exact = save_dir / f"{base_stem}.psd"
+    return exact if exact in matches else max(matches, key=lambda p: p.stat().st_mtime)
+
+
 class PsdExportRequest(BaseModel):
     title: str
     year: str = ""
@@ -1325,6 +1363,7 @@ class PsdExportRequest(BaseModel):
     backdrop_paths: list[str] = []   # TMDB backdrop file_paths — fit-to-height, no crop, placed below posters
     logo_paths: list[str] = []       # TMDB file_paths — each becomes a separate logo layer
     use_existing: bool = False       # When True: open existing PSD in export folder and inject layers into it
+    confirm_overwrite: bool = False  # When True: proceed with a New Export even if a PSD for this title exists
 
 
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
@@ -1691,63 +1730,62 @@ def tmdb_psd_export(payload: PsdExportRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"PSD export failed: {exc}")
 
 
-def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
-    if not payload.poster_paths and not payload.backdrop_paths and not payload.logo_paths:
-        raise HTTPException(status_code=400, detail="At least one poster, backdrop, or a logo is required.")
+def _fetch_export_images(payload: PsdExportRequest, api_key: str) -> tuple[list[bytes], list[bytes], list[bytes]]:
+    """Download the selected poster/backdrop/logo images from TMDB.
 
-    # Validate paths — must start with / and contain no traversal
-    all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + list(payload.logo_paths)
-    for p in all_paths:
-        if not p.startswith("/") or ".." in p:
-            raise HTTPException(status_code=400, detail="Invalid image path.")
-
-    api_key = _get_monitor_tmdb_key(db)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
-
+    Returns (posters, backdrops, logos); logo entries that fail SVG conversion are dropped.
+    """
     try:
-        poster_bytes_list: list[bytes] = [
-            _fetch_tmdb_image_bytes(p, api_key) for p in payload.poster_paths
-        ]
-        backdrop_bytes_list: list[bytes] = [
-            _fetch_tmdb_image_bytes(p, api_key) for p in payload.backdrop_paths
-        ]
-        logo_bytes_list: list[bytes] = [
-            b for p in payload.logo_paths
-            if (b := _fetch_tmdb_image_bytes(p, api_key))  # skip empty (cairosvg failures)
-        ]
+        poster_bytes_list = [_fetch_tmdb_image_bytes(p, api_key) for p in payload.poster_paths]
+        backdrop_bytes_list = [_fetch_tmdb_image_bytes(p, api_key) for p in payload.backdrop_paths]
+        logo_bytes_list = [b for p in payload.logo_paths if (b := _fetch_tmdb_image_bytes(p, api_key))]
     except HTTPException:
         raise
     except Exception as exc:
         log_error(LogTags.API, f"PSD export image fetch failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=502, detail=f"Failed to download image from TMDB: {exc}")
+    return poster_bytes_list, backdrop_bytes_list, logo_bytes_list
 
-    # Construct safe filename and resolve save destination early so we can
-    # check for an existing PSD before deciding which template to use.
+
+def _resolve_new_export_template(db: Session) -> Path | None:
+    """Template for a New Export: user-configured PSD → bundled default → None (scratch)."""
+    template_setting = get_setting_value(db, SETTING_PSD_TEMPLATE_PATH)
+    if template_setting:
+        candidate = Path(template_setting)
+        if candidate.is_file():
+            return candidate
+        log_warning(LogTags.API, f"PSD template not found at configured path: {template_setting}; falling back to default")
+    if _DEFAULT_TEMPLATE_PATH.is_file():
+        log_info(LogTags.API, "Using bundled default PSD template")
+        return _DEFAULT_TEMPLATE_PATH
+    return None
+
+
+def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
+    # ── Validate image paths (a blank selection is allowed — it yields the
+    #    template/existing PSD as-is; paths must start with / and contain no traversal) ──
+    all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + list(payload.logo_paths)
+    for p in all_paths:
+        if not p.startswith("/") or ".." in p:
+            raise HTTPException(status_code=400, detail="Invalid image path.")
+
+    # ── Resolve names + save destination ──
+    #   - export_folder set     → save there
+    #   - else open_photopea on → save to /config/psd_cache (temp, URL-accessible)
+    #   - else                  → stream bytes as a browser download (no saving)
     safe_title = re.sub(r'[<>:"/\\|?*]', "", payload.title).strip()
     base_stem = f"{safe_title} ({payload.year})" if payload.year else safe_title
-
     filename = f"{base_stem}.psd"
-
     output_filename = f"{base_stem}{_build_idarr_id_suffix(payload)}.psd"
 
-    # Determine save behaviour:
-    #   - If export_folder is set → save there (user-configured path)
-    #   - Else if open_photopea is enabled → save to /config/psd_cache (temp, URL-accessible)
-    #   - Otherwise → stream bytes as a browser download (no saving)
     export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
     open_photopea = (get_setting_value(db, SETTING_PSD_OPEN_PHOTOPEA) or "").lower() == "true"
+    save_dir: Path | None = _psd_storage_dir(db) if (export_folder or open_photopea) else None
 
-    save_dir: Path | None = None
-    if export_folder:
-        save_dir = Path(export_folder)
-    elif open_photopea:
-        from core.config import settings as app_settings
-        save_dir = app_settings.config_dir / "psd_cache"
-
-    # Resolve template path:
-    #   use_existing=True  → open existing PSD in save_dir (error if not found)
-    #   use_existing=False → user-configured template → bundled default → scratch
+    # ── Resolve template + handle conflicts BEFORE fetching any images ──
+    #   use_existing=True  → reuse the existing PSD (404 not-found if none)
+    #   use_existing=False → guard against silently overwriting an existing title (409 exists),
+    #                        then configured template → bundled default → scratch
     template_path: Path | None = None
     if payload.use_existing:
         if save_dir is None:
@@ -1758,37 +1796,30 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         try:
             existing_psd = _find_existing_psd(save_dir, base_stem, payload.tmdb_id)
         except _PsdMatchAmbiguous:
-            # Multiple PSDs share this title/year but none match the TMDB id — don't guess and
+            # Several PSDs share this title/year but none match the TMDB id — don't guess and
             # risk layering into the wrong file. Surface as not-found so the UI offers "create new".
-            log_info(
-                LogTags.API,
-                f"Existing PSD ambiguous for {filename} (tmdb-{payload.tmdb_id or '?'}); not reusing",
-                folder=str(save_dir),
-            )
+            log_info(LogTags.API, f"Existing PSD ambiguous for {filename} (tmdb-{payload.tmdb_id or '?'}); not reusing", folder=str(save_dir))
             existing_psd = None
         if existing_psd is None:
-            from fastapi.responses import JSONResponse as _JSONResponse
-            return _JSONResponse(
-                status_code=404,
-                content={"not_found": True, "expected_filename": filename},
-            )
+            return JSONResponse(status_code=404, content={"not_found": True, "expected_filename": filename})
         template_path = existing_psd
         output_filename = existing_psd.name
         log_info(LogTags.API, f"Existing PSD found — adding poster layers: {existing_psd.name}", folder=str(save_dir))
     else:
-        template_setting = get_setting_value(db, SETTING_PSD_TEMPLATE_PATH)
-        if template_setting:
-            candidate = Path(template_setting)
-            if candidate.is_file():
-                template_path = candidate
-            else:
-                log_warning(LogTags.API, f"PSD template not found at configured path: {template_setting}; falling back to default")
-        if template_path is None and _DEFAULT_TEMPLATE_PATH.is_file():
-            template_path = _DEFAULT_TEMPLATE_PATH
-            log_info(LogTags.API, "Using bundled default PSD template")
+        if save_dir is not None and not payload.confirm_overwrite:
+            existing = _find_psd_by_title(save_dir, base_stem)
+            if existing is not None:
+                return JSONResponse(status_code=409, content={"exists": True, "existing_filename": existing.name})
+        template_path = _resolve_new_export_template(db)
 
-    # Optional override to fit posters inside a 25px border while preserving
-    # aspect ratio. Canvas/template/backdrop/logo behavior is unchanged.
+    # ── Commit: require the TMDB key only when images need fetching, then fetch them ──
+    api_key = _get_monitor_tmdb_key(db)
+    if all_paths and not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+    poster_bytes_list, backdrop_bytes_list, logo_bytes_list = _fetch_export_images(payload, api_key)
+
+    # Optional override to fit posters inside a 25px border while preserving aspect
+    # ratio. Canvas/template/backdrop/logo behavior is unchanged.
     fit_within_border = (get_setting_value(db, SETTING_PSD_POSTER_FIT_BORDER) or "").lower() == "true"
     if fit_within_border:
         log_info(LogTags.API, "Poster fit override enabled: fit within 25px border (top-aligned)")
@@ -1807,6 +1838,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         log_error(LogTags.API, f"PSD build failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to build PSD: {exc}")
 
+    # ── Persist to the save folder, or stream as a browser download ──
     if save_dir is not None:
         try:
             save_dir.mkdir(parents=True, exist_ok=True)
@@ -1815,9 +1847,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         except Exception as exc:
             log_warning(LogTags.API, f"PSD save failed: {exc}")
             raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
-
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
-        from fastapi.responses import JSONResponse
         return JSONResponse({
             "filename": output_filename,
             "psd_url": f"/api/maker-tools/psd-exports/{output_filename}",
@@ -1825,7 +1855,6 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         })
 
     log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
-
     return Response(
         content=psd_bytes,
         media_type="application/octet-stream",
@@ -1840,19 +1869,8 @@ def serve_psd_export(filename: str, db: Session = Depends(get_db)) -> Response:
     Used by the Photopea integration to load the file directly from the server.
     Security: filename is validated (no slashes, no traversal, must end in .psd).
     """
-    # Reject any path traversal or non-PSD filenames
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
-        raise HTTPException(status_code=400, detail="Invalid filename.")
-
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
-
-    # Look in export_folder first; fall back to psd_cache dir
-    if export_folder:
-        file_path = Path(export_folder) / filename
-    else:
-        from core.config import settings as app_settings
-        file_path = app_settings.config_dir / "psd_cache" / filename
-
+    _validate_psd_filename(filename)
+    file_path = _psd_storage_dir(db) / filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
 
@@ -1866,28 +1884,6 @@ def serve_psd_export(filename: str, db: Session = Depends(get_db)) -> Response:
     )
 
 
-@router.head("/psd-exports/{filename}")
-def check_psd_export_exists(filename: str, db: Session = Depends(get_db)) -> Response:
-    """Lightweight existence check for a saved PSD — returns 200 if found, 404 if not.
-
-    Used by the frontend 'New Export' overwrite-guard before downloading or reading any bytes.
-    """
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
-        raise HTTPException(status_code=400, detail="Invalid filename.")
-
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
-    if export_folder:
-        file_path = Path(export_folder) / filename
-    else:
-        from core.config import settings as app_settings
-        file_path = app_settings.config_dir / "psd_cache" / filename
-
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found.")
-
-    return Response(status_code=200)
-
-
 @router.put("/psd-exports/{filename}")
 async def upload_psd_to_export_folder(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
     """Accept a PSD file upload and save it to the configured export folder.
@@ -1896,15 +1892,8 @@ async def upload_psd_to_export_folder(filename: str, request: Request, db: Sessi
     can select their local PSD and upload it here so the next export can reuse it.
     Security: filename is validated (no slashes, no traversal, must end in .psd).
     """
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
-        raise HTTPException(status_code=400, detail="Invalid filename.")
-
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
-    if export_folder:
-        save_dir = Path(export_folder)
-    else:
-        from core.config import settings as app_settings
-        save_dir = app_settings.config_dir / "psd_cache"
+    _validate_psd_filename(filename)
+    save_dir = _psd_storage_dir(db)
 
     try:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -1919,7 +1908,6 @@ async def upload_psd_to_export_folder(filename: str, request: Request, db: Sessi
         log_error(LogTags.API, f"PSD upload failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded PSD: {exc}")
 
-    from fastapi.responses import JSONResponse
     return JSONResponse({"filename": filename, "saved": True})
 
 
@@ -1932,15 +1920,8 @@ async def save_psd_from_photopea(filename: str, request: Request, db: Session = 
       bytes 2000+   — exported file data (one file because we pass formats=["psd:true"])
     The response JSON key "message" is shown briefly to the user inside Photopea.
     """
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
-        raise HTTPException(status_code=400, detail="Invalid filename.")
-
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
-    if export_folder:
-        save_dir = Path(export_folder)
-    else:
-        from core.config import settings as app_settings
-        save_dir = app_settings.config_dir / "psd_cache"
+    _validate_psd_filename(filename)
+    save_dir = _psd_storage_dir(db)
 
     try:
         body = await request.body()
@@ -1957,7 +1938,6 @@ async def save_psd_from_photopea(filename: str, request: Request, db: Session = 
         log_error(LogTags.API, f"Photopea save failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
 
-    from fastapi.responses import JSONResponse
     return JSONResponse({"message": "Saved!", "script": "app.activeDocument.saved=true;"})
 
 

@@ -165,6 +165,7 @@ export interface PsdExportRequest {
   backdrop_paths: string[]
   logo_paths: string[]
   use_existing?: boolean
+  confirm_overwrite?: boolean
 }
 
 /** Returned when the server saved the PSD to an export folder — open in Photopea. */
@@ -188,15 +189,23 @@ export interface PsdExportNotFound {
   expectedFilename: string
 }
 
-export type PsdExportResult = PsdExportSaved | PsdExportDownload | PsdExportNotFound
+/** Returned for a New Export when a PSD for this title already exists and overwrite isn't confirmed. */
+export interface PsdExportExists {
+  mode: 'exists'
+  existingFilename: string
+}
+
+export type PsdExportResult = PsdExportSaved | PsdExportDownload | PsdExportNotFound | PsdExportExists
 
 /**
- * Export selected TMDB images as a layered PSD.
+ * Export selected TMDB images as a layered PSD. The server owns conflict detection,
+ * so a single call returns one of:
  *
- * - If the server has an export folder configured it saves to disk and returns
- *   JSON {filename, psd_url}. We surface this as mode='photopea'.
- * - Otherwise the server streams PSD bytes and we surface them as mode='download'.
- * - When use_existing=true and no file exists: mode='not-found' with the expected filename.
+ * - mode='photopea'  — saved to the export folder (JSON {filename, psd_url}).
+ * - mode='download'  — no export folder configured; raw PSD bytes streamed back.
+ * - mode='not-found' — use_existing=true but no matching PSD exists (409→404 here).
+ * - mode='exists'    — New Export would overwrite an existing title and confirm_overwrite
+ *                      is not set; caller should confirm then retry with confirm_overwrite.
  *
  * Error bodies from non-2xx responses arrive as Blobs (responseType:'blob') and
  * are decoded here so the caller always gets a readable Error message.
@@ -244,9 +253,12 @@ export const exportToPsd = async (
       const text = await rawData.text()
       let parsed: Record<string, unknown> | undefined
       try { parsed = JSON.parse(text) as Record<string, unknown> } catch { /* ignore */ }
-      // 404 not-found is a structured response, not a real error
+      // 404 not-found and 409 exists are structured responses, not real errors
       if (axiosErr?.response?.status === 404 && parsed?.not_found === true) {
         return { mode: 'not-found', expectedFilename: (parsed.expected_filename as string) ?? '' }
+      }
+      if (axiosErr?.response?.status === 409 && parsed?.exists === true) {
+        return { mode: 'exists', existingFilename: (parsed.existing_filename as string) ?? '' }
       }
       const detail = typeof parsed?.detail === 'string' ? parsed.detail
         : text.trim().length > 0 && text.trim().length < 300 ? text.trim()
@@ -258,17 +270,28 @@ export const exportToPsd = async (
 }
 
 /**
- * Check whether a PSD with the given filename already exists in the export folder.
- * Uses a HEAD request so no file bytes are transferred.
+ * Build the Photopea launch URL for a saved PSD: loads the file, renames the
+ * document tab to "Title (Year)" plus as many ID tags as fit Photopea's 50-char
+ * tab-name cap (which fills the Save-for-web Name field), and wires the server
+ * save endpoint so File→Save posts the PSD back to us.
  */
-export const checkPsdExists = async (filename: string): Promise<boolean> => {
-  const { default: axios } = await import('axios')
-  try {
-    await axios.head(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`)
-    return true
-  } catch {
-    return false
+export const buildPhotopeaUrl = (psdUrl: string, filename: string): string => {
+  const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`
+  const PHOTOPEA_NAME_CAP = 50
+  const idTagPattern = / \{(?:tmdb|tvdb|imdb)-[^}]*\}/g
+  const noExt = filename.replace(/\.psd$/i, '')
+  const idTags = noExt.match(idTagPattern) ?? []
+  let tabName = noExt.replace(idTagPattern, '') // "Title (Year)"
+  for (const tag of idTags) {
+    if ((tabName + tag).length > PHOTOPEA_NAME_CAP) break
+    tabName += tag
   }
+  const config = {
+    files: [psdUrl],
+    script: `app.activeDocument.name = ${JSON.stringify(tabName)};`,
+    server: { version: 1, url: saveUrl, formats: ['psd:true'] },
+  }
+  return `https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`
 }
 
 export interface PosterStyleEntry {

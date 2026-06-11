@@ -19,7 +19,7 @@ import {
   TmdbSearchFilter,
   TmdbSearchResult,
 } from '../api/client'
-import TmdbItemCard from '../components/maker-tools/TmdbItemCard'
+import TmdbItemCard, { derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import './MakerTools.css'
@@ -156,9 +156,10 @@ function MakerTools() {
 
   useEffect(() => {
     getSettings().then((settings) => {
-      setPsdExportFolder((settings.psd_export_folder || '').trim())
-      setPsdTemplatePath((settings.psd_template_path || '').trim())
-      setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
+      const cfg = derivePsdConfig(settings)
+      setPsdExportFolder(cfg.exportFolder)
+      setPsdTemplatePath(cfg.templatePath)
+      setPsdOpenPhotopea(cfg.openPhotopea)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -707,10 +708,10 @@ function MakerTools() {
                         <li><strong>Hard limits</strong> — no logo will exceed 800px wide; tall logos are also capped in height to stay within the lower third of the canvas</li>
                       </ul>
                     </li>
-                    <li><strong>Export PSD</strong> — once you've selected images, two export buttons appear in the gallery toolbar:
+                    <li><strong>Export PSD</strong> — two export buttons are always available in the gallery toolbar. Selecting images is optional — you can export a blank PSD or open an existing one without selecting anything:
                       <ul>
-                        <li><strong>New Export</strong> — always creates a fresh PSD using your configured template (or the built-in default). Any file in the export folder with the same name is overwritten from scratch.</li>
-                        <li><strong>Use Existing PSD</strong> — opens an already-saved PSD from your export folder and injects the new poster/logo/backdrop layers into it, preserving all your existing work (borders, text, effects). The file must be named <code>{'{'}title{'}'} ({'{'}year{'}'}).psd</code> and placed in the configured export folder. If no matching file is found, a prompt will guide you to either place the file there manually or upload it directly from your computer.</li>
+                        <li><strong>New Export</strong> — always creates a fresh PSD using your configured template (or the built-in default). With no images selected this gives you a blank template to start from. Any file in the export folder with the same name is overwritten from scratch.</li>
+                        <li><strong>Use Existing PSD</strong> — opens an already-saved PSD from your export folder and injects any selected poster/logo/backdrop layers into it, preserving all your existing work (borders, text, effects). With no images selected it simply opens the existing file. It must be named <code>{'{'}title{'}'} ({'{'}year{'}'}).psd</code> and placed in the configured export folder. If no matching file is found, a prompt will guide you to either place the file there manually or upload it directly from your computer.</li>
                       </ul>
                     </li>
                     <li><strong>Open in Photopea</strong> — if the "Open in Photopea" toggle is enabled in Configure, the exported PSD will open directly in Photopea in a new tab instead of downloading</li>
