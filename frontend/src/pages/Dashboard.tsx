@@ -1,17 +1,24 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, getUnmatchedStats, UnmatchedStats, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType } from '../api/client'
+import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import './Dashboard.css'
 
+// Drive-sync jobs use dynamic type strings (see backend models/job.py job_type_sync_* helpers)
+const isDriveSyncJobType = (jobType: string): boolean =>
+  jobType === 'gdrive_sync' ||
+  jobType === 'sync' ||
+  jobType.startsWith('Sync: ') ||
+  jobType.startsWith('Sync All') ||
+  jobType.startsWith('Sync Group')
+
 function Dashboard() {
   const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
   const navigate = useNavigate()
-  const { jobs } = useUnmatched()
+  const { jobs, unmatchedStats } = useUnmatched()
   const [stats, setStats] = useState<Stats | null>(null)
-  const [unmatchedStats, setUnmatchedStats] = useState<UnmatchedStats | null>(null)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [recentPosters, setRecentPosters] = useState<RecentSyncedPoster[]>([])
   const [posterFilter, setPosterFilter] = useState<'all' | 'movie' | 'season' | 'collection'>('all')
@@ -30,6 +37,7 @@ function Dashboard() {
   const [hoveredSchedule, setHoveredSchedule] = useState<{ data: Schedule; rect: DOMRect } | null>(null)
   const scheduleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastDisplayJobIdRef = useRef<number | null>(null)
+  const lastSyncJobStatusRef = useRef<Record<string, string>>({})
   const { showToast } = useToast()
 
   const formatPercent = (percent: number): string => {
@@ -40,7 +48,6 @@ function Dashboard() {
 
   useEffect(() => {
     fetchStats()
-    fetchUnmatchedStats()
     fetchSchedules()
     fetchDrives()
     fetchIdarrTargets()
@@ -48,6 +55,24 @@ function Dashboard() {
     fetchActivityStats()
     return undefined
   }, [])
+
+  // Refresh the recently-synced carousel when a workflow or drive sync finishes
+  useEffect(() => {
+    let shouldRefresh = false
+    jobs.forEach(job => {
+      const key = `${job.job_type}_${job.id}`
+      const previousStatus = lastSyncJobStatusRef.current[key]
+      const isTerminal = job.status === 'completed' || job.status === 'failed'
+      if (isTerminal && previousStatus && previousStatus !== job.status &&
+          (job.job_type === 'Poster Workflow' || isDriveSyncJobType(job.job_type))) {
+        shouldRefresh = true
+      }
+      lastSyncJobStatusRef.current[key] = job.status
+    })
+    if (shouldRefresh) {
+      fetchRecentPosters()
+    }
+  }, [jobs])
 
   const runWithLoadingState = async (
     setLoadingState: (value: boolean) => void,
@@ -74,13 +99,6 @@ function Dashboard() {
       const data = await getStats()
       setStats(data)
     }, 'Error fetching stats:')
-  }
-
-  const fetchUnmatchedStats = async () => {
-    await fetchWithLogging(async () => {
-      const data = await getUnmatchedStats()
-      setUnmatchedStats(data)
-    }, 'Error fetching unmatched stats:')
   }
 
   const fetchSchedules = async () => {
