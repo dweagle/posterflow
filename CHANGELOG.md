@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-13
+### Fixed
+- IDarr: fixed ID collision issue on items with same cross-media ids
+- Dashboard: the recently-synced carousel and unmatched stats now correctly refresh
+- Maker-Tools: Poster export settings now save correctly
+- Community Requests: New Request button no longer overflows out of the card on narrow screens.
+
 ## [0.8.3] - 2026-06-13
 ### Fixed
 - Community Requests: the Complete button now appears immediately after claiming a request, instead of only after a page refresh.
