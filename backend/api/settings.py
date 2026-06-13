@@ -93,6 +93,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "gdrive_storage_path",
     # PSD export
     "psd_export_folder",
+    "psd_image_export_folder",
     "psd_template_path",
     "psd_open_photopea",
     "psd_poster_fit_border",
