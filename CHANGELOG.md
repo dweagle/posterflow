@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-13
+### Fixed
+- Community Requests: the Complete button now appears immediately after claiming a request, instead of only after a page refresh.
+
 ## [0.8.2] - 2026-06-13
 ### Added
 - Poster Manager: asset cleanup that removes asset/tmp folder items not matching any Sonarr, Radarr, or Plex item, with toggles on the Workflow and Poster Renamer pages.
