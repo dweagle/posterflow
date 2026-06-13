@@ -8,6 +8,7 @@ import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import TmdbItemCard, { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
+import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
@@ -55,8 +56,11 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 
 export default function CommunityRequests() {
   const navigate = useNavigate()
-  const { isConnected, isMaker, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
+  const { showToast } = useToast()
+  const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
   const { refreshCommunityRequestCount } = useUnmatched()
+  // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
+  const fetchRequestsRef = useRef<(() => void) | null>(null)
   const [requests, setRequests] = useState<CommunityRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -72,8 +76,9 @@ export default function CommunityRequests() {
   // Per-card archive-thread state: requestId → 'loading' | 'done' | error string
   const [archiveStates, setArchiveStates] = useState<Map<string, 'loading' | 'done' | string>>(new Map())
   const [archiveConfirm, setArchiveConfirm] = useState<{ requestId: string; message: string } | null>(null)
+  const [claimConflict, setClaimConflict] = useState<string | null>(null)   // message shown when a claim fails (already claimed)
 
-  const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false })
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
@@ -203,12 +208,21 @@ export default function CommunityRequests() {
         return next
       })
       void refreshCommunityRequestCount()
+      if (action === 'complete') fetchRequestsRef.current?.()   // re-fetch so the list re-sorts/re-filters
     } catch (err) {
-      setActionStates((prev) =>
-        new Map(prev).set(requestId, err instanceof Error ? err.message : `${action} failed`)
-      )
+      const msg = err instanceof Error ? err.message : `${action} failed`
+      if (action === 'claim') {
+        // Usually means someone claimed it first while this page was stale. Make it
+        // obvious (toast + popup) and refresh so the now-claimed request updates.
+        setActionStates((prev) => { const next = new Map(prev); next.delete(requestId); return next })
+        showToast(msg, 'error')
+        setClaimConflict(msg)
+        fetchRequestsRef.current?.()
+      } else {
+        setActionStates((prev) => new Map(prev).set(requestId, msg))
+      }
     }
-  }, [updateRequestStatus])
+  }, [updateRequestStatus, showToast])
 
   const handleArchiveThread = useCallback(async (requestId: string, message?: string) => {
     setArchiveStates((prev) => new Map(prev).set(requestId, 'loading'))
@@ -259,6 +273,7 @@ export default function CommunityRequests() {
   }, [mediaType, status, sortOrder])
 
   useEffect(() => {
+    fetchRequestsRef.current = fetchRequests
     fetchRequests()
   }, [fetchRequests])
 
@@ -569,6 +584,8 @@ export default function CommunityRequests() {
                     const actionLoading = as_ === 'loading'
                     const actionError = typeof as_ === 'string' && as_ !== 'loading' ? as_ : null
                     const canAct = req.status === 'pending' || req.status === 'in_progress'
+                    // Only the maker who claimed it (or the server owner) may complete it.
+                    const canComplete = req.claimed_by_discord_id === discordUserId || isOwner
                     const isUploading = us === 'uploading' || (typeof us === 'string' && us.startsWith('uploading-'))
                     const isPosted = typeof us === 'string' && us.startsWith('Posted')
                     const uploadLabel = isUploading
@@ -602,7 +619,7 @@ export default function CommunityRequests() {
                                 <span>Claim</span>
                               </button>
                             )}
-                            {req.status === 'in_progress' && (
+                            {req.status === 'in_progress' && canComplete && (
                               <button
                                 type="button"
                                 className="request-action-btn action-complete"
@@ -731,6 +748,26 @@ export default function CommunityRequests() {
         </div>
       )
     })()}
+    {/* ── Already-claimed popup ───────────────────────────────────────────── */}
+    {claimConflict && (
+      <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setClaimConflict(null) }}>
+        <div className="modal-content schedule-modal" style={{ maxWidth: '380px' }}>
+          <div className="modal-header">
+            <h2>Already claimed</h2>
+            <button className="modal-close" onClick={() => setClaimConflict(null)}>×</button>
+          </div>
+          <div className="modal-body">
+            <p style={{ margin: 0 }}>{claimConflict}</p>
+            <p className="muted" style={{ marginTop: '0.75rem' }}>
+              The list has been refreshed to show its current status.
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button className="btn-primary" onClick={() => setClaimConflict(null)}>Got it</button>
+          </div>
+        </div>
+      </div>
+    )}
     {/* ── New Community Request modal ─────────────────────────────────────── */}
     {newRequestModalOpen && (
       <NewCommunityRequestModal

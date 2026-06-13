@@ -27,6 +27,7 @@ const CLIENT_SECRET = Deno.env.get('DISCORD_CLIENT_SECRET')!
 const GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')!
 const MAKER_ROLE_ID = Deno.env.get('DISCORD_MAKER_ROLE_ID')!
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
+const BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')!
 
 const REDIRECT_URI = 'https://qwudwkxfqowjtisdlplv.supabase.co/functions/v1/discord-oauth'
 
@@ -159,11 +160,27 @@ Deno.serve(async (req) => {
     isMaker = (member.roles as string[]).includes(MAKER_ROLE_ID)
   }
 
+  // Is this the Discord server owner? (Exempt from the claimer-only completion rule.)
+  let isOwner = false
+  try {
+    const guildResp = await fetch(
+      `https://discord.com/api/v10/guilds/${GUILD_ID}`,
+      { headers: { Authorization: `Bot ${BOT_TOKEN}` } },
+    )
+    if (guildResp.ok) {
+      const guild = await guildResp.json() as { owner_id?: string }
+      isOwner = guild.owner_id === discordUserId
+    }
+  } catch {
+    // Non-fatal — fall back to is_owner=false.
+  }
+
   // ── Step 5: Issue signed token (30-day expiry) ────────────────────────────
   const payload = {
     discord_user_id: discordUserId,
     discord_username: discordUsername,
     is_maker: isMaker,
+    is_owner: isOwner,
     exp: Math.floor(Date.now() / 1000) + 86400 * 30,
   }
   const token = await createToken(payload)

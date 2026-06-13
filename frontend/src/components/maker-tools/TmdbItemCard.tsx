@@ -218,6 +218,7 @@ export type PsdConfig = {
   exportFolder: string
   templatePath: string
   openPhotopea: boolean
+  imageExportFolder: string   // blank = download image exports in-browser; set = save to this server folder
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -226,6 +227,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     exportFolder: (s.psd_export_folder || '').trim(),
     templatePath: (s.psd_template_path || '').trim(),
     openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
+    imageExportFolder: (s.psd_image_export_folder || '').trim(),
   }
 }
 
@@ -262,7 +264,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
   const [psdUploading, setPsdUploading] = useState(false)
 
   // PSD settings: use prop if provided, else fetch once
-  const [psdConfig, setPsdConfig] = useState<PsdConfig>(psdConfigProp ?? { exportFolder: '', templatePath: '', openPhotopea: false })
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>(psdConfigProp ?? { exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
   useEffect(() => {
     if (psdConfigProp !== undefined) {
       setPsdConfig(psdConfigProp)
@@ -499,7 +501,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
       }
       if (result.mode === 'photopea') {
         if (result.openPhotopea) {
-          window.open(buildPhotopeaUrl(result.psdUrl, result.filename), '_blank')
+          window.open(buildPhotopeaUrl(result.psdUrl, result.filename, psdConfig.imageExportFolder), '_blank')
           showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
         } else {
           showToast(`PSD saved: ${result.filename}`, 'success')
@@ -521,7 +523,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, psdSelection, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, psdSelection, psdConfig.imageExportFolder, showToast])
 
   const handlePsdNotFoundUpload = useCallback(async (file: File) => {
     if (!psdNotFound) return

@@ -110,11 +110,12 @@ interface RequestRow {
   discord_message_id: string | null
   title: string
   requested_by_discord_id: string | null
+  claimed_by_discord_id: string | null
 }
 
 async function fetchRequest(requestId: string): Promise<RequestRow | null> {
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id&limit=1`,
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id&limit=1`,
     { headers: SB_HEADERS },
   )
   if (!resp.ok) return null
@@ -235,6 +236,17 @@ async function checkMakerRole(discordUserId: string): Promise<boolean> {
   return member.roles.includes(MAKER_ROLE_ID)
 }
 
+// The Discord server owner is exempt from the claimer-only completion rule.
+async function getGuildOwnerId(): Promise<string | null> {
+  const resp = await fetch(
+    `https://discord.com/api/v10/guilds/${GUILD_ID}`,
+    { headers: { Authorization: `Bot ${BOT_TOKEN}` } },
+  )
+  if (!resp.ok) return null
+  const guild = await resp.json() as { owner_id?: string }
+  return guild.owner_id ?? null
+}
+
 // ── Handler ────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -318,7 +330,7 @@ Deno.serve(async (req) => {
   }
 
   // ── Step 4: Validate action against current status ────────────────────────
-  const { status, discord_message_id, requested_by_discord_id } = row
+  const { status, discord_message_id, requested_by_discord_id, claimed_by_discord_id } = row
 
   if (action === 'claim' && status !== 'pending') {
     const msg = status === 'in_progress'
@@ -328,6 +340,13 @@ Deno.serve(async (req) => {
   }
   if (action === 'complete' && status !== 'in_progress') {
     return json({ error: 'Only in-progress requests can be marked as complete' }, 409)
+  }
+  // Completion is restricted to the maker who claimed it — except the server owner.
+  if (action === 'complete' && claimed_by_discord_id !== maker.discord_user_id) {
+    const ownerId = await getGuildOwnerId()
+    if (maker.discord_user_id !== ownerId) {
+      return json({ error: 'Only the maker who claimed this request can mark it complete' }, 403)
+    }
   }
   if (action === 'reject' && !['pending', 'in_progress'].includes(status)) {
     return json({ error: 'This request cannot be rejected in its current state' }, 409)

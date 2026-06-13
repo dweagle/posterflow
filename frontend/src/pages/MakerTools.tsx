@@ -84,6 +84,7 @@ function MakerTools() {
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
+  const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
 
@@ -160,6 +161,7 @@ function MakerTools() {
       setPsdExportFolder(cfg.exportFolder)
       setPsdTemplatePath(cfg.templatePath)
       setPsdOpenPhotopea(cfg.openPhotopea)
+      setPsdImageExportFolder(cfg.imageExportFolder)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -212,6 +214,7 @@ function MakerTools() {
         psd_template_path: psdTemplatePath.trim(),
         psd_open_photopea: String(psdOpenPhotopea),
         psd_poster_fit_border: String(psdPosterFitBorder),
+        psd_image_export_folder: psdImageExportFolder.trim(),
       })
       showToast('PSD settings saved', 'success')
       setShowPsdConfigModal(false)
@@ -774,7 +777,7 @@ function MakerTools() {
                         key={`${item.media_type}-${item.tmdb_id}`}
                         item={item}
                         posterAvailability={posterAvailability[item.tmdb_id]}
-                        psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea }}
+                        psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
                       />
                     ))}
                   </div>
@@ -805,6 +808,21 @@ function MakerTools() {
                     value={psdExportFolder}
                     onChange={(e) => setPsdExportFolder(e.target.value)}
                     placeholder="/config/psd_exports"
+                  />
+                </label>
+                <label>
+                  Image Export Folder
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Optional. Where images exported from Photopea land — the in-box JPG button and
+                    File→Export As / <code>Ctrl+Shift+Alt+S</code>. Set an absolute container-side path
+                    (e.g. <code>/config/poster_jpgs</code>) to save there, or leave blank to download
+                    images in your browser instead.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdImageExportFolder}
+                    onChange={(e) => setPsdImageExportFolder(e.target.value)}
+                    placeholder="(leave blank to download)"
                   />
                 </label>
                 <label>

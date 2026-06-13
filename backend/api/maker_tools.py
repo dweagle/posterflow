@@ -1357,6 +1357,7 @@ SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"
 SETTING_PSD_TEMPLATE_PATH = "psd_template_path"
 SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
 SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
+SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"
 
 # Bundled default template — lives at backend/assets/default_template.psd
 _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_template.psd"
@@ -1373,6 +1374,15 @@ def _psd_storage_dir(db: Session) -> Path:
     temp ``psd_cache`` under the config dir."""
     export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
     return Path(export_folder) if export_folder else app_settings.config_dir / "psd_cache"
+
+
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg")
+
+
+def _validate_image_filename(filename: str) -> None:
+    """Reject path traversal and non-image names. Raises HTTP 400 on failure."""
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(_IMAGE_EXTS):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
 
 
 def _find_psd_by_title(save_dir: Path, base_stem: str) -> Path | None:
@@ -1956,6 +1966,36 @@ async def upload_psd_to_export_folder(filename: str, request: Request, db: Sessi
     except Exception as exc:
         log_error(LogTags.API, f"PSD upload failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded PSD: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True})
+
+
+@router.put("/image-exports/{filename}")
+async def save_image_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write an exported image (JPG/PNG/…) to the configured image export folder.
+
+    Used by the Photopea wrapper's Export-As / JPG button when an image export
+    folder is configured (otherwise the wrapper downloads the image in-browser).
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_PSD_IMAGE_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No image export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported image", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Image export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True})
 

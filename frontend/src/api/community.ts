@@ -12,6 +12,7 @@ export interface CommunityRequest {
   tvdb_id: number | null
   status: 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
   claimed_by: string | null
+  claimed_by_discord_id: string | null
   fulfilled_by: string | null
   requested_by: string | null
   requested_by_discord_id: string | null

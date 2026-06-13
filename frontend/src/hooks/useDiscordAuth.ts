@@ -12,6 +12,7 @@ interface DiscordAuth {
   discord_user_id: string
   discord_username: string
   is_maker: boolean
+  is_owner: boolean
   exp: number
 }
 
@@ -37,6 +38,7 @@ function parseStoredToken(token: string): Omit<DiscordAuth, 'token'> | null {
       discord_user_id: payload.discord_user_id,
       discord_username: payload.discord_username,
       is_maker: payload.is_maker,
+      is_owner: payload.is_owner ?? false,
       exp: payload.exp,
     }
   } catch {
@@ -177,6 +179,7 @@ export function useDiscordAuth() {
   return {
     isConnected: auth !== null,
     isMaker: auth?.is_maker ?? false,
+    isOwner: auth?.is_owner ?? false,
     username: auth?.discord_username ?? null,
     discordUserId: auth?.discord_user_id ?? null,
     token: auth?.token ?? null,

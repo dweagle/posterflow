@@ -278,28 +278,32 @@ export const exportToPsd = async (
 }
 
 /**
- * Build the Photopea launch URL for a saved PSD: loads the file, renames the
- * document tab to "Title (Year)" plus as many ID tags as fit Photopea's 50-char
- * tab-name cap (which fills the Save-for-web Name field), and wires the server
- * save endpoint so File→Save posts the PSD back to us.
+ * Build the launch URL for a saved PSD. Opens our in-app wrapper page
+ * (/photopea-editor.html), which embeds Photopea full-window plus the floating
+ * Seasons layer box and a Save button.
+ *
+ * The wrapper does the file I/O itself rather than letting Photopea fetch/POST the
+ * PSD: Posterflow is usually reached over a plain-http LAN address, and an https
+ * Photopea iframe inside an http page isn't a "secure context", so the browser
+ * blocks it from touching the LAN PSD (mixed content + private-network access). So
+ * we hand the wrapper everything it needs — the PSD URL to read, a tab name, and
+ * the save endpoint to write back to — all of which it uses same-origin.
  */
-export const buildPhotopeaUrl = (psdUrl: string, filename: string): string => {
-  const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`
-  const PHOTOPEA_NAME_CAP = 50
-  const idTagPattern = / \{(?:tmdb|tvdb|imdb)-[^}]*\}/g
-  const noExt = filename.replace(/\.psd$/i, '')
-  const idTags = noExt.match(idTagPattern) ?? []
-  let tabName = noExt.replace(idTagPattern, '') // "Title (Year)"
-  for (const tag of idTags) {
-    if ((tabName + tag).length > PHOTOPEA_NAME_CAP) break
-    tabName += tag
+export const buildPhotopeaUrl = (psdUrl: string, filename: string, imageExportFolder = ''): string => {
+  const config: {
+    psd: string
+    name: string
+    save: string
+    imgBase?: string
+  } = {
+    psd: psdUrl,                                  // wrapper fetches this same-origin, hands bytes to Photopea
+    name: filename.replace(/\.psd$/i, ''),        // document/tab name (full, untruncated; keeps ID tags)
+    save: `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, // PSD save (Ctrl+S) PUTs here
   }
-  const config = {
-    files: [psdUrl],
-    script: `app.activeDocument.name = ${JSON.stringify(tabName)};`,
-    server: { version: 1, url: saveUrl, formats: ['psd:true'] },
-  }
-  return `https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`
+  // Image exports (Export As / JPG button): when a server folder is configured, the
+  // wrapper PUTs `<name>.<ext>` under this base; otherwise it downloads in-browser.
+  if (imageExportFolder) config.imgBase = `${window.location.origin}/api/maker-tools/image-exports/`
+  return `${window.location.origin}/photopea-editor.html#${encodeURIComponent(JSON.stringify(config))}`
 }
 
 export interface PosterStyleEntry {
