@@ -197,6 +197,9 @@ export default function CommunityRequests() {
                 ...r,
                 status: result.status as CommunityRequest['status'],
                 claimed_by: result.claimed_by,
+                // The API response omits claimed_by_discord_id; on a claim the claimer
+                // is the current user, so set it so the Complete button shows immediately.
+                claimed_by_discord_id: action === 'claim' ? discordUserId : r.claimed_by_discord_id,
                 fulfilled_by: result.fulfilled_by,
               }
             : r
@@ -222,7 +225,7 @@ export default function CommunityRequests() {
         setActionStates((prev) => new Map(prev).set(requestId, msg))
       }
     }
-  }, [updateRequestStatus, showToast])
+  }, [updateRequestStatus, showToast, discordUserId])
 
   const handleArchiveThread = useCallback(async (requestId: string, message?: string) => {
     setArchiveStates((prev) => new Map(prev).set(requestId, 'loading'))
