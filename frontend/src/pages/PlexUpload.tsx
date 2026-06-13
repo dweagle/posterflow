@@ -1362,7 +1362,7 @@ function PlexUpload() {
                     onChange={(event) => setSyncBeforeUpload(event.target.checked)}
                     disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
                   />
-                  <span>Sync drives before upload</span>
+                  <span>Sync drives before upload (Full upload only)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
