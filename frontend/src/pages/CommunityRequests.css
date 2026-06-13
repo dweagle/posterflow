@@ -1093,8 +1093,15 @@
     gap: 0.5rem;
   }
 
-  /* Refresh button full width */
-  .community-refresh-btn {
+  /* Action buttons stack full width so neither overflows the card */
+  .community-toolbar-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .community-refresh-btn,
+  .community-new-request-btn {
     width: 100%;
     justify-content: center;
   }
