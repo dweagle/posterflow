@@ -449,18 +449,16 @@ function Dashboard() {
             ? 'mm2k'
             : 'custom'
 
+      acc.all[driveType] += 1
       if (drive.subscribed) {
         acc.subscribed[driveType] += 1
-        if (drive.last_synced) {
-          acc.synced[driveType] += 1
-        }
       }
 
       return acc
     },
     {
+      all: { cl2k: 0, mm2k: 0, custom: 0 },
       subscribed: { cl2k: 0, mm2k: 0, custom: 0 },
-      synced: { cl2k: 0, mm2k: 0, custom: 0 },
     }
   )
 
@@ -766,15 +764,15 @@ function Dashboard() {
             <span className="pst-sep" />
             {/* CL2K */}
             <span className="stat-badge cl2k">CL2K</span>
-            <span className="pst-val">{driveCountsByType.synced.cl2k} / {driveCountsByType.subscribed.cl2k}</span>
+            <span className="pst-val">{driveCountsByType.subscribed.cl2k} / {driveCountsByType.all.cl2k}</span>
             <span className="pst-val">{stats?.posters_by_type.cl2k || 0}</span>
             {/* MM2K */}
             <span className="stat-badge mm2k">MM2K</span>
-            <span className="pst-val">{driveCountsByType.synced.mm2k} / {driveCountsByType.subscribed.mm2k}</span>
+            <span className="pst-val">{driveCountsByType.subscribed.mm2k} / {driveCountsByType.all.mm2k}</span>
             <span className="pst-val">{stats?.posters_by_type.mm2k || 0}</span>
             {/* Custom */}
             <span className="stat-badge custom">Custom</span>
-            <span className="pst-val">{driveCountsByType.synced.custom} / {driveCountsByType.subscribed.custom}</span>
+            <span className="pst-val">{driveCountsByType.subscribed.custom} / {driveCountsByType.all.custom}</span>
             <span className="pst-val">{stats?.posters_by_type.custom || 0}</span>
           </div>
         </div>
