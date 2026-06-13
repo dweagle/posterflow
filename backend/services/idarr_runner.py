@@ -521,6 +521,17 @@ class IdarrRunner:
 
             group_cache_hint: dict[str, Any] | None = None
             normalized_group_title = self._normalize_with_aliases(title)
+            # Intrinsic media type from the filename only (pre-cache), used to reject
+            # cross-type by_tmdb collisions.
+            group_has_season = any(SEASON_REGEX.search(str(a["file_path"].stem)) for a in group_assets)
+            if group_has_season or isinstance(group_tvdb_id, int):
+                file_intrinsic_type: str | None = "tv_series"
+            elif isinstance(group_year, int):
+                file_intrinsic_type = "movie"
+            elif COLLECTION_REGEX.search(base_lower):
+                file_intrinsic_type = "collection"
+            else:
+                file_intrinsic_type = None
             if isinstance(group_tmdb_id, int):
                 tmdb_candidates = group_cache_hints.get("by_tmdb", {}).get(group_tmdb_id, [])
                 if isinstance(tmdb_candidates, list):
@@ -528,6 +539,10 @@ class IdarrRunner:
                     best_rank = -1
                     for candidate in tmdb_candidates:
                         if not isinstance(candidate, dict):
+                            continue
+                        if not self._by_tmdb_hint_is_compatible(
+                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_group_title
+                        ):
                             continue
                         candidate_title = str(candidate.get("normalized_title") or "")
                         candidate_year = candidate.get("year") if isinstance(candidate.get("year"), int) else None
@@ -772,6 +787,16 @@ class IdarrRunner:
             cache_type: str | None = None
 
             cache_hint: dict[str, Any] | None = None
+            # Intrinsic media type from the filename only (pre-cache), used to reject
+            # cross-type by_tmdb collisions.
+            if isinstance(asset_tvdb_id, int):
+                file_intrinsic_type: str | None = "tv_series"
+            elif isinstance(year, int):
+                file_intrinsic_type = "movie"
+            elif COLLECTION_REGEX.search(str(asset.get("title") or "").lower()):
+                file_intrinsic_type = "collection"
+            else:
+                file_intrinsic_type = None
             if isinstance(asset_tmdb_id, int):
                 tmdb_candidates = group_cache_hints.get("by_tmdb", {}).get(asset_tmdb_id, [])
                 if isinstance(tmdb_candidates, list) and tmdb_candidates:
@@ -779,6 +804,10 @@ class IdarrRunner:
                     best_rank = -1
                     for candidate in tmdb_candidates:
                         if not isinstance(candidate, dict):
+                            continue
+                        if not self._by_tmdb_hint_is_compatible(
+                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_title
+                        ):
                             continue
                         candidate_title = str(candidate.get("normalized_title") or "")
                         candidate_year = candidate.get("year") if isinstance(candidate.get("year"), int) else None
@@ -981,6 +1010,26 @@ class IdarrRunner:
                     by_title_year[title_year_key] = candidate
 
         return {"by_tmdb": by_tmdb, "by_title_year": by_title_year}
+
+    @staticmethod
+    def _by_tmdb_hint_is_compatible(
+        candidate: dict[str, Any],
+        *,
+        file_type: str | None,
+        normalized_title: str,
+    ) -> bool:
+        """Reject a same-tmdb cache hint that is a cross-media-type collision.
+
+        TMDB ids are unique only within a media type: movie 2122 ("The Whole Ten
+        Yards") and tv 2122 ("King of the Hill") are different entities. Accept when
+        the candidate's type matches the file's intrinsic type, or its title matches
+        (covers a genuine same-entity row whose type the filename can't establish).
+        """
+        cand_type = IdarrRunner._normalize_asset_type(str(candidate.get("asset_type") or ""))
+        if file_type and cand_type and cand_type != file_type:
+            cand_title = str(candidate.get("normalized_title") or "")
+            return bool(cand_title and cand_title == normalized_title)
+        return True
 
     @staticmethod
     def _classify_search_match(

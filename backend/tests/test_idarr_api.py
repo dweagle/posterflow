@@ -445,6 +445,37 @@ def test_idarr_runner_asset_drive_keeps_type_inferred_for_unmatched_provisional_
     assert frozen.get("tmdb_id") == 109445
 
 
+def test_idarr_runner_scan_rejects_cross_type_tmdb_collision(test_db, tmp_path):
+    """A movie file must NOT inherit a cached series row that merely shares the numeric
+    tmdb id. TMDB ids are unique only within a media type: movie 2122 ("The Whole Ten
+    Yards") and tv 2122 ("King of the Hill") are different entities. Without a type guard
+    the movie gets the series' tvdb id, flips to tv_series, and resolves to the wrong title."""
+    runner = IdarrRunner(test_db)
+    # Cached, fully-resolved King of the Hill *series* row sharing tmdb id 2122.
+    test_db.add(IdarrAssetCache(
+        asset_key="tv_series::kingofthehill::1997::tmdb=2122",
+        title="King of the Hill", year=1997, asset_type="tv_series",
+        tmdb_id=2122, tvdb_id=73903, imdb_id="tt0118375", matched=True, payload_json="{}",
+    ))
+    test_db.commit()
+    (tmp_path / "The Whole Ten Yards (2004) {tmdb-2122} {imdb-tt0327247}.jpg").write_bytes(b"x")
+
+    # Season-grouped scanner (regular poster drive).
+    grouped = runner._scan_assets(tmp_path)
+    movie = next(a for a in grouped if int(a.get("tmdb_id") or 0) == 2122)
+    assert movie["type"] == "movie"
+    assert movie.get("tvdb_id") is None
+    assert movie.get("imdb_id") == "tt0327247"
+    assert "whole ten yards" in str(movie.get("title") or "").lower()
+
+    # Flat asset-drive scanner exercises the second by_tmdb hint path.
+    flat = runner._scan_assets_for_asset_drive(tmp_path)
+    movie2 = next(a for a in flat if int(a.get("tmdb_id") or 0) == 2122)
+    assert movie2["type"] == "movie"
+    assert movie2.get("tvdb_id") is None
+    assert movie2.get("imdb_id") == "tt0327247"
+
+
 def test_idarr_runner_parse_repairs_malformed_year_paren():
     """A dangling year parenthesis (from an interrupted/partial rename) must be repaired so the
     year is parsed and stripped, instead of becoming a junk title that never matches and churns
