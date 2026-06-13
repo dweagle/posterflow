@@ -56,6 +56,7 @@ class LogTags:
     ARR = "ARR"
     IDARR = "IDARR"
     MONITOR = "MONITOR"
+    CLEANUP = "CLEANUP"
 
 # ============================================================================
 # LOGGING HELPERS
@@ -248,10 +249,10 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
         "sync_one": ["SYNC", "RCLONE"],
         "sync_all": ["SYNC-ALL", "SYNC", "RCLONE"],
         "plex_upload": ["UPLOADER", "DATABASE", "API", "POSTER_RENAMER", "BORDER_REPLACER", "SCANNER"],
-        "poster_renamer": ["POSTER_RENAMER", "SCANNER", "ARR"],
+        "poster_renamer": ["POSTER_RENAMER", "SCANNER", "ARR", "CLEANUP"],
         "border_replacer": ["BORDER_REPLACER"],
         "unmatched_assets": ["UNMATCHED", "SCANNER", "ARR", "POSTER_RENAMER"],
-        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR", "UPLOADER"],
+        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR", "UPLOADER", "CLEANUP"],
         "backup": ["BACKUP"],
         "idarr": ["IDARR", "RCLONE"],
     }

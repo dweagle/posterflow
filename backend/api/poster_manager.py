@@ -45,6 +45,8 @@ SETTING_POSTER_ASSET_FOLDERS = "poster_asset_folders"
 SETTING_POSTER_RENAMER_STATS = "poster_renamer_stats"
 SETTING_POSTER_DRIVE_PRIORITY = "poster_drive_priority"
 SETTING_AUTO_RUN_BORDER = "auto_run_border"
+SETTING_AUTO_RUN_CLEANUP = "auto_run_cleanup"
+SETTING_CLEANUP_DELETE_UNKNOWN = "cleanup_delete_unknown"
 SETTING_BORDER_REPLACER_MODE = "border_replacer_mode"
 SETTING_POSTER_FLOW_CONFIG = "poster_flow_config"
 SETTING_TMDB_API_KEY = "tmdb_api_key"
@@ -104,6 +106,9 @@ class PosterConfig(BaseModel):
     asset_folders: Optional[bool] = True
     dry_run: Optional[bool] = False
     match_threshold: Optional[float] = 0.8
+    # Per-run asset-cleanup overrides; None falls back to the persisted toggle.
+    run_cleanup: Optional[bool] = None
+    cleanup_delete_unknown: Optional[bool] = None
 
 
 class RenameRequestPayload(BaseModel):
@@ -127,6 +132,11 @@ class FlowJobConfig(BaseModel):
     stop_on_error: bool = True
 
 
+class CleanupFlowJobConfig(BaseModel):
+    enabled: bool = True
+    delete_unknown: bool = False
+
+
 class IdarrFlowJobConfig(BaseModel):
     enabled: bool = False
     stop_on_error: bool = False
@@ -141,6 +151,7 @@ class FlowConfig(BaseModel):
     detect_unmatched: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
     border_replacer: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=True)
     plex_upload: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=False)
+    cleanup_assets: CleanupFlowJobConfig = Field(default_factory=CleanupFlowJobConfig)
 
 
 class FlowRunRequest(BaseModel):
@@ -514,6 +525,46 @@ async def save_auto_run_border(
         db.rollback()
         log_error(LogTags.POSTER_RENAMER, f"Error saving auto-run border setting: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error saving auto-run border setting")
+
+
+@router.get("/auto-run-cleanup")
+async def get_auto_run_cleanup(db: Session = Depends(get_db)) -> Dict[str, bool]:
+    """Get the asset-cleanup toggle (and its delete-unknown sub-toggle)."""
+    try:
+        enabled_setting = get_setting(db, SETTING_AUTO_RUN_CLEANUP)
+        delete_unknown_setting = get_setting(db, SETTING_CLEANUP_DELETE_UNKNOWN)
+        return {
+            "enabled": enabled_setting.value.lower() == "true" if enabled_setting else True,
+            "delete_unknown": delete_unknown_setting.value.lower() == "true" if delete_unknown_setting else False,
+        }
+    except Exception as e:
+        log_error(LogTags.CLEANUP, f"Error getting auto-run cleanup setting: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error getting auto-run cleanup setting")
+
+
+@router.post("/auto-run-cleanup")
+async def save_auto_run_cleanup(
+    enabled: bool,
+    delete_unknown: bool = False,
+    db: Session = Depends(get_db)
+) -> Dict[str, bool]:
+    """Save the asset-cleanup toggle (and its delete-unknown sub-toggle)."""
+    try:
+        upsert_setting(db, SETTING_AUTO_RUN_CLEANUP, "true" if enabled else "false")
+        upsert_setting(db, SETTING_CLEANUP_DELETE_UNKNOWN, "true" if delete_unknown else "false")
+        db.commit()
+        log_user_action(
+            f"Auto-run asset cleanup {'enabled' if enabled else 'disabled'}"
+            f"{' (delete unknown)' if delete_unknown else ''}",
+            setting_key=SETTING_AUTO_RUN_CLEANUP,
+            value=enabled,
+            delete_unknown=delete_unknown,
+        )
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.CLEANUP, f"Error saving auto-run cleanup setting: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error saving auto-run cleanup setting")
 
 
 @router.get("/scan")
@@ -983,6 +1034,7 @@ async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "scope_indices": [],
             "sync_after_run": False,
         }
+        default_cleanup_config: Dict[str, bool] = {"enabled": True, "delete_unknown": False}
         flow_setting = get_setting(db, SETTING_POSTER_FLOW_CONFIG)
 
         if flow_setting:
@@ -1007,9 +1059,17 @@ async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
                         }
                     else:
                         normalized[key] = dict(default_step_config[key])
+                cleanup_value = parsed.get("cleanup_assets")
+                if isinstance(cleanup_value, dict):
+                    normalized["cleanup_assets"] = {
+                        "enabled": bool(cleanup_value.get("enabled", False)),
+                        "delete_unknown": bool(cleanup_value.get("delete_unknown", False)),
+                    }
+                else:
+                    normalized["cleanup_assets"] = dict(default_cleanup_config)
                 return normalized
 
-        return {"idarr": default_idarr_config, **default_step_config}
+        return {"idarr": default_idarr_config, "cleanup_assets": default_cleanup_config, **default_step_config}
 
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Error getting flow config: {e}\n{traceback.format_exc()}")

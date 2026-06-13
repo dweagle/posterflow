@@ -85,6 +85,10 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_season_colors",
     "border_replacer_season_width",
     "auto_run_border",
+    # Asset Cleanup
+    "auto_run_cleanup",
+    "cleanup_delete_unknown",
+    "asset_cleanup_ignore",
     # GDrive storage path
     "gdrive_storage_path",
     # PSD export

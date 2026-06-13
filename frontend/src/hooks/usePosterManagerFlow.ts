@@ -79,7 +79,7 @@ export const usePosterManagerFlow = ({
     }
   }
 
-  const handleFlowConfigChange = (jobName: keyof FlowConfig, field: 'enabled' | 'stop_on_error', value: boolean) => {
+  const handleFlowConfigChange = (jobName: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown', value: boolean) => {
     if (!flowConfig) return
 
     setFlowConfig({

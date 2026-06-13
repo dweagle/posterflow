@@ -17,6 +17,8 @@ interface UsePosterManagerLifecycleOptions {
   borderWidth: number
   borderMode: 'incremental' | 'full'
   autoRunBorder: boolean
+  autoRunCleanup: boolean
+  cleanupDeleteUnknown: boolean
   holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
@@ -28,6 +30,8 @@ interface UsePosterManagerLifecycleOptions {
     width: number
     mode: 'incremental' | 'full'
     autoRunBorder: boolean
+    autoRunCleanup: boolean
+    cleanupDeleteUnknown: boolean
     holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
     skipRunOutsideHoliday: boolean
     removeBorders: boolean
@@ -71,6 +75,8 @@ export function usePosterManagerLifecycle({
   borderWidth,
   borderMode,
   autoRunBorder,
+  autoRunCleanup,
+  cleanupDeleteUnknown,
   holidaySchedules,
   skipRunOutsideHoliday,
   removeBorders,
@@ -126,6 +132,8 @@ export function usePosterManagerLifecycle({
     const widthChanged = borderWidth !== originalBorderSettingsRef.current.width
     const modeChanged = borderMode !== originalBorderSettingsRef.current.mode
     const autoRunChanged = autoRunBorder !== originalBorderSettingsRef.current.autoRunBorder
+    const autoRunCleanupChanged = autoRunCleanup !== originalBorderSettingsRef.current.autoRunCleanup
+    const cleanupDeleteUnknownChanged = cleanupDeleteUnknown !== originalBorderSettingsRef.current.cleanupDeleteUnknown
     const holidaysChanged = JSON.stringify(holidaySchedules) !== JSON.stringify(originalBorderSettingsRef.current.holidaySchedules)
     const skipRunChanged = skipRunOutsideHoliday !== originalBorderSettingsRef.current.skipRunOutsideHoliday
     const removeBordersChanged = removeBorders !== originalBorderSettingsRef.current.removeBorders
@@ -133,9 +141,11 @@ export function usePosterManagerLifecycle({
     const seasonColorsChanged = JSON.stringify(seasonColors) !== JSON.stringify(originalBorderSettingsRef.current.seasonColors)
     const seasonWidthChanged = seasonWidth !== originalBorderSettingsRef.current.seasonWidth
 
-    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged)
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || autoRunCleanupChanged || cleanupDeleteUnknownChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged)
   }, [
     autoRunBorder,
+    autoRunCleanup,
+    cleanupDeleteUnknown,
     borderColors,
     borderMode,
     borderWidth,

@@ -8,6 +8,8 @@ interface OriginalBorderSettings {
   width: number
   mode: 'incremental' | 'full'
   autoRunBorder: boolean
+  autoRunCleanup: boolean
+  cleanupDeleteUnknown: boolean
   holidaySchedules: BorderHolidaySchedule[]
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
@@ -40,6 +42,8 @@ export const usePosterManagerBorder = ({
   const [borderMode, setBorderMode] = useState<'incremental' | 'full'>('incremental')
   const [newColor, setNewColor] = useState('#000000')
   const [autoRunBorder, setAutoRunBorder] = useState(false)
+  const [autoRunCleanup, setAutoRunCleanup] = useState(true)
+  const [cleanupDeleteUnknown, setCleanupDeleteUnknown] = useState(false)
   const [holidaySchedules, setHolidaySchedules] = useState<BorderHolidaySchedule[]>([])
   const [skipRunOutsideHoliday, setSkipRunOutsideHoliday] = useState(false)
   const [removeBorders, setRemoveBorders] = useState(false)
@@ -73,6 +77,11 @@ export const usePosterManagerBorder = ({
       const autoRunStr = settings['auto_run_border'] || 'false'
       const autoRun = autoRunStr.toLowerCase() === 'true'
       setAutoRunBorder(autoRun)
+
+      const autoRunCleanupVal = (settings['auto_run_cleanup'] || 'true').toLowerCase() === 'true'
+      setAutoRunCleanup(autoRunCleanupVal)
+      const cleanupDeleteUnknownVal = (settings['cleanup_delete_unknown'] || 'false').toLowerCase() === 'true'
+      setCleanupDeleteUnknown(cleanupDeleteUnknownVal)
 
       const holidaysStr = settings['border_replacer_holidays'] || '[]'
       let holidays: BorderHolidaySchedule[] = []
@@ -130,6 +139,8 @@ export const usePosterManagerBorder = ({
         width,
         mode,
         autoRunBorder: autoRun,
+        autoRunCleanup: autoRunCleanupVal,
+        cleanupDeleteUnknown: cleanupDeleteUnknownVal,
         holidaySchedules: holidays,
         skipRunOutsideHoliday: skipRun,
         removeBorders: removeBordersEnabled,
@@ -163,6 +174,8 @@ export const usePosterManagerBorder = ({
         border_replacer_width: borderWidth.toString(),
         border_replacer_mode: borderMode,
         auto_run_border: autoRunBorder ? 'true' : 'false',
+        auto_run_cleanup: autoRunCleanup ? 'true' : 'false',
+        cleanup_delete_unknown: cleanupDeleteUnknown ? 'true' : 'false',
         border_replacer_holidays: JSON.stringify(holidaySchedules),
         border_replacer_skip_non_holiday: skipRunOutsideHoliday ? 'true' : 'false',
         border_replacer_remove_borders: removeBorders ? 'true' : 'false',
@@ -176,6 +189,8 @@ export const usePosterManagerBorder = ({
         width: borderWidth,
         mode: borderMode,
         autoRunBorder,
+        autoRunCleanup,
+        cleanupDeleteUnknown,
         holidaySchedules,
         skipRunOutsideHoliday,
         removeBorders,
@@ -241,6 +256,8 @@ export const usePosterManagerBorder = ({
     setBorderWidth(original.width)
     setBorderMode(original.mode)
     setAutoRunBorder(original.autoRunBorder)
+    setAutoRunCleanup(original.autoRunCleanup)
+    setCleanupDeleteUnknown(original.cleanupDeleteUnknown)
     setHolidaySchedules([...original.holidaySchedules])
     setSkipRunOutsideHoliday(original.skipRunOutsideHoliday)
     setRemoveBorders(original.removeBorders)
@@ -256,6 +273,8 @@ export const usePosterManagerBorder = ({
     borderMode,
     newColor,
     autoRunBorder,
+    autoRunCleanup,
+    cleanupDeleteUnknown,
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,
@@ -267,6 +286,8 @@ export const usePosterManagerBorder = ({
     setBorderMode,
     setNewColor,
     setAutoRunBorder,
+    setAutoRunCleanup,
+    setCleanupDeleteUnknown,
     setSkipRunOutsideHoliday,
     setRemoveBorders,
     setSeasonMode,

@@ -10,6 +10,8 @@ type RenamerTabProps = {
   saving: boolean
   renaming: boolean
   autoRunBorder: boolean
+  autoRunCleanup: boolean
+  cleanupDeleteUnknown: boolean
   libraryConfigs: PlexLibraryConfig[]
   selectedLibraries: Set<string>
   // Manual media
@@ -26,6 +28,8 @@ type RenamerTabProps = {
   onSaveSettings: () => void
   onRunRename: (dryRun: boolean) => void
   onSetAutoRunBorder: (enabled: boolean) => void
+  onSetAutoRunCleanup: (enabled: boolean) => void
+  onSetCleanupDeleteUnknown: (enabled: boolean) => void
   onToggleLibrarySelection: (instanceName: string, libraryKey: string) => void
   onFormTitleChange: (v: string) => void
   onFormYearChange: (v: string) => void
@@ -45,6 +49,8 @@ function RenamerTab({
   saving,
   renaming,
   autoRunBorder,
+  autoRunCleanup,
+  cleanupDeleteUnknown,
   libraryConfigs,
   selectedLibraries,
   manualEntries,
@@ -60,6 +66,8 @@ function RenamerTab({
   onSaveSettings,
   onRunRename,
   onSetAutoRunBorder,
+  onSetAutoRunCleanup,
+  onSetCleanupDeleteUnknown,
   onToggleLibrarySelection,
   onFormTitleChange,
   onFormYearChange,
@@ -131,6 +139,25 @@ function RenamerTab({
             <small>When enabled, border replacer runs automatically after renaming posters (uses Poster Renamer incremental/full mode setting on Border Replacer page)</small>
             <small className="standalone-warning">⚠️ Standalone runs only. To disable Border Replacer in the Workflow, toggle it off/on on the Workflow page.</small>
             <small className="standalone-warning">⚠️ Plex Upload also uses this setting — if you want borders applied during Plex Upload runs, this must be enabled.</small>
+          </div>
+
+          <div className="field-group">
+            <label>Auto-Run Asset Cleanup</label>
+            <div className="toggle-field">
+              <label className="toggle-switch">
+                <input type="checkbox" checked={autoRunCleanup} onChange={(e) => onSetAutoRunCleanup(e.target.checked)} />
+                <span className="toggle-slider"></span>
+              </label>
+              <span className="toggle-label">{autoRunCleanup ? 'Enabled (Runs After Rename/Border)' : 'Disabled'}</span>
+            </div>
+            <small>When enabled, removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
+            {autoRunCleanup && (
+              <label className="checkbox-option" style={{ marginTop: '0.4rem' }}>
+                <input type="checkbox" checked={cleanupDeleteUnknown} onChange={(e) => onSetCleanupDeleteUnknown(e.target.checked)} />
+                <span>Also remove unknown/stray folders (no match, no ID — riskier)</span>
+              </label>
+            )}
+            <small className="standalone-warning">⚠️ For the Workflow, enable this on the Workflow page instead.</small>
           </div>
         </div>
 

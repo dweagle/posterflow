@@ -185,6 +185,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 "detect_unmatched": {"enabled": True, "stop_on_error": True},
                 "border_replacer": {"enabled": False, "stop_on_error": True},
                 "plex_upload": {"enabled": False, "stop_on_error": False},
+                "cleanup_assets": {"enabled": True, "delete_unknown": False},
             }
 
         if dry_run:
@@ -546,6 +547,41 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             results["jobs_skipped"].append({"job": "border_replacer", "reason": "Disabled in configuration"})
             update_job_state(db, job, progress=78, message=format_workflow_step(4, 6, "Border replacer skipped"))
 
+        # ── Asset cleanup (opt-in toggle) ─────────────────────────────────────
+        # Runs once dest/ is finalized by rename (+ optional border) and BEFORE
+        # Plex upload, so upload never pushes stale/orphaned posters.
+        if flow_config.get("cleanup_assets", {}).get("enabled", False):
+            log_info(LogTags.WORKFLOW, "Running asset cleanup (post-rename/border)")
+            update_job_state(db, job, message="Cleaning up orphaned asset folders...")
+            try:
+                from modules.cleanup import maybe_run_asset_cleanup, summarize_cleanup
+                cleanup_result = maybe_run_asset_cleanup(
+                    db,
+                    config_data={
+                        "run_cleanup": True,
+                        "cleanup_delete_unknown": flow_config.get("cleanup_assets", {}).get("delete_unknown", False),
+                    },
+                    dry_run=dry_run,
+                    triggered_by="workflow",
+                    job=job,
+                )
+                results["jobs_run"].append({
+                    "job": "cleanup_assets",
+                    "success": True,
+                    "embed_spec": {
+                        "event_type": "success",
+                        "title": "Asset Cleanup",
+                        "description": summarize_cleanup(cleanup_result) or "No changes",
+                        "fields": [],
+                        "color": 0x4CAF50,
+                    },
+                })
+            except Exception as e:
+                log_error(LogTags.WORKFLOW, f"Asset cleanup failed: {e}\n{traceback.format_exc()}")
+                results["jobs_failed"].append({"job": "cleanup_assets", "error": str(e)})
+        else:
+            results["jobs_skipped"].append({"job": "cleanup_assets", "reason": "Disabled in configuration"})
+
         # ── Step 5/6: Plex Upload ─────────────────────────────────────────────
         if flow_config.get("plex_upload", {}).get("enabled", False):
             log_step(LogTags.WORKFLOW, 5, 6, "Uploading posters to Plex")
@@ -733,6 +769,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             "border_replacer": "Border Replacer",
             "detect_unmatched": "Detect Unmatched",
             "plex_upload": "Plex Upload",
+            "cleanup_assets": "Asset Cleanup",
         }
 
         def _fmt_simple_list(items: list, include_error: bool = False) -> str:

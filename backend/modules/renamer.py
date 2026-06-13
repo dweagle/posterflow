@@ -425,6 +425,21 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                         error=str(e)
                     )
 
+        # ── Asset cleanup (opt-in toggle, standalone runs only) ────────────
+        # Skipped for workflow children — the workflow runs cleanup at its own
+        # tail (after border/upload) so the final folders exist first.
+        cleanup_summary = None
+        if triggered_by != "workflow":
+            from modules.cleanup import maybe_run_asset_cleanup, summarize_cleanup
+            cleanup_result = maybe_run_asset_cleanup(
+                db,
+                config_data=config_data,
+                dry_run=config_data.get("dry_run", False),
+                triggered_by=triggered_by,
+                job=job,
+            )
+            cleanup_summary = summarize_cleanup(cleanup_result)
+
         stats = result.get("stats", {})
         update_job_state(
             db,
@@ -469,7 +484,7 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                         "value": _build_renamer_section(output.get("collections", [])),
                         "inline": False,
                     },
-                ],
+                ] + ([{"name": "Asset Cleanup", "value": cleanup_summary, "inline": False}] if cleanup_summary else []),
                 color=0x4CAF50,
             )
         log_section_end(LogTags.POSTER_RENAMER, "Background Poster Renamer Complete")

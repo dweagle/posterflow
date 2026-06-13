@@ -194,6 +194,11 @@ export interface IdarrFlowJobConfig {
   sync_after_run: boolean
 }
 
+export interface CleanupFlowJobConfig {
+  enabled: boolean
+  delete_unknown: boolean
+}
+
 export interface FlowConfig {
   idarr: IdarrFlowJobConfig
   sync_drives: FlowJobConfig
@@ -201,6 +206,7 @@ export interface FlowConfig {
   detect_unmatched: FlowJobConfig
   border_replacer: FlowJobConfig
   plex_upload: FlowJobConfig
+  cleanup_assets: CleanupFlowJobConfig
 }
 
 export interface FlowResult {

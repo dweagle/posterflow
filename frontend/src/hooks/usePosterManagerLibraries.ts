@@ -9,6 +9,8 @@ interface OriginalBorderSettings {
   width: number
   mode: 'incremental' | 'full'
   autoRunBorder: boolean
+  autoRunCleanup: boolean
+  cleanupDeleteUnknown: boolean
   holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
@@ -17,6 +19,8 @@ interface OriginalBorderSettings {
 interface UsePosterManagerLibrariesParams {
   activeTab: PosterManagerTab
   autoRunBorder: boolean
+  autoRunCleanup: boolean
+  cleanupDeleteUnknown: boolean
   originalLibrarySelectionRef: MutableRefObject<Set<string> | null>
   originalBorderSettingsRef: MutableRefObject<OriginalBorderSettings | null>
   setHasUnsavedLibraryChanges: (value: boolean) => void
@@ -27,6 +31,8 @@ interface UsePosterManagerLibrariesParams {
 export const usePosterManagerLibraries = ({
   activeTab,
   autoRunBorder,
+  autoRunCleanup,
+  cleanupDeleteUnknown,
   originalLibrarySelectionRef,
   originalBorderSettingsRef,
   setHasUnsavedLibraryChanges,
@@ -193,6 +199,8 @@ export const usePosterManagerLibraries = ({
 
       if (activeTab === 'rename') {
         settingsToSave['auto_run_border'] = autoRunBorder ? 'true' : 'false'
+        settingsToSave['auto_run_cleanup'] = autoRunCleanup ? 'true' : 'false'
+        settingsToSave['cleanup_delete_unknown'] = cleanupDeleteUnknown ? 'true' : 'false'
       }
 
       await saveBulkSettings(settingsToSave)
@@ -209,6 +217,8 @@ export const usePosterManagerLibraries = ({
       if (activeTab === 'rename') {
         if (originalBorderSettingsRef.current) {
           originalBorderSettingsRef.current.autoRunBorder = autoRunBorder
+          originalBorderSettingsRef.current.autoRunCleanup = autoRunCleanup
+          originalBorderSettingsRef.current.cleanupDeleteUnknown = cleanupDeleteUnknown
         }
         setHasUnsavedBorderChanges(false)
       }

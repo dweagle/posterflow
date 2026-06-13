@@ -78,6 +78,8 @@ function PosterManager() {
     width: number
     mode: 'incremental' | 'full'
     autoRunBorder: boolean
+    autoRunCleanup: boolean
+    cleanupDeleteUnknown: boolean
     holidaySchedules: BorderHolidaySchedule[]
     skipRunOutsideHoliday: boolean
     removeBorders: boolean
@@ -128,6 +130,8 @@ function PosterManager() {
     borderMode,
     newColor,
     autoRunBorder,
+    autoRunCleanup,
+    cleanupDeleteUnknown,
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,
@@ -135,6 +139,8 @@ function PosterManager() {
     setBorderMode,
     setNewColor,
     setAutoRunBorder,
+    setAutoRunCleanup,
+    setCleanupDeleteUnknown,
     setSkipRunOutsideHoliday,
     setRemoveBorders,
     fetchBorderSettings,
@@ -208,6 +214,8 @@ function PosterManager() {
   } = usePosterManagerLibraries({
     activeTab,
     autoRunBorder,
+    autoRunCleanup,
+    cleanupDeleteUnknown,
     originalLibrarySelectionRef,
     originalBorderSettingsRef,
     setHasUnsavedLibraryChanges,
@@ -355,6 +363,8 @@ function PosterManager() {
     borderWidth,
     borderMode,
     autoRunBorder,
+    autoRunCleanup,
+    cleanupDeleteUnknown,
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,
@@ -476,6 +486,8 @@ function PosterManager() {
           saving={saving}
           renaming={renaming}
           autoRunBorder={autoRunBorder}
+          autoRunCleanup={autoRunCleanup}
+          cleanupDeleteUnknown={cleanupDeleteUnknown}
           libraryConfigs={libraryConfigs}
           selectedLibraries={selectedLibraries}
           manualEntries={manualEntries}
@@ -491,6 +503,8 @@ function PosterManager() {
           onSaveSettings={saveRenameSettings}
           onRunRename={handleStartRename}
           onSetAutoRunBorder={setAutoRunBorder}
+          onSetAutoRunCleanup={setAutoRunCleanup}
+          onSetCleanupDeleteUnknown={setCleanupDeleteUnknown}
           onToggleLibrarySelection={toggleLibrarySelection}
           onFormTitleChange={setFormTitle}
           onFormYearChange={setFormYear}

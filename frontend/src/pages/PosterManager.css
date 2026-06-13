@@ -3468,6 +3468,25 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   height: 16px;
 }
 
+/* Inline row of checkbox options (e.g. Asset Cleanup + its sub-toggle) */
+.checkbox-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.75rem;
+}
+
+.checkbox-option-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.checkbox-option-with-info .toolbar-info svg {
+  width: 14px;
+  height: 14px;
+}
+
 .idarr-scope-selector {
   display: flex;
   flex-direction: column;

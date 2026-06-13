@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, Eye, Save, Waves, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Eye, Info, Save, Waves, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget } from '../../api/client'
 import Toolbar from './Toolbar'
@@ -16,7 +16,7 @@ type FlowTabProps = {
   formatPercent: (percent: number) => string
   onSaveFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
-  onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error', value: boolean) => void
+  onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown', value: boolean) => void
   onChangeIdarrFlowConfig: (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => void
   onToggleIdarrScope: (scopeIndex: number, included: boolean) => void
 }
@@ -169,6 +169,30 @@ function FlowTab({
                 <input type="checkbox" checked={flowConfig.rename_posters.stop_on_error} onChange={(e) => onChangeFlowConfig('rename_posters', 'stop_on_error', e.target.checked)} />
                 <span>Stop workflow if this step fails</span>
               </label>
+              <div className="checkbox-option-row">
+                <div className="checkbox-option-with-info">
+                  <label className="checkbox-option">
+                    <input type="checkbox" checked={!!flowConfig.cleanup_assets?.enabled} onChange={(e) => onChangeFlowConfig('cleanup_assets', 'enabled', e.target.checked)} />
+                    <span>Asset Cleanup</span>
+                  </label>
+                  <span className="toolbar-info" tabIndex={0}>
+                    <Info size={14} />
+                    <div className="toolbar-tooltip">Removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename/border, before Plex upload.</div>
+                  </span>
+                </div>
+                {flowConfig.cleanup_assets?.enabled && (
+                  <div className="checkbox-option-with-info">
+                    <label className="checkbox-option">
+                      <input type="checkbox" checked={!!flowConfig.cleanup_assets?.delete_unknown} onChange={(e) => onChangeFlowConfig('cleanup_assets', 'delete_unknown', e.target.checked)} />
+                      <span>Also remove unknown/stray folders</span>
+                    </label>
+                    <span className="toolbar-info" tabIndex={0}>
+                      <Info size={14} />
+                      <div className="toolbar-tooltip">Also deletes folders that match no movie/show/collection and have no usable ID or title (custom or hand-dropped folders). Riskier — leave off unless your assets folder is strictly Radarr/Sonarr/Plex-managed.</div>
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
