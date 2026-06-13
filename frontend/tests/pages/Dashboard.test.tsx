@@ -7,7 +7,6 @@ const mockNavigate = vi.fn()
 const mockShowToast = vi.fn()
 
 const mockGetStats = vi.fn()
-const mockGetUnmatchedStats = vi.fn()
 const mockGetSchedules = vi.fn()
 const mockGetDrives = vi.fn()
 const mockRunFlow = vi.fn()
@@ -26,13 +25,21 @@ vi.mock('../../src/contexts/UnmatchedContext', () => ({
   useUnmatched: () => ({
     jobs: [],
     refreshStats: vi.fn(),
-    unmatchedStats: null,
+    unmatchedStats: {
+      summary: {
+        movies: { total: 10, unmatched: 2, percent_complete: 80 },
+        series: { total: 5, unmatched: 1, percent_complete: 80 },
+        seasons: { total: 0, unmatched: 0, percent_complete: 0 },
+        collections: { total: 0, unmatched: 0, percent_complete: 0 },
+        grand_total: { total: 15, unmatched: 3, percent_complete: 80 },
+      },
+      last_run: '2026-02-15T00:00:00Z',
+    },
   }),
 }))
 
 vi.mock('../../src/api/client', () => ({
   getStats: (...args: unknown[]) => mockGetStats(...args),
-  getUnmatchedStats: (...args: unknown[]) => mockGetUnmatchedStats(...args),
   getSchedules: (...args: unknown[]) => mockGetSchedules(...args),
   getDrives: (...args: unknown[]) => mockGetDrives(...args),
   getRecentSyncedPosters: (...args: unknown[]) => mockGetRecentSyncedPosters(...args),
@@ -66,16 +73,6 @@ describe('Dashboard', () => {
       },
       subscribed_drives_by_type: { cl2k: 1, mm2k: 1, custom: 1 },
     })
-    mockGetUnmatchedStats.mockResolvedValue({
-      summary: {
-        movies: { total: 10, unmatched: 2, percent_complete: 80 },
-        series: { total: 5, unmatched: 1, percent_complete: 80 },
-        seasons: { total: 0, unmatched: 0, percent_complete: 0 },
-        collections: { total: 0, unmatched: 0, percent_complete: 0 },
-        grand_total: { total: 15, unmatched: 3, percent_complete: 80 },
-      },
-      last_run: '2026-02-15T00:00:00Z',
-    })
     mockGetSchedules.mockResolvedValue([])
     mockGetDrives.mockResolvedValue([])
     mockGetRecentSyncedPosters.mockResolvedValue({ items: [] })
@@ -90,7 +87,6 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(mockGetStats).toHaveBeenCalledTimes(1)
-      expect(mockGetUnmatchedStats).toHaveBeenCalledTimes(1)
       expect(mockGetSchedules).toHaveBeenCalledTimes(1)
       expect(mockGetDrives).toHaveBeenCalledTimes(1)
       expect(mockGetRecentSyncedPosters).toHaveBeenCalledWith(100)
