@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-13
+### Added
+- Poster Manager: asset cleanup that removes asset/tmp folder items not matching any Sonarr, Radarr, or Plex item, with toggles on the Workflow and Poster Renamer pages.
+- Maker Tools: configurable server-side image export folder for PSD exports, plus a new Photopea editor wrapper for in-app PSD editing and image exporting.
+
+### Changed
+- Community Requests: claiming a request that is already claimed now shows a claim-conflict modal instead of failing silently.
+- Plex Upload: clarified the sync-drives option wording in the settings UI.
+
 ## [0.8.1] - 2026-06-11
 ### Added
 - Plex Upload: track Plex rating keys to detect items that were removed and re-added, triggering a fresh upload; clearer logging throughout the upload process.
