@@ -380,6 +380,13 @@
   // ---- controls ------------------------------------------------------------
   saveBtn.addEventListener('click', saveDoc);
   jpgBtn.addEventListener('click', exportJpg);
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveDoc();
+    }
+  });
   box.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   box.querySelector('[data-act="collapse"]').addEventListener('click', (e) => {
     box.classList.toggle('collapsed');
