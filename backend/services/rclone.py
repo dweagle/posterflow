@@ -525,6 +525,7 @@ scope = drive.readonly
                     *auth_args,
                     '--fast-list',
                     '--tpslimit=8',
+                    '--check-first',
                     '--stats', '1s',
                     '--stats-log-level', 'NOTICE',
                     '-v',
@@ -540,7 +541,9 @@ scope = drive.readonly
             files_uploaded = 0
             total_files = sum(1 for path in local_path.rglob("*") if path.is_file())
             checks_re = re.compile(r"Checks:\s*([\d,]+)\s*/\s*([\d,]+)")
+            listed_re = re.compile(r"Listed\s+([\d,]+)")
             transferred_re = re.compile(r"Transferred:\s*([\d,]+)\s*/\s*([\d,]+)")
+            max_listed = 0
 
             if progress_callback:
                 try:
@@ -551,18 +554,33 @@ scope = drive.readonly
             for line in process.stdout:
                 recent_lines.append(line)
 
+                listed_match = listed_re.search(line)
+                if listed_match:
+                    try:
+                        max_listed = max(max_listed, int(listed_match.group(1).replace(",", "")))
+                    except Exception:  # nosec B110
+                        pass
+
                 checks_match = checks_re.search(line)
                 if checks_match and progress_callback:
                     try:
                         checked = int(checks_match.group(1).replace(",", ""))
                         checked_total = int(checks_match.group(2).replace(",", ""))
                         effective_total = max(total_files, checked_total, 1)
-                        progress_callback(
-                            min(checked, effective_total),
-                            effective_total,
-                            "checking",
-                            f"Checked {checked:,}/{effective_total:,} files",
-                        )
+                        if checked <= 0:
+                            progress_callback(
+                                max_listed,
+                                effective_total,
+                                "listing",
+                                "Listing remote and local files...",
+                            )
+                        else:
+                            progress_callback(
+                                min(checked, effective_total),
+                                effective_total,
+                                "checking",
+                                f"Checked {checked:,}/{effective_total:,} files",
+                            )
                     except Exception as callback_error:
                         log_warning(LogTags.RCLONE, f"Upload progress callback error: {callback_error}")
 

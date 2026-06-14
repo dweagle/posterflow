@@ -262,10 +262,13 @@ def _run_idarr_personal_sync_inline(
     def _sync_progress(current: int, total: int, phase: str, message: str) -> None:
         try:
             ratio = min(max(current / max(total, 1), 0.0), 1.0)
-            if phase == "checking":
-                scaled = int(progress_start + ratio * span * 0.4)
+            if phase == "listing":
+                listing_ratio = min(current / max(2 * max(total, 1), 1), 1.0)
+                scaled = int(progress_start + listing_ratio * span * 0.45)
+            elif phase == "checking":
+                scaled = int(progress_start + span * 0.45 + ratio * span * 0.07)
             elif phase in {"uploading", "uploading_stats", "uploading_file"}:
-                scaled = int(progress_start + span * 0.4 + ratio * span * 0.6)
+                scaled = int(progress_start + span * 0.52 + ratio * span * 0.48)
             elif phase == "complete":
                 scaled = progress_end
             else:
@@ -571,10 +574,13 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
             try:
                 normalized_total = max(total, 1)
                 ratio = min(max(current / normalized_total, 0.0), 1.0)
-                if phase == "checking":
-                    scaled_progress = int(20 + ratio * 55)
+                if phase == "listing":
+                    listing_ratio = min(current / max(2 * normalized_total, 1), 1.0)
+                    scaled_progress = int(20 + listing_ratio * 45)
+                elif phase == "checking":
+                    scaled_progress = int(65 + ratio * 7)
                 elif phase in {"uploading", "uploading_stats", "uploading_file"}:
-                    scaled_progress = int(75 + ratio * 24)
+                    scaled_progress = int(72 + ratio * 27)
                 elif phase == "complete":
                     scaled_progress = 99
                 else:
@@ -582,7 +588,11 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
                 current_progress = int(job.progress or 0)
                 next_progress = max(current_progress, min(scaled_progress, 99))
 
-                if phase == "checking":
+                if phase == "listing":
+                    sync_message = _sanitize_message(
+                        message or "Listing remote and local files..."
+                    )
+                elif phase == "checking":
                     sync_message = _sanitize_message(
                         f"Scanning upload status: {current}/{normalized_total} files checked"
                     )
@@ -614,7 +624,7 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
                 if next_progress == last_progress_emit and sync_message == str(job.message or ""):
                     return
 
-                if next_progress == last_progress_emit and phase not in {"complete", "checking"}:
+                if next_progress == last_progress_emit and phase not in {"complete", "checking", "listing"}:
                     return
 
                 update_job_state(

@@ -284,6 +284,71 @@ class TestSyncFolder:
 
 
 # ---------------------------------------------------------------------------
+# upload_folder — listing-phase progress so the bar moves while rclone lists
+# the remote drive (Checks pinned at 0 / total during that slow window)
+# ---------------------------------------------------------------------------
+
+class TestUploadFolderProgress:
+    def _service(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(settings, "config_dir", tmp_path)
+        monkeypatch.setattr("services.rclone.shutil.which", lambda _: "/usr/bin/rclone")
+        svc = RcloneService()
+        monkeypatch.setattr(svc, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
+        return svc
+
+    def _make_popen(self, monkeypatch, output_lines, returncode=0):
+        captured = {}
+
+        def _fake_popen(args, **kwargs):
+            captured["args"] = args
+            proc = SimpleNamespace(
+                stdout=io.StringIO("\n".join(output_lines) + "\n"),
+                returncode=returncode,
+            )
+            proc.wait = lambda: None
+            return proc
+
+        monkeypatch.setattr("services.rclone.subprocess.Popen", _fake_popen)
+        return captured
+
+    def test_listing_phase_reports_growing_listed_count(self, monkeypatch, tmp_path):
+        """While Checks stays 0/total, the growing 'Listed N' count must drive a
+        'listing' phase so the progress bar moves instead of freezing."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "poster.jpg").write_text("x")
+
+        output = [
+            "Checks:                 0 / 5233, 0%, Listed 1200",
+            "Checks:                 0 / 5233, 0%, Listed 4800",
+            "Checks:              5233 / 5233, 100%, Listed 5233",
+        ]
+        self._make_popen(monkeypatch, output, returncode=0)
+
+        calls = []
+        result = svc.upload_folder(src, "drive-123", progress_callback=lambda *a: calls.append(a))
+        assert result["success"] is True
+
+        listing_calls = [c for c in calls if c[2] == "listing"]
+        assert listing_calls, "expected a 'listing' phase while Checks were pinned at 0"
+        # current arg (listed count) must increase across the listing window
+        listed_counts = [c[0] for c in listing_calls]
+        assert listed_counts == sorted(listed_counts)
+        assert max(listed_counts) >= 4800
+        # Once checks complete, it switches to the 'checking' phase
+        assert any(c[2] == "checking" for c in calls)
+
+    def test_upload_uses_check_first(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
+        svc.upload_folder(src, "drive-123")
+        assert "--check-first" in captured["args"]
+
+
+# ---------------------------------------------------------------------------
 # OAuth credentials written to config file (not argv)
 # ---------------------------------------------------------------------------
 
