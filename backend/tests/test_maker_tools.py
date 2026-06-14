@@ -890,6 +890,30 @@ def test_psd_export_sanitizes_dangerous_filename_chars(client, test_db):
         assert ch not in filename, f"Unsafe char {ch!r} found in filename: {filename}"
 
 
+def test_psd_export_strips_leading_dots_so_file_isnt_hidden(client, test_db):
+    """A title starting with '...' must not produce a hidden dotfile — the scanner,
+    poster renamer (IDarr), and drive counts all skip names starting with '.', so
+    such a file would be invisible (and Photopea couldn't load it)."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "...And Then", "year": "2026", "poster_paths": ["/p1.jpg"]},
+            )
+
+    assert response.status_code == 200
+    filename = response.json()["filename"]
+    assert not filename.startswith("."), f"Filename is hidden: {filename}"
+    assert filename.startswith("And Then")
+
+
 # ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/psd-exports/{filename} — security & serving
 # ---------------------------------------------------------------------------
@@ -913,9 +937,20 @@ def test_serve_psd_export_non_psd_extension_rejected(client):
     assert response.status_code == 400
 
 
-def test_serve_psd_export_dotdot_in_name_rejected(client):
-    response = client.get("/api/maker-tools/psd-exports/foo..bar.psd")
-    assert response.status_code == 400
+def test_serve_psd_export_embedded_dotdot_allowed(client, test_db):
+    # Embedded ".." is a legal filename, not traversal (no separator). It must be
+    # served, not rejected — e.g. titles like "Spider-Man... Home".
+    with tempfile.TemporaryDirectory() as tmpdir:
+        psd_path = Path(tmpdir) / "foo..bar.psd"
+        psd_path.write_bytes(b"FAKEPSDCONTENT")
+
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        response = client.get("/api/maker-tools/psd-exports/foo..bar.psd")
+
+    assert response.status_code == 200
+    assert response.content == b"FAKEPSDCONTENT"
 
 
 def test_serve_psd_export_file_not_found_returns_404(client):

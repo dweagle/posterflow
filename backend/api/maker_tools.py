@@ -1364,8 +1364,14 @@ _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_temp
 
 
 def _validate_psd_filename(filename: str) -> None:
-    """Reject path traversal and non-PSD names. Raises HTTP 400 on failure."""
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".psd"):
+    """Reject path traversal and non-PSD names. Raises HTTP 400 on failure.
+
+    Embedded dots are allowed (titles like "Spider-Man... Home" are valid); with
+    separators already blocked, a ".." substring can't ascend a directory, so only
+    path separators and the bare "."/".." names are rejected.
+    """
+    if ("/" in filename or "\\" in filename or filename in (".", "..")
+            or not filename.lower().endswith(".psd")):
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
 
@@ -1380,8 +1386,13 @@ _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg")
 
 
 def _validate_image_filename(filename: str) -> None:
-    """Reject path traversal and non-image names. Raises HTTP 400 on failure."""
-    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(_IMAGE_EXTS):
+    """Reject path traversal and non-image names. Raises HTTP 400 on failure.
+
+    Embedded dots are allowed; with separators already blocked, a ".." substring
+    can't ascend a directory, so only separators and bare "."/".." are rejected.
+    """
+    if ("/" in filename or "\\" in filename or filename in (".", "..")
+            or not filename.lower().endswith(_IMAGE_EXTS)):
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
 
@@ -1833,6 +1844,8 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     #   - else open_photopea on → save to /config/psd_cache (temp, URL-accessible)
     #   - else                  → stream bytes as a browser download (no saving)
     safe_title = re.sub(r'[<>:"/\\|?*]', "", payload.title).strip()
+    # Strip leading dots so the file isn't hidden — scanner/renamer/idarr skip dotfiles
+    safe_title = safe_title.lstrip(".").strip()
     base_stem = f"{safe_title} ({payload.year})" if payload.year else safe_title
     filename = f"{base_stem}.psd"
     output_filename = f"{base_stem}{_build_idarr_id_suffix(payload)}.psd"
