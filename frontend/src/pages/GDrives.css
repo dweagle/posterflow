@@ -583,15 +583,42 @@
   background: #252525;
   border: 1px solid #444;
   border-radius: 6px;
-  padding: 0.4rem 0.6rem;
+  padding: 0.5rem 0.6rem;
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.45rem;
   z-index: 9999;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
   min-width: 240px;
   max-width: 320px;
-  white-space: nowrap;
+}
+
+.drive-id-tooltip-desc {
+  font-size: 0.7rem;
+  color: #ddd;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.drive-id-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.drive-id-tooltip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: #64b5f6;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.drive-id-tooltip-link:hover {
+  color: #90caf9;
+  text-decoration: underline;
 }
 
 .drive-id-tooltip-text {

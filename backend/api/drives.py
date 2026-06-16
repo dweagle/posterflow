@@ -17,6 +17,7 @@ from models.schedule import Schedule
 from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
+from services.drive_loader import get_drive_descriptions
 
 router = APIRouter(prefix="/api/drives", tags=["drives"])
 
@@ -142,6 +143,7 @@ class DriveSchema(BaseModel):
     display_name: str | None = None
     drive_id: str
     style_type: str
+    description: str | None = None
     subscribed: bool
     sync_enabled: bool
     priority: int
@@ -199,23 +201,27 @@ async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
         load_drives_from_json(db)
         drives = db.query(Drive).order_by(Drive.priority.desc(), Drive.name).all()
     
+    # Descriptions are static reference data read from the drives.json source
+    descriptions = get_drive_descriptions()
+
     # Calculate poster counts and stats for each drive
     drive_schemas = []
     for drive in drives:
         poster_count = db.query(Poster).filter(Poster.drive_id == drive.drive_id).count()
-        
+
         # Count unprocessed posters (last_processed IS NULL)
         unprocessed_count = db.query(Poster).filter(
             Poster.drive_id == drive.drive_id,
             Poster.last_processed.is_(None)
         ).count()
-        
+
         drive_dict = {
             'id': drive.id,
             'name': drive.name,
             'display_name': drive.display_name,
             'drive_id': drive.drive_id,
             'style_type': drive.style_type,
+            'description': descriptions.get(drive.drive_id),
             'subscribed': drive.subscribed,
             'sync_enabled': drive.sync_enabled,
             'priority': drive.priority,

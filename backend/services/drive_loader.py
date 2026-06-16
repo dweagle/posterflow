@@ -1,5 +1,6 @@
 import json
 import requests
+from pathlib import Path
 from typing import Dict, Any, Optional
 from core.config import settings
 from core.logging import LogTags, log_success, log_error, log_warning, log_info
@@ -14,6 +15,40 @@ REQUEST_TIMEOUT = 10
 
 # Persistent cache location (survives container rebuilds)
 CACHE_PATH = settings.config_dir / "drives_cache.json"
+
+# Bundled drives.json shipped inside the container (fallback for descriptions)
+BUNDLED_PATH = Path(__file__).parent.parent / "assets" / "drives.json"
+
+
+def get_drive_descriptions() -> Dict[str, str]:
+    """
+    Build a drive_id -> description map from the drives.json source.
+
+    Descriptions are static reference data (not stored in the DB), so they are
+    read directly from the runtime cache, falling back to the bundled asset.
+    Reads the files directly (no logging) since this runs on every drive list.
+
+    Returns:
+        Mapping of drive_id to its description (drives without one are omitted).
+    """
+    data: Optional[DrivesPayload] = None
+    for path in (CACHE_PATH, BUNDLED_PATH):
+        try:
+            if path.exists():
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                break
+        except Exception as e:
+            log_warning(LogTags.DRIVES, f"Failed to read {path.name} for descriptions: {e}")
+
+    if not data:
+        return {}
+
+    return {
+        d["drive_id"]: d["description"]
+        for d in data.get("drives", [])
+        if d.get("drive_id") and d.get("description")
+    }
 
 
 def save_to_cache(data: DrivesPayload) -> None:

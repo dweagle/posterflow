@@ -5,9 +5,15 @@ import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check } from 'lucide-react'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import './GDrives.css'
+
+// Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
+const driveFolderUrl = (driveId: string): string | null =>
+  driveId && !driveId.startsWith('manual-')
+    ? `https://drive.google.com/drive/folders/${driveId}`
+    : null
 
 type CustomDriveModalInput = {
   name: string
@@ -541,14 +547,30 @@ function GDrives() {
                               onMouseEnter={() => showIdTooltip(drive.id)}
                               onMouseLeave={hideIdTooltip}
                             >
-                              <span className="drive-id-tooltip-text">{drive.drive_id}</span>
-                              <button
-                                className="btn-copy-id"
-                                onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
-                                title="Copy to clipboard"
-                              >
-                                {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
-                              </button>
+                              {drive.description && (
+                                <span className="drive-id-tooltip-desc">{drive.description}</span>
+                              )}
+                              <div className="drive-id-tooltip-row">
+                                <span className="drive-id-tooltip-text">{drive.drive_id}</span>
+                                <button
+                                  className="btn-copy-id"
+                                  onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
+                                  title="Copy to clipboard"
+                                >
+                                  {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
+                                </button>
+                              </div>
+                              {driveFolderUrl(drive.drive_id) && (
+                                <a
+                                  className="drive-id-tooltip-link"
+                                  href={driveFolderUrl(drive.drive_id)!}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <ExternalLink size={11} /> Open in Drive
+                                </a>
+                              )}
                             </div>
                           )}
                         </div>
@@ -672,14 +694,30 @@ function GDrives() {
                       onMouseEnter={() => showIdTooltip(drive.id)}
                       onMouseLeave={hideIdTooltip}
                     >
-                      <span className="drive-id-tooltip-text">{drive.drive_id}</span>
-                      <button
-                        className="btn-copy-id"
-                        onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
-                        title="Copy to clipboard"
-                      >
-                        {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
-                      </button>
+                      {drive.description && (
+                        <span className="drive-id-tooltip-desc">{drive.description}</span>
+                      )}
+                      <div className="drive-id-tooltip-row">
+                        <span className="drive-id-tooltip-text">{drive.drive_id}</span>
+                        <button
+                          className="btn-copy-id"
+                          onClick={(e) => { e.stopPropagation(); handleCopyId(drive.id, drive.drive_id) }}
+                          title="Copy to clipboard"
+                        >
+                          {copiedId === drive.id ? <Check size={11} /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                      {driveFolderUrl(drive.drive_id) && (
+                        <a
+                          className="drive-id-tooltip-link"
+                          href={driveFolderUrl(drive.drive_id)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={11} /> Open in Drive
+                        </a>
+                      )}
                     </div>
                   )}
                 </div>

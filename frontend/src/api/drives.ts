@@ -8,6 +8,7 @@ export interface Drive {
   display_name: string | null
   drive_id: string
   style_type: DriveStyleType
+  description: string | null
   subscribed: boolean
   sync_enabled: boolean
   priority: number
