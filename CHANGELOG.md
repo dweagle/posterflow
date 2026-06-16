@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-16
+### Added
+- Community Requests: poster style (CL2K or MM2K) when submitting a request is now required.
+- Community Requests: an "All / My Requests" filter, separate from the status filter, to show only your own requests.
+- Community Requests: sidebar badges — poster makers see the count of pending (unclaimed) requests; requesters see their own pending and in-progress counts only.
+- Maker Tools: a Photopea plugin for PosterFlow to manage seasons and specials directly within the Photopea editor. Removed wrapper to improve performance and not intefere with Photopeas functions.
+- Google Drives: the drive info popup now links to the Google Drives and shows a short description of each.
+
+### Changed
+- Unmatched Assets: Arr items that have an in-cinema status are usually ignored on unmatched asset stats. If an item still carries a non-released status, but is in the users library and missing a poster, it no longer is left out of the unmaatched stats. (Duke's support issue)
+- Poster Renamer: prunes stale symlinks and uses a more reliable file-copy process. (seks' support issue)
+- Drives: removed the redundant tooltip on the drive ID info buttons for a cleaner look.
+
+### Fixed
+- Maker Tools: PSD filename validation now allows embedded dots and strips leading dots.
+- Sync: more accurate progress reporting during the rclone listing phase.
+- Dashboard: Drive/poster statistics now show total counts correctly.
+
+### Security
+- Community Requests: submissions now require a verified Discord token. The server derives the requester's identity from the token instead of a client-supplied ID, enforces per-account and per-IP daily limits, and direct anonymous access to the submission database functions is revoked. May require user to sign back in with Discord after update.
+
 ## [0.8.4] - 2026-06-13
 ### Fixed
 - IDarr: fixed ID collision issue on items with same cross-media ids
