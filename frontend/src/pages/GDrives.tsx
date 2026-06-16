@@ -538,7 +538,7 @@ function GDrives() {
                           onMouseEnter={() => showIdTooltip(drive.id)}
                           onMouseLeave={hideIdTooltip}
                         >
-                          <button className="btn-drive-id-info" title="Show Drive ID">
+                          <button className="btn-drive-id-info">
                             <Info size={13} />
                           </button>
                           {idTooltip === drive.id && (
@@ -685,7 +685,7 @@ function GDrives() {
                   onMouseEnter={() => showIdTooltip(drive.id)}
                   onMouseLeave={hideIdTooltip}
                 >
-                  <button className="btn-drive-id-info" title="Show Drive ID">
+                  <button className="btn-drive-id-info">
                     <Info size={13} />
                   </button>
                   {idTooltip === drive.id && (
