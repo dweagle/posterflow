@@ -15,6 +15,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from core.auth import mint_psd_access_token, verify_psd_access_token
 from core.config import settings as app_settings
 from core.job_queue import job_queue
 from core.logging import LogIcons, LogTags, log_debug, log_error, log_info, log_success, log_user_action, log_warning
@@ -1470,6 +1471,98 @@ def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
     return content
 
 
+def _measure_logo_density(logo_pil: Image.Image) -> float:
+    """Ratio of non-transparent pixels to total pixels, via the alpha histogram
+    (256 bins — fast, no numpy). Drives the sparse/dense sizing adjustments."""
+    alpha_hist = logo_pil.split()[3].histogram()
+    non_transparent = sum(alpha_hist[11:])  # alpha > 10 = effectively visible
+    total_pixels = logo_pil.width * logo_pil.height
+    return non_transparent / total_pixels if total_pixels > 0 else 1.0
+
+
+def compute_logo_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int, density: float) -> tuple[int, int, int, int]:
+    """Size + place a logo with the Maker Tools formula. Returns (w, h, left, top) in
+    canvas pixels: centered horizontally, bottom-anchored at 1352.13px @ 1500h.
+    The Photopea plugin's Place Logo button mirrors this in JS — keep them in sync."""
+    is_sparse_logo = density < 0.30   # thin/wispy logos → size up
+    is_dense_logo  = density > 0.60   # solid/filled logos → tighter height, mild width reduction
+
+    # Placement constants (reference canvas 1000×1500)
+    logo_bottom = round(canvas_h * (1352.13 / 1500))   # bottom edge at 1352.13px @ 1500h
+    max_logo_top = round(canvas_h * (1100.0 / 1500))   # top must not exceed 1100px @ 1500h
+    max_logo_h = logo_bottom - max_logo_top             # = 252px @ 1500h
+    max_logo_w = round(canvas_w * (800.0 / 1000))      # hard cap 800px @ 1000w
+
+    # Smooth continuous formula: taller/squarer logos get narrower targets.
+    # Ceiling scales with source pixel area (size bucket):
+    #   small  (<200K px, e.g. 788×131 banner)  → ceiling 0.85: banner logos fill more canvas
+    #   medium (200K–1.5M px, most logos)        → ceiling 0.84: standard
+    #   large  (>1.5M px, e.g. 4080×921)         → ceiling 0.93: high-res logos downscale cleanly
+    _logo_px = src_w * src_h
+    if _logo_px < 200_000:
+        _ceiling, _size_label = 0.85, "small"
+    elif _logo_px > 1_500_000:
+        _ceiling, _size_label = 0.93, "large"
+    else:
+        _ceiling, _size_label = 0.84, "medium"
+    projected_h_at_max = src_h * (max_logo_w / src_w)
+    _ref_h = canvas_w * (90.0 / 1000)
+    _clamped_ph = max(projected_h_at_max, _ref_h)
+    _target_ratio = _ceiling * (_ref_h / _clamped_ph) ** 0.40
+    # Floor scales with density so denser logos get a slightly higher minimum width.
+    _density_floor = 0.58 + max(0.0, density - 0.30) * 0.10
+    target_logo_w = round(canvas_w * max(_density_floor, min(_ceiling, _target_ratio)))
+    log_debug(LogTags.API, f"Logo sizing:  proj_h={projected_h_at_max:.0f}px  floor={_density_floor:.3f}  ceiling={_ceiling:.2f} ({_size_label})  base_target_w={target_logo_w}px ({target_logo_w/canvas_w*100:.1f}%)")
+
+    # Scale: aim for target width, clamp by max height, cap by max width.
+    # Logos wider than 600px (at 1000w reference) get a tighter 225px height cap.
+    wide_threshold = round(canvas_w * (600.0 / 1000))
+    effective_max_h = round(canvas_h * (225.0 / 1500)) if target_logo_w > wide_threshold else max_logo_h
+
+    # Apply density adjustments
+    if is_sparse_logo:
+        # More transparent → more boost. Linear: 0% at threshold (0.30) → +15% at density 0.
+        t = (0.30 - density) / 0.30
+        density_mult = 1.0 + (t * 0.15)
+        target_logo_w = min(round(target_logo_w * density_mult), max_logo_w)
+        effective_max_h = min(round(effective_max_h * density_mult), max_logo_h)
+        log_debug(LogTags.API, f"Logo density: sparse boost +{(density_mult - 1.0) * 100:.1f}% → target_w={target_logo_w}px  max_h={effective_max_h}px")
+    elif is_dense_logo:
+        # Dense logos: gentle width reduction (max 10%), aggressive height cap.
+        t = (density - 0.60) / (1.0 - 0.60)
+        w_mult = 1.0 - (t * 0.10)
+        target_logo_w = round(target_logo_w * w_mult)
+        effective_max_h = round(canvas_h * (225.0 / 1500) * (1.0 - t * 0.55))
+        log_debug(LogTags.API, f"Logo density: dense shrink w×{w_mult:.3f} → target_w={target_logo_w}px  max_h={effective_max_h}px")
+    scale = target_logo_w / src_w
+    if src_h * scale > effective_max_h:
+        scale = effective_max_h / src_h
+    if src_w * scale > max_logo_w:
+        scale = max_logo_w / src_w
+
+    logo_w = round(src_w * scale)
+    logo_h = round(src_h * scale)
+    log_debug(LogTags.API, f"Logo result:  {logo_w}x{logo_h}px  scale={scale:.4f}  binding={'height' if src_h * (target_logo_w / src_w) > effective_max_h else 'width'}")
+
+    logo_left = (canvas_w - logo_w) // 2
+    logo_top = logo_bottom - logo_h   # bottom-anchored
+    return logo_w, logo_h, logo_left, logo_top
+
+
+def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int) -> tuple[int, int, int, int]:
+    """Scale a poster to the bordered width (canvas − 25px each side), preserving ratio,
+    then center horizontally and top-align at y=25. Returns (w, h, left, top) in canvas px.
+    The plugin's Fit Poster button mirrors this in JS — keep them in sync."""
+    border_px = 25
+    target_w = max(1, canvas_w - (border_px * 2))
+    scale = target_w / src_w
+    new_w = max(1, round(src_w * scale))
+    new_h = max(1, round(src_h * scale))
+    pos_left = (canvas_w - new_w) // 2
+    pos_top = border_px
+    return new_w, new_h, pos_left, pos_top
+
+
 def _build_psd(
     poster_bytes_list: list[bytes],
     logo_bytes_list: list[bytes],
@@ -1513,8 +1606,6 @@ def _build_psd(
     else:
         psd = PSDImage.new("RGB", (canvas_w, canvas_h))
 
-    border_px = 25
-
     # Build the base display name used for all layer names
     base_name = f"{title} ({year})" if title and year else title or "Poster"
 
@@ -1525,16 +1616,10 @@ def _build_psd(
         poster_pil = Image.open(BytesIO(poster_bytes)).convert("RGB")
 
         if fit_within_border:
-            # Scale to the bordered width, preserving ratio, then top-align.
-            target_w = max(1, canvas_w - (border_px * 2))
-            scale = target_w / poster_pil.width
-            new_w = max(1, round(poster_pil.width * scale))
-            new_h = max(1, round(poster_pil.height * scale))
+            # Scale to the bordered width, top-aligned and centered.
+            new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(
+                poster_pil.width, poster_pil.height, canvas_w, canvas_h)
             poster_pil = poster_pil.resize((new_w, new_h), Image.LANCZOS)
-
-            # Top aligned to the border, horizontally centered.
-            pos_left = (canvas_w - new_w) // 2
-            pos_top = border_px
         else:
             # Default behavior: cover-fill to full canvas, then center-crop.
             scale = max(canvas_w / poster_pil.width, canvas_h / poster_pil.height)
@@ -1604,78 +1689,14 @@ def _build_psd(
             log_warning(LogTags.API, f"Skipping unreadable logo image #{logo_idx + 1}: {img_exc}")
             continue
 
-        # Measure pixel density: ratio of non-transparent pixels to total pixels.
-        # Uses the alpha channel histogram (256 bins) — fast, no numpy required.
-        _alpha_hist = logo_pil.split()[3].histogram()
-        _non_transparent = sum(_alpha_hist[11:])  # alpha > 10 = effectively visible
-        _total_pixels = logo_pil.width * logo_pil.height
-        logo_density = _non_transparent / _total_pixels if _total_pixels > 0 else 1.0
-        is_sparse_logo = logo_density < 0.30   # thin/wispy logos → size up
-        is_dense_logo  = logo_density > 0.60   # solid/filled logos → tighter height, mild width reduction
-        density_label = "sparse" if is_sparse_logo else ("dense" if is_dense_logo else "normal")
+        # Measure density and size/place the logo with the shared formula. The Photopea
+        # plugin's Place Logo button mirrors this formula client-side (it can't reach this
+        # http API from inside HTTPS Photopea) — keep the two in sync.
+        logo_density = _measure_logo_density(logo_pil)
+        density_label = "sparse" if logo_density < 0.30 else ("dense" if logo_density > 0.60 else "normal")
         log_debug(LogTags.API, f"Logo source: {logo_pil.width}x{logo_pil.height}px  density={logo_density:.3f} ({density_label})")
-
-        # Placement constants (reference canvas 1000×1500)
-        logo_bottom = round(canvas_h * (1352.13 / 1500))   # bottom edge at 1352.13px @ 1500h
-        max_logo_top = round(canvas_h * (1100.0 / 1500))   # top must not exceed 1100px @ 1500h
-        max_logo_h = logo_bottom - max_logo_top             # = 252px @ 1500h
-        max_logo_w = round(canvas_w * (800.0 / 1000))      # hard cap 800px @ 1000w
-
-        # Smooth continuous formula: taller/squarer logos get narrower targets.
-        # Ceiling scales with source pixel area (size bucket):
-        #   small  (<200K px, e.g. 788×131 banner)  → ceiling 0.85: banner logos fill more canvas
-        #   medium (200K–1.5M px, most logos)        → ceiling 0.84: standard
-        #   large  (>1.5M px, e.g. 4080×921)         → ceiling 0.93: high-res logos downscale cleanly
-        # At 1000w reference: proj_h ≤ 90px → ceiling (flat logos, capped at 800 by max_logo_w)
-        #   proj_h = 133px (Friends, small) → ~750px  |  proj_h = 181px (YF&N, large) → ~704px
-        #   proj_h ≥ 230px → density-dependent floor (0.58–0.63)
-        _logo_px = logo_pil.width * logo_pil.height
-        if _logo_px < 200_000:
-            _ceiling, _size_label = 0.85, "small"
-        elif _logo_px > 1_500_000:
-            _ceiling, _size_label = 0.93, "large"
-        else:
-            _ceiling, _size_label = 0.84, "medium"
-        projected_h_at_max = logo_pil.height * (max_logo_w / logo_pil.width)
-        _ref_h = canvas_w * (90.0 / 1000)
-        _clamped_ph = max(projected_h_at_max, _ref_h)
-        _target_ratio = _ceiling * (_ref_h / _clamped_ph) ** 0.40
-        # Floor scales with density so denser logos get a slightly higher minimum width.
-        # Range: 0.58 at density≤0.30, up to ~0.63 at density=0.80
-        _density_floor = 0.58 + max(0.0, logo_density - 0.30) * 0.10
-        target_logo_w = round(canvas_w * max(_density_floor, min(_ceiling, _target_ratio)))
-        log_debug(LogTags.API, f"Logo sizing:  proj_h={projected_h_at_max:.0f}px  floor={_density_floor:.3f}  ceiling={_ceiling:.2f} ({_size_label})  base_target_w={target_logo_w}px ({target_logo_w/canvas_w*100:.1f}%)")
-
-        # Scale: aim for target width, clamp by max height, cap by max width
-        # Logos wider than 600px (at 1000w reference) get a tighter 225px height cap
-        wide_threshold = round(canvas_w * (600.0 / 1000))
-        effective_max_h = round(canvas_h * (225.0 / 1500)) if target_logo_w > wide_threshold else max_logo_h
-
-        # Apply density adjustments
-        if is_sparse_logo:
-            # More transparent → more boost. Linear: 0% at threshold (0.30) → +15% at density 0.
-            t = (0.30 - logo_density) / 0.30
-            density_mult = 1.0 + (t * 0.15)
-            target_logo_w = min(round(target_logo_w * density_mult), max_logo_w)
-            effective_max_h = min(round(effective_max_h * density_mult), max_logo_h)
-            log_debug(LogTags.API, f"Logo density: sparse boost +{(density_mult - 1.0) * 100:.1f}% → target_w={target_logo_w}px  max_h={effective_max_h}px")
-        elif is_dense_logo:
-            # Dense logos: gentle width reduction (max 10%), aggressive height cap.
-            # Height always derived from the tight 225px base, shrinking up to 55% at max density.
-            t = (logo_density - 0.60) / (1.0 - 0.60)
-            w_mult = 1.0 - (t * 0.10)
-            target_logo_w = round(target_logo_w * w_mult)
-            effective_max_h = round(canvas_h * (225.0 / 1500) * (1.0 - t * 0.55))
-            log_debug(LogTags.API, f"Logo density: dense shrink w×{w_mult:.3f} → target_w={target_logo_w}px  max_h={effective_max_h}px")
-        scale = target_logo_w / logo_pil.width
-        if logo_pil.height * scale > effective_max_h:
-            scale = effective_max_h / logo_pil.height
-        if logo_pil.width * scale > max_logo_w:
-            scale = max_logo_w / logo_pil.width
-
-        logo_w = round(logo_pil.width * scale)
-        logo_h = round(logo_pil.height * scale)
-        log_debug(LogTags.API, f"Logo result:  {logo_w}x{logo_h}px  scale={scale:.4f}  binding={'height' if logo_pil.height * (target_logo_w / logo_pil.width) > effective_max_h else 'width'}")
+        logo_w, logo_h, logo_left, logo_top = compute_logo_geometry(
+            logo_pil.width, logo_pil.height, canvas_w, canvas_h, logo_density)
         logo_pil = logo_pil.resize((logo_w, logo_h), Image.LANCZOS)
 
         # Convert logo to pure white, preserving the original alpha channel
@@ -1683,9 +1704,6 @@ def _build_psd(
         white = Image.new("RGBA", logo_pil.size, (255, 255, 255, 255))
         white.putalpha(alpha)
         logo_pil = white
-
-        logo_left = (canvas_w - logo_w) // 2
-        logo_top = logo_bottom - logo_h   # bottom-anchored
 
         logo_count = len(logo_bytes_list)
         layer_name = f"{base_name} - Logo" if logo_count == 1 else f"{base_name} - Logo {logo_count - logo_idx}"
@@ -1920,9 +1938,16 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             log_warning(LogTags.API, f"PSD save failed: {exc}")
             raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
+        # When a password is set, Photopea fetches the PSD via files:[url] and can't send the
+        # Bearer header — append a signed, file-scoped, expiring token it can use instead.
+        psd_url = f"/api/maker-tools/psd-exports/{output_filename}"
+        token_pair = mint_psd_access_token(db, output_filename)
+        if token_pair is not None:
+            sig, exp = token_pair
+            psd_url = f"{psd_url}?token={sig}&exp={exp}"
         return JSONResponse({
             "filename": output_filename,
-            "psd_url": f"/api/maker-tools/psd-exports/{output_filename}",
+            "psd_url": psd_url,
             "open_photopea": open_photopea,
         })
 
@@ -1935,13 +1960,17 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
 
 
 @router.get("/psd-exports/{filename}")
-def serve_psd_export(filename: str, db: Session = Depends(get_db)) -> Response:
+def serve_psd_export(filename: str, token: str = "", exp: str = "", db: Session = Depends(get_db)) -> Response:
     """Serve a previously-saved PSD file from the configured export folder.
 
-    Used by the Photopea integration to load the file directly from the server.
+    Used by the Photopea integration to load the file directly from the server. This route is
+    exempt from the password middleware (Photopea can't send the Bearer header); instead, when
+    a password is set it requires a signed, file-scoped ?token=&exp= minted at export time.
     Security: filename is validated (no slashes, no traversal, must end in .psd).
     """
     _validate_psd_filename(filename)
+    if not verify_psd_access_token(db, filename, token, exp):
+        raise HTTPException(status_code=401, detail="Unauthorized")
     file_path = _psd_storage_dir(db) / filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
@@ -2011,36 +2040,6 @@ async def save_image_export(filename: str, request: Request, db: Session = Depen
         raise HTTPException(status_code=500, detail=f"Failed to save image: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True})
-
-
-@router.post("/psd-exports/{filename}")
-async def save_psd_from_photopea(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
-    """Receive a Photopea File→Save POST and write the PSD to the export folder.
-
-    Photopea's binary POST body format:
-      bytes 0-1999  — null-padded JSON metadata header
-      bytes 2000+   — exported file data (one file because we pass formats=["psd:true"])
-    The response JSON key "message" is shown briefly to the user inside Photopea.
-    """
-    _validate_psd_filename(filename)
-    save_dir = _psd_storage_dir(db)
-
-    try:
-        body = await request.body()
-        if not body:
-            raise HTTPException(status_code=400, detail="Empty request body.")
-        # Skip the 2000-byte JSON header Photopea prepends to every save POST.
-        psd_bytes = body[2000:] if len(body) > 2000 else body
-        save_dir.mkdir(parents=True, exist_ok=True)
-        (save_dir / filename).write_bytes(psd_bytes)
-        log_user_action("Saved PSD from Photopea", filename=filename, folder=str(save_dir))
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log_error(LogTags.API, f"Photopea save failed: {exc}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
-
-    return JSONResponse({"message": "Saved!", "script": "app.activeDocument.saved=true;"})
 
 
 @router.post("/monitor/config", response_model=MakerMonitorConfig)

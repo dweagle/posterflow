@@ -176,7 +176,7 @@ export {
   type PosterAvailability,
   type PosterStyleEntry,
   exportToPsd,
-  buildPhotopeaUrl,
+  openPhotopeaWithPsd,
   uploadPsdToExportFolder,
   checkTmdbPosterAvailability,
   getMakerMonitorConfig,

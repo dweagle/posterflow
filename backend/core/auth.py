@@ -6,6 +6,7 @@ The middleware guards all /api/* routes when a password has been configured.
 Routes under /api/auth/ and a few utility endpoints are always exempt.
 """
 import hashlib
+import hmac
 import secrets
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -38,6 +39,14 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/api/idarr/pending-matches/source-image",
     "/api/posterflow/plex-upload/source-image",
     "/api/posterflow/plex-upload/plex-thumb",
+)
+
+# (method, path-prefix) pairs that skip the password header check because the endpoint
+# self-authenticates another way (a signed ?token= in the query). Only the listed method is
+# exempt — other methods on the same path stay guarded (e.g. GET-to-fetch a PSD accepts a
+# signed token, but PUT-to-save still requires the Bearer header).
+_EXEMPT_METHOD_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("GET", "/api/maker-tools/psd-exports/"),  # Photopea files:[url] fetch — see verify_psd_access_token
 )
 
 
@@ -146,6 +155,57 @@ def verify_webhook_token(db: Session, candidate: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# PSD access tokens
+# ---------------------------------------------------------------------------
+# When a password is set, Photopea (a third-party origin) loads an exported PSD via
+# files:[url] and can't send the app Bearer header. We sign a file-scoped, expiring token,
+# append it to the PSD URL as ?token=&exp=, and the GET endpoint validates it. The token is
+# HMAC'd with the password hash as the key, so it grants access to exactly one filename,
+# expires, and is invalidated when the password changes. It is NOT the password — safe to put
+# in the URL that Photopea's JS can read.
+
+_PSD_TOKEN_TTL = 12 * 3600  # seconds
+
+
+def _psd_signing_key(db: Session) -> bytes | None:
+    """HMAC key for PSD access tokens — the app password hash, or None if no password is set."""
+    setting = get_setting(db, APP_PASSWORD_HASH_KEY)
+    if setting and setting.value:
+        return setting.value.encode("utf-8")
+    return None
+
+
+def mint_psd_access_token(db: Session, filename: str, ttl: int = _PSD_TOKEN_TTL) -> tuple[str, int] | None:
+    """Sign a file-scoped, expiring access token for `filename`.
+
+    Returns (token, exp) when a password is set, or None when it isn't (no token needed).
+    """
+    key = _psd_signing_key(db)
+    if key is None:
+        return None
+    exp = int(time.time()) + ttl
+    sig = hmac.new(key, f"{filename}:{exp}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return sig, exp
+
+
+def verify_psd_access_token(db: Session, filename: str, token: str, exp: str) -> bool:
+    """Validate a PSD access token. Returns True when no password is set (open access)."""
+    key = _psd_signing_key(db)
+    if key is None:
+        return True
+    if not token:
+        return False
+    try:
+        exp_int = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_int < int(time.time()):
+        return False
+    expected = hmac.new(key, f"{filename}:{exp_int}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return secrets.compare_digest(expected, token)
+
+
+# ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
 
@@ -199,6 +259,11 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
         # Always-exempt prefixes
         for prefix in _EXEMPT_PREFIXES:
             if path.startswith(prefix):
+                return await call_next(request)
+
+        # Method+prefix exemptions — the endpoint authenticates itself (signed ?token=)
+        for method, prefix in _EXEMPT_METHOD_PREFIXES:
+            if request.method == method and path.startswith(prefix):
                 return await call_next(request)
 
         # Load cached password (refresh from DB if stale)

@@ -21,12 +21,15 @@ from api.maker_tools import (
     _build_tmdb_images,
     _extract_name,
     _fetch_tmdb_image_bytes,
+    _measure_logo_density,
     _parse_bool,
     _parse_iso_date,
     _parse_non_negative_int,
     _parse_positive_int,
     _sanitize_drive_ids,
     _sanitize_monitor_config,
+    compute_logo_geometry,
+    compute_poster_fit_geometry,
     MakerMonitorConfig,
 )
 
@@ -731,6 +734,57 @@ def test_build_psd_no_poster_only_logo_returns_bytes():
 
 
 # ---------------------------------------------------------------------------
+# Shared placement formula: compute_logo_geometry / compute_poster_fit_geometry /
+# _measure_logo_density. These back both the PSD export and the plugin's
+# Place Logo / Fit Poster buttons, so the values are pinned as a regression guard.
+# ---------------------------------------------------------------------------
+
+# At the 1000×1500 reference, the logo bottom edge sits at round(1352.13) = 1352px.
+_LOGO_BOTTOM = 1352
+
+
+@pytest.mark.parametrize(
+    "src_w,src_h,density,expected",
+    [
+        (1000, 1000, 1.0, (101, 101, 449, 1251)),   # square + dense → tight height cap
+        (1600, 400, 0.5, (610, 152, 195, 1200)),    # wide banner, normal density
+        (788, 131, 0.2, (763, 127, 118, 1225)),     # small sparse banner → sparse boost
+    ],
+)
+def test_compute_logo_geometry_known_values(src_w, src_h, density, expected):
+    assert compute_logo_geometry(src_w, src_h, 1000, 1500, density) == expected
+
+
+def test_compute_logo_geometry_is_centered_and_bottom_anchored():
+    for src_w, src_h, density in [(1000, 1000, 1.0), (1600, 400, 0.5), (788, 131, 0.2)]:
+        w, h, left, top = compute_logo_geometry(src_w, src_h, 1000, 1500, density)
+        assert left == (1000 - w) // 2          # centered horizontally
+        assert top + h == _LOGO_BOTTOM          # bottom-anchored
+        assert w <= 800                          # never exceeds the hard width cap
+
+
+def test_compute_logo_geometry_scales_with_canvas():
+    # Doubling the canvas doubles the size/anchor (formula scales off the 1000×1500 reference);
+    # left stays centered (may differ by 1px from exact doubling due to integer centering).
+    sw, sh, sl, st = compute_logo_geometry(1000, 1000, 1000, 1500, 1.0)
+    lw, lh, ll, lt = compute_logo_geometry(1000, 1000, 2000, 3000, 1.0)
+    assert (lw, lh, lt) == (sw * 2, sh * 2, st * 2)
+    assert ll == (2000 - lw) // 2
+
+
+def test_compute_poster_fit_geometry_bordered_and_top_aligned():
+    assert compute_poster_fit_geometry(1000, 1500, 1000, 1500) == (950, 1425, 25, 25)
+    assert compute_poster_fit_geometry(500, 750, 2000, 3000) == (1950, 2925, 25, 25)
+    w, h, left, top = compute_poster_fit_geometry(800, 1200, 1000, 1500)
+    assert w == 950 and left == 25 and top == 25   # canvas − 25px each side, top-aligned
+
+
+def test_measure_logo_density_opaque_vs_transparent():
+    assert _measure_logo_density(Image.new("RGBA", (40, 10), (255, 255, 255, 200))) == 1.0
+    assert _measure_logo_density(Image.new("RGBA", (10, 10), (0, 0, 0, 0))) == 0.0
+
+
+# ---------------------------------------------------------------------------
 # API: POST /api/maker-tools/tmdb/psd-export — validation
 # ---------------------------------------------------------------------------
 
@@ -985,6 +1039,58 @@ def test_serve_psd_export_cors_header_present(client, test_db):
         response = client.get("/api/maker-tools/psd-exports/Test.psd")
 
     assert response.headers.get("access-control-allow-origin") == "*"
+
+
+# ---------------------------------------------------------------------------
+# PSD access tokens — serving a PSD when an app password is set
+# Photopea fetches via files:[url] and can't send the Bearer header, so a signed,
+# file-scoped, expiring ?token=&exp= is minted at export time and checked here.
+# ---------------------------------------------------------------------------
+
+
+def test_psd_access_token_open_when_no_password(test_db):
+    """With no password set, no token is minted and serving stays open."""
+    from core.auth import mint_psd_access_token, verify_psd_access_token
+
+    assert mint_psd_access_token(test_db, "x.psd") is None
+    assert verify_psd_access_token(test_db, "x.psd", "", "") is True
+
+
+def test_serve_psd_export_with_password_requires_valid_token(client, test_db):
+    from core.auth import mint_psd_access_token, set_password
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "Secret Show (2026).psd").write_bytes(b"PSDBYTES")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        set_password(test_db, "hunter2")
+        test_db.commit()
+
+        # No token → 401 (the GET route is middleware-exempt; the endpoint rejects it).
+        no_token = client.get("/api/maker-tools/psd-exports/Secret Show (2026).psd")
+        assert no_token.status_code == 401
+
+        # Wrong token → 401.
+        bad = client.get("/api/maker-tools/psd-exports/Secret Show (2026).psd?token=deadbeef&exp=99999999999")
+        assert bad.status_code == 401
+
+        # Valid signed token → 200.
+        sig, exp = mint_psd_access_token(test_db, "Secret Show (2026).psd")
+        ok = client.get(f"/api/maker-tools/psd-exports/Secret Show (2026).psd?token={sig}&exp={exp}")
+        assert ok.status_code == 200
+        assert ok.content == b"PSDBYTES"
+
+
+def test_psd_access_token_is_file_scoped_and_expiring(client, test_db):
+    """A token for one file can't fetch another, and an expired token is rejected."""
+    from core.auth import mint_psd_access_token, set_password, verify_psd_access_token
+
+    set_password(test_db, "hunter2")
+    test_db.commit()
+
+    sig, exp = mint_psd_access_token(test_db, "A.psd")
+    assert verify_psd_access_token(test_db, "A.psd", sig, str(exp)) is True
+    assert verify_psd_access_token(test_db, "B.psd", sig, str(exp)) is False          # other file
+    assert verify_psd_access_token(test_db, "A.psd", sig, "1") is False               # expired/forged exp
 
 
 # ---------------------------------------------------------------------------

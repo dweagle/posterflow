@@ -278,32 +278,35 @@ export const exportToPsd = async (
 }
 
 /**
- * Build the launch URL for a saved PSD. Opens our in-app wrapper page
- * (/photopea-editor.html), which embeds Photopea full-window plus the floating
- * Seasons layer box and a Save button.
+ * Open TOP-LEVEL Photopea with the exported PSD and the Posterflow "Seasons" plugin attached.
+ * Photopea fetches the PSD itself (files:[url]) and opens it on startup; a launch `script`
+ * renames the doc to the full filename, and the plugin panel (environment.plugins) provides the
+ * season buttons, the PSD save, and the JPG export.
  *
- * The wrapper does the file I/O itself rather than letting Photopea fetch/POST the
- * PSD: Posterflow is usually reached over a plain-http LAN address, and an https
- * Photopea iframe inside an http page isn't a "secure context", so the browser
- * blocks it from touching the LAN PSD (mixed content + private-network access). So
- * we hand the wrapper everything it needs — the PSD URL to read, a tab name, and
- * the save endpoint to write back to — all of which it uses same-origin.
+ * Needs the user to allow Photopea's "local network access" prompt (public photopea.com reaching
+ * the LAN/localhost server) + CORS on the PSD GET. Photopea API: https://www.photopea.com/api/
  */
-export const buildPhotopeaUrl = (psdUrl: string, filename: string, imageExportFolder = ''): string => {
-  const config: {
-    psd: string
-    name: string
-    save: string
-    imgBase?: string
-  } = {
-    psd: psdUrl,                                  // wrapper fetches this same-origin, hands bytes to Photopea
-    name: filename.replace(/\.psd$/i, ''),        // document/tab name (full, untruncated; keeps ID tags)
-    save: `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, // PSD save (Ctrl+S) PUTs here
+export const openPhotopeaWithPsd = (psdUrl: string, filename: string): void => {
+  const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`
+  const params = new URLSearchParams({ save: saveUrl, name: filename.replace(/\.psd$/i, '') })
+  const pluginUrl = `${window.location.origin}/photopea-plugin.html?${params.toString()}`
+  // icon: Posterflow's favicon (a colored logo, so no "===" theme-recolor prefix).
+  // w/h: fix the panel to 184px wide — fits 5 season chips per row.
+  const icon = `${window.location.origin}/favicon.webp`
+  // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
+  // editor boots. Photopea trims the doc name out of the URL (dropping the "(year) {ids}" part), so we pass a launch `script`
+  // (runs once after the file loads) that renames the doc to the full export filename — the tab,
+  // the JPG export, and the plugin's save guard all rely on that name. Requires the user to ALLOW
+  // Photopea's "local network access" prompt + CORS on the PSD GET (we send it). On a
+  // password-protected instance psd_url carries a signed, file-scoped ?token= the GET validates,
+  // since Photopea can't send the app Bearer header.
+  const docName = filename.replace(/\.psd$/i, '')
+  const config = {
+    files: [psdUrl],
+    script: `try{if(app.documents.length>0)app.activeDocument.name=${JSON.stringify(docName)}}catch(e){}`,
+    environment: { plugins: [{ name: 'Posterflow Seasons', url: pluginUrl, icon, w: 184, h: 420 }] },
   }
-  // Image exports (Export As / JPG button): when a server folder is configured, the
-  // wrapper PUTs `<name>.<ext>` under this base; otherwise it downloads in-browser.
-  if (imageExportFolder) config.imgBase = `${window.location.origin}/api/maker-tools/image-exports/`
-  return `${window.location.origin}/photopea-editor.html#${encodeURIComponent(JSON.stringify(config))}`
+  window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
 }
 
 export interface PosterStyleEntry {

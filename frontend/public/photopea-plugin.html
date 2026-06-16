@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Posterflow — Seasons</title>
+<!--
+  Posterflow's Photopea PLUGIN panel. It runs as a panel INSIDE top-level Photopea
+  (attached via environment.plugins in the launch URL — no manual install), so Photopea
+  keeps all its native abilities: a file you DRAG IN gets a writable handle, and Ctrl+S
+  overwrites it on disk natively.
+
+  For the POSTER itself: Photopea fetches the exported PSD straight from Posterflow via the
+  launch config (files:[url]) — this needs the user's one-time "allow local network access"
+  prompt for photopea.com plus CORS (Posterflow sends it). The panel reads the doc's
+  SEASONS/SPECIALS layers and toggles them; on Save it exports the PSD and PUTs it back to the
+  export folder same-origin. (A URL-opened doc has no local file handle, so Photopea's native
+  Ctrl+S can't overwrite the server file — hence the 💾 button.)
+
+  The save target + doc name are passed in THIS page's query string by openPhotopeaWithPsd()
+  (?save=<url>&name=<doc name>); Photopea names the loaded doc from the file URL.
+
+  Photopea API: https://www.photopea.com/api/
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #1f1f24; color: #e6e6e6;
+    font: 12px/1.4 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  .head { display: flex; align-items: center; gap: 4px; padding: 5px 6px; background: #2a2a31; border-bottom: 1px solid #3a3a42; }
+  .title { font-weight: 600; flex: 1; }
+  .btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px; padding: 3px 7px; font-size: 12px; line-height: 1.4; }
+  .btn:hover { background: #4a4a54; }
+  .singles { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
+  .singles.hidden { display: none; }
+  .tools { display: flex; gap: 5px; padding: 6px; border-bottom: 1px solid #3a3a42; }
+  .tools .btn { flex: 1; }
+  .list { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; overflow-y: auto; padding: 8px; flex: 1; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-thumb { background: #3a3a42; border-radius: 3px; }
+  .chip { min-width: 16px; text-align: center; box-sizing: border-box; background: #2a2a31; border: 1px solid #3a3a42;
+    color: #cfcfcf; border-radius: 6px; padding: 1px 6px; line-height: 1; cursor: pointer; user-select: none; }
+  .chip:hover { filter: brightness(1.25); }
+  .chip.on  { background: #2e7d46; border-color: #3fae62; color: #fff; }
+  .chip.off { background: #4a4a55; border-color: #5a5a66; color: #e6e6e6; }
+  .chip.grp { font-weight: 700; flex-basis: 100%; }
+  .chip.grp.on { background: #3b6bd6; border-color: #5a86f0; }
+  .chip.num { width: 28px; padding-left: 2px; padding-right: 2px; }
+  .msg { padding: 8px; color: #9aa; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <span class="title">Seasons</span>
+    <button class="btn" data-act="save" title="Save the poster PSD back to Posterflow">💾</button>
+    <button class="btn" data-act="jpg" title="Export flattened JPG to Posterflow">JPG</button>
+    <button class="btn" data-act="refresh" title="Reload layers from the active document">⟳</button>
+  </div>
+  <div class="tools">
+    <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo, using Maker Tools' formula (keeps the logo's colors)">Place Logo</button>
+    <button class="btn" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</button>
+  </div>
+  <div class="singles hidden"></div>
+  <div class="list"><div class="msg">Loading…</div></div>
+
+<script>
+(function () {
+  'use strict';
+
+  const PP      = window.parent;                 // top-level Photopea hosts this panel
+  const singles = document.querySelector('.singles');
+  const list    = document.querySelector('.list');
+  const saveBtn = document.querySelector('[data-act="save"]');
+  const jpgBtn  = document.querySelector('[data-act="jpg"]');
+  const logoBtn = document.querySelector('[data-act="logo"]');
+  const fitBtn  = document.querySelector('[data-act="fit"]');
+  let model = { singles: [], seasons: [] };
+  let saving = false, jpgBusy = false;
+  let placeBusy = false, pendingMode = '';  // Place Logo / Fit Poster state
+  let placeBtn = null, placeLabel = '', placeWatch = null, pendingRes = null;  // in-flight button + watchdog + target geom
+  let pendingDocName = 'poster';                  // current active doc name, captured for the JPG filename
+  let posterDocName = '';                          // the poster doc's name (captured once on load) — the save guard matches on it
+
+  // ---- config from this page's query string (set by openPhotopeaWithPsd) ----
+  const q   = new URLSearchParams(location.search);
+  const cfg = { save: q.get('save') || '', name: q.get('name') || '' };
+
+  // Posterflow API auth: the panel is same-origin to Posterflow, so its token (if a
+  // password is set) is in our localStorage.
+  const authHeaders = () => {
+    const t = localStorage.getItem('posterflow.auth.token');
+    return t ? { 'Authorization': 'Bearer ' + t } : {};
+  };
+
+  // ---- talk to Photopea ----------------------------------------------------
+  const send = (script) => PP.postMessage(script, '*');
+
+  const FETCH = `try{
+    if(app.documents.length===0){app.echoToOE('PFL:'+JSON.stringify({singles:[],seasons:[]}));}
+    else{
+      var d=app.activeDocument;
+      var SING=[{re:/^specials$/i,lab:'SP'},{re:/^collection$/i,lab:'C'},{re:/^complete limited/i,lab:'CLS'}];
+      var singles=[];
+      function fs(ls,pa,pv){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);var ev=pv&&L.visible;
+        for(var k=0;k<SING.length;k++){if(SING[k].re.test(L.name)){singles.push({lab:SING[k].lab,n:L.name,p:here,v:ev});}}
+        if(L.typename=='LayerSet'){fs(L.layers,here,ev);}}}
+      fs(d.layers,[],true);
+
+      function find(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);
+        if(L.typename=='LayerSet'&&/^\\s*seasons\\s*$/i.test(L.name))return {L:L,p:here};
+        if(L.typename=='LayerSet'){var f=find(L.layers,here);if(f)return f;}}return null;}
+      function cls(L,pr){
+        if(pr=='main'){if(L.typename=='LayerSet'){if(/\\d+\\s*-\\s*\\d+/.test(L.name))return 'decade';if(/years/i.test(L.name))return 'years';return 'group';}return 'otherLeaf';}
+        if(pr=='decade')return (L.typename=='LayerSet')?'group':'season';
+        if(pr=='years')return 'year';
+        return 'other';
+      }
+      var seasons=[];
+      function walk(node,path,role,pv){var ev=pv&&node.visible;
+        seasons.push({n:node.name,p:path,g:(node.typename=='LayerSet'),v:ev,r:role});
+        if(node.typename=='LayerSet'){for(var i=0;i<node.layers.length;i++){var c=node.layers[i];walk(c,path.concat(i),cls(c,role),ev);}}
+      }
+      var root=find(d.layers,[]);
+      if(root){walk(root.L,root.p,'main',true);}
+      app.echoToOE('PFLNAME:'+app.activeDocument.name);
+      app.echoToOE('PFL:'+JSON.stringify({singles:singles,seasons:seasons}));
+    }
+  }catch(e){app.echoToOE('PFLERR:'+e);}`;
+
+  const fetchLayers = () => send(FETCH);
+
+  const setVis = (changes) => send(
+    `try{var dd=app.activeDocument;var ch=${JSON.stringify(changes)};` +
+    `for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;` +
+    `for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}` +
+    `app.echoToOE('PFLVIS:ok');}catch(e){app.echoToOE('PFLERR:'+e);}`
+  );
+
+  // ---- helpers -------------------------------------------------------------
+  const label = (name) => {
+    const r = name.replace(/seasons?|text/ig, '').trim();
+    if (r === '') return 'S';
+    if (r.includes('-')) return 'S' + r.replace(/\s+/g, '');
+    return r.replace(/\s+/g, '');
+  };
+  const key = (p) => JSON.stringify(p);
+  const allNodes = () => model.singles.concat(model.seasons);
+  const byRole = (r) => model.seasons.filter((n) => n.r === r);
+
+  const commit = (changes) => {
+    setVis(changes);
+    changes.forEach((ch) => { const k = key(ch.p); allNodes().forEach((n) => { if (key(n.p) === k) n.v = ch.v; }); });
+    render();
+  };
+
+  // ---- click behaviours ----------------------------------------------------
+  const main = () => byRole('main')[0];
+
+  const clickSeason = (S) => {
+    if (S.v) { commit([{ p: S.p, v: false }]); return; }
+    const parentKey = key(S.p.slice(0, -1));
+    const changes = [{ p: S.p, v: true }];
+    if (main()) changes.push({ p: main().p, v: true });
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: key(dn.p) === parentKey }));
+    byRole('season').forEach((sn) => { if (sn !== S) changes.push({ p: sn.p, v: false }); });
+    model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    commit(changes);
+  };
+
+  const clickSingle = (SI) => {
+    if (SI.v) { commit([{ p: SI.p, v: false }]); return; }
+    const changes = [{ p: SI.p, v: true }];
+    // Legacy PSDs nest singles inside SEASONS / wrapper groups ("SPECIALS TEXT", etc.) — turning on
+    // just the leaf shows nothing, so reveal every ancestor group too (no-op for root-level singles).
+    for (let i = 1; i < SI.p.length; i++) changes.push({ p: SI.p.slice(0, i), v: true });
+    model.singles.forEach((x) => { if (x !== SI) changes.push({ p: x.p, v: false }); });
+    byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    commit(changes);
+  };
+
+  const clickToggle = (N) => commit([{ p: N.p, v: !N.v }]);
+
+  const clickDecade = (D) => {
+    if (D.v) { commit([{ p: D.p, v: false }]); return; }
+    const changes = [];
+    if (main()) changes.push({ p: main().p, v: true });
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: dn === D }));
+    commit(changes);
+  };
+
+  // ---- render --------------------------------------------------------------
+  const chip = (text, on, folder) => {
+    const c = document.createElement('div');
+    c.className = 'chip ' + (on ? 'on' : 'off') + (folder ? ' grp' : '');
+    c.textContent = text;
+    return c;
+  };
+
+  const render = () => {
+    singles.innerHTML = '';
+    model.singles.forEach((SI) => {
+      const c = chip(SI.lab, SI.v, false);
+      c.title = SI.n;
+      c.addEventListener('click', () => clickSingle(SI));
+      singles.appendChild(c);
+    });
+    singles.classList.toggle('hidden', model.singles.length === 0);
+
+    list.innerHTML = '';
+    if (!model.singles.length && !model.seasons.length) {
+      list.innerHTML = '<div class="msg">No SEASONS / SPECIALS layers found. Press ⟳ once the PSD is open.</div>';
+      return;
+    }
+    let decadeOpen = true;
+    model.seasons.forEach((N) => {
+      if (N.r === 'years' || N.r === 'year' || N.r === 'other' || N.r === 'group' || N.r === 'otherLeaf') return;
+      if (N.r === 'decade') decadeOpen = N.v;
+      if (N.r === 'season' && !decadeOpen) return;
+      const folder = (N.r === 'main' || N.r === 'decade');
+      const c = chip(label(N.n), N.v, folder);
+      c.title = N.n;
+      if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', () => clickSeason(N)); }
+      else if (N.r === 'decade') c.addEventListener('click', () => clickDecade(N));
+      else                       c.addEventListener('click', () => clickToggle(N));   // main
+      list.appendChild(c);
+    });
+  };
+
+  // Photopea loads the PSD itself from the launch config (files:[url]), so by the time this
+  // panel opens a doc is already active. Here we just read the layers of whatever is active.
+
+  // ---- save the poster PSD back to Posterflow ------------------------------
+  const flashSave = (m) => { saving = false; saveBtn.textContent = m; setTimeout(() => { saveBtn.textContent = '💾'; }, 1400); };
+  // Only the poster (the doc we named cfg.name) goes back to cfg.save. If another doc is
+  // active (e.g. a file you dragged in), tell the user to use Ctrl+S — Photopea saves that
+  // one natively to its own file.
+  const saveDoc = () => {
+    if (!cfg.save || saving || placeBusy) return;
+    saving = true; saveBtn.textContent = '…';
+    // Save only the poster — the doc that was active when the panel loaded (posterDocName).
+    // Photopea may name a files:[url] doc however it likes, so match on the name we actually
+    // saw, not cfg.name. (Empty until the first layer-read returns; saving before then no-ops.)
+    send('try{if(' + JSON.stringify(posterDocName) + '&&app.activeDocument.name==' + JSON.stringify(posterDocName) +
+      '){app.activeDocument.saveToOE("psd")}else{app.echoToOE("PFLNOSAVE:"+app.activeDocument.name)}}' +
+      'catch(e){app.echoToOE("PFLERR:"+e)}');
+  };
+
+  // ---- JPG export → Posterflow image folder --------------------------------
+  const activeSuffix = () => {
+    const single = model.singles.find((s) => s.v);
+    if (single) {
+      if (single.lab === 'SP') return ' - Specials';
+      if (single.lab === 'CLS') return ' - Season 1';
+      return '';
+    }
+    const season = model.seasons.find((n) => {
+      if (n.r !== 'season' || !n.v) return false;
+      const dkey = key(n.p.slice(0, -1));
+      const decade = model.seasons.find((m) => m.r === 'decade' && key(m.p) === dkey);
+      return (!decade || decade.v) && (!main() || main().v);
+    });
+    return season ? ' - Season ' + label(season.n) : '';
+  };
+  const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
+  const exportJpg = () => {
+    if (jpgBusy || placeBusy) return;
+    jpgBusy = true; jpgBtn.textContent = '…';
+    send('try{app.echoToOE("PFLNAME:"+app.activeDocument.name);app.activeDocument.saveToOE("jpg:0.90")}catch(e){app.echoToOE("PFLERR:"+e)}');
+  };
+
+  const download = (buf, filename) => {
+    const url = URL.createObjectURL(new Blob([buf]));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  // Photopea hands bytes back here: PSD ("8BPS") from 💾 → PUT to the PSD save URL;
+  // anything else (JPG) → PUT to the image-export folder, else download.
+  const onSaved = async (buf) => {
+    const u8 = new Uint8Array(buf);
+    const isPsd = u8[0] === 0x38 && u8[1] === 0x42 && u8[2] === 0x50 && u8[3] === 0x53;   // "8BPS"
+    if (isPsd) {
+      if (!cfg.save) return;
+      try {
+        const r = await fetch(cfg.save, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        flashSave('✓');
+      } catch (e) { flashSave('✗'); console.error('PSD save failed:', e); }
+      return;
+    }
+    const filename = pendingDocName.replace(/\.[^./\\]+$/, '') + activeSuffix() + '.jpg';
+    try {
+      const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename), {
+        method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      flashJpg('✓');
+    } catch (e) {
+      console.warn('Image-folder PUT failed, downloading instead:', e);
+      download(buf, filename); flashJpg('✓');
+    }
+  };
+
+  // ---- Place Logo / Fit Poster ---------------------------------------------
+  // Apply Maker Tools' auto-placement formula to the SELECTED layer, entirely CLIENT-SIDE.
+  // The panel runs over http inside HTTPS Photopea, so it CANNOT fetch Posterflow's http API
+  // (the browser blocks it as mixed content). So the formula is ported to JS below — it must
+  // stay in sync with compute_logo_geometry / compute_poster_fit_geometry in
+  // backend/api/maker_tools.py (the PSD export's path; the backend tests pin those values).
+  // Flow: read the layer + canvas size from Photopea → compute geometry here → resize the
+  // layer and re-measure its bounds → translate it into place. Place Logo also needs the
+  // layer's pixels for the transparency ("density") term, so it first exports the layer to a
+  // throwaway doc as PNG and measures density in a local canvas.
+  const note = (t) => list.insertAdjacentHTML('afterbegin', '<div class="msg">' + t + '</div>');
+
+  // --- the formula (mirror of backend/api/maker_tools.py) ---
+  // rnd = round-half-to-even, matching Python's round() so the JS result is pixel-identical
+  // to the PSD export (JS Math.round would differ by 1px on exact .5 cases).
+  const rnd = (x) => { const f = Math.floor(x); return (Math.abs(x - f - 0.5) < 1e-9) ? (f % 2 === 0 ? f : f + 1) : Math.round(x); };
+  const computeLogoGeometry = (srcW, srcH, cw, ch, density) => {
+    const logoBottom = rnd(ch * (1352.13 / 1500));
+    const maxLogoTop = rnd(ch * (1100.0 / 1500));
+    const maxLogoH = logoBottom - maxLogoTop;
+    const maxLogoW = rnd(cw * (800.0 / 1000));
+    const logoPx = srcW * srcH;
+    const ceiling = logoPx < 200000 ? 0.85 : (logoPx > 1500000 ? 0.93 : 0.84);
+    const projHAtMax = srcH * (maxLogoW / srcW);
+    const refH = cw * (90.0 / 1000);
+    const targetRatio = ceiling * Math.pow(refH / Math.max(projHAtMax, refH), 0.40);
+    const densityFloor = 0.58 + Math.max(0.0, density - 0.30) * 0.10;
+    let targetW = rnd(cw * Math.max(densityFloor, Math.min(ceiling, targetRatio)));
+    const wideThreshold = rnd(cw * (600.0 / 1000));
+    let maxH = targetW > wideThreshold ? rnd(ch * (225.0 / 1500)) : maxLogoH;
+    if (density < 0.30) {                    // sparse → size up
+      const t = (0.30 - density) / 0.30, mult = 1.0 + t * 0.15;
+      targetW = Math.min(rnd(targetW * mult), maxLogoW);
+      maxH = Math.min(rnd(maxH * mult), maxLogoH);
+    } else if (density > 0.60) {              // dense → tighter
+      const t = (density - 0.60) / 0.40, wMult = 1.0 - t * 0.10;
+      targetW = rnd(targetW * wMult);
+      maxH = rnd(ch * (225.0 / 1500) * (1.0 - t * 0.55));
+    }
+    let scale = targetW / srcW;
+    if (srcH * scale > maxH) scale = maxH / srcH;
+    if (srcW * scale > maxLogoW) scale = maxLogoW / srcW;
+    const w = rnd(srcW * scale), h = rnd(srcH * scale);
+    return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
+  };
+  const computePosterFitGeometry = (srcW, srcH, cw) => {
+    const border = 25, targetW = Math.max(1, cw - border * 2), scale = targetW / srcW;
+    const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
+    return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
+  };
+
+  // Coerce a Photopea bound/dimension to a PRIMITIVE px number. The trailing *1 matters:
+  // Photopea bounds are UnitValue objects, and `number - UnitValue` arithmetic inside a script
+  // sign-flips (ExtendScript trap) — so we never do bounds math in-script; nv() is only used to
+  // echo clean numbers, and all deltas are computed in JS.
+  const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
+
+  // Photopea follows Adobe's DOM, where bounds / translate use the document's RULER unit — if the
+  // PSD's ruler is points/inches, our pixel numbers are misread (the layer flies off-canvas). So
+  // every script that touches geometry runs inside px(): force the ruler to PIXELS, do the work,
+  // then restore the user's ruler. NV is included so nv() is available; the wrapper also provides
+  // the try/catch → PFLERR.
+  const px = (work) =>
+    "var _ru=null;try{_ru=app.preferences.rulerUnits;app.preferences.rulerUnits=Units.PIXELS;}catch(e){}" +
+    "try{" + NV + work + "}catch(e){app.echoToOE('PFLERR:'+e);}" +
+    "try{if(_ru!=null)app.preferences.rulerUnits=_ru;}catch(e){}";
+
+  // Read active-layer bounds + canvas size → echo PFLGEO. (Fit Poster uses just this.)
+  const READ_GEO = px(
+    "var d=app.activeDocument,L=d.activeLayer,b=L.bounds;" +
+    "var ll=nv(b[0]),lt=nv(b[1]),lw=Math.round(nv(b[2])-ll),lh=Math.round(nv(b[3])-lt);" +
+    "app.echoToOE('PFLGEO:'+JSON.stringify({cw:nv(d.width),ch:nv(d.height),lw:lw,lh:lh,ll:ll,lt:lt}));");
+
+  // Placement is two scripts: (1) resize the layer and echo its NEW top-left as plain numbers
+  // (PFLRSZ:left,top); (2) the plugin computes the move in JS (no in-script UnitValue math) and
+  // translates by literal numbers. Same path for Place Logo and Fit Poster — no extra documents.
+  const applyPlacement = (geo, res) => {
+    pendingRes = res;
+    const sc = (res.width / geo.lw) * 100;
+    send(px("var L=app.activeDocument.activeLayer;L.resize(" + sc + "," + sc + ");" +
+      "var b=L.bounds;app.echoToOE('PFLRSZ:'+nv(b[0])+','+nv(b[1]));"));
+  };
+  const placeTranslate = (curLeft, curTop) => {
+    const res = pendingRes; pendingRes = null;
+    if (!res || !isFinite(curLeft) || !isFinite(curTop)) { finishPlace(false); return; }
+    const dx = res.left - curLeft, dy = res.top - curTop;   // computed in JS — no UnitValue math
+    send(px("app.activeDocument.activeLayer.translate(" + dx + "," + dy + ");app.echoToOE('PFLPLACED:ok');"));
+  };
+
+  const finishPlace = (ok, msg) => {
+    if (placeWatch) { clearTimeout(placeWatch); placeWatch = null; }
+    if (placeBtn) { const b = placeBtn, l = placeLabel; b.textContent = ok ? '✓' : '✗'; setTimeout(() => { b.textContent = l; }, 1400); }
+    if (msg) note(msg);
+    placeBusy = false; pendingMode = ''; placeBtn = null; pendingRes = null;
+  };
+
+  // PFLGEO arrived → compute the target geometry from the layer's real bounds, then place it.
+  // The export's logo formula also has a transparency ("density") term for sparse/dense tweaks;
+  // measuring a single layer's transparency needs a throwaway document (too fragile in Photopea),
+  // so we use a neutral density here — aspect ratio + pixel area (the dominant factors) are exact.
+  const LOGO_DENSITY = 0.30;   // neutral: no sparse boost / dense shrink, just the base sizing
+  const onGeo = (json) => {
+    let geo; try { geo = JSON.parse(json); } catch { finishPlace(false); return; }
+    if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
+    const res = pendingMode === 'logo'
+      ? computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)
+      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw);
+    applyPlacement(geo, res);
+  };
+
+  const startPlace = (mode, btn, label) => {
+    if (placeBusy) return;
+    placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = label;
+    btn.textContent = '…';
+    placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 12000);
+    send(READ_GEO);
+  };
+  const startLogo = () => startPlace('logo', logoBtn, 'Place Logo');
+  const startFit  = () => startPlace('fit', fitBtn, 'Fit Poster');
+
+  // ---- incoming messages from Photopea -------------------------------------
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (typeof d !== 'string') { onSaved(d); return; }   // ArrayBuffer = saveToOE result
+    if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
+    else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); render(); } catch (_) {} }
+    else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
+    else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
+    else if (d.startsWith('PFLPLACED:')){ finishPlace(true); }
+    else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); list.insertAdjacentHTML('afterbegin', '<div class="msg">"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.</div>'); }
+    else if (d.startsWith('PFLERR:'))   { if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { list.innerHTML = '<div class="msg">Error: ' + d.slice(7) + '</div>'; flashSave('💾'); flashJpg('JPG'); } }
+    // PFLVIS: ack handled optimistically in commit().
+  });
+
+  // ---- controls ------------------------------------------------------------
+  saveBtn.addEventListener('click', saveDoc);
+  jpgBtn.addEventListener('click', exportJpg);
+  logoBtn.addEventListener('click', startLogo);
+  fitBtn.addEventListener('click', startFit);
+  document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
+  window.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveDoc(); } });
+
+  saveBtn.style.display = cfg.save ? '' : 'none';
+  fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
+})();
+</script>
+</body>
+</html>

@@ -55,3 +55,6 @@ GEMINI.md
 
 # CI
 .ci-tmp/
+
+# Local-only reference docs (kept in Claude's per-repo memory, not committed)
+docs/photopea-api.md

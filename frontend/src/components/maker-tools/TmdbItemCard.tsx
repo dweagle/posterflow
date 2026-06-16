@@ -21,7 +21,7 @@ import {
   type TmdbImagesResponse,
   type TmdbTvDetails,
   type PosterAvailability,
-  buildPhotopeaUrl,
+  openPhotopeaWithPsd,
   exportToPsd,
   uploadPsdToExportFolder,
   getSeasonImages,
@@ -501,8 +501,11 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
       }
       if (result.mode === 'photopea') {
         if (result.openPhotopea) {
-          window.open(buildPhotopeaUrl(result.psdUrl, result.filename, psdConfig.imageExportFolder), '_blank')
-          showToast(`PSD opened in Photopea: ${result.filename}`, 'success')
+          // Photopea fetches the exported PSD itself (files:[url]) and the plugin panel adds the
+          // seasons / save / JPG buttons. Works on http LAN once the user allows Photopea's
+          // one-time "local network access" prompt.
+          openPhotopeaWithPsd(result.psdUrl, result.filename)
+          showToast(`Opening ${result.filename} in Photopea…`, 'success')
         } else {
           showToast(`PSD saved: ${result.filename}`, 'success')
         }
