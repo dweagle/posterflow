@@ -122,6 +122,43 @@ def _build_progress_callback(
     return rename_progress
 
 
+def _prune_dead_symlinks(tmp_dir: str) -> tuple[int, int]:
+    """Remove dangling symlinks (and folders left empty by their removal) from tmp/.
+
+    A staged symlink goes dead when its gdrive source poster is removed/renamed. Those
+    stale links accumulate forever (rename only touches matched items, cleanup only
+    removes orphans), so prune them here. Only dangling links and the folders they leave
+    empty are removed — valid entries are untouched so their mtimes stay intact for the
+    stat-based "needs new poster?" short-circuit.
+
+    Returns:
+        Tuple of (removed_links, removed_dirs).
+    """
+    removed_links = 0
+    removed_dirs = 0
+    if not os.path.isdir(tmp_dir):
+        return (0, 0)
+
+    # Bottom-up so a folder emptied by link removal is seen as empty when we reach it.
+    for root, _dirs, files in os.walk(tmp_dir, topdown=False):
+        for name in files:
+            path = os.path.join(root, name)
+            if os.path.islink(path) and not os.path.exists(path):
+                try:
+                    os.remove(path)
+                    removed_links += 1
+                except OSError as exc:
+                    log_warning(LogTags.POSTER_RENAMER, f"Could not remove dead symlink {path}: {exc}", path=path, error=str(exc))
+        if root != tmp_dir:
+            try:
+                if not os.listdir(root):
+                    os.rmdir(root)
+                    removed_dirs += 1
+            except OSError:
+                pass
+    return (removed_links, removed_dirs)
+
+
 def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_discord: bool = False, triggered_by: str = "manual") -> None:
     """
     Execute Poster Renamer in a background thread.
@@ -225,6 +262,19 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
         skip_border_post_processing = bool(config_data.get("skip_border_post_processing", False))
 
         border_ran_successfully = False
+
+        # Prune stale staging symlinks (source removed/renamed on the drive) before
+        # border/copy runs over tmp/, so one dead link can't poison those steps and
+        # cruft doesn't accumulate. Valid entries' mtimes are left intact.
+        if not skip_border_post_processing and not config_data.get("dry_run", False):
+            pruned_links, pruned_dirs = _prune_dead_symlinks(os.path.join(dest_dir, "tmp"))
+            if pruned_links or pruned_dirs:
+                log_info(
+                    LogTags.POSTER_RENAMER,
+                    f"Pruned {pruned_links} dead staging symlink(s) and {pruned_dirs} empty folder(s) from tmp/",
+                    removed_links=pruned_links,
+                    removed_dirs=pruned_dirs,
+                )
 
         if not skip_border_post_processing and auto_run_border_enabled:
             try:
@@ -358,6 +408,37 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
 
                         copied_count = 0
                         skipped_count = 0
+                        failed_count = 0
+
+                        # Copy a single staged file to its destination. Isolated so one
+                        # bad file (e.g. a dangling symlink whose gdrive source is gone)
+                        # can't abort the whole sync and leave assets/ partially populated.
+                        def _copy_one(src_file: str, dest_file: str) -> None:
+                            nonlocal copied_count, skipped_count, failed_count
+                            try:
+                                # Dangling symlink (source missing) — skip, don't abort the loop
+                                if os.path.islink(src_file) and not os.path.exists(src_file):
+                                    log_warning(
+                                        LogTags.POSTER_RENAMER,
+                                        f"Skipping broken symlink in tmp/ (source missing): {src_file}",
+                                        path=src_file,
+                                    )
+                                    failed_count += 1
+                                    return
+                                if os.path.exists(dest_file) and filecmp.cmp(src_file, dest_file, shallow=False):
+                                    skipped_count += 1
+                                else:
+                                    shutil.copy2(src_file, dest_file)
+                                    copied_count += 1
+                            except Exception as copy_err:
+                                log_warning(
+                                    LogTags.POSTER_RENAMER,
+                                    f"Failed to copy {src_file} → {dest_file}: {copy_err}",
+                                    src=src_file,
+                                    dest=dest_file,
+                                    error=str(copy_err),
+                                )
+                                failed_count += 1
 
                         for item in os.listdir(tmp_dir):
                             src_path = os.path.join(tmp_dir, item)
@@ -374,28 +455,29 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                                         os.makedirs(os.path.join(dest_root, dir_name), exist_ok=True)
 
                                     for file_name in files:
-                                        src_file = os.path.join(root, file_name)
-                                        dest_file = os.path.join(dest_root, file_name)
-
-                                        if os.path.exists(dest_file) and filecmp.cmp(src_file, dest_file, shallow=False):
-                                            skipped_count += 1
-                                        else:
-                                            shutil.copy2(src_file, dest_file)
-                                            copied_count += 1
+                                        _copy_one(
+                                            os.path.join(root, file_name),
+                                            os.path.join(dest_root, file_name),
+                                        )
 
                             elif os.path.isfile(src_path):
-                                if os.path.exists(dest_path) and filecmp.cmp(src_path, dest_path, shallow=False):
-                                    skipped_count += 1
-                                else:
-                                    shutil.copy2(src_path, dest_path)
-                                    copied_count += 1
+                                _copy_one(src_path, dest_path)
 
-                        log_success(
-                            LogTags.POSTER_RENAMER,
-                            f"Copy complete: {copied_count} changed, {skipped_count} unchanged",
-                            copied=copied_count,
-                            skipped=skipped_count
-                        )
+                        if failed_count:
+                            log_warning(
+                                LogTags.POSTER_RENAMER,
+                                f"Copy complete: {copied_count} changed, {skipped_count} unchanged, {failed_count} failed/skipped",
+                                copied=copied_count,
+                                skipped=skipped_count,
+                                failed=failed_count,
+                            )
+                        else:
+                            log_success(
+                                LogTags.POSTER_RENAMER,
+                                f"Copy complete: {copied_count} changed, {skipped_count} unchanged",
+                                copied=copied_count,
+                                skipped=skipped_count
+                            )
 
                         try:
                             dest_pattern = dest_dir.rstrip('/') + '/%'
