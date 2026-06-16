@@ -151,7 +151,6 @@ export default function CommunityRequestModal({
           : 'Request submitted!',
         result.status === 'already_requested' ? 'info' : 'success',
       )
-      setTimeout(onClose, 1200)
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -159,7 +158,15 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, onClose])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast])
+
+  // Auto-close shortly after a successful submit. Cleared on unmount so a pending
+  // close can't fire after the modal is gone (which leaked stray onClose calls into tests).
+  useEffect(() => {
+    if (!submitted) return
+    const id = setTimeout(onClose, 1200)
+    return () => clearTimeout(id)
+  }, [submitted, onClose])
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>

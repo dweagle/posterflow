@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { AlertCircle, Check, ExternalLink, Loader2, Search, Star, LogOut, User, X } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
@@ -139,7 +139,6 @@ export default function NewCommunityRequestModal({
         result.status === 'already_requested' ? 'Already requested!' : 'Request submitted!',
         result.status === 'already_requested' ? 'info' : 'success',
       )
-      setTimeout(onClose, 1200)
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -149,8 +148,16 @@ export default function NewCommunityRequestModal({
     }
   }, [
     canSubmit, selected, searchType, effectiveTitle, effectiveYear,
-    notes, posterStyle, extraTags, pingDiscordId, effectiveName, token, showToast, onClose,
+    notes, posterStyle, extraTags, pingDiscordId, effectiveName, token, showToast,
   ])
+
+  // Auto-close shortly after a successful submit. Cleared on unmount so a pending
+  // close can't fire after the modal is gone (avoids stray onClose calls).
+  useEffect(() => {
+    if (!submitted) return
+    const id = setTimeout(onClose, 1200)
+    return () => clearTimeout(id)
+  }, [submitted, onClose])
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>

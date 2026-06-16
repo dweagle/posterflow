@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [react()],
   test: {
     setupFiles: ['./tests/setup.ts'],
+    // Reset mock call history between tests so module-level vi.fn() mocks
+    // (e.g. onClose) don't accumulate calls across tests.
+    clearMocks: true,
   },
   build: {
     rollupOptions: {
