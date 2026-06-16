@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 import httpx
 
 from database import get_db
-from models.setting import get_setting_value, upsert_setting
 from core.logging import LogTags, log_info, log_error, log_user_action
 
 # Supabase project configuration.
 # The publishable key is intentionally public — it is scoped to read-only access
-# via Row Level Security. All writes go through a SECURITY DEFINER function.
+# via Row Level Security. All writes go through the submit-request edge function,
+# which verifies a signed Discord token and enforces per-user and per-IP daily
+# limits server-side. Direct anon calls to the RPCs are revoked at the Postgres
+# level by a one-off Supabase migration (applied out-of-band).
 SUPABASE_URL = "https://qwudwkxfqowjtisdlplv.supabase.co"
 SUPABASE_KEY = "sb_publishable_N83-fB74swOKM5XGbMhO7A_qk7LXgel"
 SUPABASE_HEADERS = {
@@ -21,32 +23,7 @@ SUPABASE_HEADERS = {
     "Content-Type": "application/json",
 }
 
-DAILY_REQUEST_LIMIT = 5
-SETTING_RATE_DATE = "community_rate_date"
-SETTING_RATE_COUNT = "community_rate_count"
-
 router = APIRouter(prefix="/api/community", tags=["community"])
-
-
-def check_and_increment_rate_limit(db: Session) -> None:
-    """Enforce a local daily limit on community request submissions.
-
-    Raises HTTP 429 if the limit is reached. Resets automatically on a new UTC day.
-    """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    stored_date = get_setting_value(db, SETTING_RATE_DATE)
-    stored_count = int(get_setting_value(db, SETTING_RATE_COUNT) or "0")
-
-    if stored_date != today:
-        # New day — reset counter
-        stored_count = 0
-        upsert_setting(db, SETTING_RATE_DATE, today)
-
-    if stored_count >= DAILY_REQUEST_LIMIT:
-        raise HTTPException(status_code=429, detail=f"Daily request limit reached ({DAILY_REQUEST_LIMIT} per day)")
-
-    upsert_setting(db, SETTING_RATE_COUNT, str(stored_count + 1))
-    db.commit()
 
 
 class PosterRequestPayload(BaseModel):
@@ -61,13 +38,19 @@ class PosterRequestPayload(BaseModel):
     notes: Optional[str] = None
     style_tags: Optional[list[str]] = None
     requested_by: Optional[str] = None
-    requested_by_discord_id: Optional[str] = None
     ping_discord_id: Optional[str] = None
+    # Signed Discord token from discord-oauth — required by the submit-request
+    # edge function, which derives the requester's identity from it.
+    discord_token: Optional[str] = None
 
 
 @router.get("/requests/count")
 async def get_community_requests_count():
-    """Return a lightweight count of open (pending + in_progress) community requests."""
+    """Return a lightweight count of unclaimed (pending) community requests.
+
+    Only pending requests count toward the sidebar badge — once a request is
+    claimed (in_progress) it drops off, since a maker is already on it.
+    """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -75,7 +58,7 @@ async def get_community_requests_count():
                 headers={**SUPABASE_HEADERS, "Prefer": "count=exact"},
                 params={
                     "select": "id",
-                    "status": "in.(pending,in_progress)",
+                    "status": "eq.pending",
                     "limit": 1,
                 },
             )
@@ -84,6 +67,38 @@ async def get_community_requests_count():
             return {"count": count}
     except Exception:
         return {"count": 0}
+
+
+@router.get("/requests/my-counts")
+async def get_my_request_counts(discord_id: str = ""):
+    """Counts of the caller's own active requests, split by status.
+
+    Powers the requester sidebar badges (own pending + in_progress). The
+    discord_id is only used to filter a public read — it's not a security
+    boundary, just which counts to show.
+    """
+    result = {"pending": 0, "in_progress": 0}
+    if not discord_id.strip():
+        return result
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/poster_requests",
+                headers=SUPABASE_HEADERS,
+                params={
+                    "select": "status",
+                    "requested_by_discord_id": f"eq.{discord_id.strip()}",
+                    "status": "in.(pending,in_progress)",
+                },
+            )
+            resp.raise_for_status()
+            for row in resp.json():
+                status = row.get("status")
+                if status in result:
+                    result[status] += 1
+            return result
+    except Exception:
+        return result
 
 
 @router.get("/requests")
@@ -156,17 +171,17 @@ async def get_community_requests(
 
 
 @router.post("/requests")
-async def submit_community_request(
-    payload: PosterRequestPayload,
-    db: Session = Depends(get_db),
-):
+async def submit_community_request(payload: PosterRequestPayload):
     """Submit a new poster request to the shared community database."""
     if payload.media_type not in ("movie", "show", "season", "collection", "person"):
         raise HTTPException(status_code=400, detail="Invalid media_type")
     if not payload.title or not payload.title.strip():
         raise HTTPException(status_code=400, detail="Title is required")
-
-    check_and_increment_rate_limit(db)
+    if not payload.discord_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Connect your Discord account to submit a request",
+        )
 
     log_user_action(
         f"Submitting community poster request: {payload.title}",
@@ -240,13 +255,14 @@ async def submit_community_request(
                     )
 
             # All writes go through the submit-request edge function.
-            # The edge function enforces server-side IP rate limiting and
-            # calls the RPC with the service role key.  Direct anon calls
-            # to the RPC have been revoked at the Postgres level.
+            # The edge function verifies the signed Discord token, derives the
+            # requester's identity from it, and enforces per-user and per-IP
+            # daily limits before calling the RPC with the service role key.
             resp = await client.post(
                 f"{SUPABASE_URL}/functions/v1/submit-request",
                 headers=SUPABASE_HEADERS,
                 json={
+                    "token": payload.discord_token,
                     "p_tmdb_id": payload.tmdb_id,
                     "p_media_type": payload.media_type,
                     "p_title": payload.title.strip(),
@@ -258,7 +274,6 @@ async def submit_community_request(
                     "p_notes": payload.notes,
                     "p_style_tags": payload.style_tags,
                     "p_requested_by": payload.requested_by,
-                    "p_requested_by_discord_id": payload.requested_by_discord_id,
                     "p_ping_discord_id": payload.ping_discord_id,
                 },
             )
@@ -274,7 +289,13 @@ async def submit_community_request(
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         log_error(LogTags.API, f"Supabase submit failed: {e.response.text}", status_code=status)
-        # Pass through rate-limit and conflict responses from the edge function
+        # Pass through auth, rate-limit and conflict responses from the edge function
+        if status == 401:
+            try:
+                detail = e.response.json().get("error", "Discord authentication required")
+            except Exception:
+                detail = "Discord authentication required"
+            raise HTTPException(status_code=401, detail=detail)
         if status == 429:
             try:
                 detail = e.response.json().get("error", "Daily submission limit reached")

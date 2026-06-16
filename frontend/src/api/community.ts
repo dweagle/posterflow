@@ -35,8 +35,10 @@ export interface SubmitRequestPayload {
   notes?: string | null
   style_tags?: string[]
   requested_by?: string | null
-  requested_by_discord_id?: string | null
   ping_discord_id?: string | null  // stores username; resolved to ID by notify-discord
+  // Signed Discord token from useDiscordAuth — required; the server derives
+  // the requester's Discord identity from it.
+  discord_token: string
 }
 
 export interface SubmitRequestResponse {
@@ -46,6 +48,10 @@ export interface SubmitRequestResponse {
 
 export const getCommunityRequestCount = (): Promise<{ count: number }> =>
   getData('/api/community/requests/count')
+
+// The connected user's own active-request counts, for the requester sidebar badges.
+export const getMyCommunityRequestCounts = (discordId: string): Promise<{ pending: number; in_progress: number }> =>
+  getData(`/api/community/requests/my-counts?discord_id=${encodeURIComponent(discordId)}`)
 
 export const getCommunityRequests = (
   params?: Record<string, string | number>,

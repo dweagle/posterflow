@@ -151,6 +151,11 @@
   border-color: #64b5f6;
 }
 
+.community-owner-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
 .community-toolbar-actions {
   display: flex;
   align-items: center;

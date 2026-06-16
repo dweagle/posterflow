@@ -248,6 +248,47 @@
   text-align: center;
 }
 
+/* Wrapper holding all of an item's badges, grouped on the right. May hold the
+   queue badge plus the requester's own pending / in-progress badges. */
+.sidebar-badges {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* Inside the group the wrapper owns the right-alignment, not the badge. */
+.sidebar-badges .sidebar-badge {
+  margin-left: 0;
+}
+
+/* Requester's own request-status badges (pending + in progress).
+   Colors match the status badges on the Community Requests page. */
+.sidebar-req-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.sidebar-req-badge--pending {
+  background-color: rgba(255, 183, 77, 0.15);
+  color: #ffb74d;
+  border-color: rgba(255, 183, 77, 0.4);
+}
+
+.sidebar-req-badge--in-progress {
+  background-color: rgba(38, 198, 218, 0.15);
+  color: #26c6da;
+  border-color: rgba(38, 198, 218, 0.4);
+}
+
 /* ── Sidebar Customize Mode ─────────────────────────────────── */
 
 .sidebar-customize-header {
@@ -520,6 +561,31 @@
     font-size: 0.65rem !important;
   }
 
+  /* Collapsed rail: stack an item's badges vertically in the icon's top-right
+     corner so several still fit on the 76px-wide icon. */
+  .sidebar-badges {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.3rem;
+    margin-left: 0;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.12rem;
+  }
+
+  /* The wrapper is the positioned element; inner badges flow within it. */
+  .sidebar-badges .sidebar-badge {
+    position: static;
+    top: auto;
+    right: auto;
+  }
+
+  .sidebar-req-badge {
+    padding: 0.02rem 0.3rem !important;
+    min-width: 1rem;
+    font-size: 0.58rem;
+  }
+
   .sidebar-job-mini {
     display: none;
   }
@@ -580,6 +646,23 @@
     padding: 0.15rem 0.45rem !important;
     min-width: 1.5rem;
     font-size: 0.72rem !important;
+  }
+
+  /* Mobile drawer is the full-width layout again — restore the horizontal group. */
+  .sidebar-badges {
+    position: static;
+    top: unset;
+    right: unset;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .sidebar-req-badge {
+    padding: 0.1rem 0.4rem !important;
+    min-width: 1.4rem;
+    font-size: 0.65rem;
   }
 
   .sidebar-job-mini {

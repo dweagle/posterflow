@@ -49,7 +49,7 @@ export default function NewCommunityRequestModal({
   onClose,
 }: NewCommunityRequestModalProps) {
   const { showToast } = useToast()
-  const { isConnected, username, discordUserId, connecting, connectError, login, logout } = useDiscordAuth()
+  const { isConnected, username, token, connecting, connectError, login, logout } = useDiscordAuth()
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -108,12 +108,13 @@ export default function NewCommunityRequestModal({
     !submitting &&
     !submitted &&
     isConnected &&
+    !!token &&
     !!effectiveName.trim() &&
     !!effectiveTitle &&
     !!posterStyle
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return
+    if (!canSubmit || !token) return
     setSubmitting(true)
     try {
       const trimmedPingId = pingDiscordId.trim()
@@ -130,8 +131,8 @@ export default function NewCommunityRequestModal({
         notes: notes.trim() || null,
         style_tags: styleTags.length > 0 ? styleTags : undefined,
         requested_by: effectiveName.trim(),
-        requested_by_discord_id: discordUserId ?? null,
         ping_discord_id: validPingId,
+        discord_token: token,
       })
       setSubmitted(true)
       showToast(
@@ -148,7 +149,7 @@ export default function NewCommunityRequestModal({
     }
   }, [
     canSubmit, selected, searchType, effectiveTitle, effectiveYear,
-    notes, posterStyle, extraTags, pingDiscordId, effectiveName, discordUserId, showToast, onClose,
+    notes, posterStyle, extraTags, pingDiscordId, effectiveName, token, showToast, onClose,
   ])
 
   return (

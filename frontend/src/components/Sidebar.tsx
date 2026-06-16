@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal } from 'lucide-react'
 import { useUnmatched } from '../contexts/UnmatchedContext'
-import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, type MakerIdarrConfig } from '../api/client'
+import { useDiscordAuth } from '../hooks/useDiscordAuth'
+import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
 import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
@@ -69,7 +70,10 @@ function getNavIcon(id: string, color: string, size = 20) {
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
   const { unmatchedCount, idarrPendingCount, communityRequestCount, jobs } = useUnmatched()
+  const { isConnected, isMaker, discordUserId } = useDiscordAuth()
   const { showToast } = useToast()
+  // Requester's own active-request counts (pending + in progress) for the sidebar badges.
+  const [myReqCounts, setMyReqCounts] = useState<{ pending: number; in_progress: number }>({ pending: 0, in_progress: 0 })
   const [isDragOverIdarr, setIsDragOverIdarr] = useState(false)
   const [idarrPickerFiles, setIdarrPickerFiles] = useState<File[] | null>(null)
   const [idarrPickerConfig, setIdarrPickerConfig] = useState<MakerIdarrConfig | null>(null)
@@ -188,6 +192,24 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
       showToast(getApiErrorMessage(error, 'Failed to upload files to IDarr'), 'error')
     }
   }
+
+  // Poll the requester's own active-request counts for the sidebar badges.
+  // Only for connected non-makers — makers see the work-queue badge instead.
+  useEffect(() => {
+    if (!isConnected || isMaker || !discordUserId) {
+      setMyReqCounts({ pending: 0, in_progress: 0 })
+      return
+    }
+    let cancelled = false
+    const load = () => {
+      getMyCommunityRequestCounts(discordUserId)
+        .then((c) => { if (!cancelled) setMyReqCounts(c) })
+        .catch(() => {})
+    }
+    load()
+    const interval = setInterval(load, 60_000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [isConnected, isMaker, discordUserId])
 
   useEffect(() => {
     if (!currentRunningJob) {
@@ -428,9 +450,24 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                   )
                 }
 
-                const badgeCount =
-                  def.badge === 'unmatched' ? unmatchedCount :
-                  def.badge === 'community' ? communityRequestCount : 0
+                // Badges shown on this item, grouped on the right. The community item can
+                // show several: the maker work-queue count (all pending) plus the user's own
+                // pending / in-progress requests — makers who also request see all of them.
+                const itemBadges: ReactNode[] = []
+                if (def.badge === 'unmatched' && unmatchedCount > 0) {
+                  itemBadges.push(<span key="unmatched" className="sidebar-badge">{unmatchedCount}</span>)
+                }
+                if (def.badge === 'community') {
+                  if (isMaker && communityRequestCount > 0) {
+                    itemBadges.push(<span key="queue" className="sidebar-badge" title="Open requests in the queue">{communityRequestCount}</span>)
+                  }
+                  if (isConnected && myReqCounts.pending > 0) {
+                    itemBadges.push(<span key="pending" className="sidebar-req-badge sidebar-req-badge--pending" title="Your pending requests">{myReqCounts.pending}</span>)
+                  }
+                  if (isConnected && myReqCounts.in_progress > 0) {
+                    itemBadges.push(<span key="in_progress" className="sidebar-req-badge sidebar-req-badge--in-progress" title="Your requests in progress">{myReqCounts.in_progress}</span>)
+                  }
+                }
 
                 return (
                   <NavLink
@@ -443,7 +480,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                   >
                     <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
                     <span className="nav-label">{def.label}</span>
-                    {badgeCount > 0 && <span className="sidebar-badge">{badgeCount}</span>}
+                    {itemBadges.length > 0 && <span className="sidebar-badges">{itemBadges}</span>}
                   </NavLink>
                 )
               })}

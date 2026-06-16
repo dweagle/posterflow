@@ -2,24 +2,39 @@
  * submit-request
  *
  * Single entry point for all community poster request submissions.
- * Enforces server-side IP rate limiting so the local (per-instance) limit
- * cannot be bypassed by hitting Supabase directly.
+ *
+ * Every submission must include a signed Discord token (issued by
+ * discord-oauth). The requester's identity is taken from the verified token —
+ * never from client-supplied fields — so rate limits are enforced per Discord
+ * account and cannot be spoofed.
  *
  * The submit_poster_request RPC has anon/authenticated execute revoked —
  * only this function (running with the service role) can call it.
  *
- * Rate limit: IP_DAILY_LIMIT submissions per IP per UTC day.
- * Tracked in the request_ip_limits table via check_and_increment_ip_limit().
+ * Rate limits (both enforced server-side, per UTC day):
+ *   USER_DAILY_LIMIT submissions per Discord account
+ *     (request_user_limits via check_and_increment_user_limit)
+ *   IP_DAILY_LIMIT submissions per IP, as a backstop
+ *     (request_ip_limits via check_and_increment_ip_limit)
+ *
+ * Required Supabase secrets:
+ *   DISCORD_JWT_SECRET        (same secret discord-oauth signs with)
+ *   SUPABASE_URL              (auto-provided)
+ *   SUPABASE_SERVICE_ROLE_KEY (auto-provided)
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 
-// Server-side daily limit per IP — independent of the per-instance local limit.
-// Set higher than the local limit (5) to accommodate shared IPs / households.
-const IP_DAILY_LIMIT = 15
+// Per-Discord-account daily limit — the primary limit.
+const USER_DAILY_LIMIT = 5
+
+// Per-IP daily backstop. Submissions arrive via the PosterFlow backend, so
+// this IP is the instance server's IP — effectively a per-instance cap.
+const IP_DAILY_LIMIT = 5
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -27,11 +42,104 @@ const json = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
+// ── Token verification (same as update-request-status / post-poster) ────────
+
+interface DiscordTokenPayload {
+  discord_user_id: string
+  discord_username: string
+  is_maker: boolean
+  exp: number
+}
+
+async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
+  const dot = token.lastIndexOf('.')
+  if (dot === -1) return null
+  const b64 = token.slice(0, dot)
+  const sig = token.slice(dot + 1)
+
+  let key: CryptoKey
+  try {
+    key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(JWT_SECRET),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    )
+  } catch {
+    return null
+  }
+
+  const sigBytes = new Uint8Array((sig.match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16)))
+  const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(b64))
+  if (!valid) return null
+
+  try {
+    const payload = JSON.parse(atob(b64)) as DiscordTokenPayload
+    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
+    if (!payload.discord_user_id) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+// ── Handler ──────────────────────────────────────────────────────────────────
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
 
+  // Parse payload
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  // ── Verify the signed Discord token ────────────────────────────────────────
+  const token = typeof body.token === 'string' ? body.token : ''
+  delete body.token
+  const user = await verifyToken(token)
+  if (!user) {
+    return json(
+      { error: 'Discord authentication required — reconnect your Discord account and try again' },
+      401,
+    )
+  }
+
+  // Validate required fields before consuming any rate-limit quota
+  const validTypes = ['movie', 'show', 'season', 'collection', 'person']
+  if (!body.p_media_type || !validTypes.includes(body.p_media_type as string)) {
+    return json({ error: 'Invalid media_type' }, 400)
+  }
+  if (!body.p_title || typeof body.p_title !== 'string' || !body.p_title.trim()) {
+    return json({ error: 'Title is required' }, 400)
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  })
+
+  // ── Per-Discord-account limit (primary) ────────────────────────────────────
+  const { data: userAllowed, error: userLimitErr } = await supabase.rpc(
+    'check_and_increment_user_limit',
+    { p_user_id: user.discord_user_id, p_limit: USER_DAILY_LIMIT },
+  )
+  if (userLimitErr) {
+    console.error('User rate limit check failed:', userLimitErr)
+    return json({ error: 'Internal error' }, 500)
+  }
+  if (!userAllowed) {
+    return json(
+      { error: `Daily request limit reached (${USER_DAILY_LIMIT} per day per Discord account). Try again tomorrow.` },
+      429,
+    )
+  }
+
+  // ── Per-IP backstop ─────────────────────────────────────────────────────────
   // Use cf-connecting-ip (set by Cloudflare, not settable by the client).
   // x-forwarded-for is intentionally NOT used as the primary source because
   // clients can send arbitrary values in that header.
@@ -43,56 +151,32 @@ Deno.serve(async (req: Request) => {
     req.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim() ??
     'unknown'
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  })
-
-  // Atomically check and increment the IP counter for today.
-  // Returns true if the submission is allowed, false if the limit is exceeded.
-  const { data: allowed, error: limitErr } = await supabase.rpc(
+  const { data: ipAllowed, error: ipLimitErr } = await supabase.rpc(
     'check_and_increment_ip_limit',
     { p_ip: ip, p_limit: IP_DAILY_LIMIT },
   )
-  if (limitErr) {
-    console.error('Rate limit check failed:', limitErr)
+  if (ipLimitErr) {
+    console.error('IP rate limit check failed:', ipLimitErr)
     return json({ error: 'Internal error' }, 500)
   }
-  if (!allowed) {
+  if (!ipAllowed) {
     return json(
       { error: `Daily submission limit reached (${IP_DAILY_LIMIT} per day). Try again tomorrow.` },
       429,
     )
   }
 
-  // Parse payload
-  let body: Record<string, unknown>
-  try {
-    body = await req.json()
-  } catch {
-    return json({ error: 'Invalid JSON body' }, 400)
-  }
-
-  // Validate required fields (defense-in-depth; the backend also validates)
-  const validTypes = ['movie', 'show', 'season', 'collection', 'person']
-  if (!body.p_media_type || !validTypes.includes(body.p_media_type as string)) {
-    return json({ error: 'Invalid media_type' }, 400)
-  }
-  if (!body.p_title || typeof body.p_title !== 'string' || !body.p_title.trim()) {
-    return json({ error: 'Title is required' }, 400)
-  }
-
   // Truncate free-text fields to prevent oversized payloads
-  if (typeof body.p_title === 'string')        body.p_title        = body.p_title.trim().slice(0, 200)
-  if (typeof body.p_notes === 'string')        body.p_notes        = body.p_notes.trim().slice(0, 1000)
-  if (typeof body.p_requested_by === 'string') body.p_requested_by = body.p_requested_by.trim().slice(0, 100)
+  if (typeof body.p_title === 'string') body.p_title = body.p_title.trim().slice(0, 200)
+  if (typeof body.p_notes === 'string') body.p_notes = body.p_notes.trim().slice(0, 1000)
 
-  // Extract and remove Discord ID fields before passing to the RPC — the RPC doesn't
-  // accept these parameters. We store them via a separate UPDATE after insert.
-  const requestedByDiscordId =
-    typeof body.p_requested_by_discord_id === 'string'
-      ? body.p_requested_by_discord_id.trim().slice(0, 30)
-      : null
-  delete body.p_requested_by_discord_id
+  // Requester identity comes from the verified token, never the client.
+  const requestedByDiscordId = user.discord_user_id
+  if (typeof body.p_requested_by === 'string' && body.p_requested_by.trim()) {
+    body.p_requested_by = body.p_requested_by.trim().slice(0, 100)
+  } else {
+    body.p_requested_by = user.discord_username
+  }
 
   // Store ping_discord_username: any reasonable Discord username (2–32 non-whitespace chars)
   const rawPingUsername = typeof body.p_ping_discord_id === 'string' ? body.p_ping_discord_id.trim() : null
@@ -132,11 +216,12 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Submission failed' }, 500)
   }
 
-  // Store the requester's Discord ID and optional ping ID on the new row.
+  // Store the requester's Discord ID and optional ping username on the new row.
   // Only set when this is a brand-new request (not a duplicate vote).
-  if (data?.is_new && data?.request_id && (requestedByDiscordId || pingDiscordId)) {
-    const updatePayload: Record<string, string> = {}
-    if (requestedByDiscordId) updatePayload.requested_by_discord_id = requestedByDiscordId
+  if (data?.is_new && data?.request_id) {
+    const updatePayload: Record<string, string> = {
+      requested_by_discord_id: requestedByDiscordId,
+    }
     if (pingDiscordUsername) updatePayload.ping_discord_username = pingDiscordUsername
     const { error: updateErr } = await supabase
       .from('poster_requests')

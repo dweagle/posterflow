@@ -75,6 +75,8 @@ export default function CommunityRequests() {
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const [status, setStatus] = useState<StatusFilter>('active')
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
+  // Separate from the status/sort filters: show all requests or only the connected user's own.
+  const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
   // Per-card upload state: requestId → 'uploading' | 'done' | Error
   const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done' | string>>(new Map())
   // Per-card action state (claim/complete/reject): requestId → 'loading' | error string
@@ -288,6 +290,12 @@ export default function CommunityRequests() {
     fetchRequests()
   }, [fetchRequests])
 
+  // "My requests" is applied client-side so it composes with the status/sort filters.
+  const visibleRequests =
+    ownerFilter === 'mine' && discordUserId
+      ? requests.filter((req) => req.requested_by_discord_id === discordUserId)
+      : requests
+
   return (
     <>
     <div className="page-container community-requests">
@@ -406,6 +414,22 @@ export default function CommunityRequests() {
             </select>
           </div>
         </div>
+        {isConnected && discordUserId && (
+          <div className="community-owner-toggle">
+            <button
+              className={`community-tab-btn${ownerFilter === 'all' ? ' active' : ''}`}
+              onClick={() => setOwnerFilter('all')}
+            >
+              All Requests
+            </button>
+            <button
+              className={`community-tab-btn${ownerFilter === 'mine' ? ' active' : ''}`}
+              onClick={() => setOwnerFilter('mine')}
+            >
+              My Requests
+            </button>
+          </div>
+        )}
         <div className="community-toolbar-actions">
           <button className="community-refresh-btn" onClick={fetchRequests} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
@@ -425,19 +449,21 @@ export default function CommunityRequests() {
           <RefreshCw size={20} className="spin-icon" />
           <span>Loading requests…</span>
         </div>
-      ) : requests.length === 0 ? (
+      ) : visibleRequests.length === 0 ? (
         <div className="community-empty">
           <Globe size={48} />
-          <p>No requests found</p>
+          <p>{ownerFilter === 'mine' ? "You haven't submitted any requests" : 'No requests found'}</p>
           <p className="community-empty-sub">
-            Submit requests from the Unmatched Assets tab in Poster Manager.
+            {ownerFilter === 'mine'
+              ? 'Requests you submit will appear here.'
+              : 'Submit requests from the Unmatched Assets tab in Poster Manager.'}
           </p>
         </div>
       ) : (
         <div className="community-list">
           <div className="community-list-header">
             <p className="community-count">
-              {requests.length} request{requests.length !== 1 ? 's' : ''}
+              {visibleRequests.length} request{visibleRequests.length !== 1 ? 's' : ''}
             </p>
             {isMaker && isConnected && (
               <label className="maker-idarr-toggle-label">
@@ -463,7 +489,7 @@ export default function CommunityRequests() {
               </label>
             )}
           </div>
-          {requests.map((req) => {
+          {visibleRequests.map((req) => {
             const tmdbLink = getTmdbLink(req)
             const tvdbLink = getTvdbLink(req)
             const showMakerTools = isMaker && isConnected && req.tmdb_id != null

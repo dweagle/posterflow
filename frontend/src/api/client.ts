@@ -197,6 +197,7 @@ export {
   type SubmitRequestResponse,
   getCommunityRequests,
   getCommunityRequestCount,
+  getMyCommunityRequestCounts,
   submitCommunityRequest,
 } from './community'
 

@@ -15,6 +15,7 @@ const mockOnClose = vi.fn()
 let mockDiscordAuth = {
   isConnected: false,
   username: null as string | null,
+  token: null as string | null,
   connecting: false,
   connectError: null as string | null,
   login: mockLogin,
@@ -57,6 +58,7 @@ describe('CommunityRequestModal', () => {
     mockDiscordAuth = {
       isConnected: false,
       username: null,
+      token: null,
       connecting: false,
       connectError: null,
       login: mockLogin,
@@ -270,7 +272,7 @@ describe('CommunityRequestModal', () => {
 
   describe('submission', () => {
     beforeEach(() => {
-      mockDiscordAuth = { ...mockDiscordAuth, isConnected: true, username: 'testuser' }
+      mockDiscordAuth = { ...mockDiscordAuth, isConnected: true, username: 'testuser', token: 'test-discord-token' }
     })
 
     it('calls submitCommunityRequest with correct payload', async () => {
@@ -285,6 +287,7 @@ describe('CommunityRequestModal', () => {
           year: 2010,
           media_type: 'movie',
           requested_by: 'testuser',
+          discord_token: 'test-discord-token',
         }),
       )
     })

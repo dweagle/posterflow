@@ -51,7 +51,7 @@ export default function CommunityRequestModal({
   onClose,
 }: CommunityRequestModalProps) {
   const { showToast } = useToast()
-  const { isConnected, username, discordUserId, connecting, connectError, login, logout } = useDiscordAuth()
+  const { isConnected, username, token, connecting, connectError, login, logout } = useDiscordAuth()
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
   const [personCandidates, setPersonCandidates] = useState<TmdbCandidate[]>([])
   const [loading, setLoading] = useState(false)
@@ -109,7 +109,7 @@ export default function CommunityRequestModal({
   const handleSubmit = useCallback(async () => {
     if (submitting) return
     const trimmedName = effectiveName.trim()
-    if (!trimmedName) return
+    if (!trimmedName || !token) return
     setSubmitting(true)
     try {
       const isSeason = seasonNumbers != null && seasonNumbers.length > 0
@@ -140,8 +140,8 @@ export default function CommunityRequestModal({
         notes: notesValue,
         style_tags: styleTags.length > 0 ? styleTags : undefined,
         requested_by: trimmedName,
-        requested_by_discord_id: discordUserId ?? null,
         ping_discord_id: validPingId,
+        discord_token: token,
       })
 
       setSubmitted(true)
@@ -159,7 +159,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, showToast, onClose])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, onClose])
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
