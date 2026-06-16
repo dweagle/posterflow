@@ -42,6 +42,14 @@ function formatRequestDate(dateStr: string): string {
     + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+// Derive the community poster style (CL2K/MM2K) from a request's style tags, if present.
+function getStyleLabel(req: CommunityRequest): 'CL2K' | 'MM2K' | null {
+  const tags = req.style_tags ?? []
+  if (tags.includes('CL2K Style')) return 'CL2K'
+  if (tags.includes('MM2K Style')) return 'MM2K'
+  return null
+}
+
 function getSeasonLabel(req: CommunityRequest): string | null {
   if (req.season_number != null) return `S${req.season_number}`
   if (req.media_type === 'season' && req.notes?.startsWith('Seasons: ')) {
@@ -484,6 +492,10 @@ export default function CommunityRequests() {
                       return lbl ? <span className="request-season">{lbl}</span> : null
                     })()}
                     <span className={`request-type-badge type-${req.media_type}`}>{req.media_type}</span>
+                    {(() => {
+                      const style = getStyleLabel(req)
+                      return style ? <span className={`request-style-badge style-${style.toLowerCase()}`}>{style}</span> : null
+                    })()}
                     <span className={`request-status-badge status-${req.status}`}>
                       {req.status === 'in_progress' ? 'in progress' : req.status}
                     </span>

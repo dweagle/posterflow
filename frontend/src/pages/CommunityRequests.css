@@ -597,6 +597,26 @@
   color: #ff8a65;
 }
 
+.request-style-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.request-style-badge.style-cl2k {
+  background: rgba(100, 181, 246, 0.18);
+  color: #90caf9;
+  border: 1px solid rgba(100, 181, 246, 0.42);
+}
+
+.request-style-badge.style-mm2k {
+  background: rgba(76, 175, 80, 0.16);
+  color: #a5d6a7;
+  border: 1px solid rgba(76, 175, 80, 0.36);
+}
+
 .request-status-badge {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;

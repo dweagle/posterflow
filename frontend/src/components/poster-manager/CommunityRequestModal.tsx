@@ -7,9 +7,15 @@ import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
-const STYLE_TAGS = [
-  'MM2K Style',
-  'CL2K Style',
+// Required, single-select community poster style. The stored tag values keep the
+// "… Style" suffix for consistency with existing requests; the card derives the badge from them.
+const POSTER_STYLES: { value: string; label: string }[] = [
+  { value: 'CL2K Style', label: 'CL2K' },
+  { value: 'MM2K Style', label: 'MM2K' },
+]
+
+// Optional extra style preferences (multi-select)
+const EXTRA_TAGS = [
   'Anime Movie',
   'Anime TV',
 ]
@@ -51,7 +57,8 @@ export default function CommunityRequestModal({
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<TmdbCandidate | null>(null)
   const [isCustomRequest, setIsCustomRequest] = useState(false)
-  const [styleTags, setStyleTags] = useState<string[]>([])
+  const [posterStyle, setPosterStyle] = useState<string | null>(null)
+  const [extraTags, setExtraTags] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [pingDiscordId, setPingDiscordId] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -91,8 +98,8 @@ export default function CommunityRequestModal({
       .finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleTag = useCallback((tag: string) => {
-    setStyleTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
+  const toggleExtraTag = useCallback((tag: string) => {
+    setExtraTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
   }, [])
 
   // Determine if the submit should be blocked because of missing TMDB selection
@@ -120,6 +127,7 @@ export default function CommunityRequestModal({
       // Use TMDB match if selected, otherwise fall back to the original asset title/year
       const trimmedPingId = pingDiscordId.trim()
       const validPingId = trimmedPingId && isValidDiscordUsername(trimmedPingId) ? trimmedPingId : null
+      const styleTags = [posterStyle, ...extraTags].filter(Boolean) as string[]
       const result = await submitCommunityRequest({
         tmdb_id: selected?.tmdb_id ?? null,
         media_type: isSeason ? 'season' : (selected?.media_type ?? tmdbType),
@@ -151,7 +159,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, styleTags, pingDiscordId, showToast, onClose])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, showToast, onClose])
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -260,17 +268,34 @@ export default function CommunityRequestModal({
             </label>
           )}
 
-          {/* Style tags */}
+          {/* Poster style — required, single choice */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Style preferences
+            Poster style <span className="request-required">required</span>
           </div>
           <div className="request-style-tags">
-            {STYLE_TAGS.map((tag) => (
+            {POSTER_STYLES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
+                onClick={() => setPosterStyle((prev) => (prev === s.value ? null : s.value))}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Extra style preferences — optional */}
+          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
+            Style preferences <span className="request-optional">(optional)</span>
+          </div>
+          <div className="request-style-tags">
+            {EXTRA_TAGS.map((tag) => (
               <button
                 key={tag}
                 type="button"
-                className={`request-style-tag${styleTags.includes(tag) ? ' selected' : ''}`}
-                onClick={() => toggleTag(tag)}
+                className={`request-style-tag${extraTags.includes(tag) ? ' selected' : ''}`}
+                onClick={() => toggleExtraTag(tag)}
               >
                 {tag}
               </button>
@@ -342,8 +367,12 @@ export default function CommunityRequestModal({
           <button
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || tmdbSelectionRequired}
-            title={tmdbSelectionRequired ? 'Select a TMDB match or check "custom request" to proceed' : undefined}
+            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || tmdbSelectionRequired || !posterStyle}
+            title={
+              tmdbSelectionRequired ? 'Select a TMDB match or check "custom request" to proceed' :
+              !posterStyle ? 'Select a poster style (CL2K or MM2K)' :
+              undefined
+            }
           >
             {submitting ? (
               <Loader2 size={14} className="spin-icon" />

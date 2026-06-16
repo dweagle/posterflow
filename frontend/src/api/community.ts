@@ -18,6 +18,7 @@ export interface CommunityRequest {
   requested_by_discord_id: string | null
   discord_thread_url: string | null
   notes?: string | null
+  style_tags?: string[] | null
   created_at: string
   updated_at: string
 }

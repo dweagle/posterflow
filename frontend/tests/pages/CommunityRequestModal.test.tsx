@@ -79,9 +79,12 @@ describe('CommunityRequestModal', () => {
       expect((screen.getByRole('button', { name: /request poster/i }) as HTMLButtonElement).disabled).toBe(true)
     })
 
-    it('is enabled when Discord is connected', () => {
+    it('stays disabled until a poster style is selected, then enables', async () => {
       mockDiscordAuth = { ...mockDiscordAuth, isConnected: true, username: 'testuser' }
+      const user = userEvent.setup()
       renderModal()
+      expect((screen.getByRole('button', { name: /request poster/i }) as HTMLButtonElement).disabled).toBe(true)
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       expect((screen.getByRole('button', { name: /request poster/i }) as HTMLButtonElement).disabled).toBe(false)
     })
   })
@@ -132,39 +135,48 @@ describe('CommunityRequestModal', () => {
   // ── Style tags ────────────────────────────────────────────────────────────
 
   describe('style tags', () => {
-    it('renders all style tag options', () => {
+    it('renders the poster style and extra tag options', () => {
       renderModal()
-      expect(screen.getByRole('button', { name: 'MM2K Style' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'CL2K Style' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'CL2K' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'MM2K' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Anime Movie' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Anime TV' })).toBeTruthy()
     })
 
-    it('toggles a style tag on click', async () => {
+    it('selects a poster style on click', async () => {
       const user = userEvent.setup()
       renderModal()
-      const tag = screen.getByRole('button', { name: 'MM2K Style' })
+      const tag = screen.getByRole('button', { name: 'MM2K' })
       expect(tag.className.includes('selected')).toBe(false)
       await user.click(tag)
       expect(tag.className.includes('selected')).toBe(true)
     })
 
-    it('deselects a tag when clicked again', async () => {
+    it('deselects the poster style when clicked again', async () => {
       const user = userEvent.setup()
       renderModal()
-      const tag = screen.getByRole('button', { name: 'MM2K Style' })
+      const tag = screen.getByRole('button', { name: 'MM2K' })
       await user.click(tag)
       expect(tag.className.includes('selected')).toBe(true)
       await user.click(tag)
       expect(tag.className.includes('selected')).toBe(false)
     })
 
-    it('allows multiple tags to be selected', async () => {
+    it('only allows one poster style at a time', async () => {
       const user = userEvent.setup()
       renderModal()
-      await user.click(screen.getByRole('button', { name: 'MM2K Style' }))
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: 'MM2K' }))
+      expect(screen.getByRole('button', { name: 'CL2K' }).className.includes('selected')).toBe(false)
+      expect(screen.getByRole('button', { name: 'MM2K' }).className.includes('selected')).toBe(true)
+    })
+
+    it('allows a poster style and an extra tag together', async () => {
+      const user = userEvent.setup()
+      renderModal()
+      await user.click(screen.getByRole('button', { name: 'MM2K' }))
       await user.click(screen.getByRole('button', { name: 'Anime Movie' }))
-      expect(screen.getByRole('button', { name: 'MM2K Style' }).className.includes('selected')).toBe(true)
+      expect(screen.getByRole('button', { name: 'MM2K' }).className.includes('selected')).toBe(true)
       expect(screen.getByRole('button', { name: 'Anime Movie' }).className.includes('selected')).toBe(true)
     })
   })
@@ -264,6 +276,7 @@ describe('CommunityRequestModal', () => {
     it('calls submitCommunityRequest with correct payload', async () => {
       const user = userEvent.setup()
       renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
       expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
@@ -276,10 +289,10 @@ describe('CommunityRequestModal', () => {
       )
     })
 
-    it('includes selected style tags in payload', async () => {
+    it('includes the selected poster style in payload', async () => {
       const user = userEvent.setup()
       renderModal()
-      await user.click(screen.getByRole('button', { name: 'MM2K Style' }))
+      await user.click(screen.getByRole('button', { name: 'MM2K' }))
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
       expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
@@ -287,9 +300,22 @@ describe('CommunityRequestModal', () => {
       )
     })
 
+    it('combines the poster style with extra tags in payload', async () => {
+      const user = userEvent.setup()
+      renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: 'Anime Movie' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ style_tags: ['CL2K Style', 'Anime Movie'] }),
+      )
+    })
+
     it('includes notes in payload when filled', async () => {
       const user = userEvent.setup()
       renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       await user.type(screen.getByPlaceholderText(/any special instructions/i), 'Use theatrical')
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
@@ -302,6 +328,7 @@ describe('CommunityRequestModal', () => {
       mockSubmitCommunityRequest.mockResolvedValue({ status: 'created' })
       const user = userEvent.setup()
       renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Request submitted!', 'success'))
     })
@@ -310,6 +337,7 @@ describe('CommunityRequestModal', () => {
       mockSubmitCommunityRequest.mockResolvedValue({ status: 'already_requested' })
       const user = userEvent.setup()
       renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Already requested!', 'info'))
     })
@@ -318,6 +346,7 @@ describe('CommunityRequestModal', () => {
       mockSubmitCommunityRequest.mockRejectedValue(new Error('Network error'))
       const user = userEvent.setup()
       renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Failed to submit request', 'error'))
     })
