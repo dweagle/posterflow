@@ -369,3 +369,128 @@ def test_detect_unmatched_ignore_unmonitored_keeps_items_without_monitored_flag(
 
     assert len(filtered["movies"]) == 1
     assert len(filtered["series"]) == 1
+
+
+def test_detect_unmatched_incinemas_flagged_only_when_in_library(test_db, monkeypatch):
+    """In-cinemas movies are skipped (no poster expected yet) unless the file is downloaded."""
+    service = UnmatchedAssetsService(test_db)
+
+    unrelated_asset = {
+        "title": "Unrelated",
+        "normalized_title": "unrelated",
+        "alternate_titles": [],
+        "normalized_alternate_titles": [],
+        "year": 2000,
+        "tmdb_id": 999,
+        "tvdb_id": None,
+        "imdb_id": None,
+        "files": ["Unrelated (2000).jpg"],
+        "season_numbers": [],
+    }
+
+    def _fake_get_assets_files(_source_dirs, merge=False):
+        return [unrelated_asset], {"u": [unrelated_asset]}
+
+    def _fake_search_matches(_prefix_index, title, tmdb_id=None, tvdb_id=None):
+        return []
+
+    monkeypatch.setattr("services.unmatched_assets.get_assets_files", _fake_get_assets_files)
+    monkeypatch.setattr("services.unmatched_assets.search_matches", _fake_search_matches)
+
+    media_dict = {
+        "movies": [
+            {
+                "title": "In Cinemas No File",
+                "normalized_title": "incinemasnofile",
+                "alternate_titles": [],
+                "normalized_alternate_titles": [],
+                "year": 2026,
+                "tmdb_id": 301,
+                "status": "incinemas",
+                "has_file": False,
+                "instance": "Radarr A",
+            },
+            {
+                "title": "Deep Water",
+                "normalized_title": "deepwater",
+                "alternate_titles": [],
+                "normalized_alternate_titles": [],
+                "year": 2026,
+                "tmdb_id": 1127384,
+                "status": "incinemas",
+                "has_file": True,
+                "instance": "Radarr A",
+            },
+        ],
+        "series": [],
+        "collections": [],
+    }
+
+    result = service.detect_unmatched(media_dict, ["/tmp/organized"])
+
+    unmatched_titles = [m["title"] for m in result["unmatched"]["movies"]]
+    assert unmatched_titles == ["Deep Water"]
+
+    # The not-downloaded in-cinemas movie is excluded from the total, so it can't
+    # silently pad the completion percentage.
+    assert result["summary"]["movies"]["total"] == 1
+    assert result["summary"]["movies"]["unmatched"] == 1
+    assert result["summary"]["movies"]["percent_complete"] == 0.0
+
+
+def test_detect_unmatched_stats_exclude_undownloaded_unreleased(test_db, monkeypatch):
+    """The completion percentage only counts movies a poster is expected for."""
+    service = UnmatchedAssetsService(test_db)
+
+    asset = {
+        "title": "Released Matched",
+        "normalized_title": "releasedmatched",
+        "alternate_titles": [],
+        "normalized_alternate_titles": [],
+        "year": 2024,
+        "tmdb_id": 101,
+        "tvdb_id": None,
+        "imdb_id": None,
+        "files": ["Released Matched (2024).jpg"],
+        "season_numbers": [],
+    }
+
+    def _fake_get_assets_files(_source_dirs, merge=False):
+        return [asset], {"m": [asset]}
+
+    def _fake_search_matches(_prefix_index, title, tmdb_id=None, tvdb_id=None):
+        return [asset] if tmdb_id == 101 else []
+
+    monkeypatch.setattr("services.unmatched_assets.get_assets_files", _fake_get_assets_files)
+    monkeypatch.setattr("services.unmatched_assets.search_matches", _fake_search_matches)
+
+    media_dict = {
+        "movies": [
+            # Released with poster -> counts, matched
+            {"title": "Released Matched", "normalized_title": "releasedmatched",
+             "alternate_titles": [], "normalized_alternate_titles": [], "year": 2024,
+             "tmdb_id": 101, "status": "released", "has_file": True, "instance": "Radarr A"},
+            # In cinemas, downloaded, no poster -> counts, unmatched
+            {"title": "Deep Water", "normalized_title": "deepwater",
+             "alternate_titles": [], "normalized_alternate_titles": [], "year": 2026,
+             "tmdb_id": 1127384, "status": "incinemas", "has_file": True, "instance": "Radarr A"},
+            # In cinemas, not downloaded -> excluded from total
+            {"title": "Theater Only", "normalized_title": "theateronly",
+             "alternate_titles": [], "normalized_alternate_titles": [], "year": 2026,
+             "tmdb_id": 302, "status": "incinemas", "has_file": False, "instance": "Radarr A"},
+            # Announced, not downloaded -> excluded from total
+            {"title": "Future Film", "normalized_title": "futurefilm",
+             "alternate_titles": [], "normalized_alternate_titles": [], "year": 2027,
+             "tmdb_id": 303, "status": "announced", "has_file": False, "instance": "Radarr A"},
+        ],
+        "series": [],
+        "collections": [],
+    }
+
+    result = service.detect_unmatched(media_dict, ["/tmp/organized"])
+
+    movies = result["summary"]["movies"]
+    assert movies["total"] == 2  # released + downloaded in-cinemas only
+    assert movies["unmatched"] == 1  # Deep Water
+    assert movies["percent_complete"] == 50.0
+    assert result["summary"]["grand_total"]["total"] == 2

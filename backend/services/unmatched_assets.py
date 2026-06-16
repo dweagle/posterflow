@@ -435,14 +435,11 @@ class UnmatchedAssetsService:
                         match_stats[media_type]["skipped"] += 1
                         continue
                         
-                    # Skip media with certain statuses
-                    if media_type in ["series", "movies"] and media.get("status") not in [
-                        "released",
-                        "ended",
-                        "continuing",
-                    ]:
+                    # Skip media with no poster expected yet (not released and not in the
+                    # library). Downloaded items are always checked regardless of status.
+                    if media_type in ["series", "movies"] and not self._should_have_poster(media, media_type):
                         match_stats[media_type]["skipped"] += 1
-                        log_debug(LogTags.UNMATCHED, f"    Skipping {media['title']} ({media.get('year')}) - status: {media.get('status')}")
+                        log_debug(LogTags.UNMATCHED, f"    Skipping {media['title']} ({media.get('year')}) - status: {(media.get('status') or '').lower()}, not in library")
                         continue
                         
                     match_stats[media_type]["processed"] += 1
@@ -713,6 +710,19 @@ class UnmatchedAssetsService:
                 progress_callback("error", 0, 100, f"Detection failed: {e}")
             return self._empty_result()
 
+    @staticmethod
+    def _should_have_poster(media: Dict[str, Any], media_type: str) -> bool:
+        """A poster is expected when the item is released or already downloaded to the library.
+
+        Single source of truth shared by detection and stats so the two never drift.
+        """
+        status = (media.get("status") or "").lower()
+        if media_type == "movies":
+            return status in {"released", "physicalrelease"} or bool(media.get("has_file", False))
+        if media_type == "series":
+            return status in {"ended", "continuing"} or bool(media.get("has_episodes", False))
+        return True
+
     def _calculate_stats(
         self,
         unmatched: Dict[str, List[Dict[str, Any]]],
@@ -722,10 +732,15 @@ class UnmatchedAssetsService:
         
         log_debug(LogTags.UNMATCHED, "Calculating statistics...")
         
+        # Only count items a poster is expected for (released or in library), so the
+        # totals/percentages match exactly what detection evaluated.
+        eligible_movies = [m for m in media_dict.get("movies", []) if self._should_have_poster(m, "movies")]
+        eligible_series = [s for s in media_dict.get("series", []) if self._should_have_poster(s, "series")]
+
         # Calculate overall stats (existing logic)
         # Movies
         unmatched_movies = len(unmatched.get("movies", []))
-        total_movies = len(media_dict.get("movies", []))
+        total_movies = len(eligible_movies)
         percent_movies = (
             ((total_movies - unmatched_movies) / total_movies * 100)
             if total_movies
@@ -747,7 +762,7 @@ class UnmatchedAssetsService:
             1 for item in unmatched.get("series", [])
             if item.get("missing_main_poster", False)
         )
-        total_series = len(media_dict.get("series", []))
+        total_series = len(eligible_series)
         percent_series = (
             ((total_series - unmatched_series) / total_series * 100)
             if total_series
@@ -774,7 +789,7 @@ class UnmatchedAssetsService:
                 s for s in media.get("seasons", [])
                 if s.get("season_has_episodes")
             ])
-            for media in media_dict.get("series", [])
+            for media in eligible_series
         )
         percent_seasons = (
             ((total_seasons - unmatched_seasons) / total_seasons * 100)
@@ -855,6 +870,9 @@ class UnmatchedAssetsService:
             instance_totals = {}
             instance_library_types = {}  # Track library_type for collections
             for media in media_list:
+                # Match the overall totals: only count items a poster is expected for.
+                if media_type in ("movies", "series") and not self._should_have_poster(media, media_type):
+                    continue
                 instance = media.get("instance", "Unknown")
                 if instance not in instance_totals:
                     instance_totals[instance] = 0
