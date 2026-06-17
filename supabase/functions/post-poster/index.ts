@@ -160,34 +160,65 @@ Deno.serve(async (req) => {
   }
 
   // ── Post image(s) to Discord thread ──────────────────────────────────────
-  const discordForm = new FormData()
   const label = files.length === 1
     ? `🖼️ Poster uploaded by **${payload.discord_username}**`
     : `🖼️ ${files.length} posters uploaded by **${payload.discord_username}**`
-  discordForm.append(
-    'payload_json',
-    JSON.stringify({
-      content: label,
-      attachments: files.map((f, i) => ({ id: i, filename: f.name || `poster_${i + 1}.jpg` })),
-    }),
-  )
-  files.forEach((f, i) => {
-    discordForm.append(`files[${i}]`, f, f.name || `poster_${i + 1}.jpg`)
-  })
 
-  const discordResp = await fetch(
-    `https://discord.com/api/v10/channels/${row.discord_message_id}/messages`,
-    {
+  // Rebuilt per attempt — a FormData's file parts are consumed when streamed.
+  const buildForm = () => {
+    const form = new FormData()
+    form.append(
+      'payload_json',
+      JSON.stringify({
+        content: label,
+        attachments: files.map((f, i) => ({ id: i, filename: f.name || `poster_${i + 1}.jpg` })),
+      }),
+    )
+    files.forEach((f, i) => {
+      form.append(`files[${i}]`, f, f.name || `poster_${i + 1}.jpg`)
+    })
+    return form
+  }
+
+  const channelUrl = `https://discord.com/api/v10/channels/${row.discord_message_id}/messages`
+
+  // Discord rate-limits messages per channel, so a quick second batch can get a
+  // 429. Retry rate limits (honoring retry_after) and transient 5xx instead of
+  // failing outright, which is what dropped a multi-batch (>10 file) upload.
+  const MAX_ATTEMPTS = 4
+  let discordResp: Response | null = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    discordResp = await fetch(channelUrl, {
       method: 'POST',
       headers: { Authorization: `Bot ${BOT_TOKEN}` },
-      body: discordForm,
-    },
-  )
+      body: buildForm(),
+    })
+    if (discordResp.ok) break
 
-  if (!discordResp.ok) {
-    const err = await discordResp.text()
-    console.error('[post-poster] Discord upload failed:', err)
-    return json({ error: 'Failed to post image to Discord' }, 500)
+    const retryable = discordResp.status === 429 || discordResp.status >= 500
+    if (!retryable || attempt === MAX_ATTEMPTS) break
+
+    let waitMs = 500 * 2 ** (attempt - 1)
+    if (discordResp.status === 429) {
+      const body = await discordResp.clone().json().catch(() => null)
+      const retryAfterSec = body?.retry_after ?? Number(discordResp.headers.get('retry-after')) ?? 1
+      waitMs = Math.ceil(retryAfterSec * 1000) + 250
+    }
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
+
+  if (!discordResp || !discordResp.ok) {
+    const status = discordResp?.status ?? 0
+    const err = discordResp ? await discordResp.text().catch(() => '') : ''
+    console.error('[post-poster] Discord upload failed:', status, err)
+    return json(
+      {
+        error: status === 429
+          ? 'Discord is rate limiting uploads — wait a moment and retry'
+          : 'Failed to post image to Discord',
+      },
+      status === 429 ? 429 : 502,
+    )
   }
 
   return json({ success: true })

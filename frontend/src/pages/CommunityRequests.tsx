@@ -50,6 +50,12 @@ function getStyleLabel(req: CommunityRequest): 'CL2K' | 'MM2K' | null {
   return null
 }
 
+// Stable fingerprint of a dropped file set, used to skip a duplicate IDarr add
+// when the same files are re-submitted (e.g. via the Retry button).
+function filesSignature(files: File[]): string {
+  return files.map((f) => `${f.name}:${f.size}:${f.lastModified}`).sort().join('|')
+}
+
 function getSeasonLabel(req: CommunityRequest): string | null {
   if (req.season_number != null) return `S${req.season_number}`
   if (req.media_type === 'season' && req.notes?.startsWith('Seasons: ')) {
@@ -95,6 +101,9 @@ export default function CommunityRequests() {
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
+  // requestId → signature of the file set already handed to IDarr, so a Retry
+  // of the same files doesn't add them to IDarr twice. Cleared when the card resets.
+  const idarrSentRef = useRef<Map<string, string>>(new Map())
 
   useEffect(() => {
     getSettings().then((settings) => {
@@ -154,8 +163,36 @@ export default function CommunityRequests() {
     }
   }, [])
 
+  // Post one batch to Discord, auto-retrying transient failures (rate limits,
+  // network blips) with a short backoff before surfacing the error to the user.
+  const uploadBatchWithRetry = useCallback(async (requestId: string, batch: File[]) => {
+    const MAX_ATTEMPTS = 3
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await uploadPoster(requestId, batch)
+        return
+      } catch (err) {
+        if (attempt >= MAX_ATTEMPTS) throw err
+        await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
+      }
+    }
+  }, [uploadPoster])
+
   const doUpload = useCallback(async (requestId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(requestId, 'uploading'))
+
+    // IDarr is the maker's own local pipeline, independent of Discord. Kick it
+    // off once, up front, so the dropped files are added even if the Discord
+    // post later fails or is only partially posted. Skip it when the same files
+    // were already sent (a Retry after a failed Discord post) to avoid duplicates.
+    if (idarrQuickAddEnabled) {
+      const signature = filesSignature(files)
+      if (idarrSentRef.current.get(requestId) !== signature) {
+        idarrSentRef.current.set(requestId, signature)
+        void doIdarrUpload(files)
+      }
+    }
+
     try {
       // Send in batches of DISCORD_MAX_FILES (Discord limit per message).
       // Wait 1.5 s between batches to avoid Discord channel rate limits.
@@ -166,15 +203,14 @@ export default function CommunityRequests() {
           const batchNum = Math.floor(i / DISCORD_MAX_FILES) + 1
           setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${batchNum}/${totalBatches}`))
         }
-        await uploadPoster(requestId, files.slice(i, i + DISCORD_MAX_FILES))
+        await uploadBatchWithRetry(requestId, files.slice(i, i + DISCORD_MAX_FILES))
       }
       const label = files.length > 1 ? `Posted ${files.length}!` : 'Posted!'
       setUploadStates((prev) => new Map(prev).set(requestId, label))
-      if (idarrQuickAddEnabled) {
-        void doIdarrUpload(files)
-      }
-      // Reset after a delay so the button can be used again
+      // Reset after a delay so the button can be used again. Clearing the IDarr
+      // guard lets a later, deliberate re-upload of the same files add them again.
       setTimeout(() => {
+        idarrSentRef.current.delete(requestId)
         setUploadStates((prev) => {
           const next = new Map(prev)
           next.delete(requestId)
@@ -186,7 +222,7 @@ export default function CommunityRequests() {
         new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upload failed')
       )
     }
-  }, [uploadPoster, idarrQuickAddEnabled, doIdarrUpload])
+  }, [uploadBatchWithRetry, idarrQuickAddEnabled, doIdarrUpload])
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const allFiles = Array.from(e.target.files ?? [])
