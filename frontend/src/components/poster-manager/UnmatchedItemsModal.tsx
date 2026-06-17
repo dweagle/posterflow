@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { useToast } from '../Toast'
 import CommunityRequestModal from './CommunityRequestModal'
+import SortControls from './SortControls'
+import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -14,6 +16,8 @@ interface NormalizedItem {
   title: string
   year: number | null
   origIdx: number
+  type: ItemType
+  seasonCount: number
   missingSeasonsNumbers?: number[]
   tmdbType?: TmdbSearchType
   category?: string
@@ -55,12 +59,14 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
       title: item.title,
       year: item.year ?? null,
       origIdx: i,
+      type: 'movie',
+      seasonCount: 0,
     }))
   }
   if (modalType === 'series') {
     return (unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
-      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i }))
+      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0 }))
   }
   if (modalType === 'seasons') {
     return (unmatchedStats.unmatched.series ?? [])
@@ -69,6 +75,8 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
         title: item.title,
         year: item.year ?? null,
         origIdx: i,
+        type: 'show',
+        seasonCount: item.missing_seasons.length,
         missingSeasonsNumbers: item.missing_seasons,
       }))
   }
@@ -77,17 +85,19 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
       title: item.title,
       year: item.year ?? null,
       origIdx: i,
+      type: 'collection',
+      seasonCount: 0,
     }))
   }
   if (modalType === 'all') {
     const result: NormalizedItem[] = []
     ;(unmatchedStats.unmatched.movies ?? []).forEach((item, i) => {
-      result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'movie', category: 'Movie' })
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'movie', seasonCount: 0, tmdbType: 'movie', category: 'Movie' })
     })
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
       .forEach((item, i) => {
-        result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'show', category: 'Series' })
+        result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, tmdbType: 'show', category: 'Series' })
       })
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_seasons.length > 0)
@@ -96,13 +106,15 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
           title: item.title,
           year: item.year ?? null,
           origIdx: i,
+          type: 'show',
+          seasonCount: item.missing_seasons.length,
           missingSeasonsNumbers: item.missing_seasons,
           tmdbType: 'show',
           category: 'Season',
         })
       })
     ;(unmatchedStats.unmatched.collections ?? []).forEach((item, i) => {
-      result.push({ title: item.title, year: item.year ?? null, origIdx: i, tmdbType: 'collection', category: 'Collection' })
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'collection', seasonCount: 0, tmdbType: 'collection', category: 'Collection' })
     })
     return result
   }
@@ -120,6 +132,7 @@ function UnmatchedItemsModal({
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
+  const [prefs, setPrefs] = useSortPrefs('unmatchedSort')
   const [candidatesMap, setCandidatesMap] = useState<Record<string, TmdbCandidate[]>>({})
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
@@ -266,12 +279,183 @@ function UnmatchedItemsModal({
     )
   }
 
-  const lowerQuery = searchQuery.trim().toLowerCase()
-  const filteredItems = lowerQuery
-    ? allItems.filter((item) => item.title.toLowerCase().includes(lowerQuery))
-    : allItems.slice(0, modalDisplayLimit)
+  // The All view mixes types, so it gets the group pills; single-type views just sort.
+  const showGroup = modalType === 'all'
+  const hasSeasons = allItems.some((item) => item.seasonCount > 0)
 
-  const hasMore = !lowerQuery && allItems.length > modalDisplayLimit
+  const lowerQuery = searchQuery.trim().toLowerCase()
+  const searchedItems = lowerQuery
+    ? allItems.filter((item) => item.title.toLowerCase().includes(lowerQuery))
+    : allItems
+  const groupFilteredItems = showGroup && prefs.group !== 'all'
+    ? searchedItems.filter((item) => item.type === prefs.group)
+    : searchedItems
+  const sortedItems = sortItems(groupFilteredItems, prefs)
+
+  // Only cap the rendered count when not searching (search results show in full).
+  const displayItems = lowerQuery ? sortedItems : sortedItems.slice(0, modalDisplayLimit)
+  const hasMore = !lowerQuery && sortedItems.length > modalDisplayLimit
+
+  const renderRow = (item: NormalizedItem) => {
+    const key = itemKey(item)
+    const isExpanded = expandedKey === key
+    const isLoading = loadingKeys.has(key)
+    const candidates = candidatesMap[key]
+    const isNoKey = noKeyItems.has(key)
+
+    return (
+      <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
+        <div className="unmatched-item">
+          <div className="unmatched-item-top">
+          <div className="unmatched-item-meta">
+            <span className="item-title">
+              {item.year
+                ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+                : item.title}
+            </span>
+            {item.year && <span className="item-year">({item.year})</span>}
+            {item.category && (
+              <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
+                {item.category}
+              </span>
+            )}
+          </div>
+          <div className="unmatched-item-actions">
+          <button
+            className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
+            onClick={() => handleTmdbSearch(item)}
+            title="Search TMDB for this item"
+          >
+            {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
+            <span>TMDB</span>
+          </button>
+          <button
+            type="button"
+            className="maker-nav-btn"
+            title="Search in Maker Tools"
+            onClick={() => {
+              const cleanedTitle = item.year
+                ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+                : item.title
+              navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle } })
+            }}
+          >
+            <Search size={13} />
+            <span>Maker</span>
+          </button>
+          <button
+            type="button"
+            className="community-request-btn"
+            title="Request this poster from the community"
+            onClick={() => setRequestItem(item)}
+          >
+            <Star size={13} />
+            <span>Request</span>
+          </button>
+          </div>
+          </div>
+          {item.missingSeasonsNumbers && item.missingSeasonsNumbers.length > 0 && (
+            <div className="unmatched-seasons-row">
+              {item.missingSeasonsNumbers.map((s) => (
+                <span key={s} className="unmatched-cat-badge unmatched-cat-badge--season">
+                  {s === 0 ? 'Specials' : `S${s}`}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {isExpanded && (
+          <div className="tmdb-candidates-panel">
+            {isNoKey ? (
+              <div className="tmdb-candidates-warning">
+                <AlertCircle size={14} />
+                <span>No TMDB API key configured. Add it in <strong>Settings → General → API Keys</strong>.</span>
+              </div>
+            ) : isLoading ? (
+              <div className="tmdb-candidates-loading">
+                <Loader2 size={16} className="spin-icon" />
+                <span>Searching TMDB…</span>
+              </div>
+            ) : !candidates || candidates.length === 0 ? (
+              <div className="tmdb-candidates-empty">No TMDB results found</div>
+
+            ) : (
+              candidates.map((candidate, cidx) => {
+                const link = getTmdbLink(candidate)
+                const isCopied = copiedLink === link
+                const isTitleCopied = copiedTitle === link
+                const previewSrc = candidate.poster_url
+                  ? candidate.poster_url.replace('/w185/', '/w342/')
+                  : null
+                return (
+                  <div key={cidx} className="tmdb-candidate-item">
+                    {previewSrc ? (
+                      <button
+                        className="tmdb-candidate-poster-btn"
+                        onClick={() => setPreviewUrl(previewSrc)}
+                        title="Click to preview poster"
+                      >
+                        <img
+                          src={candidate.poster_url!}
+                          alt=""
+                          className="tmdb-candidate-poster"
+                          loading="lazy"
+                        />
+                      </button>
+                    ) : (
+                      <div className="tmdb-candidate-poster tmdb-candidate-poster--empty" />
+                    )}
+                    <div className="tmdb-candidate-info">
+                      <div className="tmdb-candidate-title-row">
+                        <span className="candidate-title">{candidate.title}</span>
+                        {candidate.year && <span className="candidate-year">({candidate.year})</span>}
+                        <span className={`tmdb-type-badge tmdb-type-badge--${candidate.media_type}`}>
+                          {candidate.media_type}
+                        </span>
+                      </div>
+                      <div className="tmdb-candidate-link-row">
+                        <span className="tmdb-link-text">{link}</span>
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tmdb-icon-btn"
+                          title="Open in TMDB"
+                        >
+                          <ExternalLink size={13} />
+                          <span>Open</span>
+                        </a>
+                        <button
+                          type="button"
+                          className={`tmdb-copy-btn${isCopied ? ' copied' : ''}`}
+                          onClick={() => handleCopyLink(link)}
+                          title={isCopied ? 'Copied!' : 'Copy link'}
+                        >
+                          {isCopied ? <Check size={13} /> : <Copy size={13} />}
+                          <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`tmdb-copy-btn${isTitleCopied ? ' copied' : ''}`}
+                          onClick={() => handleCopyTitle(candidate, link)}
+                          title={isTitleCopied ? 'Copied!' : 'Copy title & year'}
+                        >
+                          {isTitleCopied ? <Check size={13} /> : <Copy size={13} />}
+                          <span>{isTitleCopied ? 'Copied' : 'Title'}</span>
+                        </button>
+
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -300,179 +484,22 @@ function UnmatchedItemsModal({
             )}
           </div>
 
+          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} />
+
           <div className="unmatched-list">
             <p className="list-count">
-              {lowerQuery
-                ? `${filteredItems.length} of ${allItems.length} items`
+              {sortedItems.length !== allItems.length
+                ? `${sortedItems.length} of ${allItems.length} items`
                 : `${allItems.length} items`}
             </p>
 
             {hasMore && (
               <p className="performance-warning">
-                ⚠️ Showing first {modalDisplayLimit} of {allItems.length} items. Use search to find specific items.
+                ⚠️ Showing first {modalDisplayLimit} of {sortedItems.length} items. Use search to find specific items.
               </p>
             )}
 
-            {filteredItems.map((item) => {
-              const key = itemKey(item)
-              const isExpanded = expandedKey === key
-              const isLoading = loadingKeys.has(key)
-              const candidates = candidatesMap[key]
-              const isNoKey = noKeyItems.has(key)
-
-              return (
-                <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
-                  <div className="unmatched-item">
-                    <div className="unmatched-item-top">
-                    <div className="unmatched-item-meta">
-                      <span className="item-title">
-                        {item.year
-                          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
-                          : item.title}
-                      </span>
-                      {item.year && <span className="item-year">({item.year})</span>}
-                      {item.category && (
-                        <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
-                          {item.category}
-                        </span>
-                      )}
-                    </div>
-                    <div className="unmatched-item-actions">
-                    <button
-                      className={`tmdb-search-btn${isExpanded ? ' active' : ''}`}
-                      onClick={() => handleTmdbSearch(item)}
-                      title="Search TMDB for this item"
-                    >
-                      {isLoading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />}
-                      <span>TMDB</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="maker-nav-btn"
-                      title="Search in Maker Tools"
-                      onClick={() => {
-                        const cleanedTitle = item.year
-                          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
-                          : item.title
-                        navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle } })
-                      }}
-                    >
-                      <Search size={13} />
-                      <span>Maker</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="community-request-btn"
-                      title="Request this poster from the community"
-                      onClick={() => setRequestItem(item)}
-                    >
-                      <Star size={13} />
-                      <span>Request</span>
-                    </button>
-                    </div>
-                    </div>
-                    {item.missingSeasonsNumbers && item.missingSeasonsNumbers.length > 0 && (
-                      <div className="unmatched-seasons-row">
-                        {item.missingSeasonsNumbers.map((s) => (
-                          <span key={s} className="unmatched-cat-badge unmatched-cat-badge--season">
-                            {s === 0 ? 'Specials' : `S${s}`}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {isExpanded && (
-                    <div className="tmdb-candidates-panel">
-                      {isNoKey ? (
-                        <div className="tmdb-candidates-warning">
-                          <AlertCircle size={14} />
-                          <span>No TMDB API key configured. Add it in <strong>Settings → General → API Keys</strong>.</span>
-                        </div>
-                      ) : isLoading ? (
-                        <div className="tmdb-candidates-loading">
-                          <Loader2 size={16} className="spin-icon" />
-                          <span>Searching TMDB…</span>
-                        </div>
-                      ) : !candidates || candidates.length === 0 ? (
-                        <div className="tmdb-candidates-empty">No TMDB results found</div>
-
-                      ) : (
-                        candidates.map((candidate, cidx) => {
-                          const link = getTmdbLink(candidate)
-                          const isCopied = copiedLink === link
-                          const isTitleCopied = copiedTitle === link
-                          const previewSrc = candidate.poster_url
-                            ? candidate.poster_url.replace('/w185/', '/w342/')
-                            : null
-                          return (
-                            <div key={cidx} className="tmdb-candidate-item">
-                              {previewSrc ? (
-                                <button
-                                  className="tmdb-candidate-poster-btn"
-                                  onClick={() => setPreviewUrl(previewSrc)}
-                                  title="Click to preview poster"
-                                >
-                                  <img
-                                    src={candidate.poster_url!}
-                                    alt=""
-                                    className="tmdb-candidate-poster"
-                                    loading="lazy"
-                                  />
-                                </button>
-                              ) : (
-                                <div className="tmdb-candidate-poster tmdb-candidate-poster--empty" />
-                              )}
-                              <div className="tmdb-candidate-info">
-                                <div className="tmdb-candidate-title-row">
-                                  <span className="candidate-title">{candidate.title}</span>
-                                  {candidate.year && <span className="candidate-year">({candidate.year})</span>}
-                                  <span className={`tmdb-type-badge tmdb-type-badge--${candidate.media_type}`}>
-                                    {candidate.media_type}
-                                  </span>
-                                </div>
-                                <div className="tmdb-candidate-link-row">
-                                  <span className="tmdb-link-text">{link}</span>
-                                  <a
-                                    href={link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="tmdb-icon-btn"
-                                    title="Open in TMDB"
-                                  >
-                                    <ExternalLink size={13} />
-                                    <span>Open</span>
-                                  </a>
-                                  <button
-                                    type="button"
-                                    className={`tmdb-copy-btn${isCopied ? ' copied' : ''}`}
-                                    onClick={() => handleCopyLink(link)}
-                                    title={isCopied ? 'Copied!' : 'Copy link'}
-                                  >
-                                    {isCopied ? <Check size={13} /> : <Copy size={13} />}
-                                    <span>{isCopied ? 'Copied' : 'Copy'}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`tmdb-copy-btn${isTitleCopied ? ' copied' : ''}`}
-                                    onClick={() => handleCopyTitle(candidate, link)}
-                                    title={isTitleCopied ? 'Copied!' : 'Copy title & year'}
-                                  >
-                                    {isTitleCopied ? <Check size={13} /> : <Copy size={13} />}
-                                    <span>{isTitleCopied ? 'Copied' : 'Title'}</span>
-                                  </button>
-
-                                </div>
-                              </div>
-                            </div>
-                          )
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {displayItems.map(renderRow)}
           </div>
         </div>
 
@@ -515,4 +542,3 @@ function UnmatchedItemsModal({
 }
 
 export default UnmatchedItemsModal
-

@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import { Download, Search, X } from 'lucide-react'
 import { FallbackItem } from '../../api/posterManager'
 import PosterStyleTmdbSearch from './PosterStyleTmdbSearch'
+import SortControls from './SortControls'
+import { sortItems, useSortPrefs } from './itemSort'
 
 type PosterStyleModalProps = {
   preferredStyle: string
@@ -12,6 +14,10 @@ type PosterStyleModalProps = {
   onDownload: () => void
 }
 
+// FallbackItem plus the fields the sort/group helpers need. Shows are collapsed
+// to one row carrying their missing-season list.
+type GroupedItem = FallbackItem & { seasons?: (number | null)[]; seasonCount: number }
+
 export default function PosterStyleModal({
   preferredStyle,
   fallbackStyle,
@@ -21,6 +27,7 @@ export default function PosterStyleModal({
   onDownload,
 }: PosterStyleModalProps) {
   const [searchQuery, setSearchQuery] = useState('')
+  const [prefs, setPrefs] = useSortPrefs('posterStyleSort')
 
   const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose()
@@ -32,7 +39,6 @@ export default function PosterStyleModal({
     : items
 
   // Group shows by (title, year) so each show appears once with season badges below
-  type GroupedItem = FallbackItem & { seasons?: (number | null)[] }
   const groupedItems = useMemo<GroupedItem[]>(() => {
     const result: GroupedItem[] = []
     const showMap = new Map<string, GroupedItem>()
@@ -42,22 +48,38 @@ export default function PosterStyleModal({
         if (showMap.has(key)) {
           if (item.season != null) showMap.get(key)!.seasons!.push(item.season)
         } else {
-          const grouped: GroupedItem = { ...item, season: null, seasons: item.season != null ? [item.season] : [] }
+          const grouped: GroupedItem = { ...item, season: null, seasons: item.season != null ? [item.season] : [], seasonCount: 0 }
           showMap.set(key, grouped)
           result.push(grouped)
         }
       } else {
-        result.push(item)
+        result.push({ ...item, seasonCount: 0 })
       }
     }
     for (const item of result) {
-      if (item.seasons) item.seasons.sort((a, b) => (a ?? 0) - (b ?? 0))
+      if (item.seasons) {
+        item.seasons.sort((a, b) => (a ?? 0) - (b ?? 0))
+        item.seasonCount = item.seasons.length
+      }
     }
     return result
   }, [filteredItems])
 
+  const typeFiltered = prefs.group === 'all' ? groupedItems : groupedItems.filter((i) => i.type === prefs.group)
+  const sortedItems = useMemo(() => sortItems(typeFiltered, prefs), [typeFiltered, prefs])
+  const hasShows = groupedItems.some((i) => i.type === 'show')
+
   const preferredKey = preferredStyle.toLowerCase().replace(/[^a-z0-9]/g, '')
   const fallbackKey = fallbackStyle.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+  const renderItem = (item: GroupedItem) => (
+    <PosterStyleTmdbSearch
+      key={`${item.type}::${item.title}::${item.year}`}
+      item={item}
+      tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+      seasons={item.seasons}
+    />
+  )
 
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
@@ -92,15 +114,15 @@ export default function PosterStyleModal({
             )}
           </div>
 
+          <SortControls prefs={prefs} onChange={setPrefs} showSeasons={hasShows} />
+
           <div className="unmatched-list">
             <p className="list-count">
-              {lowerQuery
-                ? `${filteredItems.length} of ${items.length} items`
-                : `${items.length} items`}
+              {sortedItems.length !== groupedItems.length
+                ? `${sortedItems.length} of ${groupedItems.length} items`
+                : `${groupedItems.length} items`}
             </p>
-            {groupedItems.map((item, i) => (
-              <PosterStyleTmdbSearch key={i} item={item} tmdbApiKeyConfigured={tmdbApiKeyConfigured} seasons={item.seasons} />
-            ))}
+            {sortedItems.map(renderItem)}
           </div>
         </div>
 
