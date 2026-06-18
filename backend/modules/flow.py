@@ -12,6 +12,7 @@ from core.logging import (
     log_info,
     log_error,
     log_success,
+    log_warning,
     log_debug,
     log_step,
     log_section_start,
@@ -198,11 +199,24 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             "jobs_failed": [],
         }
 
-        # ── Step 1/6: IDarr ────────────────────────────────────────────────
+        # Only enabled steps are counted/numbered, so the log reads "Step N/<enabled>"
+        # and renumbers when a step (e.g. IDarr) is toggled off.
         idarr_flow_cfg = flow_config.get("idarr", {})
+        total_steps = sum(1 for enabled in (
+            idarr_flow_cfg.get("enabled", False),
+            flow_config.get("sync_drives", {}).get("enabled", False),
+            flow_config.get("rename_posters", {}).get("enabled", False),
+            flow_config.get("border_replacer", {}).get("enabled", False),
+            flow_config.get("plex_upload", {}).get("enabled", False),
+            flow_config.get("detect_unmatched", {}).get("enabled", False),
+        ) if enabled)
+        step = 0
+
+        # ── IDarr ──────────────────────────────────────────────────────────
         if idarr_flow_cfg.get("enabled", False):
-            log_step(LogTags.WORKFLOW, 1, 6, "Running IDarr rename")
-            update_job_state(db, job, progress=0, message=format_workflow_step(1, 6, "Running IDarr rename..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Running IDarr rename")
+            update_job_state(db, job, progress=0, message=format_workflow_step(step, total_steps, "Running IDarr rename..."))
 
             idarr_setting_raw = get_setting_value(db, "maker_tools_idarr_config", "")
             idarr_cfg_valid = False
@@ -226,7 +240,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 try:
                     _promote_child_progress_to_parent(
                         db, job, idarr_child.id, 0, 15,
-                        format_workflow_step(1, 6, "Running IDarr rename..."),
+                        format_workflow_step(step, total_steps, "Running IDarr rename..."),
                         run_idarr_workflow_step,
                         idarr_run_config,
                     )
@@ -246,8 +260,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     })
 
                     if child_ok:
-                        log_success(LogTags.WORKFLOW, "Step 1/6 complete: IDarr rename finished", child_job_id=idarr_child.id)
-                        update_job_state(db, job, progress=15, message=format_workflow_step_complete(1, 6, "IDarr rename finished"))
+                        log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: IDarr rename finished", child_job_id=idarr_child.id)
+                        update_job_state(db, job, progress=15, message=format_workflow_step_complete(step, total_steps, "IDarr rename finished"))
                     else:
                         raise Exception(child_message or "IDarr step failed")
 
@@ -272,18 +286,19 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                         send_major_error_notification(db, source="workflow.idarr", message=error_msg, job_id=job_id)
                         return results
             else:
-                log_info(LogTags.WORKFLOW, "Step 1/6: IDarr enabled but not configured — skipping")
+                log_info(LogTags.WORKFLOW, f"Step {step}/{total_steps}: IDarr enabled but not configured — skipping")
                 results["jobs_skipped"].append({"job": "idarr", "reason": "IDarr not configured (no valid maker_tools_idarr_config)"})
-                update_job_state(db, job, progress=15, message=format_workflow_step(1, 6, "IDarr skipped (not configured)"))
+                update_job_state(db, job, progress=15, message=format_workflow_step(step, total_steps, "IDarr skipped (not configured)"))
         else:
-            log_info(LogTags.WORKFLOW, "Step 1/6: IDarr disabled - skipping")
+            log_info(LogTags.WORKFLOW, "IDarr disabled - skipping")
             results["jobs_skipped"].append({"job": "idarr", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=15, message=format_workflow_step(1, 6, "IDarr skipped"))
+            update_job_state(db, job, progress=15, message="IDarr skipped")
 
-        # ── Step 2/6: Sync Google Drives ───────────────────────────────────
+        # ── Sync Google Drives ─────────────────────────────────────────────
         if flow_config.get("sync_drives", {}).get("enabled", False):
-            log_step(LogTags.WORKFLOW, 2, 6, "Syncing Google Drives")
-            update_job_state(db, job, progress=15, message=format_workflow_step(2, 6, "Syncing Google Drives..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Syncing Google Drives")
+            update_job_state(db, job, progress=15, message=format_workflow_step(step, total_steps, "Syncing Google Drives..."))
 
             sync_child = _create_child_job(db, JOB_TYPE_SYNC_ALL_PREFIX, "Workflow requested sync all")
             try:
@@ -293,7 +308,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     sync_child.id,
                     15,
                     40,
-                    format_workflow_step(2, 6, "Syncing Google Drives..."),
+                    format_workflow_step(step, total_steps, "Syncing Google Drives..."),
                     partial(run_sync_all_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
@@ -319,8 +334,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, "Step 2/6 complete: Sync finished", child_job_id=sync_child.id)
-                    update_job_state(db, job, progress=40, message=format_workflow_step_complete(2, 6, "Sync finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Sync finished", child_job_id=sync_child.id)
+                    update_job_state(db, job, progress=40, message=format_workflow_step_complete(step, total_steps, "Sync finished"))
                 else:
                     raise Exception(child_message or "Sync step failed")
 
@@ -352,14 +367,15 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Step 2/6: Sync drives disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Sync drives disabled - skipping")
             results["jobs_skipped"].append({"job": "sync_drives", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=40, message=format_workflow_step(2, 6, "Sync drives skipped"))
+            update_job_state(db, job, progress=40, message="Sync drives skipped")
 
-        # ── Step 3/6: Rename & Organize Posters ───────────────────────────────
+        # ── Rename & Organize Posters ─────────────────────────────────────────
         if flow_config.get("rename_posters", {}).get("enabled", False):
-            log_step(LogTags.WORKFLOW, 3, 6, "Renaming and organizing posters")
-            update_job_state(db, job, progress=40, message=format_workflow_step(3, 6, "Renaming and organizing posters..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Renaming and organizing posters")
+            update_job_state(db, job, progress=40, message=format_workflow_step(step, total_steps, "Renaming and organizing posters..."))
 
             rename_child = _create_child_job(db, JOB_TYPE_POSTER_RENAMER, "Workflow requested Poster Renamer")
             try:
@@ -380,7 +396,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     rename_child.id,
                     40,
                     65,
-                    format_workflow_step(3, 6, "Renaming and organizing posters..."),
+                    format_workflow_step(step, total_steps, "Renaming and organizing posters..."),
                     partial(run_rename_background_job, triggered_by="workflow"),
                     config_data,
                     True,  # skip_discord: sub-module notifications suppressed in workflow
@@ -434,8 +450,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, "Step 3/6 complete: Rename finished", child_job_id=rename_child.id)
-                    update_job_state(db, job, progress=65, message=format_workflow_step_complete(3, 6, "Rename finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Rename finished", child_job_id=rename_child.id)
+                    update_job_state(db, job, progress=65, message=format_workflow_step_complete(step, total_steps, "Rename finished"))
                 else:
                     raise Exception(child_message or "Rename step failed")
 
@@ -467,14 +483,15 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Step 3/6: Rename posters disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Rename posters disabled - skipping")
             results["jobs_skipped"].append({"job": "rename_posters", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=65, message=format_workflow_step(3, 6, "Rename posters skipped"))
+            update_job_state(db, job, progress=65, message="Rename posters skipped")
 
-        # ── Step 4/6: Border Replacer ───────────────────────────────────────
+        # ── Border Replacer ─────────────────────────────────────────────────
         if flow_config.get("border_replacer", {}).get("enabled", False):
-            log_step(LogTags.WORKFLOW, 4, 6, "Applying borders to posters")
-            update_job_state(db, job, progress=65, message=format_workflow_step(4, 6, "Applying borders to posters..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Applying borders to posters")
+            update_job_state(db, job, progress=65, message=format_workflow_step(step, total_steps, "Applying borders to posters..."))
 
             border_child = _create_child_job(db, JOB_TYPE_BORDER_REPLACER, "Workflow requested border replacer")
             try:
@@ -488,7 +505,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     border_child.id,
                     60,
                     75,
-                    format_workflow_step(3, 4, "Applying borders to posters..."),
+                    format_workflow_step(step, total_steps, "Applying borders to posters..."),
                     partial(run_border_replacer_background_job, triggered_by="workflow"),
                     dry_run,
                     border_mode,
@@ -510,8 +527,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, "Step 4/6 complete: Border replacer finished", child_job_id=border_child.id)
-                    update_job_state(db, job, progress=78, message=format_workflow_step_complete(4, 6, "Border replacer finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Border replacer finished", child_job_id=border_child.id)
+                    update_job_state(db, job, progress=78, message=format_workflow_step_complete(step, total_steps, "Border replacer finished"))
                 else:
                     raise Exception(child_message or "Border replacer step failed")
 
@@ -543,13 +560,16 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Step 4/6: Border replacer disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Border replacer disabled - skipping")
             results["jobs_skipped"].append({"job": "border_replacer", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=78, message=format_workflow_step(4, 6, "Border replacer skipped"))
+            update_job_state(db, job, progress=78, message="Border replacer skipped")
 
         # ── Asset cleanup (opt-in toggle) ─────────────────────────────────────
         # Runs once dest/ is finalized by rename (+ optional border) and BEFORE
         # Plex upload, so upload never pushes stale/orphaned posters.
+        # Asset cleanup is auxiliary, not a numbered step, so it stays out of the
+        # run/skipped/failed tallies and is surfaced via its own summary embed.
+        cleanup_embed = None
         if flow_config.get("cleanup_assets", {}).get("enabled", False):
             log_info(LogTags.WORKFLOW, "Running asset cleanup (post-rename/border)")
             update_job_state(db, job, message="Cleaning up orphaned asset folders...")
@@ -565,27 +585,28 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     triggered_by="workflow",
                     job=job,
                 )
-                results["jobs_run"].append({
-                    "job": "cleanup_assets",
-                    "success": True,
-                    "embed_spec": {
-                        "event_type": "success",
-                        "title": "Asset Cleanup",
-                        "description": summarize_cleanup(cleanup_result) or "No changes",
-                        "fields": [],
-                        "color": 0x4CAF50,
-                    },
-                })
+                cleanup_embed = {
+                    "event_type": "success",
+                    "title": "Asset Cleanup",
+                    "description": summarize_cleanup(cleanup_result) or "No changes",
+                    "fields": [],
+                    "color": 0x4CAF50,
+                }
             except Exception as e:
                 log_error(LogTags.WORKFLOW, f"Asset cleanup failed: {e}\n{traceback.format_exc()}")
-                results["jobs_failed"].append({"job": "cleanup_assets", "error": str(e)})
-        else:
-            results["jobs_skipped"].append({"job": "cleanup_assets", "reason": "Disabled in configuration"})
+                cleanup_embed = {
+                    "event_type": "error",
+                    "title": "Asset Cleanup Failed",
+                    "description": str(e)[:500],
+                    "fields": [],
+                    "color": 0xF44336,
+                }
 
-        # ── Step 5/6: Plex Upload ─────────────────────────────────────────────
+        # ── Plex Upload ───────────────────────────────────────────────────────
         if flow_config.get("plex_upload", {}).get("enabled", False):
-            log_step(LogTags.WORKFLOW, 5, 6, "Uploading posters to Plex")
-            update_job_state(db, job, progress=78, message=format_workflow_step(5, 6, "Uploading posters to Plex..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Uploading posters to Plex")
+            update_job_state(db, job, progress=78, message=format_workflow_step(step, total_steps, "Uploading posters to Plex..."))
 
             plex_child = _create_child_job(db, JOB_TYPE_PLEX_UPLOAD, "Workflow requested Plex upload")
             try:
@@ -602,7 +623,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     plex_child.id,
                     78,
                     90,
-                    format_workflow_step(5, 6, "Uploading posters to Plex..."),
+                    format_workflow_step(step, total_steps, "Uploading posters to Plex..."),
                     run_plex_upload_background_job,
                     False,   # dry_run
                     False,   # reapply
@@ -625,8 +646,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, "Step 5/6 complete: Plex upload finished", child_job_id=plex_child.id)
-                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(5, 6, "Plex upload finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Plex upload finished", child_job_id=plex_child.id)
+                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(step, total_steps, "Plex upload finished"))
                 else:
                     raise Exception(child_message or "Plex upload step failed")
 
@@ -658,14 +679,15 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Step 5/6: Plex upload disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Plex upload disabled - skipping")
             results["jobs_skipped"].append({"job": "plex_upload", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=90, message=format_workflow_step(5, 6, "Plex upload skipped"))
+            update_job_state(db, job, progress=90, message="Plex upload skipped")
 
-        # ── Step 6/6: Detect Unmatched ──────────────────────────────────────
+        # ── Detect Unmatched ────────────────────────────────────────────────
         if flow_config.get("detect_unmatched", {}).get("enabled", False):
-            log_step(LogTags.WORKFLOW, 6, 6, "Detecting unmatched assets")
-            update_job_state(db, job, progress=90, message=format_workflow_step(6, 6, "Detecting unmatched assets..."))
+            step += 1
+            log_step(LogTags.WORKFLOW, step, total_steps, "Detecting unmatched assets")
+            update_job_state(db, job, progress=90, message=format_workflow_step(step, total_steps, "Detecting unmatched assets..."))
 
             unmatched_child = _create_child_job(db, JOB_TYPE_UNMATCHED_DETECTION, "Workflow requested unmatched detection")
             try:
@@ -675,7 +697,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     unmatched_child.id,
                     90,
                     99,
-                    format_workflow_step(6, 6, "Detecting unmatched assets..."),
+                    format_workflow_step(step, total_steps, "Detecting unmatched assets..."),
                     partial(run_unmatched_detection_background_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
@@ -710,8 +732,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, "Step 6/6 complete: Unmatched detection finished", child_job_id=unmatched_child.id)
-                    update_job_state(db, job, progress=99, message=format_workflow_step_complete(6, 6, "Unmatched detection finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Unmatched detection finished", child_job_id=unmatched_child.id)
+                    update_job_state(db, job, progress=99, message=format_workflow_step_complete(step, total_steps, "Unmatched detection finished"))
                 else:
                     raise Exception(child_message or "Unmatched step failed")
 
@@ -743,21 +765,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Step 6/6: Detect unmatched disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Detect unmatched disabled - skipping")
             results["jobs_skipped"].append({"job": "detect_unmatched", "reason": "Disabled in configuration"})
-
-        log_section_end(
-            LogTags.WORKFLOW,
-            f"Workflow completed - {len(results['jobs_run'])} jobs run, {len(results['jobs_skipped'])} skipped, {len(results['jobs_failed'])} failed",
-        )
-        update_job_state(
-            db,
-            job,
-            status=JOB_STATUS_COMPLETED,
-            progress=100,
-            message=f"Workflow completed: {len(results['jobs_run'])} jobs run, {len(results['jobs_skipped'])} skipped, {len(results['jobs_failed'])} failed",
-            completed_at=datetime.now(timezone.utc),
-        )
 
         success = True
         results["job_id"] = job_id
@@ -771,6 +780,38 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             "plex_upload": "Plex Upload",
             "cleanup_assets": "Asset Cleanup",
         }
+
+        # Per-step recap so the run ends with each step's main result in one place.
+        log_section_start(LogTags.WORKFLOW, "Workflow Summary")
+        for _run_item in results["jobs_run"]:
+            _label = _step_labels.get(_run_item.get("job", ""), _run_item.get("job", ""))
+            _desc = (_run_item.get("embed_spec") or {}).get("description") or "completed"
+            log_success(LogTags.WORKFLOW, f"{_label}: {_desc}")
+        if cleanup_embed:
+            _cleanup_desc = cleanup_embed.get("description") or "completed"
+            if cleanup_embed.get("event_type") == "error":
+                log_warning(LogTags.WORKFLOW, f"Asset Cleanup: {_cleanup_desc}")
+            else:
+                log_success(LogTags.WORKFLOW, f"Asset Cleanup: {_cleanup_desc}")
+        if results["jobs_skipped"]:
+            _skipped = ", ".join(_step_labels.get(i.get("job", ""), i.get("job", "")) for i in results["jobs_skipped"])
+            log_info(LogTags.WORKFLOW, f"Skipped: {_skipped}")
+        for _fail_item in results["jobs_failed"]:
+            _label = _step_labels.get(_fail_item.get("job", ""), _fail_item.get("job", ""))
+            log_warning(LogTags.WORKFLOW, f"Failed: {_label}: {str(_fail_item.get('error', ''))[:120]}")
+
+        log_section_end(
+            LogTags.WORKFLOW,
+            f"Workflow completed - {len(results['jobs_run'])} jobs run, {len(results['jobs_skipped'])} skipped, {len(results['jobs_failed'])} failed",
+        )
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_COMPLETED,
+            progress=100,
+            message=f"Workflow completed: {len(results['jobs_run'])} jobs run, {len(results['jobs_skipped'])} skipped, {len(results['jobs_failed'])} failed",
+            completed_at=datetime.now(timezone.utc),
+        )
 
         def _fmt_simple_list(items: list, include_error: bool = False) -> str:
             if not items:
@@ -821,6 +862,9 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             spec = _run_item.get("embed_spec")
             if spec:
                 all_embeds.append(spec)
+
+        if cleanup_embed:
+            all_embeds.append(cleanup_embed)
 
         send_discord_workflow_summary(db, embeds=all_embeds)
 
