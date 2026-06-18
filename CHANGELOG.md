@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-06-18
+### Changed
+- Style Usage/Unmatched Assets: request modals now allow grouping by All/Movies/Shows/Collections with sorting options instead of random order.
+- GDrives: descriptions for drives refined.
+- Workflow: logging now includes per-step summaries. 
+- IDarr: the manual resolve dropdown now collapses and clears its search text after resolving.
+
+### Fixed
+- Community Requests: poster uploads to Discord now validate file signatures and retry on failure for more reliable posting.
+- IDarr: logo previews now show the checkered transparency background correctly for all supported transparent file types.
+- IDarr: further improvements to prevent cross-type contamination during matching/renaming.
+
 ## [0.8.5] - 2026-06-16
 ### Added
 - Community Requests: poster style (CL2K or MM2K) when submitting a request is now required.
