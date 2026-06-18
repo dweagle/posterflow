@@ -20,6 +20,8 @@ interface UseIDarrResolverWorkflowParams {
   setResolverCandidates: Dispatch<SetStateAction<MakerIdarrPendingCandidate[]>>
   setResolverCandidatesLoading: Dispatch<SetStateAction<boolean>>
   setResolverHistory: Dispatch<SetStateAction<MakerIdarrResolutionEvent[]>>
+  setResolverManualSearch: Dispatch<SetStateAction<string>>
+  setManualSectionOpen: Dispatch<SetStateAction<boolean>>
 }
 
 export const useIDarrResolverWorkflow = ({
@@ -33,6 +35,8 @@ export const useIDarrResolverWorkflow = ({
   setResolverCandidates,
   setResolverCandidatesLoading,
   setResolverHistory,
+  setResolverManualSearch,
+  setManualSectionOpen,
 }: UseIDarrResolverWorkflowParams) => {
   const loadResolverCandidates = async (item: MakerIdarrPendingItem) => {
     try {
@@ -56,6 +60,9 @@ export const useIDarrResolverWorkflow = ({
   }
 
   const openResolver = async (item: MakerIdarrPendingItem) => {
+    // Reset the manual section to closed and clear its search when loading a new item.
+    setManualSectionOpen(false)
+    setResolverManualSearch('')
     setResolverItem(item)
     setResolverTmdbId(item.suggested_ids?.tmdb_id ? String(item.suggested_ids.tmdb_id) : '')
     setResolverTmdbType('')

@@ -434,6 +434,8 @@ function IDarr() {
     setResolverCandidates,
     setResolverCandidatesLoading,
     setResolverHistory,
+    setResolverManualSearch,
+    setManualSectionOpen,
   })
 
   const loadPendingMatches = async ({
