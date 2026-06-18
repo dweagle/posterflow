@@ -226,6 +226,7 @@ export interface MakerIdarrPendingItem {
   pending_status?: 'resolved' | 'resolved_renamed' | null
   conflict_files?: string[] | null
   conflict_file_previews?: (string | null)[] | null
+  conflict_file_tracked?: boolean[] | null
   suggested_ids?: {
     tmdb_id?: number | null
     tvdb_id?: number | null

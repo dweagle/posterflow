@@ -389,31 +389,27 @@ def build_idarr_asset_key(
     tvdb_id: int | None = None,
     imdb_id: str | None = None,
 ) -> str:
-    """Build the canonical Idarr asset key used for cache lookups and pending-match tracking.
+    """Build the Idarr asset key for cache/pending lookups.
 
-    Provisional format (unresolved):
-        ``<type>::<normalised_title>::<year>[::scope=<scope_token>]``
+    Resolved (ID known): ``<type>::tmdb=<id>[::scope=<token>]`` (tvdb=/imdb= when no tmdb).
+    Provisional (no ID): ``<type>::<normalised_title>::<year>[::scope=<token>]``.
 
-    Resolved format (ID known):
-        ``<type>::<normalised_title>::<year>::tmdb=<id>[::scope=<scope_token>]``
-
-    Including the TMDB/TVDB/IMDB ID in the key gives each distinct resolved item its
-    own row even when two items share the same title and year (e.g. two movies both
-    called "Spiral (2019)").  The provisional title/year-only form is used while an
-    item is still unresolved.
+    Keying resolved rows by id (not title) means one item = one row per scope regardless of
+    filename. Unresolved rows stay title/year keyed until matched.
     """
-    normalized_title = normalize_titles(str(title or "").strip())
-    year_part = str(year) if isinstance(year, int) else ""
-    key = f"{str(asset_type or '').strip().lower()}::{normalized_title}::{year_part}"
+    asset_type_part = str(asset_type or "").strip().lower()
 
-    # Append ID suffix once a canonical ID is known so that two distinct titles
-    # sharing the same title/year get separate cache rows.
+    # ID known → key by id alone so name changes can't fork an item.
     if isinstance(tmdb_id, int):
-        key = f"{key}::tmdb={tmdb_id}"
+        key = f"{asset_type_part}::tmdb={tmdb_id}"
     elif isinstance(tvdb_id, int):
-        key = f"{key}::tvdb={tvdb_id}"
+        key = f"{asset_type_part}::tvdb={tvdb_id}"
     elif isinstance(imdb_id, str) and str(imdb_id).strip():
-        key = f"{key}::imdb={imdb_id.strip()}"
+        key = f"{asset_type_part}::imdb={imdb_id.strip()}"
+    else:
+        normalized_title = normalize_titles(str(title or "").strip())
+        year_part = str(year) if isinstance(year, int) else ""
+        key = f"{asset_type_part}::{normalized_title}::{year_part}"
 
     if scope_token:
         return f"{key}::scope={scope_token}"

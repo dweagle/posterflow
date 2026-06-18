@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 import requests
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
@@ -487,6 +487,7 @@ class IdarrRunner:
         cache_rows = self._load_all_cache_rows("index build")
         filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
         group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
+        tracked_now = self._current_tracked_filenames(cache_rows)
 
         for entry in sorted(source_dir.iterdir()):
             if not entry.is_file():
@@ -497,6 +498,7 @@ class IdarrRunner:
                 continue
 
             asset = self._parse_asset(entry)
+            asset["_previously_tracked"] = entry.name.strip().lower() in tracked_now
             assets.append(asset)
 
             group_title = SEASON_REGEX.split(entry.stem)[0].strip()
@@ -767,6 +769,7 @@ class IdarrRunner:
         cache_rows = self._load_all_cache_rows("index build")
         filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
         group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
+        tracked_now = self._current_tracked_filenames(cache_rows)
 
         for entry in sorted(source_dir.iterdir()):
             if not entry.is_file():
@@ -775,7 +778,9 @@ class IdarrRunner:
                 continue
             if entry.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
-            assets.append(self._parse_asset_no_season_hint(entry))
+            parsed = self._parse_asset_no_season_hint(entry)
+            parsed["_previously_tracked"] = entry.name.strip().lower() in tracked_now
+            assets.append(parsed)
 
         for asset in assets:
             title = str(asset.get("title") or "")
@@ -936,19 +941,12 @@ class IdarrRunner:
                 except Exception:
                     payload = {}
 
+            # Index only current_filenames — a past (renamed-away) name isn't an identity, so a
+            # re-dropped dirty file can't inherit an old item's id.
             file_names: list[str] = []
             current_filenames = payload.get("current_filenames")
-            original_filenames = payload.get("original_filenames")
-            payload_files = payload.get("files")
-
             if isinstance(current_filenames, list):
                 file_names.extend([str(value) for value in current_filenames if isinstance(value, str)])
-            if isinstance(original_filenames, list):
-                file_names.extend([str(value) for value in original_filenames if isinstance(value, str)])
-            if isinstance(payload_files, list):
-                file_names.extend([str(value) for value in payload_files if isinstance(value, str)])
-            elif isinstance(payload_files, str):
-                file_names.extend([part.strip() for part in payload_files.split(";") if part.strip()])
 
             candidate = {
                 "asset_type": str(row.asset_type or "").strip().lower(),
@@ -973,6 +971,25 @@ class IdarrRunner:
                     index[file_key] = candidate
 
         return index
+
+    @staticmethod
+    def _current_tracked_filenames(rows: list) -> set[str]:
+        """Lowercased set of currently-tracked filenames (current_filenames only) — tells "old"
+        (already tracked) from "new" this scan."""
+        tracked: set[str] = set()
+        for row in rows or []:
+            if not (isinstance(row.payload_json, str) and row.payload_json.strip()):
+                continue
+            try:
+                payload = json.loads(row.payload_json)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            for name in payload.get("current_filenames") or []:
+                if isinstance(name, str) and name.strip():
+                    tracked.add(Path(name).name.strip().lower())
+        return tracked
 
     def _load_group_cache_hints(self, rows: list | None = None) -> dict[str, dict[Any, Any]]:
         by_tmdb: dict[int, list[dict[str, Any]]] = {}
@@ -1889,11 +1906,11 @@ class IdarrRunner:
             tmdb_id = int(asset.get("tmdb_id")) if isinstance(asset.get("tmdb_id"), int) else None
             tvdb_id = int(asset.get("tvdb_id")) if isinstance(asset.get("tvdb_id"), int) else None
             imdb_id = str(asset.get("imdb_id") or "").strip() if isinstance(asset.get("imdb_id"), str) else None
-            # Include both the provisional title/year key and the resolved ID-keyed form
-            # so we catch rows regardless of which format they were stored under.
+            # Match by provisional, ID-keyed, and pending:: key forms.
             keys.add(self._asset_key(asset_type=asset_type, title=title, year=year))
             keys.add(self._asset_key(asset_type=asset_type, title=title, year=year,
                                      tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id))
+            keys.add(self._asset_key(asset_type="pending", title=title, year=year))
         tmdb_ids = {
             int(asset.get("tmdb_id"))
             for asset in assets
@@ -1955,6 +1972,20 @@ class IdarrRunner:
             normalized_row = self._normalize_asset_type(row_type)
             return bool(normalized_asset and normalized_row and normalized_asset == normalized_row)
 
+        def _pick_cached_row(asset_type: str, candidates: list[IdarrAssetCache]) -> IdarrAssetCache | None:
+            # Prefer a type-compatible row. Otherwise fall back to the first candidate only when
+            # its type can't be ruled out — never a row whose *known* type differs, since
+            # tmdb/tvdb/imdb ids are namespaced per media type (movie 4599 "Raising Helen" and
+            # tv 4599 "Yes, Dear" are different entities). Matching across types crosses titles.
+            if not candidates:
+                return None
+            exact = next((row for row in candidates if _is_compatible_type(asset_type, row.asset_type)), None)
+            if exact is not None:
+                return exact
+            if self._normalize_asset_type(asset_type) is None:
+                return candidates[0]  # asset's own type unknown — can't disambiguate
+            return next((row for row in candidates if self._normalize_asset_type(row.asset_type) is None), None)
+
         resolved_map: dict[str, IdarrAssetCache] = {}
         for asset in assets:
             asset_type = str(asset.get("type") or "")
@@ -1969,26 +2000,24 @@ class IdarrRunner:
             matched_row: IdarrAssetCache | None = None
 
             if isinstance(asset.get("tmdb_id"), int):
-                candidates = by_tmdb.get(int(asset["tmdb_id"]), [])
-                matched_row = next((row for row in candidates if _is_compatible_type(asset_type, row.asset_type)), None)
-                if not matched_row and candidates:
-                    matched_row = candidates[0]
+                matched_row = _pick_cached_row(asset_type, by_tmdb.get(int(asset["tmdb_id"]), []))
 
             if not matched_row and isinstance(asset.get("tvdb_id"), int):
-                candidates = by_tvdb.get(int(asset["tvdb_id"]), [])
-                matched_row = next((row for row in candidates if _is_compatible_type(asset_type, row.asset_type)), None)
-                if not matched_row and candidates:
-                    matched_row = candidates[0]
+                matched_row = _pick_cached_row(asset_type, by_tvdb.get(int(asset["tvdb_id"]), []))
 
             if not matched_row and isinstance(asset.get("imdb_id"), str) and str(asset.get("imdb_id") or "").strip():
                 imdb_value = str(asset.get("imdb_id") or "").strip()
-                candidates = by_imdb.get(imdb_value, [])
-                matched_row = next((row for row in candidates if _is_compatible_type(asset_type, row.asset_type)), None)
-                if not matched_row and candidates:
-                    matched_row = candidates[0]
+                matched_row = _pick_cached_row(asset_type, by_imdb.get(imdb_value, []))
 
             if not matched_row:
+                # Fall back to exact key, then the pending:: row, so a re-scanned unmatched asset
+                # keeps its cached freshness.
                 key_row = by_key.get(asset_key)
+                if key_row is None:
+                    pending_key = self._asset_key(asset_type="pending", title=str(asset.get("title") or ""),
+                                                  year=asset.get("year") if isinstance(asset.get("year"), int) else None)
+                    if pending_key != asset_key:
+                        key_row = by_key.get(pending_key)
                 if key_row is not None:
                     # Guard: if the asset has a specific TMDB ID and the title/year cache
                     # row has a *different* known TMDB ID, this is a distinct title sharing
@@ -2244,6 +2273,10 @@ class IdarrRunner:
                         asset["new_title"] = canonical_title
                     if isinstance(canonical_year, int) and canonical_year != asset.get("year") and not isinstance(asset.get("new_year"), int):
                         asset["new_year"] = canonical_year
+
+                    # Manual resolves surface a picker on conflict instead of replacing by mtime.
+                    if bool(cache_payload.get("resolved_manually")):
+                        asset["_resolved_manually"] = True
 
                     # If the item was manually resolved but the canonical title was never
                     # stored (e.g. resolved before the canonical_title fix was added),
@@ -3081,9 +3114,10 @@ class IdarrRunner:
             tvdb_id = int(asset.get("tvdb_id")) if isinstance(asset.get("tvdb_id"), int) else None
             imdb_id = str(asset.get("imdb_id") or "").strip() if isinstance(asset.get("imdb_id"), str) else None
 
-            # Use the resolved (ID-keyed) form when we know the ID so that two
-            # distinct items with the same title/year get separate rows.
-            key = self._asset_key(asset_type=asset_type, title=title, year=year,
+            # ID-keyed when matched; unmatched share the resolver's pending:: key so it's one row,
+            # not an inferred-type row + a pending:: placeholder.
+            entry_type = asset_type if (tmdb_id is not None or tvdb_id is not None or imdb_id) else "pending"
+            key = self._asset_key(asset_type=entry_type, title=title, year=year,
                                   tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id)
 
             entry = aggregated.get(key)
@@ -3096,7 +3130,7 @@ class IdarrRunner:
                     # existing_canonical_title from the DB when new_title was not set.
                     "canonical_title": str(asset.get("new_title") or "").strip(),
                     "canonical_year": asset.get("new_year") if isinstance(asset.get("new_year"), int) else year,
-                    "asset_type": asset_type,
+                    "asset_type": entry_type,
                     "tmdb_id": None,
                     "tvdb_id": None,
                     "imdb_id": None,
@@ -3134,16 +3168,15 @@ class IdarrRunner:
 
             touch_checked_at = bool(entry.get("touch_checked_at", False))
 
-            # When the ID-keyed row doesn't exist yet, look for a matching provisional
-            # (title/year-only) row to absorb its payload and timestamps into the new
-            # ID-keyed row and then delete it so no dangling provisional rows remain.
+            # Fold a matching provisional row into this ID row and delete it (even if the ID row
+            # exists), unless that provisional key is a live entry this run.
             provisional_row: IdarrAssetCache | None = None
             provisional_key = self._asset_key(
                 asset_type=str(entry["asset_type"]),
                 title=str(entry["title"]),
                 year=entry["year"] if isinstance(entry.get("year"), int) else None,
             )
-            if row is None and key != provisional_key:
+            if key != provisional_key and provisional_key not in aggregated:
                 provisional_row = self._cache_query().filter(IdarrAssetCache.asset_key == provisional_key).first()
 
             incoming_title = str(entry["title"])
@@ -3153,32 +3186,37 @@ class IdarrRunner:
             incoming_tvdb_id = entry["tvdb_id"] if isinstance(entry.get("tvdb_id"), int) else None
             incoming_imdb_id = entry["imdb_id"] if isinstance(entry.get("imdb_id"), str) else None
 
+            # Reconcile a pre-existing row for the same item under a different id key (id-type
+            # transition). Match a secondary id only when the predecessor lacks the higher one.
             predecessor_payload: dict[str, Any] = {}
+            predecessor_rows: list[IdarrAssetCache] = []
             if row is None and provisional_row is None:
-                _id_filter = None
+                _id_clauses = []
                 if incoming_tmdb_id is not None:
-                    _id_filter = IdarrAssetCache.tmdb_id == incoming_tmdb_id
-                elif incoming_tvdb_id is not None:
-                    _id_filter = IdarrAssetCache.tvdb_id == incoming_tvdb_id
-                elif incoming_imdb_id:
-                    _id_filter = IdarrAssetCache.imdb_id == incoming_imdb_id
-                if _id_filter is not None:
-                    _pred = (
+                    _id_clauses.append(IdarrAssetCache.tmdb_id == incoming_tmdb_id)
+                if incoming_tvdb_id is not None:
+                    _id_clauses.append(and_(IdarrAssetCache.tmdb_id.is_(None), IdarrAssetCache.tvdb_id == incoming_tvdb_id))
+                if incoming_imdb_id:
+                    _id_clauses.append(and_(IdarrAssetCache.tmdb_id.is_(None), IdarrAssetCache.tvdb_id.is_(None), IdarrAssetCache.imdb_id == incoming_imdb_id))
+                if _id_clauses:
+                    predecessor_rows = (
                         self._cache_query()
                         .filter(
                             IdarrAssetCache.asset_key != key,
                             IdarrAssetCache.asset_type == incoming_asset_type,
-                            _id_filter,
+                            or_(*_id_clauses),
                         )
-                        .first()
+                        .all()
                     )
-                    if _pred and isinstance(_pred.payload_json, str) and _pred.payload_json.strip():
-                        try:
-                            _parsed_pred = json.loads(_pred.payload_json)
-                            if isinstance(_parsed_pred, dict):
-                                predecessor_payload = _parsed_pred
-                        except Exception:
-                            predecessor_payload = {}
+                    for _pred in predecessor_rows:
+                        if isinstance(_pred.payload_json, str) and _pred.payload_json.strip():
+                            try:
+                                _parsed_pred = json.loads(_pred.payload_json)
+                                if isinstance(_parsed_pred, dict):
+                                    predecessor_payload = _parsed_pred
+                                    break
+                            except Exception:
+                                predecessor_payload = {}
 
             resolved_title = incoming_title
             resolved_year = incoming_year
@@ -3284,6 +3322,13 @@ class IdarrRunner:
                 if isinstance(resolved_canonical_year, int):
                     resolved_year = resolved_canonical_year
 
+            # Store the canonical title/year on resolved rows, not the raw filename title.
+            _resolved_has_id = resolved_tmdb_id is not None or resolved_tvdb_id is not None or bool(resolved_imdb_id)
+            if _resolved_has_id and resolved_canonical_title:
+                resolved_title = resolved_canonical_title
+                if isinstance(resolved_canonical_year, int):
+                    resolved_year = resolved_canonical_year
+
             cache_payload = {
                 "title": resolved_title,
                 "year": resolved_year,
@@ -3322,16 +3367,41 @@ class IdarrRunner:
                 touch_checked_at=touch_checked_at,
             )
 
-            # If the ID-keyed row was just created from a provisional row, delete the
-            # provisional row and inherit its last_checked_at when touch was suppressed.
+            # Delete the absorbed provisional (and its pending match); inherit its freshness only
+            # if this ID row had none.
             if provisional_row is not None:
                 self._pending_query().filter(IdarrPendingMatch.asset_key == provisional_key).delete(synchronize_session=False)
                 self.db.delete(provisional_row)
                 self._pending_resolved_mid_run += 1
-                if not touch_checked_at and provisional_row.last_checked_at is not None:
+                if not touch_checked_at and upserted.last_checked_at is None and provisional_row.last_checked_at is not None:
                     upserted.last_checked_at = provisional_row.last_checked_at
 
+            # Remove any stale inferred-type twin (e.g. collection::) of this pending:: row.
+            if resolved_asset_type == "pending":
+                _twin_keys = [
+                    self._asset_key(asset_type=_t, title=resolved_title, year=resolved_year)
+                    for _t in ("movie", "tv_series", "collection")
+                ]
+                _twin_keys = [k for k in _twin_keys if k != key]
+                if _twin_keys:
+                    self._cache_query().filter(
+                        IdarrAssetCache.asset_key.in_(_twin_keys),
+                        IdarrAssetCache.matched.is_(False),
+                    ).delete(synchronize_session=False)
 
+            # Collapse same-item predecessor rows (id-type transition); inherit freshness if we did
+            # no lookup, then delete each orphan unless its file is still scanned this run.
+            for _pred in predecessor_rows:
+                if _pred.asset_key == key or _pred.asset_key in aggregated:
+                    continue
+                if (
+                    not touch_checked_at
+                    and upserted.last_checked_at is None
+                    and _pred.last_checked_at is not None
+                ):
+                    upserted.last_checked_at = _pred.last_checked_at
+                self._pending_query().filter(IdarrPendingMatch.asset_key == _pred.asset_key).delete(synchronize_session=False)
+                self.db.delete(_pred)
 
     def _prune_inactive_cache_keys_for_source(self, source_dir: Path, active_keys: set[str]) -> dict[str, int]:
         source_files = {
@@ -3405,6 +3475,132 @@ class IdarrRunner:
             "removed_cache": int(removed_cache or 0),
             "removed_pending": int(removed_pending or 0),
         }
+
+    def _trim_cache_filenames_to_disk(self, disk_filenames: set[str]) -> int:
+        """Drop current_filenames entries no longer on disk (a full scan is the authoritative
+        on-disk set). original_filenames is left as the audit trail. Returns rows changed."""
+        if not disk_filenames:
+            return 0
+        trimmed_rows = 0
+        for row in self._cache_query().all():
+            if not isinstance(row.payload_json, str) or not row.payload_json.strip():
+                continue
+            try:
+                payload = json.loads(row.payload_json)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            current = payload.get("current_filenames")
+            if not isinstance(current, list) or not current:
+                continue
+            kept = [f for f in current if isinstance(f, str) and Path(f).name in disk_filenames]
+            if len(kept) != len(current):
+                payload["current_filenames"] = kept
+                row.payload_json = json.dumps(payload)
+                trimmed_rows += 1
+        return trimmed_rows
+
+    def _prune_duplicate_id_rows(self) -> int:
+        """Remove non-canonical rows that duplicate a canonical id-keyed row (same type+id in
+        scope). Keeps the id-keyed row; leaves groups with no id-keyed row alone. Full runs only."""
+        groups: dict[tuple, list[IdarrAssetCache]] = {}
+        for row in self._cache_query().all():
+            if not isinstance(row.asset_key, str) or not row.asset_key.strip():
+                continue
+            if isinstance(row.tmdb_id, int):
+                gid: tuple = ("tmdb", int(row.tmdb_id))
+            elif isinstance(row.tvdb_id, int):
+                gid = ("tvdb", int(row.tvdb_id))
+            elif isinstance(row.imdb_id, str) and row.imdb_id.strip():
+                gid = ("imdb", row.imdb_id.strip())
+            else:
+                continue
+            groups.setdefault((str(row.asset_type or "").strip().lower(), gid), []).append(row)
+
+        removed = 0
+        for (_atype, (idkind, idval)), grp in groups.items():
+            if len(grp) < 2:
+                continue
+            marker = f"::{idkind}={idval}"
+            keeper = next((r for r in grp if marker in str(r.asset_key)), None)
+            if keeper is None:
+                continue  # no canonical id-keyed row yet — leave for natural promotion
+            for r in grp:
+                if r.asset_key == keeper.asset_key:
+                    continue
+                self._pending_query().filter(IdarrPendingMatch.asset_key == r.asset_key).delete(synchronize_session=False)
+                self.db.delete(r)
+                removed += 1
+        return removed
+
+    def _heal_cross_type_title_collisions(self) -> int:
+        """Force re-verify cache rows poisoned by a cross-media-type tmdb collision by clearing
+        their freshness, so the next enrichment re-checks them against TMDB and corrects the title.
+
+        Signature: two rows share a tmdb id but have different *known* asset types and the *same*
+        title. TMDB ids are namespaced per media type, so a movie and a series sharing a numeric id
+        is normal (movie 4599 "Raising Helen" vs tv 4599 "Yes, Dear") — but the same *title* across
+        those two types only happens when one row inherited the other's title. We can't tell which
+        without TMDB, so clear both; each re-verifies under its own type. Once corrected their titles
+        differ, so this no longer fires. Full runs only."""
+        by_tmdb: dict[int, list[IdarrAssetCache]] = {}
+        for row in self._cache_query().all():
+            if isinstance(row.tmdb_id, int):
+                by_tmdb.setdefault(int(row.tmdb_id), []).append(row)
+
+        cleared = 0
+        for rows in by_tmdb.values():
+            if len(rows) < 2:
+                continue
+            tagged = [
+                (self._normalize_asset_type(r.asset_type),
+                 self._normalize_with_aliases(str(r.title or "").strip()), r)
+                for r in rows
+            ]
+            for a_type, a_title, a_row in tagged:
+                if not a_type or not a_title or a_row.last_checked_at is None:
+                    continue
+                if any(b_type and b_type != a_type and b_title == a_title
+                       for b_type, b_title, b_row in tagged if b_row is not a_row):
+                    a_row.last_checked_at = None
+                    cleared += 1
+        return cleared
+
+    def _prune_orphaned_unmatched_rows(self) -> int:
+        """Delete dead unmatched rows: not matched, no id, no current filenames, no pending match,
+        and not ignored/dismissed. Full runs only."""
+        pending_keys = {
+            str(r.asset_key)
+            for r in self._pending_query().all()
+            if isinstance(r.asset_key, str) and r.asset_key.strip()
+        }
+        removed = 0
+        for row in self._cache_query().all():
+            if not isinstance(row.asset_key, str) or not row.asset_key.strip():
+                continue
+            if row.matched:
+                continue
+            if isinstance(row.tmdb_id, int) or isinstance(row.tvdb_id, int) or (isinstance(row.imdb_id, str) and row.imdb_id.strip()):
+                continue
+            if row.asset_key in pending_keys:
+                continue
+            payload: dict[str, Any] = {}
+            if isinstance(row.payload_json, str) and row.payload_json.strip():
+                try:
+                    parsed = json.loads(row.payload_json)
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except Exception:
+                    payload = {}
+            if str(payload.get("status") or "").strip().lower() in ("ignored", "dismissed"):
+                continue
+            current = payload.get("current_filenames")
+            if isinstance(current, list) and any(isinstance(f, str) and f.strip() for f in current):
+                continue
+            self.db.delete(row)
+            removed += 1
+        return removed
 
     @staticmethod
     def _format_pending_row_label(row: Any) -> str:
@@ -3487,6 +3683,7 @@ class IdarrRunner:
 
             raw_conflict_files = item.get("conflict_files")
             raw_conflict_file_paths = item.get("conflict_file_paths")
+            raw_conflict_file_tracked = item.get("conflict_file_tracked")
             payload.append(
                 {
                     "title": title,
@@ -3496,6 +3693,7 @@ class IdarrRunner:
                     "source_path": str(item.get("source_path") or "").strip() or None,
                     "conflict_files": raw_conflict_files if isinstance(raw_conflict_files, list) else None,
                     "conflict_file_paths": raw_conflict_file_paths if isinstance(raw_conflict_file_paths, list) else None,
+                    "conflict_file_tracked": raw_conflict_file_tracked if isinstance(raw_conflict_file_tracked, list) else None,
                 }
             )
 
@@ -3560,6 +3758,11 @@ class IdarrRunner:
                 cache_payload["conflict_file_paths"] = [str(p) for p in conflict_file_paths if p]
             else:
                 cache_payload.pop("conflict_file_paths", None)
+            conflict_file_tracked = item.get("conflict_file_tracked")
+            if isinstance(conflict_file_tracked, list) and conflict_file_tracked:
+                cache_payload["conflict_file_tracked"] = [bool(t) for t in conflict_file_tracked]
+            else:
+                cache_payload.pop("conflict_file_tracked", None)
             cache_payload["pending_entry"] = pending_entry
             if not str(cache_payload.get("status") or "").strip():
                 cache_payload["status"] = "not_found"
@@ -3651,20 +3854,40 @@ class IdarrRunner:
                 removed_stale += 1
                 removed_stale_items.append(self._format_pending_row_label(row))
 
+        # Drop conflict-keyed rows not re-created as a live conflict this run (full runs only).
+        removed_conflict = 0
+        if not is_targeted_run:
+            removed_conflict = self._prune_stale_conflict_cache_rows(desired_keys)
+
         self.db.commit()
         removed_resolved_total = removed_resolved + self._pending_resolved_mid_run
         log_info(
             LogTags.IDARR,
-            f"Pending matches updated: active={self._pending_query().count()}, unresolved_this_run={len(payload)}, removed_resolved={removed_resolved_total}, removed_stale={removed_stale}",
+            f"Pending matches updated: active={self._pending_query().count()}, unresolved_this_run={len(payload)}, removed_resolved={removed_resolved_total}, removed_stale={removed_stale}, removed_conflict={removed_conflict}",
             pending_count=len(payload),
             removed_resolved=removed_resolved_total,
             removed_resolved_mid_run=self._pending_resolved_mid_run,
             removed_stale=removed_stale,
+            removed_conflict=removed_conflict,
         )
         for label in removed_resolved_items:
             log_info(LogTags.IDARR, f"• Pending match removed (resolved): {label}")
         for label in removed_stale_items:
             log_info(LogTags.IDARR, f"• Pending match removed (stale, no longer on disk): {label}")
+
+    def _prune_stale_conflict_cache_rows(self, desired_keys: set[str]) -> int:
+        """Delete conflict-keyed rows not in desired_keys (this run's live conflicts). Returns the
+        count removed. Full (non-targeted) runs only."""
+        stale_keys = [
+            str(row.asset_key)
+            for row in self._cache_query().filter(IdarrAssetCache.asset_key.like("%::conflict=%")).all()
+            if isinstance(row.asset_key, str) and row.asset_key not in desired_keys
+        ]
+        if not stale_keys:
+            return 0
+        self._cache_query().filter(IdarrAssetCache.asset_key.in_(stale_keys)).delete(synchronize_session=False)
+        self._pending_query().filter(IdarrPendingMatch.asset_key.in_(stale_keys)).delete(synchronize_session=False)
+        return len(stale_keys)
 
     def _collect_conflict_pending_assets(
         self,
@@ -3745,7 +3968,22 @@ class IdarrRunner:
                     continue
                 seen_keys.add(dedupe_key)
 
-                conflict_file_names = [Path(sp).name for sp in source_paths_list if sp]
+                # Build names/paths/tracked together, index-aligned (tracked = "old", new = "new").
+                conflict_file_names: list[str] = []
+                conflict_file_paths: list[str] = []
+                conflict_file_tracked: list[bool] = []
+                for sp in source_paths_list:
+                    if not sp:
+                        continue
+                    matched = asset_by_source_path.get(sp)
+                    if matched is None:
+                        try:
+                            matched = asset_by_source_path.get(str(Path(sp).resolve()))
+                        except Exception:
+                            matched = None
+                    conflict_file_names.append(Path(sp).name)
+                    conflict_file_paths.append(str(sp))
+                    conflict_file_tracked.append(bool(matched.get("_previously_tracked")) if matched else False)
                 conflict_assets.append(
                     {
                         "title": title,
@@ -3755,7 +3993,8 @@ class IdarrRunner:
                         "pending_reason": "rename_conflict",
                         "source_path": source_paths_list[0],
                         "conflict_files": conflict_file_names,
-                        "conflict_file_paths": [str(sp) for sp in source_paths_list if sp],
+                        "conflict_file_paths": conflict_file_paths,
+                        "conflict_file_tracked": conflict_file_tracked,
                     }
                 )
                 continue
@@ -3773,9 +4012,12 @@ class IdarrRunner:
             if matched_asset is None:
                 continue
 
-            title = str(matched_asset.get("title") or "").strip()
+            # Label the picker by the canonical (matched) title, not the dirty parsed name.
+            title = str(matched_asset.get("new_title") or matched_asset.get("title") or "").strip()
             asset_type = str(matched_asset.get("type") or "").strip().lower()
-            year = matched_asset.get("year") if isinstance(matched_asset.get("year"), int) else None
+            year = matched_asset.get("new_year") if isinstance(matched_asset.get("new_year"), int) else (
+                matched_asset.get("year") if isinstance(matched_asset.get("year"), int) else None
+            )
             if not title or not asset_type:
                 continue
 
@@ -3790,16 +4032,35 @@ class IdarrRunner:
                 continue
             seen_keys.add(dedupe_key)
 
-            conflict_assets.append(
-                {
-                    "title": title,
-                    "year": year,
-                    "type": asset_type,
-                    "match_reason": "rename_conflict",
-                    "pending_reason": "rename_conflict",
-                    "source_path": source_path,
-                }
-            )
+            conflict_entry: dict[str, Any] = {
+                "title": title,
+                "year": year,
+                "type": asset_type,
+                "match_reason": "rename_conflict",
+                "pending_reason": "rename_conflict",
+                "source_path": source_path,
+            }
+
+            # If the existing target is still on disk, build a two-file picker (existing = old,
+            # incoming = new) so the user chooses which to keep.
+            target_path = str(row.get("target_path") or "").strip()
+            existing_name = Path(target_path).name if target_path else ""
+            incoming_name = Path(source_path).name
+            target_exists = False
+            if target_path:
+                try:
+                    target_exists = Path(target_path).is_file()
+                except Exception:
+                    target_exists = False
+            if target_exists and existing_name and incoming_name:
+                conflict_entry["conflict_files"] = [existing_name, incoming_name]
+                conflict_entry["conflict_file_paths"] = [target_path, source_path]
+                conflict_entry["conflict_file_tracked"] = [
+                    True,
+                    bool(matched_asset.get("_previously_tracked")),
+                ]
+
+            conflict_assets.append(conflict_entry)
 
         return conflict_assets
 
@@ -4111,6 +4372,11 @@ class IdarrRunner:
                 row = self._cache_query().filter(IdarrAssetCache.asset_key == asset_key).first()
         else:
             row = self._cache_query().filter(IdarrAssetCache.asset_key == asset_key).first()
+            if not row:
+                # Unmatched rows live under the ``pending::`` key now; record history there.
+                pending_key = self._asset_key(asset_type="pending", title=title, year=year)
+                if pending_key != asset_key:
+                    row = self._cache_query().filter(IdarrAssetCache.asset_key == pending_key).first()
         if not row:
             return False
 
@@ -4445,8 +4711,9 @@ class IdarrRunner:
 
                 duplicate_conflicts += 1
 
-                if source_mtime > destination_mtime:
-                    # Incoming file is newer → archive existing, rename incoming
+                # Bulk run + newer incoming → silently replace. Manual resolve, or older/same-age
+                # incoming → surface a picker and move nothing.
+                if source_mtime > destination_mtime and not bool(asset.get("_resolved_manually")):
                     archived, archived_path = self._archive_duplicate(destination, dupe_dir, dry_run)
                     if archived:
                         ok = self._rename_in_place(source_file, new_filename, dry_run)
@@ -4494,13 +4761,14 @@ class IdarrRunner:
                                 }
                             )
                     else:
+                        # Archive failed → leave both in place, resolve via picker.
                         skipped_count += 1
                         conflict_rows.append(
                             {
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "source_path": str(source_file),
                                 "target_path": new_path,
-                                "resolution": "in_place_conflict_archive_failed",
+                                "resolution": "rename_target_exists",
                                 "archived_path": "",
                                 "action_mode": "rename",
                                 "dry_run": str(dry_run).lower(),
@@ -4513,21 +4781,19 @@ class IdarrRunner:
                                 "to_path": new_path,
                                 "status": "skipped",
                                 "revert_supported": False,
-                                "reason": "in_place_conflict_archive_failed",
+                                "reason": "rename_target_exists",
                             }
                         )
                 else:
-                    # Existing destination is newer or same age → archive the incoming source as the older duplicate
-                    archived, archived_path = self._archive_duplicate(source_file, dupe_dir, dry_run)
-                    resolution = "archived_older_incoming_kept_newer_existing" if archived else "in_place_conflict_kept_existing"
+                    # Manual resolve, or older/same-age incoming → surface a picker, move nothing.
                     skipped_count += 1
                     conflict_rows.append(
                         {
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                             "source_path": str(source_file),
                             "target_path": new_path,
-                            "resolution": resolution,
-                            "archived_path": archived_path or "",
+                            "resolution": "rename_target_exists",
+                            "archived_path": "",
                             "action_mode": "rename",
                             "dry_run": str(dry_run).lower(),
                         }
@@ -4539,7 +4805,7 @@ class IdarrRunner:
                             "to_path": new_path,
                             "status": "skipped",
                             "revert_supported": False,
-                            "reason": resolution,
+                            "reason": "rename_target_exists",
                         }
                     )
 
@@ -4583,6 +4849,7 @@ class IdarrRunner:
         pending_only: bool,
         orphan_prune_stats: dict[str, int],
         inactive_cache_prune_stats: dict[str, int],
+        collisions_healed: int = 0,
     ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
         run_finished_at = datetime.now(timezone.utc)
         elapsed_seconds = max(0, int((run_finished_at - run_started_at).total_seconds()))
@@ -4609,6 +4876,9 @@ class IdarrRunner:
             {"label": "💾 Cache Skipped", "value": int(enrichment_stats.get("freshness_skipped", 0))},
             {"label": "📡 TMDB API Calls", "value": int(enrichment_stats.get("tmdb_api_calls", 0))},
         ]
+        # Only surface when it actually fired — a "0" line every run is noise.
+        if collisions_healed:
+            summary_report.append({"label": "🩹 Collisions Healed", "value": collisions_healed})
 
         stats = {
             "total_assets": total_assets,
@@ -4625,6 +4895,7 @@ class IdarrRunner:
             "ambiguous_matches": ambiguous_matches,
             "tvdb_missing_tv": tvdb_missing_tv,
             "reclassified_tv": reclassified_tv,
+            "collisions_healed": collisions_healed,
             "ignored_assets": ignored_count,
             "ignore_pending_sync": ignore_pending_sync_stats,
             "pending_only": pending_only,
@@ -4858,6 +5129,20 @@ class IdarrRunner:
         if tvdb_frequency < 1:
             tvdb_frequency = 1
 
+        # Corrective pre-pass: clear freshness on rows poisoned by a past cross-type tmdb
+        # collision so enrichment re-verifies and renames them back (e.g. a series mislabelled
+        # with a movie's title). Self-limiting — only fires while the collision signature exists.
+        collisions_healed = 0
+        if not single_item_mode:
+            try:
+                collisions_healed = self._heal_cross_type_title_collisions()
+                if collisions_healed:
+                    self.db.flush()
+                    log_info(LogTags.IDARR, f"Re-verifying {collisions_healed} cache row(s) with a cross-type title collision")
+            except Exception as exc:
+                self.db.rollback()
+                log_warning(LogTags.IDARR, f"Cross-type collision heal skipped: {exc}")
+
         log_info(LogTags.IDARR, "Starting metadata enrichment via TMDB")
         _notify_progress("enrichment", 12, "Enriching metadata via TMDB")
 
@@ -4906,8 +5191,9 @@ class IdarrRunner:
                 _ak_type = str(_aa.get("type") or "")
                 _ak_title = str(_aa.get("title") or "")
                 _ak_year = _aa.get("year") if isinstance(_aa.get("year"), int) else None
-                # Always include the provisional key (for unmatched/unresolved rows).
+                # Include provisional + pending:: keys so unmatched rows aren't pruned.
                 active_keys.add(self._asset_key(asset_type=_ak_type, title=_ak_title, year=_ak_year))
+                active_keys.add(self._asset_key(asset_type="pending", title=_ak_title, year=_ak_year))
                 # Also include the ID-keyed form so resolved rows aren't pruned.
                 _ak_tmdb = int(_aa["tmdb_id"]) if isinstance(_aa.get("tmdb_id"), int) else None
                 _ak_tvdb = int(_aa["tvdb_id"]) if isinstance(_aa.get("tvdb_id"), int) else None
@@ -4919,6 +5205,17 @@ class IdarrRunner:
                     ))
             if not single_item_mode:
                 inactive_cache_prune_stats = self._prune_inactive_cache_keys_for_source(source_dir, active_keys)
+                # Full scan = authoritative on-disk set; trim stale current_filenames.
+                disk_filenames = {Path(str(a.get("file_path"))).name for a in assets if a.get("file_path")}
+                trimmed_rows = self._trim_cache_filenames_to_disk(disk_filenames)
+                if trimmed_rows:
+                    log_info(LogTags.IDARR, f"Trimmed stale filenames from {trimmed_rows} cache row(s)")
+                removed_dupe_ids = self._prune_duplicate_id_rows()
+                if removed_dupe_ids:
+                    log_info(LogTags.IDARR, f"Removed {removed_dupe_ids} duplicate id cache row(s)")
+                removed_orphans = self._prune_orphaned_unmatched_rows()
+                if removed_orphans:
+                    log_info(LogTags.IDARR, f"Removed {removed_orphans} orphaned unmatched cache row(s)")
             self.db.commit()
         except Exception as exc:
             self.db.rollback()
@@ -5070,6 +5367,7 @@ class IdarrRunner:
             pending_only=pending_only,
             orphan_prune_stats=orphan_prune_stats,
             inactive_cache_prune_stats=inactive_cache_prune_stats,
+            collisions_healed=collisions_healed,
         )
         log_info(LogTags.IDARR, "Summary Report:")
         for _row in summary_report:

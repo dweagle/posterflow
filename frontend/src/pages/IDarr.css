@@ -428,6 +428,7 @@
 }
 
 .idarr-page .conflict-cell-thumb-btn {
+  position: relative;
   background: #1a1a1a;
   border: 1px solid #555;
   border-radius: 4px;
@@ -444,6 +445,30 @@
 
 .idarr-page .conflict-cell-thumb-btn:hover {
   border-color: #888;
+}
+
+.idarr-page .conflict-cell-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 1;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.idarr-page .conflict-cell-badge--new {
+  background: #2e7d32;
+}
+
+.idarr-page .conflict-cell-badge--old {
+  background: #6b6b6b;
 }
 
 .idarr-page .conflict-cell-thumb {

@@ -337,6 +337,8 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
         if result.stats:
             stats = result.stats
             elapsed = str(stats.get("elapsed") or f"{int(stats.get('elapsed_seconds') or 0)}s")
+            healed = int(stats.get("collisions_healed") or 0)
+            healed_part = f", healed={healed}" if healed else ""
             log_success(
                 LogTags.IDARR,
                 (
@@ -345,7 +347,8 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
                     f"processed={int(stats.get('processed_assets') or 0)}, "
                     f"renamed={int(stats.get('files_renamed') or stats.get('renamed') or 0)}, "
                     f"skipped={int(stats.get('skipped') or 0)}, "
-                    f"unmatched={unmatched_count}, "
+                    f"unmatched={unmatched_count}"
+                    f"{healed_part}, "
                     f"elapsed={elapsed}"
                 ),
             )

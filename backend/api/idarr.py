@@ -1341,6 +1341,7 @@ def _build_idarr_pending_items_payload(
                 "asset_subtype": asset_subtype,
                 "pending_status": cache_payload.get("pending_status") or None,
                 "conflict_files": cache_payload.get("conflict_files") if isinstance(cache_payload.get("conflict_files"), list) else None,
+                "conflict_file_tracked": cache_payload.get("conflict_file_tracked") if isinstance(cache_payload.get("conflict_file_tracked"), list) else None,
                 "conflict_file_previews": (
                     [
                         _build_idarr_pending_preview_url({"pending_entry": {"files": p}}, source_dirs, cache_buster=None)
@@ -1815,6 +1816,8 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                 _candidate_type = _cmt
         _base_type = row.asset_type if row.asset_type not in (None, "pending") else None
         target_asset_type = _normalize_idarr_asset_type(_explicit_type or inferred_type or _candidate_type or _base_type) or "movie"
+        # Keep this keyed by the dirty title so the rename run matches the still-dirty file; the
+        # runner re-keys it by id and absorbs this row.
         target_asset_key = _idarr_asset_key(target_asset_type, row.title, row.year, scope_token)
 
         upsert_idarr_asset_cache(
@@ -1895,6 +1898,10 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
             matched=bool(existing_cache.matched) if existing_cache else False,
             payload_json=json.dumps(cache_payload),
         )
+    elif "::conflict=" in asset_key:
+        # Conflict rows are derived state — delete the leftover ::conflict= row on dismiss.
+        if existing_cache is not None:
+            db.delete(existing_cache)
     else:
         dismissed_at = datetime.now(timezone.utc).isoformat()
         dismiss_event = {

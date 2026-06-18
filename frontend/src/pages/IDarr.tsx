@@ -1896,6 +1896,11 @@ const {
                       {item.conflict_files!.map((file, fileIndex) => {
                         const fileIsPsd = isPsd(file)
                         const previewUrl = fileIsPsd ? null : getPreviewImageUrl(item.conflict_file_previews?.[fileIndex])
+                        // "New" = discovered this scan; "Old" = already tracked in the cache.
+                        const trackedFlags = item.conflict_file_tracked
+                        const tracked = Array.isArray(trackedFlags) && trackedFlags.length === item.conflict_files!.length
+                          ? trackedFlags[fileIndex]
+                          : null
                         return (
                           <div key={file} className="conflict-file-cell">
                             <button
@@ -1905,6 +1910,11 @@ const {
                               onClick={previewUrl ? () => setCardPreviewUrl(previewUrl) : undefined}
                               style={!previewUrl ? { cursor: 'default' } : undefined}
                             >
+                              {tracked !== null && (
+                                <span className={`conflict-cell-badge ${tracked ? 'conflict-cell-badge--old' : 'conflict-cell-badge--new'}`}>
+                                  {tracked ? 'Old' : 'New'}
+                                </span>
+                              )}
                               {previewUrl ? (
                                 <img src={previewUrl} alt={file} className="conflict-cell-thumb" loading="lazy" />
                               ) : fileIsPsd ? (

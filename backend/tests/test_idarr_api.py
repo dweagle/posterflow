@@ -476,6 +476,97 @@ def test_idarr_runner_scan_rejects_cross_type_tmdb_collision(test_db, tmp_path):
     assert movie2.get("imdb_id") == "tt0327247"
 
 
+def test_idarr_runner_load_cache_map_rejects_cross_type_tmdb_collision(test_db):
+    """_load_cache_map must NOT match a TV asset to a cached *movie* row that only shares the
+    numeric tmdb id. TMDB ids are namespaced per media type: movie 4599 ("Raising Helen") and
+    tv 4599 ("Yes, Dear") are different entities. Matching the movie row crosses the series'
+    title to the movie at rename time (ids kept, title swapped)."""
+    runner = IdarrRunner(test_db)
+    # Fully-resolved *movie* row sharing tmdb id 4599 with the incoming TV series.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::raisinghelen::2004::tmdb=4599",
+        title="Raising Helen", year=2004, asset_type="movie",
+        tmdb_id=4599, tvdb_id=None, imdb_id="tt0357082", matched=True,
+        payload_json=json.dumps({"canonical_title": "Raising Helen", "canonical_year": 2004}),
+    ))
+    test_db.commit()
+
+    cache_map = runner._load_cache_map([{
+        "title": "Yes, Dear", "year": 2000, "type": "tv_series",
+        "tmdb_id": 4599, "tvdb_id": 72367, "imdb_id": "tt0247144",
+    }])
+    # The movie row must not be handed to the TV asset under any key form.
+    assert all(row.asset_type != "movie" for row in cache_map.values())
+
+
+def test_idarr_runner_heal_cross_type_title_collisions(test_db):
+    """Rows poisoned by a past cross-type tmdb collision (same tmdb + same title across a movie
+    and a series) get their freshness cleared so enrichment re-verifies and fixes the title.
+    A legit same-tmdb pair with *different* titles is left fresh (no needless re-verify)."""
+    runner = IdarrRunner(test_db)
+    fresh = datetime.now(timezone.utc)
+    # Poisoned: movie + series share tmdb 4599 AND title "Raising Helen".
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::raisinghelen::2004::tmdb=4599", title="Raising Helen", year=2004,
+        asset_type="movie", tmdb_id=4599, imdb_id="tt0357082", matched=True,
+        payload_json="{}", last_checked_at=fresh,
+    ))
+    test_db.add(IdarrAssetCache(
+        asset_key="tv_series::raisinghelen::2004::tmdb=4599", title="Raising Helen", year=2004,
+        asset_type="tv_series", tmdb_id=4599, tvdb_id=72367, imdb_id="tt0247144", matched=True,
+        payload_json="{}", last_checked_at=fresh,
+    ))
+    # Legit collision: same tmdb 2122 but different titles — must stay fresh.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::wholetenyards::2004::tmdb=2122", title="The Whole Ten Yards", year=2004,
+        asset_type="movie", tmdb_id=2122, imdb_id="tt0327247", matched=True,
+        payload_json="{}", last_checked_at=fresh,
+    ))
+    test_db.add(IdarrAssetCache(
+        asset_key="tv_series::kingofthehill::1997::tmdb=2122", title="King of the Hill", year=1997,
+        asset_type="tv_series", tmdb_id=2122, tvdb_id=73903, imdb_id="tt0118375", matched=True,
+        payload_json="{}", last_checked_at=fresh,
+    ))
+    test_db.commit()
+
+    assert runner._heal_cross_type_title_collisions() == 2
+
+    rows = {r.asset_key: r for r in test_db.query(IdarrAssetCache).all()}
+    assert rows["movie::raisinghelen::2004::tmdb=4599"].last_checked_at is None
+    assert rows["tv_series::raisinghelen::2004::tmdb=4599"].last_checked_at is None
+    assert rows["movie::wholetenyards::2004::tmdb=2122"].last_checked_at is not None
+    assert rows["tv_series::kingofthehill::1997::tmdb=2122"].last_checked_at is not None
+
+    # Idempotent / self-limiting: a second pass clears nothing new.
+    assert runner._heal_cross_type_title_collisions() == 0
+
+
+def test_idarr_runner_summary_surfaces_collisions_healed_only_when_nonzero(test_db):
+    """The 'Collisions Healed' summary line appears only when the heal actually fired, and the
+    count is always carried in stats for downstream logging."""
+    runner = IdarrRunner(test_db)
+
+    def _summarize(healed):
+        return runner.summarize_run(
+            run_started_at=datetime.now(timezone.utc),
+            assets=[], total_assets=0, unmatched_assets=[],
+            enrichment_stats={}, enrichment_details=[],
+            renamed_count=0, skipped_count=0, duplicate_conflicts=0,
+            conflict_rows=[], operation_rows=[], duplicate_log_csv=None,
+            ignored_count=0, ignore_pending_sync_stats={}, pending_only=False,
+            orphan_prune_stats={}, inactive_cache_prune_stats={},
+            collisions_healed=healed,
+        )
+
+    report, stats, _ = _summarize(2)
+    assert any("Collisions Healed" in str(r.get("label")) and r.get("value") == 2 for r in report)
+    assert stats["collisions_healed"] == 2
+
+    report0, stats0, _ = _summarize(0)
+    assert not any("Collisions Healed" in str(r.get("label")) for r in report0)
+    assert stats0["collisions_healed"] == 0
+
+
 def test_idarr_runner_parse_repairs_malformed_year_paren():
     """A dangling year parenthesis (from an interrupted/partial rename) must be repaired so the
     year is parsed and stripped, instead of becoming a junk title that never matches and churns
@@ -702,6 +793,485 @@ def test_idarr_runner_store_cache_rows_preserves_resolve_metadata_across_title_r
     assert payload.get("resolved_manually") is True
     assert payload.get("resolution_history") and isinstance(payload["resolution_history"], list)
     assert payload.get("canonical_title") == "Inception"
+
+
+def test_idarr_resolved_asset_key_is_id_only(test_db):
+    """A resolved row's key is its id alone — any name for the same id yields the same key."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    k1 = runner._asset_key(asset_type="movie", title="1171x1299", year=None, tmdb_id=550)
+    k2 = runner._asset_key(asset_type="movie", title="Fight Club", year=1999, tmdb_id=550)
+    assert k1 == k2 == "movie::tmdb=550::scope=t0_demo"
+    # tvdb / imdb fall-through when no tmdb id is present.
+    assert runner._asset_key(asset_type="tv_series", title="x", year=2020, tvdb_id=99) == "tv_series::tvdb=99::scope=t0_demo"
+    assert runner._asset_key(asset_type="movie", title="x", year=2020, imdb_id="tt7") == "movie::imdb=tt7::scope=t0_demo"
+    # Unresolved (no id) keeps the provisional title/year form.
+    assert runner._asset_key(asset_type="movie", title="Fight Club", year=1999) == "movie::fightclub::1999::scope=t0_demo"
+
+
+def test_idarr_runner_store_cache_rows_one_row_per_id_across_names(test_db):
+    """Two names for the same movie collapse to one id-keyed row, with both filenames recorded."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    runner._store_asset_cache_rows([
+        {"title": "1171x1299", "year": None, "type": "movie", "tmdb_id": 550,
+         "has_id": True, "_cache_touch": True, "file_path": "/plexart/logos/1171x1299 - logo.png"},
+        {"title": "Fight Club", "year": 1999, "type": "movie", "tmdb_id": 550,
+         "has_id": True, "_cache_touch": True, "file_path": "/plexart/logos/Fight Club (1999) {tmdb-550} - logo.png"},
+    ])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).all()
+    assert len(rows) == 1
+    assert rows[0].asset_key == "movie::tmdb=550::scope=t0_demo"
+    files = json.loads(rows[0].payload_json).get("current_filenames") or []
+    assert "1171x1299 - logo.png" in files
+    assert "Fight Club (1999) {tmdb-550} - logo.png" in files
+
+
+def test_idarr_runner_store_cache_rows_rescan_renamed_file_updates_in_place(test_db):
+    """Re-scanning a resolved+renamed file updates the same id-keyed row in place, no second row."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    # First pass: the dirty-named file resolves to tmdb 550.
+    runner._store_asset_cache_rows([{
+        "title": "1171x1299", "year": None, "type": "movie", "tmdb_id": 550,
+        "has_id": True, "_cache_touch": True, "file_path": "/plexart/logos/1171x1299 - logo.png",
+    }])
+    test_db.commit()
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).count() == 1
+
+    # Second pass: the renamed canonical file is scanned — same id, different name.
+    runner._store_asset_cache_rows([{
+        "title": "Fight Club", "year": 1999, "type": "movie", "tmdb_id": 550,
+        "has_id": True, "_cache_touch": False, "file_path": "/plexart/logos/Fight Club (1999) {tmdb-550} - logo.png",
+    }])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).all()
+    assert len(rows) == 1
+    assert rows[0].asset_key == "movie::tmdb=550::scope=t0_demo"
+
+
+def test_idarr_runner_trim_cache_filenames_to_disk(test_db):
+    """current_filenames is trimmed to files on disk; original_filenames is left intact."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=550::scope=t0_demo", title="Fight Club", year=1999,
+        asset_type="movie", tmdb_id=550, matched=True,
+        payload_json=json.dumps({
+            "current_filenames": [
+                "Fight Club (1999) {tmdb-550} - logo.png",  # on disk
+                "1171x1299 - logo.png",                      # archived/renamed away
+                "cWUJnmUFQ34SyjcvsO4EGwB7w23.webp",          # archived/renamed away
+            ],
+            "original_filenames": ["1171x1299 - logo.png"],
+        }),
+    ))
+    # A row whose only file is on disk — must be left unchanged.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=27205::scope=t0_demo", title="Inception", year=2010,
+        asset_type="movie", tmdb_id=27205, matched=True,
+        payload_json=json.dumps({"current_filenames": ["Inception (2010) {tmdb-27205} - logo.png"]}),
+    ))
+    test_db.commit()
+
+    on_disk = {"Fight Club (1999) {tmdb-550} - logo.png", "Inception (2010) {tmdb-27205} - logo.png"}
+    changed = runner._trim_cache_filenames_to_disk(on_disk)
+    test_db.commit()
+
+    assert changed == 1  # only the Fight Club row had stale entries
+    fc = json.loads(test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).first().payload_json)
+    assert fc["current_filenames"] == ["Fight Club (1999) {tmdb-550} - logo.png"]
+    assert fc["original_filenames"] == ["1171x1299 - logo.png"]  # audit trail untouched
+
+
+def test_idarr_runner_store_cache_rows_collapses_idtype_transition(test_db):
+    """A tvdb-only row is absorbed by the new tmdb-keyed row (metadata + freshness carried), leaving one row."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    older = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    tvdb_key = runner._asset_key(asset_type="tv_series", title="Some Show", year=2020, tvdb_id=99)
+    assert tvdb_key == "tv_series::tvdb=99::scope=t0_demo"
+    test_db.add(IdarrAssetCache(
+        asset_key=tvdb_key, title="Some Show", year=2020, asset_type="tv_series",
+        tmdb_id=None, tvdb_id=99, matched=True,
+        payload_json=json.dumps({
+            "resolved_manually": True, "canonical_title": "Some Show",
+            "current_filenames": ["Some Show (2020) {tvdb-99}.png"],
+        }),
+        last_checked_at=older,
+    ))
+    test_db.commit()
+
+    # Re-scanned now carrying a tmdb id; no network lookup of its own this run.
+    runner._store_asset_cache_rows([{
+        "title": "Some Show", "year": 2020, "type": "tv_series",
+        "tmdb_id": 12345, "tvdb_id": 99, "has_id": True, "_cache_touch": False,
+        "file_path": "/plexart/logos/Some Show (2020) {tmdb-12345} {tvdb-99} - logo.png",
+    }])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_type == "tv_series").all()
+    assert len(rows) == 1
+    surv = rows[0]
+    assert surv.asset_key == "tv_series::tmdb=12345::scope=t0_demo"
+    assert surv.tmdb_id == 12345 and surv.tvdb_id == 99
+    assert json.loads(surv.payload_json).get("resolved_manually") is True
+    assert surv.last_checked_at is not None  # inherited from the tvdb-only predecessor
+
+
+def test_idarr_runner_store_cache_rows_idtype_transition_ignores_conflicting_tmdb(test_db):
+    """A different item sharing only a stale tvdb (but with its own tmdb) is NOT collapsed."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    other_key = runner._asset_key(asset_type="tv_series", title="Other Show", year=2019, tmdb_id=111)
+    test_db.add(IdarrAssetCache(
+        asset_key=other_key, title="Other Show", year=2019, asset_type="tv_series",
+        tmdb_id=111, tvdb_id=99, matched=True,  # shares tvdb=99 but a different tmdb
+        payload_json=json.dumps({"current_filenames": ["Other Show (2019) {tmdb-111}.png"]}),
+        last_checked_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    ))
+    test_db.commit()
+
+    runner._store_asset_cache_rows([{
+        "title": "Some Show", "year": 2020, "type": "tv_series",
+        "tmdb_id": 222, "tvdb_id": 99, "has_id": True, "_cache_touch": True,
+        "file_path": "/plexart/logos/Some Show (2020) {tmdb-222} - logo.png",
+    }])
+    test_db.commit()
+
+    # The conflicting-tmdb row survives; a separate new row is created for the new item.
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == other_key).first() is not None
+    assert test_db.query(IdarrAssetCache).filter(
+        IdarrAssetCache.asset_key == "tv_series::tmdb=222::scope=t0_demo"
+    ).first() is not None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_type == "tv_series").count() == 2
+
+
+def test_idarr_runner_store_cache_rows_uses_canonical_title_for_resolved(test_db):
+    """A resolved row's title column is the canonical title, not the dirty filename name."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    runner._store_asset_cache_rows([{
+        "title": "cWUJnmUFQ34SyjcvsO4EGwB7w23",                       # dirty scanned title
+        "new_title": "From Dusk Till Dawn 3: The Hangman's Daughter",  # canonical from TMDB
+        "year": 2000, "new_year": 2000,
+        "type": "movie", "tmdb_id": 10213, "has_id": True, "_cache_touch": True,
+        "file_path": "/plexart/logos/cWUJnmUFQ34SyjcvsO4EGwB7w23.webp",
+    }])
+    test_db.commit()
+
+    row = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 10213).first()
+    assert row.asset_key == "movie::tmdb=10213::scope=t0_demo"
+    assert row.title == "From Dusk Till Dawn 3: The Hangman's Daughter"  # canonical, not the hash
+    assert json.loads(row.payload_json)["canonical_title"] == "From Dusk Till Dawn 3: The Hangman's Daughter"
+
+
+def test_idarr_runner_prune_stale_conflict_cache_rows(test_db):
+    """Stale conflict-keyed rows are removed; live conflicts and ordinary rows are kept."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    live_key = "movie::sometitle::2020::conflict=aaaa::scope=t0_demo"
+    stale_key = "movie::oldtitle::1999::conflict=bbbb::scope=t0_demo"
+    for k in (live_key, stale_key):
+        test_db.add(IdarrAssetCache(
+            asset_key=k, title="x", year=2000, asset_type="movie", matched=False,
+            payload_json=json.dumps({"pending_reason": "rename_conflict", "status": "dismissed"}),
+        ))
+    # An ordinary resolved row must be left alone.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=550::scope=t0_demo", title="Fight Club", year=1999,
+        asset_type="movie", tmdb_id=550, matched=True, payload_json=json.dumps({}),
+    ))
+    test_db.commit()
+
+    removed = runner._prune_stale_conflict_cache_rows({live_key})
+    test_db.commit()
+
+    assert removed == 1
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == live_key).first() is not None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == stale_key).first() is None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "movie::tmdb=550::scope=t0_demo").first() is not None
+
+
+def test_idarr_runner_store_unmatched_uses_single_pending_row(test_db):
+    """An unmatched item is one pending:: row (not an inferred-type + pending:: pair), and _load_cache_map finds it."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    # Year-less unmatched asset (the runner would infer "collection").
+    runner._store_asset_cache_rows([{
+        "title": "123456", "year": None, "type": "collection",
+        "has_id": False, "_cache_touch": True, "file_path": "/plexart/logos/123456 - logo.png",
+    }])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.title == "123456").all()
+    assert len(rows) == 1
+    assert rows[0].asset_key == "pending::123456::::scope=t0_demo"
+    assert rows[0].asset_type == "pending"
+    # No bogus collection:: twin.
+    assert test_db.query(IdarrAssetCache).filter(
+        IdarrAssetCache.asset_key == "collection::123456::::scope=t0_demo"
+    ).first() is None
+
+    # The enrichment lookup finds the pending row for the same (collection-inferred) asset, so its
+    # freshness throttles re-search.
+    cache_map = runner._load_cache_map([{"title": "123456", "year": None, "type": "collection"}])
+    assert any(row.asset_key == "pending::123456::::scope=t0_demo" for row in cache_map.values())
+
+
+def test_idarr_runner_store_unmatched_removes_stale_inferred_type_twin(test_db):
+    """Storing the pending:: row removes a stale inferred-type twin (e.g. collection::)."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    # Pre-existing stale twin from before the change.
+    test_db.add(IdarrAssetCache(
+        asset_key="collection::123456::::scope=t0_demo", title="123456", year=None,
+        asset_type="collection", matched=False,
+        payload_json=json.dumps({"current_filenames": ["123456 - logo.png"], "status": "not_found"}),
+    ))
+    test_db.commit()
+
+    runner._store_asset_cache_rows([{
+        "title": "123456", "year": None, "type": "collection",
+        "has_id": False, "_cache_touch": True, "file_path": "/plexart/logos/123456 - logo.png",
+    }])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.title == "123456").all()
+    assert len(rows) == 1
+    assert rows[0].asset_key == "pending::123456::::scope=t0_demo"
+
+
+def test_idarr_runner_store_absorbs_provisional_when_id_row_exists(test_db):
+    """Resolving a dirty file to an already-cached movie absorbs the provisional row, no duplicate id row."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    # Canonical id-keyed row already exists.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=10213::scope=t0_demo", title="From Dusk Till Dawn 3", year=2000,
+        asset_type="movie", tmdb_id=10213, matched=True,
+        payload_json=json.dumps({"current_filenames": ["From Dusk Till Dawn 3 (2000) {tmdb-10213}.png"]}),
+        last_checked_at=datetime.now(timezone.utc),
+    ))
+    # A dirty-title provisional row carrying the same id, left by a manual resolve.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::abcdefg::::scope=t0_demo", title="abcdefg", year=None,
+        asset_type="movie", tmdb_id=10213, matched=True,
+        payload_json=json.dumps({"current_filenames": ["abcdefg - logo.png"], "resolved_manually": True}),
+    ))
+    test_db.commit()
+
+    # Re-scan the (renamed) dirty file: it resolves to the existing id row.
+    runner._store_asset_cache_rows([{
+        "title": "abcdefg", "year": None, "type": "movie", "tmdb_id": 10213,
+        "has_id": True, "_cache_touch": False, "file_path": "/plexart/logos/abcdefg - logo.png",
+    }])
+    test_db.commit()
+
+    rows = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 10213).all()
+    assert len(rows) == 1
+    assert rows[0].asset_key == "movie::tmdb=10213::scope=t0_demo"
+
+
+def test_idarr_runner_prune_duplicate_id_rows(test_db):
+    """A dirty-title row duplicating a canonical id row is removed; canonical and unrelated rows kept."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=10213::scope=t0_demo", title="From Dusk Till Dawn 3", year=2000,
+        asset_type="movie", tmdb_id=10213, matched=True, payload_json=json.dumps({}),
+    ))
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::abcdefg::::scope=t0_demo", title="abcdefg", year=None,
+        asset_type="movie", tmdb_id=10213, matched=True, payload_json=json.dumps({"current_filenames": []}),
+    ))
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=550::scope=t0_demo", title="Fight Club", year=1999,
+        asset_type="movie", tmdb_id=550, matched=True, payload_json=json.dumps({}),
+    ))
+    test_db.commit()
+
+    removed = runner._prune_duplicate_id_rows()
+    test_db.commit()
+
+    assert removed == 1
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "movie::abcdefg::::scope=t0_demo").first() is None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 10213).count() == 1
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).count() == 1
+
+
+def test_idarr_runner_prune_orphaned_unmatched_rows(test_db):
+    """Dead unmatched orphans are removed; active/ignored/dismissed/resolved rows survive."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    # Dead orphan — should be removed.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::dusktilldawn3::::scope=t0_demo", title="dusk till dawn 3", year=None,
+        asset_type="movie", matched=False,
+        payload_json=json.dumps({"candidate_results": [{"tmdb_id": 10213}]}),
+    ))
+    # Active unmatched — has a pending-match → keep.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::stillpending::::scope=t0_demo", title="still pending", year=None,
+        asset_type="movie", matched=False, payload_json=json.dumps({"status": "not_found"}),
+    ))
+    test_db.add(IdarrPendingMatch(asset_key="movie::stillpending::::scope=t0_demo", title="still pending", year=None, asset_type="movie"))
+    # Ignored marker — keep.
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::someignored::::scope=t0_demo", title="some ignored", year=None,
+        asset_type="movie", matched=False, payload_json=json.dumps({"status": "ignored"}),
+    ))
+    # Resolved row — keep (has id).
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::tmdb=550::scope=t0_demo", title="Fight Club", year=1999,
+        asset_type="movie", tmdb_id=550, matched=True, payload_json=json.dumps({}),
+    ))
+    test_db.commit()
+
+    removed = runner._prune_orphaned_unmatched_rows()
+    test_db.commit()
+
+    assert removed == 1
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == "movie::dusktilldawn3::::scope=t0_demo").first() is None
+    for survivor in ("movie::stillpending::::scope=t0_demo", "movie::someignored::::scope=t0_demo", "movie::tmdb=550::scope=t0_demo"):
+        assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == survivor).first() is not None
+
+
+def test_idarr_filename_index_excludes_historical_names(test_db):
+    """The filename index maps only current filenames, so a re-dropped old name can't inherit the past id."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+
+    class _Row:
+        def __init__(self, asset_key, tmdb, payload):
+            self.asset_key = asset_key
+            self.asset_type = "movie"
+            self.tmdb_id = tmdb
+            self.tvdb_id = None
+            self.imdb_id = None
+            self.payload_json = json.dumps(payload)
+
+    rows = [_Row("movie::tmdb=550::scope=t0_demo", 550, {
+        "current_filenames": ["Fight Club (1999) {tmdb-550} - logo.png"],
+        "original_filenames": ["1171x1299 - logo.png", "xyz.png"],
+    })]
+    index = runner._load_cache_filename_index(rows=rows)
+
+    assert "1171x1299 - logo.png" not in index   # historical name not indexed
+    assert "xyz.png" not in index
+    current = "fight club (1999) {tmdb-550} - logo.png"
+    assert current in index and index[current]["tmdb_id"] == 550
+
+
+def test_idarr_current_tracked_filenames_excludes_history():
+    """Only current_filenames count as 'tracked'; history names are excluded."""
+    class _Row:
+        def __init__(self, payload):
+            self.payload_json = json.dumps(payload)
+    rows = [
+        _Row({"current_filenames": ["Foo (2020) - logo.png", "Bar.png"]}),
+        _Row({"current_filenames": ["Baz.webp"], "original_filenames": ["old-name.png"]}),
+    ]
+    tracked = IdarrRunner._current_tracked_filenames(rows)
+    assert tracked == {"foo (2020) - logo.png", "bar.png", "baz.webp"}
+    assert "old-name.png" not in tracked
+
+
+def test_idarr_collect_conflict_pending_marks_new_vs_old(test_db):
+    """An intra-batch conflict tags each file old (tracked) or new, index-aligned with conflict_files."""
+    runner = IdarrRunner(test_db)
+    runner._scope_token = "t0_demo"
+    old_asset = {
+        "file_path": Path("/plexart/logos/Show (2020) {tmdb-5} - logo.png"),
+        "title": "Show", "year": 2020, "type": "tv_series", "_previously_tracked": True,
+    }
+    new_asset = {
+        "file_path": Path("/plexart/logos/junk999.png"),
+        "title": "Show", "year": 2020, "type": "tv_series", "_previously_tracked": False,
+    }
+    conflict_rows = [{
+        "resolution": "intra_batch_filename_conflict",
+        "source_paths": [str(old_asset["file_path"]), str(new_asset["file_path"])],
+        "source_path": str(old_asset["file_path"]),
+    }]
+
+    result = runner._collect_conflict_pending_assets(assets=[old_asset, new_asset], conflict_rows=conflict_rows)
+
+    assert len(result) == 1
+    item = result[0]
+    assert item["conflict_files"] == ["Show (2020) {tmdb-5} - logo.png", "junk999.png"]
+    assert item["conflict_file_tracked"] == [True, False]
+
+
+def _load_migration_0010():
+    import importlib.util
+    mig_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0010_idarr_idkeyed_cache.py"
+    spec = importlib.util.spec_from_file_location("idarr_mig_0010", mig_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_migration_0010_rekeys_and_dedupes_legacy_rows(test_db):
+    """Legacy title-keyed rows for the same id collapse to one id-only row (merged filenames, freshest timestamp)."""
+    scope = "t2_demo"
+    older = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    # Two legacy rows for tmdb 550 under different (title-embedded) keys.
+    test_db.add(IdarrAssetCache(
+        asset_key=f"movie::1171x1299::::tmdb=550::scope={scope}",
+        title="1171x1299", year=None, asset_type="movie", tmdb_id=550, matched=True,
+        payload_json=json.dumps({"current_filenames": ["1171x1299 - logo.png"]}),
+        last_checked_at=older,
+    ))
+    test_db.add(IdarrAssetCache(
+        asset_key=f"movie::fightclub::1999::tmdb=550::scope={scope}",
+        title="Fight Club", year=1999, asset_type="movie", tmdb_id=550, matched=True,
+        payload_json=json.dumps({
+            "canonical_title": "Fight Club",
+            "current_filenames": ["Fight Club (1999) {tmdb-550} - logo.png"],
+        }),
+        last_checked_at=None,
+    ))
+    # An unresolved (no-id) row must be left untouched.
+    test_db.add(IdarrAssetCache(
+        asset_key=f"movie::somethingunknown::2020::scope={scope}",
+        title="Something Unknown", year=2020, asset_type="movie", matched=False,
+        payload_json=json.dumps({"current_filenames": ["Something Unknown (2020).png"]}),
+    ))
+    test_db.commit()
+
+    _load_migration_0010().rekey_idarr_cache(test_db.connection())
+    test_db.expire_all()
+
+    survivors = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).all()
+    assert len(survivors) == 1
+    surv = survivors[0]
+    assert surv.asset_key == f"movie::tmdb=550::scope={scope}"
+    # Canonical-filename row won as survivor; both filenames merged in.
+    files = json.loads(surv.payload_json).get("current_filenames")
+    assert set(files) == {"1171x1299 - logo.png", "Fight Club (1999) {tmdb-550} - logo.png"}
+    # Inherited the only/freshest timestamp from the group.
+    assert surv.last_checked_at is not None
+    # The unresolved row is untouched.
+    assert test_db.query(IdarrAssetCache).filter(
+        IdarrAssetCache.asset_key == f"movie::somethingunknown::2020::scope={scope}"
+    ).count() == 1
 
 
 def test_enrich_grouped_assets_reuses_single_tmdb_search(test_db, monkeypatch):
@@ -968,6 +1538,48 @@ def test_idarr_resolve_pending_match_success_updates_cache_and_removes_pending(c
     assert cache_row is not None
     assert cache_row.tmdb_id == 27205
     assert cache_row.matched is True
+
+
+def test_idarr_dismiss_conflict_deletes_leftover_cache_row(client, test_db):
+    """Dismissing a conflict-keyed entry deletes its leftover cache row on the spot."""
+    conflict_key = "movie::sometitle::2020::conflict=abcd1234"
+    test_db.add(IdarrPendingMatch(asset_key=conflict_key, title="Some Title", year=2020, asset_type="movie"))
+    test_db.add(IdarrAssetCache(
+        asset_key=conflict_key, title="Some Title", year=2020, asset_type="movie", matched=False,
+        payload_json=json.dumps({"pending_reason": "rename_conflict", "conflict_files": ["a.png", "b.png"]}),
+    ))
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/pending-matches/resolve",
+        json={"asset_key": conflict_key, "action": "dismiss", "sync_target_index": 0},
+    )
+    assert response.status_code == 200
+
+    assert test_db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == conflict_key).first() is None
+    assert test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == conflict_key).first() is None
+
+
+def test_idarr_dismiss_non_conflict_keeps_row_marked_dismissed(client, test_db):
+    """A normal dismiss keeps the cache row marked dismissed (suppressed, not deleted)."""
+    key = "movie::sometitle::2020"
+    test_db.add(IdarrPendingMatch(asset_key=key, title="Some Title", year=2020, asset_type="movie"))
+    test_db.add(IdarrAssetCache(
+        asset_key=key, title="Some Title", year=2020, asset_type="movie", matched=False,
+        payload_json=json.dumps({"status": "not_found"}),
+    ))
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/pending-matches/resolve",
+        json={"asset_key": key, "action": "dismiss", "sync_target_index": 0},
+    )
+    assert response.status_code == 200
+
+    assert test_db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == key).first() is None
+    cache_row = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.asset_key == key).first()
+    assert cache_row is not None
+    assert json.loads(cache_row.payload_json).get("status") == "dismissed"
 
 
 def test_idarr_resolve_removes_other_type_provisional_unmatched_row(client, test_db):
@@ -1501,6 +2113,48 @@ def test_idarr_runner_collect_conflict_pending_assets_maps_conflict_rows_to_asse
     assert pending_assets[0]["type"] == "movie"
     assert pending_assets[0]["pending_reason"] == "rename_conflict"
     assert pending_assets[0]["source_path"] == str(source_file)
+    # Target doesn't exist on disk → no picker, just a plain conflict entry.
+    assert "conflict_files" not in pending_assets[0]
+
+
+def test_idarr_runner_collect_conflict_pending_assets_builds_picker_when_target_exists(test_db, tmp_path):
+    """When the existing target is on disk, the conflict entry carries a two-file picker labelled by the canonical match."""
+    runner = IdarrRunner(test_db)
+
+    incoming = tmp_path / "abcdef.png"
+    incoming.write_bytes(b"incoming")
+    existing = tmp_path / "From Dusk Till Dawn 3 (2000).png"
+    existing.write_bytes(b"existing")
+
+    assets = [
+        {
+            "file_path": incoming,
+            "title": "abcdef",
+            "new_title": "From Dusk Till Dawn 3",
+            "new_year": 2000,
+            "type": "movie",
+            "_previously_tracked": False,
+        }
+    ]
+    conflict_rows = [
+        {
+            "source_path": str(incoming),
+            "target_path": str(existing),
+            "resolution": "rename_target_exists",
+        }
+    ]
+
+    pending_assets = runner._collect_conflict_pending_assets(assets=assets, conflict_rows=conflict_rows)
+
+    assert len(pending_assets) == 1
+    entry = pending_assets[0]
+    # Labelled by the canonical match, not the dirty parsed name.
+    assert entry["title"] == "From Dusk Till Dawn 3"
+    assert entry["year"] == 2000
+    # Existing first (old/tracked), incoming second (new), index-aligned.
+    assert entry["conflict_files"] == ["From Dusk Till Dawn 3 (2000).png", "abcdef.png"]
+    assert entry["conflict_file_paths"] == [str(existing), str(incoming)]
+    assert entry["conflict_file_tracked"] == [True, False]
 
 
 def test_idarr_runner_store_pending_assets_prefers_conflict_source_path_for_pending_entry(test_db, tmp_path):
