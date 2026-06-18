@@ -389,7 +389,10 @@ function IDarr() {
     }
   }
 
-  const isPng = (url: string | null | undefined) => /\.png/i.test(String(url || ''))
+  // Show the transparency checkerboard behind formats that can carry an alpha channel — logos
+  // are typically PNG or WebP. Matches the extension whether it's a bare filename or embedded in
+  // a preview URL (e.g. "…/source-image?path=Foo.webp&cb=123").
+  const isTransparentImage = (url: string | null | undefined) => /\.(png|webp|gif|avif)\b/i.test(String(url || ''))
   // Browsers can't render .psd, so any preview pointing at one would just break — detect it
   // and show a PSD placeholder instead. Matches a .psd extension whether it's a bare filename or
   // sits inside a preview URL (e.g. "…/source-image?path=Foo.psd&cb=123").
@@ -1897,7 +1900,7 @@ const {
                           <div key={file} className="conflict-file-cell">
                             <button
                               type="button"
-                              className={`conflict-cell-thumb-btn${isPng(file) ? ' idarr-checkered' : ''}`}
+                              className={`conflict-cell-thumb-btn${isTransparentImage(file) ? ' idarr-checkered' : ''}`}
                               title={previewUrl ? 'Click to preview' : undefined}
                               onClick={previewUrl ? () => setCardPreviewUrl(previewUrl) : undefined}
                               style={!previewUrl ? { cursor: 'default' } : undefined}
@@ -2666,7 +2669,7 @@ const {
           <img
             src={resolverPreviewUrl}
             alt={`${resolverItem.title} source poster preview`}
-            className={`resolver-preview-image${isPng(resolverPreviewUrl) ? ' idarr-checkered' : ''}`}
+            className={`resolver-preview-image${isTransparentImage(resolverPreviewUrl) ? ' idarr-checkered' : ''}`}
           />
         </div>
       </div>
@@ -2970,7 +2973,7 @@ const {
       {cardPreviewUrl && (
         <div className="modal-overlay" onClick={() => setCardPreviewUrl(null)}>
           <div className="modal-content resolver-preview-modal">
-            <img src={cardPreviewUrl} alt="Conflict file preview" className={`resolver-preview-image${isPng(cardPreviewUrl) ? ' idarr-checkered' : ''}`} />
+            <img src={cardPreviewUrl} alt="Conflict file preview" className={`resolver-preview-image${isTransparentImage(cardPreviewUrl) ? ' idarr-checkered' : ''}`} />
           </div>
         </div>
       )}
