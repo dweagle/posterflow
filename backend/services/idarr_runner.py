@@ -20,7 +20,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
-from core.logging import LogTags, log_debug, log_info, log_warning
+from core.logging import LogTags, log_debug, log_error, log_info, log_warning
 from models.idarr import (
     IdarrAssetCache,
     IdarrPendingMatch,
@@ -73,6 +73,17 @@ class RateLimitException(Exception):
     def __init__(self, period_remaining: float):
         self.period_remaining = max(0.0, float(period_remaining))
         super().__init__(f"Rate limit exceeded. Retry after {self.period_remaining:.2f}s")
+
+
+class TmdbUnavailableError(Exception):
+    """Abort an IDarr run after too many consecutive TMDB failures (outage) instead of grinding through every asset."""
+
+    def __init__(self, consecutive: int, reason: str) -> None:
+        self.consecutive = consecutive
+        self.reason = reason
+        super().__init__(
+            f"Aborted IDarr: {consecutive} TMDB requests failed in a row ({reason}) — the API appears to be down. Try again later."
+        )
 
 
 def sleep_and_notify(func):
@@ -142,7 +153,10 @@ class IdarrRunner:
 
     TMDB_MIN_INTERVAL_SECONDS = 0.10
     TMDB_MAX_RETRIES = 3
+    TMDB_ABORT_AFTER_CONSECUTIVE_FAILURES = 8  # give up the run if TMDB fails this many times in a row
     _tmdb_last_request_at = 0.0
+    _tmdb_consecutive_failures = 0
+    _tmdb_last_failure_reason = ""
     CACHE_RENAME_HISTORY_MAX_ENTRIES = 20
 
     @classmethod
@@ -1504,11 +1518,24 @@ class IdarrRunner:
 
                 status_code = getattr(response, "status_code", None)
                 if allow_404 and status_code == 404:
+                    cls._tmdb_consecutive_failures = 0  # TMDB responded — it's up
                     return None
 
                 response.raise_for_status()
                 payload = response.json()
+                cls._tmdb_consecutive_failures = 0
                 return payload if isinstance(payload, dict) else {}
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                # Transport-level outage (previously NOT retried). Retry, then count it as a hard failure.
+                if attempt < cls.TMDB_MAX_RETRIES - 1:
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+                cls._tmdb_consecutive_failures += 1
+                cls._tmdb_last_failure_reason = (
+                    "TMDB timed out" if isinstance(exc, requests.exceptions.Timeout)
+                    else "couldn't reach TMDB (network/DNS)"
+                )
+                raise
             except requests.HTTPError as exc:
                 status = exc.response.status_code if exc.response is not None else None
                 retryable = status in {429, 500, 502, 503, 504}
@@ -1525,7 +1552,10 @@ class IdarrRunner:
                     time.sleep(0.5 * (2 ** attempt))
                     continue
                 if allow_404 and status == 404:
+                    cls._tmdb_consecutive_failures = 0  # TMDB responded — it's up
                     return None
+                cls._tmdb_consecutive_failures += 1
+                cls._tmdb_last_failure_reason = f"TMDB returned HTTP {status}"
                 raise
 
         return None
@@ -2138,6 +2168,11 @@ class IdarrRunner:
         )
 
         for index, asset in enumerate(assets, start=1):
+            # Circuit breaker: bail on a sustained TMDB outage instead of timing out on every remaining asset.
+            if self._tmdb_consecutive_failures >= self.TMDB_ABORT_AFTER_CONSECUTIVE_FAILURES:
+                err = TmdbUnavailableError(self._tmdb_consecutive_failures, self._tmdb_last_failure_reason or "repeated TMDB failures")
+                log_error(LogTags.IDARR, str(err))
+                raise err
             before_tmdb = asset.get("tmdb_id")
             before_tvdb = asset.get("tvdb_id")
             before_imdb = asset.get("imdb_id")
@@ -4953,6 +4988,9 @@ class IdarrRunner:
         tmdb_api_key = str(config_data.get("tmdb_api_key", "")).strip()
         if not tmdb_api_key:
             raise ValueError("TMDB API key is required for IDarr runs")
+
+        IdarrRunner._tmdb_consecutive_failures = 0  # fresh circuit breaker per run
+        IdarrRunner._tmdb_last_failure_reason = ""
 
         warnings: list[str] = []
 

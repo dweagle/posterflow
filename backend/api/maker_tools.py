@@ -141,19 +141,17 @@ def _parse_iso_date(value: str | None) -> date | None:
 
 
 def _fetch_first_air_year(tmdb_id: str, tmdb_api_key: str) -> str:
-    """Fetch the first air year for a TV show from TMDB (lightweight fallback)."""
+    """Fetch the first air year for a TV show from TMDB (lightweight, best-effort fallback)."""
     try:
-        resp = requests.get(
+        payload = _tmdb_fetch_json(
             f"https://api.themoviedb.org/3/tv/{tmdb_id}",
-            params={"api_key": tmdb_api_key, "language": "en-US"},
-            timeout=10,
+            {"api_key": tmdb_api_key, "language": "en-US"},
+            "first air year",
         )
-        if resp.status_code == 200:
-            first_air_date = str(resp.json().get("first_air_date") or "")
-            return first_air_date[:4] if len(first_air_date) >= 4 else ""
-    except Exception:
-        pass
-    return ""
+    except TmdbUpstreamError:
+        return ""
+    first_air_date = str(payload.get("first_air_date") or "")
+    return first_air_date[:4] if len(first_air_date) >= 4 else ""
 
 
 def _merge_recent_missing_items(
@@ -487,22 +485,8 @@ def _check_show_status(
     lookahead_days: int,
 ) -> MakerMonitorShowResult | None:
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
-    params = {"api_key": tmdb_api_key, "language": "en-US"}
-
-    try:
-        response = requests.get(url, params=params, timeout=10)
-    except Exception as exc:
-        log_error(LogTags.MONITOR, f"TMDB request failed: {exc}", tmdb_id=tmdb_id)
-        return None
-
-    if response.status_code != 200:
-        log_warning(LogTags.MONITOR, "TMDB request returned non-200", tmdb_id=tmdb_id, status=response.status_code)
-        return None
-
-    try:
-        payload = response.json()
-    except Exception:
-        return None
+    # Raises TmdbUpstreamError on failure so the run's circuit breaker can count it (vs. a legit no-premiere None).
+    payload = _tmdb_fetch_json(url, {"api_key": tmdb_api_key, "language": "en-US"}, "show status")
 
     next_episode = payload.get("next_episode_to_air")
     if not isinstance(next_episode, dict):
@@ -614,6 +598,7 @@ def _fetch_discovery_items(
     my_movie_inventory_by_type: dict[str, dict[str, set[str]]],
     ext_tv_inventory_by_type: dict[str, dict[str, dict[str, set[Any]]]],
     ext_movie_inventory_by_type: dict[str, dict[str, set[str]]],
+    breaker: "TmdbCircuitBreaker | None" = None,
 ) -> list[MakerDiscoveryItem]:
     if category == "tv":
         url = "https://api.themoviedb.org/3/discover/tv"
@@ -649,51 +634,47 @@ def _fetch_discovery_items(
         max_pop_seen = 0.0
 
         try:
-            response = requests.get(url, params=params, timeout=10)
-            if response.status_code != 200:
-                log_warning(
-                    LogTags.MONITOR,
-                    f"Discovery request non-200: category={category} language={lang_key} status={response.status_code}",
-                    category=category,
-                    language=lang_key,
-                    status=response.status_code,
-                )
+            payload = _tmdb_fetch_json(url, params, f"discovery ({category}/{lang_key})")
+        except TmdbUpstreamError as err:
+            if breaker is not None:
+                breaker.record_failure(err.reason)
+                if breaker.tripped:
+                    raise MonitorAborted(breaker.abort_message())
+            continue
+        if breaker is not None:
+            breaker.record_success()
+
+        results = payload.get("results")
+        if not isinstance(results, list):
+            continue
+
+        count_raw = len(results)
+
+        for item in results[: config.discovery_max_results]:
+            if not isinstance(item, dict):
                 continue
-
-            payload = response.json()
-            results = payload.get("results") if isinstance(payload, dict) else []
-            if not isinstance(results, list):
+            popularity = float(item.get("popularity") or 0)
+            if popularity > max_pop_seen:
+                max_pop_seen = popularity
+            if popularity < config.discovery_popularity:
                 continue
+            item_id = item.get("id")
+            if isinstance(item_id, int):
+                all_results_map[item_id] = item
+                count_kept += 1
 
-            count_raw = len(results)
-
-            for item in results[: config.discovery_max_results]:
-                if not isinstance(item, dict):
-                    continue
-                popularity = float(item.get("popularity") or 0)
-                if popularity > max_pop_seen:
-                    max_pop_seen = popularity
-                if popularity < config.discovery_popularity:
-                    continue
-                item_id = item.get("id")
-                if isinstance(item_id, int):
-                    all_results_map[item_id] = item
-                    count_kept += 1
-
-            log_info(
-                LogTags.MONITOR,
-                (
-                    f"Discovery language complete: category={category} language={lang_key} "
-                    f"| returned={count_raw} | kept={count_kept} | max_popularity={max_pop_seen:.2f}"
-                ),
-                category=category,
-                language=lang_key,
-                api_returned=count_raw,
-                kept=count_kept,
-                max_popularity=max_pop_seen,
-            )
-        except Exception as exc:
-            log_warning(LogTags.MONITOR, f"Discovery scan failed for language '{lang}': {exc}")
+        log_info(
+            LogTags.MONITOR,
+            (
+                f"Discovery language complete: category={category} language={lang_key} "
+                f"| returned={count_raw} | kept={count_kept} | max_popularity={max_pop_seen:.2f}"
+            ),
+            category=category,
+            language=lang_key,
+            api_returned=count_raw,
+            kept=count_kept,
+            max_popularity=max_pop_seen,
+        )
 
     final_items = list(all_results_map.values())
     final_items.sort(key=lambda row: float(row.get("popularity") or 0), reverse=True)
@@ -784,24 +765,137 @@ class TmdbSearchResult(BaseModel):
 
 
 def _fetch_external_ids(tmdb_id: int, media_type: str, api_key: str) -> tuple[str | None, int | None]:
-    """Fetch IMDB and TVDB IDs from TMDB external_ids endpoint. Returns (imdb_id, tvdb_id)."""
+    """Fetch IMDB and TVDB IDs from TMDB external_ids endpoint (best-effort). Returns (imdb_id, tvdb_id)."""
     if media_type not in ("movie", "tv"):
         return None, None
     url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/external_ids"
     try:
-        response = requests.get(url, params={"api_key": api_key}, timeout=8)
-        if response.status_code != 200:
-            return None, None
-        data = response.json()
-        imdb_id = str(data.get("imdb_id") or "").strip() or None
-        tvdb_raw = data.get("tvdb_id")
-        tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
-        return imdb_id, tvdb_id
-    except Exception:
+        data = _tmdb_fetch_json(url, {"api_key": api_key}, "external IDs", timeout=8)
+    except TmdbUpstreamError:
         return None, None
+    imdb_id = str(data.get("imdb_id") or "").strip() or None
+    tvdb_raw = data.get("tvdb_id")
+    tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
+    return imdb_id, tvdb_id
 
 
 _YEAR_SUFFIX_RE = re.compile(r"\s+\(?(\d{4})\)?$")
+
+
+MAKER_MONITOR_TMDB_ABORT_THRESHOLD = 8  # consecutive TMDB failures before a run gives up
+
+
+class TmdbUpstreamError(Exception):
+    """A TMDB call failed (timeout / unreachable / non-200 / bad JSON). `.reason` is human-readable; `.status` is the HTTP code, if any."""
+
+    def __init__(self, reason: str, status: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+
+
+class MonitorAborted(Exception):
+    """Raised to stop a monitor run early — e.g. the TMDB circuit breaker tripped during an outage."""
+
+
+class TmdbCircuitBreaker:
+    """Trips a run after N consecutive TMDB failures so an outage aborts fast instead of grinding through every item."""
+
+    def __init__(self, max_consecutive: int = MAKER_MONITOR_TMDB_ABORT_THRESHOLD) -> None:
+        self.max_consecutive = max_consecutive
+        self.consecutive = 0
+        self.total_failures = 0
+        self.last_reason = ""
+
+    def record_success(self) -> None:
+        self.consecutive = 0
+
+    def record_failure(self, reason: str) -> None:
+        self.consecutive += 1
+        self.total_failures += 1
+        self.last_reason = reason
+
+    @property
+    def tripped(self) -> bool:
+        return self.consecutive >= self.max_consecutive
+
+    def abort_message(self) -> str:
+        return (
+            f"Aborted Maker Monitor: {self.consecutive} TMDB requests failed in a row "
+            f"({self.last_reason}) — the API appears to be down. Try again later."
+        )
+
+
+# Shared TMDB error layer: name the real cause (timeout/unreachable/5xx/429) in both the log and the toast.
+# `context` is a short human label (e.g. "images", "TV details") spliced into the message.
+def _tmdb_failure_reason(context: str, *, exc: Exception | None = None, status: int | None = None) -> str:
+    """Short, specific cause for a failed TMDB call — shared by the toast endpoints and the background scans."""
+    if exc is not None:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return f"TMDB timed out loading {context}"
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            return f"couldn't reach TMDB for {context} (network/DNS, or TMDB is down)"
+        return f"TMDB request for {context} failed: {exc}"
+    if status == 401:
+        return "TMDB rejected the API key (HTTP 401)"
+    if status == 429:
+        return f"TMDB rate-limited loading {context} (HTTP 429)"
+    if status in (500, 502, 503, 504):
+        return f"TMDB temporarily unavailable loading {context} (HTTP {status})"
+    return f"TMDB returned HTTP {status} loading {context}"
+
+
+def _tmdb_is_severe(*, exc: Exception | None = None, status: int | None = None) -> bool:
+    """Outage-class failures (transport error / 5xx) log as ERROR; client-ish ones (401/429/4xx) as WARNING."""
+    return exc is not None or status in (500, 502, 503, 504)
+
+
+def _log_tmdb_failure(reason: str, *, severe: bool, exc: Exception | None = None) -> None:
+    detail = f"{reason}: {exc}" if exc is not None else reason
+    (log_error if severe else log_warning)(LogTags.MONITOR, detail)
+
+
+def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
+    """Convert a TmdbUpstreamError into the user-facing HTTPException for an endpoint (401 → bad-key 400)."""
+    if err.status == 401:
+        return HTTPException(status_code=400, detail="Invalid TMDB API key. Check it in Settings → General → API Keys.")
+    return HTTPException(status_code=502, detail=f"{err.reason[:1].upper()}{err.reason[1:]} — try again shortly.")
+
+
+def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: int = 10) -> dict[str, Any]:
+    """Low-level TMDB GET: logs + raises TmdbUpstreamError on any failure, else returns the parsed JSON dict."""
+    try:
+        resp = requests.get(url, params=params, timeout=timeout)
+    except Exception as exc:
+        reason = _tmdb_failure_reason(context, exc=exc)
+        _log_tmdb_failure(reason, severe=True, exc=exc)
+        raise TmdbUpstreamError(reason)
+    if resp.status_code != 200:
+        reason = _tmdb_failure_reason(context, status=resp.status_code)
+        _log_tmdb_failure(reason, severe=_tmdb_is_severe(status=resp.status_code))
+        raise TmdbUpstreamError(reason, status=resp.status_code)
+    try:
+        data = resp.json()
+    except Exception:
+        reason = f"TMDB sent an unreadable (non-JSON) response loading {context}"
+        _log_tmdb_failure(reason, severe=True)
+        raise TmdbUpstreamError(reason)
+    return data if isinstance(data, dict) else {}
+
+
+def _tmdb_get_json(url: str, params: dict[str, Any], context: str, timeout: int = 10) -> dict[str, Any]:
+    """Endpoint wrapper around _tmdb_fetch_json that surfaces failures as a user-facing HTTPException."""
+    try:
+        return _tmdb_fetch_json(url, params, context, timeout)
+    except TmdbUpstreamError as err:
+        raise _tmdb_http_error(err)
+
+
+def _tmdb_raise_http(context: str, *, exc: Exception | None = None, status: int | None = None) -> HTTPException:
+    """Log + build the user-facing HTTPException for a non-JSON TMDB call (image streams)."""
+    reason = _tmdb_failure_reason(context, exc=exc, status=status)
+    _log_tmdb_failure(reason, severe=_tmdb_is_severe(exc=exc, status=status), exc=exc)
+    return _tmdb_http_error(TmdbUpstreamError(reason, status=status))
 
 
 @router.get("/tmdb/search", response_model=list[TmdbSearchResult])
@@ -842,19 +936,8 @@ def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> lis
         params: dict[str, Any] = {"api_key": api_key, "query": query, "language": "en-US", "page": 1}
         if extra_params:
             params.update(extra_params)
-        try:
-            resp = requests.get(url, params=params, timeout=10)
-        except Exception as exc:
-            log_error(LogTags.MONITOR, f"TMDB search request failed: {exc}", query=query)
-            raise HTTPException(status_code=502, detail="TMDB request failed")
-        if resp.status_code == 401:
-            raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
-        if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
-        try:
-            return resp.json().get("results", [])
-        except Exception:
-            raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+        results = _tmdb_get_json(url, params, "search results").get("results", [])
+        return results if isinstance(results, list) else []
 
     if filter_type == "all":
         year_extra: dict[str, Any] = {}
@@ -1154,21 +1237,7 @@ def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session
     if img_lang:
         params["include_image_language"] = img_lang
 
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-    except Exception as exc:
-        log_error(LogTags.MONITOR, f"TMDB images request failed: {exc}", tmdb_id=tmdb_id, media_type=mt)
-        raise HTTPException(status_code=502, detail="TMDB request failed")
-
-    if resp.status_code == 401:
-        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+    data = _tmdb_get_json(url, params, "images")
 
     posters = _build_tmdb_images(data.get("posters", []))
     backdrops = _build_tmdb_images(data.get("backdrops", []), size_thumb="w780")
@@ -1197,11 +1266,9 @@ def tmdb_image_proxy(path: str, db: Session = Depends(get_db)):
     try:
         resp = requests.get(url, stream=True, timeout=30)
     except Exception as exc:
-        log_error(LogTags.MONITOR, f"Image proxy request failed: {exc}", path=path)
-        raise HTTPException(status_code=502, detail="Failed to fetch image from TMDB")
-
+        raise _tmdb_raise_http("image download", exc=exc)
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
+        raise _tmdb_raise_http("image download", status=resp.status_code)
 
     content_type = resp.headers.get("content-type", "image/jpeg")
     filename = path.lstrip("/")
@@ -1230,21 +1297,7 @@ def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetail
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
 
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
-    try:
-        resp = requests.get(url, params={"api_key": api_key, "language": "en-US"}, timeout=10)
-    except Exception as exc:
-        log_error(LogTags.MONITOR, f"TMDB tv-details request failed: {exc}", tmdb_id=tmdb_id)
-        raise HTTPException(status_code=502, detail="TMDB request failed")
-
-    if resp.status_code == 401:
-        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "TV details")
 
     seasons: list[TmdbSeasonInfo] = []
     for s in (data.get("seasons") or []):
@@ -1284,21 +1337,7 @@ def tmdb_origin_country(tmdb_id: int, media_type: str, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
 
     url = f"https://api.themoviedb.org/3/{mt}/{tmdb_id}"
-    try:
-        resp = requests.get(url, params={"api_key": api_key, "language": "en-US"}, timeout=10)
-    except Exception as exc:
-        log_error(LogTags.MONITOR, f"TMDB origin-country request failed: {exc}", tmdb_id=tmdb_id)
-        raise HTTPException(status_code=502, detail="TMDB request failed")
-
-    if resp.status_code == 401:
-        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "country of origin")
 
     countries: list[str] = []
     for c in (data.get("origin_country") or []):
@@ -1330,21 +1369,7 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
     if img_lang:
         params["include_image_language"] = img_lang
 
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-    except Exception as exc:
-        log_error(LogTags.MONITOR, f"TMDB season-images request failed: {exc}", tmdb_id=tmdb_id, season_number=season_number)
-        raise HTTPException(status_code=502, detail="TMDB request failed")
-
-    if resp.status_code == 401:
-        raise HTTPException(status_code=400, detail="Invalid TMDB API key.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"TMDB returned status {resp.status_code}")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid response from TMDB")
+    data = _tmdb_get_json(url, params, "season images")
 
     posters = _build_tmdb_images(data.get("posters", []))
     posters.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))
@@ -1447,7 +1472,7 @@ def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
     # api_key is not needed for image CDN but included for consistency / future auth
     resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch TMDB image: HTTP {resp.status_code}")
+        raise _tmdb_raise_http("image download", status=resp.status_code)
 
     content = resp.content
     # Detect SVG: TMDB logo originals are often SVG files which Pillow cannot open.
@@ -2232,6 +2257,7 @@ def run_maker_monitor_scan_internal(
     total_needed = 0
     scanned_tmdb_ids: dict[tuple[str, str], set[str]] = {}
     scanned_seasons: dict[tuple[str, str], dict[str, set[int]]] = {}
+    breaker = TmdbCircuitBreaker()  # abort the whole run if TMDB fails too many times in a row
 
     total_drives = max(1, len(selected_drives))
     drive_progress_start = 15
@@ -2276,12 +2302,21 @@ def run_maker_monitor_scan_internal(
             )
 
             for index, (tmdb_id, seasons) in enumerate(tv_inventory.items(), start=1):
-                show_result = _check_show_status(
-                    tmdb_id=tmdb_id,
-                    existing_seasons=seasons,
-                    tmdb_api_key=resolved_config.tmdb_api_key,
-                    lookahead_days=resolved_config.lookahead_days,
-                )
+                try:
+                    show_result = _check_show_status(
+                        tmdb_id=tmdb_id,
+                        existing_seasons=seasons,
+                        tmdb_api_key=resolved_config.tmdb_api_key,
+                        lookahead_days=resolved_config.lookahead_days,
+                    )
+                    breaker.record_success()
+                except TmdbUpstreamError as err:
+                    breaker.record_failure(err.reason)
+                    if breaker.tripped:
+                        msg = breaker.abort_message()
+                        log_error(LogTags.MONITOR, msg)
+                        raise MonitorAborted(msg)
+                    continue
                 if show_result and not show_result.poster_exists:
                     ext_sources: list[str] = []
                     type_inventory = my_tv_inventory_by_type.get(drive_type, {})
@@ -2356,6 +2391,8 @@ def run_maker_monitor_scan_internal(
                 premieres=premieres,
                 needed=needed,
             )
+        except MonitorAborted:
+            raise  # circuit breaker tripped — abort the whole run, don't fall through to the next drive
         except Exception as exc:
             log_error(
                 LogTags.MONITOR,
@@ -2395,6 +2432,7 @@ def run_maker_monitor_scan_internal(
             my_movie_inventory_by_type=my_movie_inventory_by_type,
             ext_tv_inventory_by_type=ext_tv_inventory_by_type,
             ext_movie_inventory_by_type=ext_movie_inventory_by_type,
+            breaker=breaker,
         )
         discovery_movies = _fetch_discovery_items(
             category="movie",
@@ -2405,6 +2443,7 @@ def run_maker_monitor_scan_internal(
             my_movie_inventory_by_type=my_movie_inventory_by_type,
             ext_tv_inventory_by_type=ext_tv_inventory_by_type,
             ext_movie_inventory_by_type=ext_movie_inventory_by_type,
+            breaker=breaker,
         )
         discovery_result = MakerMonitorDiscoveryResult(shows=discovery_shows, movies=discovery_movies)
 
