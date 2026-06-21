@@ -157,7 +157,7 @@ function PlexUpload() {
   const [webhookStatsLoading, setWebhookStatsLoading] = useState(false)
   const [webhookStatsResetting, setWebhookStatsResetting] = useState(false)
   const [webhookDedupeClearing, setWebhookDedupeClearing] = useState(false)
-  const [webhookDedupeMediaType, setWebhookDedupeMediaType] = useState<'movie' | 'series'>('movie')
+  const [webhookDedupeMediaType, setWebhookDedupeMediaType] = useState<'movie' | 'series' | null>(null)
   const [webhookDedupeTitle, setWebhookDedupeTitle] = useState('')
   const [webhookDedupeYear, setWebhookDedupeYear] = useState('')
   const [webhookDedupeSeason, setWebhookDedupeSeason] = useState('')
@@ -589,6 +589,11 @@ function PlexUpload() {
   }
 
   const clearWebhookDedupeForItem = async () => {
+    if (!webhookDedupeMediaType) {
+      showToast('Select a title from the search results before clearing', 'error')
+      return
+    }
+
     const title = webhookDedupeTitle.trim()
     if (!title) {
       showToast('Title is required to clear a duplicate lock', 'error')
@@ -622,12 +627,17 @@ function PlexUpload() {
     setWebhookDedupeClearing(true)
     try {
       const response = await clearPlexWebhookDedupe({
-        media_type: webhookDedupeMediaType,
+        media_type: webhookDedupeMediaType ?? undefined,
         title,
         year: parsedYear,
         season_number: webhookDedupeMediaType === 'series' ? parsedSeason : undefined,
       })
       showToast(`Cleared duplicate lock entries: ${response.removed}`, 'success')
+      setWebhookDedupeTitle('')
+      setWebhookDedupeYear('')
+      setWebhookDedupeSeason('')
+      setWebhookDedupeMediaType(null)
+      setWebhookDedupeSearchResults([])
       fetchWebhookStats(false)
     } catch (error) {
       console.error('Failed to clear webhook dedupe cache:', error)
@@ -1043,7 +1053,7 @@ function PlexUpload() {
   }
 
   useEffect(() => {
-    if (webhookDedupeMediaType === 'movie') {
+    if (webhookDedupeMediaType !== 'series') {
       setWebhookDedupeSeason('')
     }
   }, [webhookDedupeMediaType])
@@ -1065,7 +1075,7 @@ function PlexUpload() {
     const timeoutId = setTimeout(async () => {
       setWebhookDedupeSearchLoading(true)
       try {
-        const response = await getPlexWebhookDedupeEntries(query, webhookDedupeMediaType, 10)
+        const response = await getPlexWebhookDedupeEntries(query, undefined, 10)
         setWebhookDedupeSearchResults(response.items || [])
       } catch (error) {
         console.error('Failed to search webhook dedupe titles:', error)
@@ -1076,7 +1086,7 @@ function PlexUpload() {
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timeoutId)
-  }, [webhookDedupeTitle, webhookDedupeMediaType])
+  }, [webhookDedupeTitle])
 
   useEffect(() => {
     let cancelled = false
@@ -1277,11 +1287,11 @@ function PlexUpload() {
 
   const selectWebhookDedupeSearchResult = (item: PlexWebhookDedupeEntry) => {
     suppressNextWebhookDedupeSearchRef.current = true
+    const mediaType = item.media_type === 'series' ? 'series' : 'movie'
+    setWebhookDedupeMediaType(mediaType)
     setWebhookDedupeTitle(item.title)
     setWebhookDedupeYear(item.year ? String(item.year) : '')
-    if (item.media_type === 'series') {
-      setWebhookDedupeSeason(item.season_number != null ? String(item.season_number) : '')
-    }
+    setWebhookDedupeSeason(mediaType === 'series' && item.season_number != null ? String(item.season_number) : '')
     setWebhookDedupeSearchResults([])
   }
 
@@ -1896,22 +1906,16 @@ function PlexUpload() {
               </p>
 
               <div className="webhook-dedupe-clear-row">
-                <select
-                  value={webhookDedupeMediaType}
-                  onChange={(event) => setWebhookDedupeMediaType(event.target.value as 'movie' | 'series')}
-                  className="webhook-dedupe-input"
-                  disabled={webhookDedupeClearing}
-                >
-                  <option value="movie">Movie</option>
-                  <option value="series">Series</option>
-                </select>
                 <div className="webhook-dedupe-search-wrap">
                   <input
                     type="text"
                     className="webhook-dedupe-input"
-                    placeholder="Title"
+                    placeholder="Search title (movie or series)"
                     value={webhookDedupeTitle}
-                    onChange={(event) => setWebhookDedupeTitle(event.target.value)}
+                    onChange={(event) => {
+                      setWebhookDedupeTitle(event.target.value)
+                      setWebhookDedupeMediaType(null)
+                    }}
                     disabled={webhookDedupeClearing}
                   />
                   {(webhookDedupeSearchLoading || webhookDedupeTitle.trim()) && (
@@ -1923,7 +1927,8 @@ function PlexUpload() {
                       ) : (
                         webhookDedupeSearchResults.map((item, index) => {
                           const key = `${item.dedupe_key}-${index}`
-                          const label = `${item.title}${item.year ? ` (${item.year})` : ''}${item.media_type === 'series' && item.season_number != null ? ` • Season ${item.season_number}` : ''}`
+                          const typeLabel = item.media_type === 'series' ? 'Series' : 'Movie'
+                          const label = `${item.title}${item.year ? ` (${item.year})` : ''}${item.media_type === 'series' && item.season_number != null ? ` • Season ${item.season_number}` : ''} • ${typeLabel}`
                           return (
                             <button
                               key={key}
@@ -1961,7 +1966,7 @@ function PlexUpload() {
                   type="button"
                   className="plex-refresh-btn"
                   onClick={clearWebhookDedupeForItem}
-                  disabled={webhookDedupeClearing}
+                  disabled={webhookDedupeClearing || !webhookDedupeMediaType}
                 >
                   {webhookDedupeClearing ? 'Clearing…' : 'Clear Duplicate Lock'}
                 </button>
