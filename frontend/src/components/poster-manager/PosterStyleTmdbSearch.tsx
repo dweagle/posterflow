@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { type FallbackItem } from '../../api/posterManager'
 import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
@@ -24,7 +23,6 @@ function getTmdbLink(candidate: TmdbCandidate): string {
 
 export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seasons, claimStatus }: PosterStyleTmdbSearchProps) {
   const { showToast } = useToast()
-  const navigate = useNavigate()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
@@ -158,8 +156,8 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
             <button
               type="button"
               className="maker-nav-btn"
-              title="Search in Maker Tools"
-              onClick={() => navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanTitle} ${item.year}` : cleanTitle } })}
+              title="Search in Maker Tools (opens in a new tab)"
+              onClick={() => window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(item.year ? `${cleanTitle} ${item.year}` : cleanTitle)}`, '_blank', 'noopener,noreferrer')}
             >
               <Search size={13} />
               <span>Maker</span>

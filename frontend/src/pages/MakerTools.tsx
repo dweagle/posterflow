@@ -401,11 +401,13 @@ function MakerTools() {
     }
   }
 
-  // Handle incoming navigation state from other pages (e.g. Poster Manager → Maker Tools search)
+  // Handle incoming search from other pages — via navigation state (same tab) or a
+  // ?tmdbSearch= query param (when opened in a new tab, where router state is unavailable).
   useEffect(() => {
     const state = location.state as { tmdbSearch?: string } | null
-    if (state?.tmdbSearch) {
-      const query = state.tmdbSearch
+    const queryParam = new URLSearchParams(location.search).get('tmdbSearch')
+    const query = state?.tmdbSearch ?? queryParam
+    if (query) {
       setTmdbQuery(query)
       setActiveTab('tmdb-search')
       void handleTmdbSearch(query)

@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, ListPlus, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { useToast } from '../Toast'
 import { publishToCommunityLists } from './publishToCommunityLists'
@@ -179,7 +178,6 @@ function UnmatchedItemsModal({
   onDownloadList,
 }: UnmatchedItemsModalProps) {
   const { showToast } = useToast()
-  const navigate = useNavigate()
   const { isConnected, token, login } = useDiscordAuth()
   const { getStatus: getClaimStatus } = useCommunityClaimStatus()
   const [publishing, setPublishing] = useState(false)
@@ -399,12 +397,13 @@ function UnmatchedItemsModal({
           <button
             type="button"
             className="maker-nav-btn"
-            title="Search in Maker Tools"
+            title="Search in Maker Tools (opens in a new tab)"
             onClick={() => {
               const cleanedTitle = item.year
                 ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
                 : item.title
-              navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle } })
+              const query = item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle
+              window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
             }}
           >
             <Search size={13} />
