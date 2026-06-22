@@ -181,6 +181,7 @@ export {
   checkTmdbPosterAvailability,
   getMakerMonitorConfig,
   getMakerMonitorLastResult,
+  getMakerMonitorNeededCount,
   getSeasonImages,
   getTmdbImages,
   getTmdbImageProxyUrl,

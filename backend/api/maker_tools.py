@@ -752,6 +752,14 @@ def get_maker_monitor_last_result(db: Session = Depends(get_db)) -> dict[str, An
     return _get_monitor_last_result(db)
 
 
+@router.get("/monitor/needed-count")
+def get_maker_monitor_needed_count(db: Session = Depends(get_db)) -> dict[str, int]:
+    """Return count of monitored items needing posters from the last scan (for sidebar badge)."""
+    last_result = _get_monitor_last_result(db)
+    count = last_result.get("total_needed")
+    return {"count": count if isinstance(count, int) else 0}
+
+
 class TmdbSearchResult(BaseModel):
     tmdb_id: int
     media_type: str  # "movie" | "tv" | "collection"

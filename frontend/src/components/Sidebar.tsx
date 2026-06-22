@@ -23,7 +23,7 @@ type NavItemDef = {
   label: string
   to: string
   iconColor: string
-  badge?: 'unmatched' | 'idarr' | 'community'
+  badge?: 'unmatched' | 'idarr' | 'community' | 'maker-monitor'
   isIdarr?: boolean
   isEnd?: boolean
 }
@@ -42,7 +42,7 @@ const NAV_ITEM_DEFS: NavItemDef[] = [
   { id: 'plex-upload', label: 'Plex Upload', to: '/plex-upload', iconColor: '#e5a00d' },
   { id: 'community-requests', label: 'Requests', to: '/community-requests', iconColor: '#64b5f6', badge: 'community' },
   { id: 'idarr', label: 'IDarr', to: '/IDarr', iconColor: '#66bb6a', badge: 'idarr', isIdarr: true },
-  { id: 'maker-tools', label: 'Maker Tools', to: '/maker-tools', iconColor: '#64b5f6' },
+  { id: 'maker-tools', label: 'Maker Tools', to: '/maker-tools', iconColor: '#64b5f6', badge: 'maker-monitor' },
   { id: 'logs', label: 'Logs', to: '/logs', iconColor: '#22c55e' },
 ]
 
@@ -69,7 +69,7 @@ function getNavIcon(id: string, color: string, size = 20) {
 
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
-  const { unmatchedCount, idarrPendingCount, communityRequestCount, jobs } = useUnmatched()
+  const { unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs } = useUnmatched()
   const { isConnected, isMaker, discordUserId } = useDiscordAuth()
   const { showToast } = useToast()
   // Requester's own active-request counts (pending + in progress) for the sidebar badges.
@@ -456,6 +456,9 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                 const itemBadges: ReactNode[] = []
                 if (def.badge === 'unmatched' && unmatchedCount > 0) {
                   itemBadges.push(<span key="unmatched" className="sidebar-badge">{unmatchedCount}</span>)
+                }
+                if (def.badge === 'maker-monitor' && makerMonitorNeededCount > 0) {
+                  itemBadges.push(<span key="maker-monitor" className="sidebar-badge" title="Monitored items needing posters">{makerMonitorNeededCount}</span>)
                 }
                 if (def.badge === 'community') {
                   if (isMaker && communityRequestCount > 0) {

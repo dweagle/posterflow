@@ -84,6 +84,11 @@ export const getMakerMonitorLastResult = async (): Promise<MakerMonitorRunRespon
   return getData<MakerMonitorRunResponse | Record<string, never>>('/api/maker-tools/monitor/last-result')
 }
 
+/** Count of monitored items needing posters from the last scan (for the sidebar badge). */
+export const getMakerMonitorNeededCount = async (): Promise<{ count: number }> => {
+  return getData<{ count: number }>('/api/maker-tools/monitor/needed-count')
+}
+
 export const saveMakerMonitorConfig = async (config: MakerMonitorConfig): Promise<MakerMonitorConfig> => {
   return postData<MakerMonitorConfig>('/api/maker-tools/monitor/config', config)
 }

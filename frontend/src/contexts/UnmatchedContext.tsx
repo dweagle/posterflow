@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
-import { getUnmatchedStats, getMakerIdarrPendingCount, getCommunityRequestCount, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
+import { getUnmatchedStats, getMakerIdarrPendingCount, getMakerMonitorNeededCount, getCommunityRequestCount, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
 
 interface JobUpdate {
   id: number
@@ -15,10 +15,12 @@ interface UnmatchedContextType {
   unmatchedStats: UnmatchedStats | null
   unmatchedCount: number
   idarrPendingCount: number
+  makerMonitorNeededCount: number
   communityRequestCount: number
   jobs: Job[]
   refreshStats: () => Promise<void>
   refreshIdarrPendingCount: () => Promise<void>
+  refreshMakerMonitorNeededCount: () => Promise<void>
   refreshCommunityRequestCount: () => Promise<void>
 }
 
@@ -28,6 +30,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   const [unmatchedStats, setUnmatchedStats] = useState<UnmatchedStats | null>(null)
   const [unmatchedCount, setUnmatchedCount] = useState<number>(0)
   const [idarrPendingCount, setIdarrPendingCount] = useState<number>(0)
+  const [makerMonitorNeededCount, setMakerMonitorNeededCount] = useState<number>(0)
   const [communityRequestCount, setCommunityRequestCount] = useState<number>(0)
   const [jobs, setJobs] = useState<Job[]>([])
   const wsRef = useRef<WebSocket | null>(null)
@@ -50,6 +53,15 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
     try {
       const data = await getMakerIdarrPendingCount()
       setIdarrPendingCount(data.count)
+    } catch {
+      // silent - sidebar badge is best-effort
+    }
+  }
+
+  const refreshMakerMonitorNeededCount = async () => {
+    try {
+      const data = await getMakerMonitorNeededCount()
+      setMakerMonitorNeededCount(data.count)
     } catch {
       // silent - sidebar badge is best-effort
     }
@@ -105,7 +117,14 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
                 previousStatus !== job.status) {
               void refreshIdarrPendingCount()
             }
-            
+
+            // Refresh maker monitor needed count when a monitor scan completes
+            if (job.job_type === 'maker_monitor' &&
+                (job.status === 'completed' || job.status === 'failed') &&
+                previousStatus !== job.status) {
+              void refreshMakerMonitorNeededCount()
+            }
+
             // Update tracked status
             lastJobStatusRef.current[jobKey] = job.status
           })
@@ -136,6 +155,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
     // Initial fetch
     refreshStats()
     void refreshIdarrPendingCount()
+    void refreshMakerMonitorNeededCount()
     void refreshCommunityRequestCount()
     
     // Poll community request count every 60 seconds so new requests from
@@ -164,7 +184,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <UnmatchedContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, communityRequestCount, jobs, refreshStats, refreshIdarrPendingCount, refreshCommunityRequestCount }}>
+    <UnmatchedContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs, refreshStats, refreshIdarrPendingCount, refreshMakerMonitorNeededCount, refreshCommunityRequestCount }}>
       {children}
     </UnmatchedContext.Provider>
   )

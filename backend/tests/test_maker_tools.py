@@ -252,6 +252,41 @@ def test_get_maker_monitor_last_result_returns_saved_result(client, test_db):
 
 
 # ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/monitor/needed-count
+# ---------------------------------------------------------------------------
+
+
+def test_get_maker_monitor_needed_count_zero_when_no_setting(client):
+    response = client.get("/api/maker-tools/monitor/needed-count")
+    assert response.status_code == 200
+    assert response.json() == {"count": 0}
+
+
+def test_get_maker_monitor_needed_count_returns_total_needed(client, test_db):
+    payload = {"range_start": "2026-05-01", "total_needed": 4}
+    test_db.add(
+        Setting(key="maker_tools_monitor_last_result", value=json.dumps(payload))
+    )
+    test_db.commit()
+
+    response = client.get("/api/maker-tools/monitor/needed-count")
+    assert response.status_code == 200
+    assert response.json() == {"count": 4}
+
+
+def test_get_maker_monitor_needed_count_zero_when_total_needed_missing(client, test_db):
+    payload = {"range_start": "2026-05-01", "total_premieres": 3}
+    test_db.add(
+        Setting(key="maker_tools_monitor_last_result", value=json.dumps(payload))
+    )
+    test_db.commit()
+
+    response = client.get("/api/maker-tools/monitor/needed-count")
+    assert response.status_code == 200
+    assert response.json() == {"count": 0}
+
+
+# ---------------------------------------------------------------------------
 # API: POST /api/maker-tools/monitor/config
 # ---------------------------------------------------------------------------
 
