@@ -55,6 +55,7 @@ type RequestItemCardProps = {
   showMakerTools: boolean
   psdConfig: PsdConfig
   posterAvailability?: PosterAvailability
+  posterAvailabilityChecked?: boolean
   // Drag/drop poster upload (only wired when isMaker)
   dragOver: boolean
   onDragEnter?: () => void
@@ -88,6 +89,7 @@ export default function RequestItemCard({
   showMakerTools,
   psdConfig,
   posterAvailability,
+  posterAvailabilityChecked,
   dragOver,
   onDragEnter,
   onDragLeave,
@@ -163,6 +165,7 @@ export default function RequestItemCard({
                 }}
                 psdConfig={psdConfig}
                 posterAvailability={posterAvailability}
+                posterAvailabilityChecked={posterAvailabilityChecked}
                 hidePoster
                 hideTitle
                 galleryPortalId={`gallery-portal-${id}`}

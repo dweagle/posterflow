@@ -1,0 +1,68 @@
+.drive-search-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1100;
+  padding: 4vh 1rem;
+  overflow-y: auto;
+}
+
+.drive-search-modal {
+  background: #1a1a1a;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+.drive-search-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.drive-search-modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #64b5f6;
+}
+
+.drive-search-modal-close {
+  background: none;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.drive-search-modal-close:hover {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.drive-search-modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+/* The shared panel's results card already has its own border/background, so
+   keep the modal body flush around it. */
+.drive-search-modal-body .poster-search-card {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}

@@ -1019,12 +1019,74 @@
   align-self: center;
 }
 
+/* Availability cap + "Search Drives" button rendered as one pill, so the
+   green check / red X reads as part of the button. */
+.tmdb-drive-search-group {
+  display: inline-flex;
+  align-items: stretch;
+  align-self: center;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  overflow: visible;
+}
+
+.tmdb-drive-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  color: #aaa;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.tmdb-drive-search-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* With a cap present, the button only rounds on its right edge. */
+.tmdb-drive-search-group.has-cap .tmdb-drive-search-btn {
+  border-radius: 0 5px 5px 0;
+}
+
+/* Red X shown once a check found no posters in any drive. */
+.tmdb-poster-unavailable {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f44336;
+  color: #fff;
+  flex-shrink: 0;
+  cursor: default;
+  align-self: center;
+}
+
+/* Inside the pill the cap becomes a flush, square-cornered left segment. */
+.tmdb-drive-search-group .tmdb-poster-available,
+.tmdb-drive-search-group .tmdb-poster-unavailable {
+  width: auto;
+  height: auto;
+  align-self: stretch;
+  padding: 0 0.4rem;
+  border-radius: 5px 0 0 5px;
+  border-right: 1px solid rgba(0, 0, 0, 0.28);
+}
+
 .tmdb-poster-available-tooltip {
   display: none;
   position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0;
+  top: calc(100% + 8px);
   background: #1e1e1e;
   border: 1px solid #4caf50;
   border-radius: 6px;

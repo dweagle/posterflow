@@ -62,6 +62,7 @@ export default function ListsView() {
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)
   const [confirmClearMine, setConfirmClearMine] = useState(false)
   const [clearingMine, setClearingMine] = useState(false)
@@ -144,7 +145,13 @@ export default function ListsView() {
         media_type: i.media_type === 'movie' ? 'movie' : i.media_type === 'collection' ? 'collection' : ('tv' as const),
       }))
     if (lookups.length === 0) return
-    checkTmdbPosterAvailability(lookups).then(setPosterAvailability).catch(() => {})
+    setPosterAvailabilityChecked(false)
+    checkTmdbPosterAvailability(lookups)
+      .then((availability) => {
+        setPosterAvailability(availability)
+        setPosterAvailabilityChecked(true)
+      })
+      .catch(() => {})
   }, [items])
 
   const handleAction = useCallback(async (item: CommunityListItem, action: 'claim' | 'complete' | 'release' | 'reject' | 'remove') => {
@@ -444,6 +451,7 @@ export default function ListsView() {
                 showMakerTools={showMakerTools}
                 psdConfig={psdConfig}
                 posterAvailability={item.tmdb_id != null ? posterAvailability[item.tmdb_id] : undefined}
+                posterAvailabilityChecked={posterAvailabilityChecked}
                 dragOver={dragOverId === item.id}
                 onDragEnter={() => setDragOverId(item.id)}
                 onDragLeave={() => setDragOverId(null)}

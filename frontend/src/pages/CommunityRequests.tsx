@@ -75,6 +75,7 @@ export default function CommunityRequests() {
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   // Top-level page tab: the requests list or the published worklists.
@@ -112,8 +113,12 @@ export default function CommunityRequests() {
         media_type: r.media_type === 'movie' ? 'movie' : r.media_type === 'collection' ? 'collection' : ('tv' as const),
       }))
     if (items.length === 0) return
+    setPosterAvailabilityChecked(false)
     checkTmdbPosterAvailability(items)
-      .then(setPosterAvailability)
+      .then((availability) => {
+        setPosterAvailability(availability)
+        setPosterAvailabilityChecked(true)
+      })
       .catch(() => {})
   }, [requests])
 
@@ -715,6 +720,7 @@ export default function CommunityRequests() {
                 showMakerTools={showMakerTools}
                 psdConfig={psdConfig}
                 posterAvailability={req.tmdb_id != null ? posterAvailability[req.tmdb_id] : undefined}
+                posterAvailabilityChecked={posterAvailabilityChecked}
                 dragOver={dragOverId === req.id}
                 onDragEnter={() => setDragOverId(req.id)}
                 onDragLeave={() => setDragOverId(null)}

@@ -13,7 +13,9 @@ import {
   Image,
   Layers,
   Clapperboard as MovieIcon,
+  Search,
   Tv,
+  X,
 } from 'lucide-react'
 import {
   type TmdbSearchResult,
@@ -33,6 +35,7 @@ import {
   getSettings,
 } from '../../api/client'
 import { useToast } from '../Toast'
+import PosterDriveSearchModal from '../PosterDriveSearchModal'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -234,6 +237,8 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
 export type TmdbItemCardProps = {
   item: TmdbSearchResult
   posterAvailability?: PosterAvailability
+  /** True once the drive availability check has run, so "none found" can show a red X. */
+  posterAvailabilityChecked?: boolean
   psdConfig?: PsdConfig
   hidePoster?: boolean
   hideTitle?: boolean
@@ -244,7 +249,7 @@ export type TmdbItemCardProps = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdConfigProp, hidePoster, hideTitle, galleryPortalId }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, hidePoster, hideTitle, galleryPortalId }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
   // Gallery state
@@ -293,6 +298,9 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
 
   // Poster lightbox
   const [previewPoster, setPreviewPoster] = useState<string | null>(null)
+
+  // In-place drive poster search
+  const [driveSearchOpen, setDriveSearchOpen] = useState(false)
 
   // Portal target for gallery panel (when galleryPortalId is set)
   const [galleryPortalEl, setGalleryPortalEl] = useState<Element | null>(null)
@@ -559,6 +567,60 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
         ]
       : []
 
+  // Drive availability indicator shown next to "Search Drives": green check with a
+  // per-style/season tooltip when posters exist, red X once a check found none.
+  const hasDrivePosters = !!posterAvailability && posterAvailability.length > 0
+  const availabilityIndicator = hasDrivePosters ? (
+    <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
+      <Check size={11} />
+      <span className="tmdb-poster-available-tooltip">
+        <span className="tmdb-poster-available-header">Available in synced drives</span>
+        <span className="tmdb-poster-available-note">As of last sync</span>
+        {posterAvailability?.map((entry) => (
+          <span key={entry.style} className="tmdb-poster-available-style-row">
+            <span className="tmdb-poster-available-style">
+              <Check size={10} /> {entry.style}
+            </span>
+            {entry.seasons.length > 0 && (
+              <span className="tmdb-poster-available-seasons">
+                {entry.seasons.length <= 5
+                  ? entry.seasons.map((s) => (
+                      <span key={s} className="tmdb-poster-season-chip">S{s}</span>
+                    ))
+                  : (
+                      <span className="tmdb-poster-season-chip">
+                        S{entry.seasons[0]} – S{entry.seasons[entry.seasons.length - 1]}
+                      </span>
+                    )
+                }
+              </span>
+            )}
+          </span>
+        ))}
+      </span>
+    </span>
+  ) : posterAvailabilityChecked ? (
+    <span className="tmdb-poster-unavailable" aria-label="No poster in synced drives" title="No poster found in synced drives">
+      <X size={11} />
+    </span>
+  ) : null
+
+  // The availability cap and "Search Drives" button render as one pill, with the
+  // check/X sitting flush on the left so they read as a single control.
+  const driveSearchControl = (
+    <span className={`tmdb-drive-search-group${availabilityIndicator ? ' has-cap' : ''}`}>
+      {availabilityIndicator}
+      <button
+        type="button"
+        className="tmdb-drive-search-btn"
+        onClick={() => setDriveSearchOpen(true)}
+        title="Search synced drive poster folders for this title"
+      >
+        <Search size={12} /> Search Drives
+      </button>
+    </span>
+  )
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -586,36 +648,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
           <div className="tmdb-result-title-row">
             {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
             {!hideTitle && item.year && <span className="tmdb-result-year">{item.year}</span>}
-            {!hideTitle && posterAvailability && posterAvailability.length > 0 && (
-              <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
-                <Check size={11} />
-                <span className="tmdb-poster-available-tooltip">
-                  <span className="tmdb-poster-available-header">Available in synced drives</span>
-                  <span className="tmdb-poster-available-note">As of last sync</span>
-                  {posterAvailability.map((entry) => (
-                    <span key={entry.style} className="tmdb-poster-available-style-row">
-                      <span className="tmdb-poster-available-style">
-                        <Check size={10} /> {entry.style}
-                      </span>
-                      {entry.seasons.length > 0 && (
-                        <span className="tmdb-poster-available-seasons">
-                          {entry.seasons.length <= 5
-                            ? entry.seasons.map((s) => (
-                                <span key={s} className="tmdb-poster-season-chip">S{s}</span>
-                              ))
-                            : (
-                                <span className="tmdb-poster-season-chip">
-                                  S{entry.seasons[0]} – S{entry.seasons[entry.seasons.length - 1]}
-                                </span>
-                              )
-                          }
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </span>
-              </span>
-            )}
+            {!hideTitle && driveSearchControl}
           </div>
 
           <div className="tmdb-result-meta">
@@ -633,36 +666,7 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
                 )}
               </>
             )}
-            {hideTitle && posterAvailability && posterAvailability.length > 0 && (
-              <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
-                <Check size={11} />
-                <span className="tmdb-poster-available-tooltip">
-                  <span className="tmdb-poster-available-header">Available in synced drives</span>
-                  <span className="tmdb-poster-available-note">As of last sync</span>
-                  {posterAvailability.map((entry) => (
-                    <span key={entry.style} className="tmdb-poster-available-style-row">
-                      <span className="tmdb-poster-available-style">
-                        <Check size={10} /> {entry.style}
-                      </span>
-                      {entry.seasons.length > 0 && (
-                        <span className="tmdb-poster-available-seasons">
-                          {entry.seasons.length <= 5
-                            ? entry.seasons.map((s) => (
-                                <span key={s} className="tmdb-poster-season-chip">S{s}</span>
-                              ))
-                            : (
-                                <span className="tmdb-poster-season-chip">
-                                  S{entry.seasons[0]} – S{entry.seasons[entry.seasons.length - 1]}
-                                </span>
-                              )
-                          }
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </span>
-              </span>
-            )}
+            {hideTitle && driveSearchControl}
           </div>
 
           <div className="tmdb-result-ids">
@@ -1096,6 +1100,14 @@ export default function TmdbItemCard({ item, posterAvailability, psdConfig: psdC
             </div>
           </div>
         </div>
+      )}
+
+      {/* In-place drive poster search */}
+      {driveSearchOpen && (
+        <PosterDriveSearchModal
+          initialQuery={item.title}
+          onClose={() => setDriveSearchOpen(false)}
+        />
       )}
     </div>
   )

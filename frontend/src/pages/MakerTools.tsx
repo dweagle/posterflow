@@ -79,6 +79,7 @@ function MakerTools() {
   const [tmdbError, setTmdbError] = useState<string | null>(null)
   const [tmdbHelpExpanded, setTmdbHelpExpanded] = useState(false)
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   // PSD export settings (used in config modal and passed to TmdbItemCard)
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
@@ -367,6 +368,7 @@ function MakerTools() {
     if (cached) {
       setTmdbResults(cached)
       setTmdbError(null)
+      setPosterAvailabilityChecked(false)
       void fetchPosterAvailability(cached)
       return
     }
@@ -374,6 +376,7 @@ function MakerTools() {
     setTmdbError(null)
     setTmdbResults(null)
     setPosterAvailability({})
+    setPosterAvailabilityChecked(false)
     try {
       const results = await searchTmdb(query, filter)
       tmdbCacheRef.current.set(cacheKey, results)
@@ -392,6 +395,7 @@ function MakerTools() {
       const items = results.map((r) => ({ tmdb_id: r.tmdb_id, title: r.title, year: r.year, media_type: r.media_type }))
       const availability = await checkTmdbPosterAvailability(items)
       setPosterAvailability(availability)
+      setPosterAvailabilityChecked(true)
     } catch {
       // Non-critical — silently ignore errors
     }
@@ -777,6 +781,7 @@ function MakerTools() {
                         key={`${item.media_type}-${item.tmdb_id}`}
                         item={item}
                         posterAvailability={posterAvailability[item.tmdb_id]}
+                        posterAvailabilityChecked={posterAvailabilityChecked}
                         psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
                       />
                     ))}
