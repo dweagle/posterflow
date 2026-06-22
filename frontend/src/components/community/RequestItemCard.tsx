@@ -56,6 +56,8 @@ type RequestItemCardProps = {
   psdConfig: PsdConfig
   posterAvailability?: PosterAvailability
   posterAvailabilityChecked?: boolean
+  /** Bump to auto-close this card's TMDB image gallery (e.g. when the item is completed). */
+  collapseSignal?: number
   // Drag/drop poster upload (only wired when isMaker)
   dragOver: boolean
   onDragEnter?: () => void
@@ -90,6 +92,7 @@ export default function RequestItemCard({
   psdConfig,
   posterAvailability,
   posterAvailabilityChecked,
+  collapseSignal,
   dragOver,
   onDragEnter,
   onDragLeave,
@@ -166,6 +169,7 @@ export default function RequestItemCard({
                 psdConfig={psdConfig}
                 posterAvailability={posterAvailability}
                 posterAvailabilityChecked={posterAvailabilityChecked}
+                collapseSignal={collapseSignal}
                 hidePoster
                 hideTitle
                 galleryPortalId={`gallery-portal-${id}`}

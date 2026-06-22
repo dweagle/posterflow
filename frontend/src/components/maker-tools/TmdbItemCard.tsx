@@ -243,13 +243,15 @@ export type TmdbItemCardProps = {
   hidePoster?: boolean
   hideTitle?: boolean
   galleryPortalId?: string
+  /** Bump this (e.g. when the parent request is completed) to auto-close the image gallery. */
+  collapseSignal?: number
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, hidePoster, hideTitle, galleryPortalId }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, hidePoster, hideTitle, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
   // Gallery state
@@ -307,6 +309,11 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   useEffect(() => {
     if (galleryPortalId) setGalleryPortalEl(document.getElementById(galleryPortalId))
   }, [galleryPortalId])
+
+  // Collapse the image gallery when the parent bumps the signal (e.g. request marked complete).
+  useEffect(() => {
+    if (collapseSignal) setGalleryOpen(false)
+  }, [collapseSignal])
 
   // Eagerly fetch TV details on mount so season/specials badges render immediately
   useEffect(() => {

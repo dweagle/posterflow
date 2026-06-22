@@ -66,6 +66,8 @@ export default function CommunityRequests() {
   const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done' | string>>(new Map())
   // Per-card action state (claim/complete/reject): requestId → 'loading' | error string
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
+  // Per-card counter bumped on complete so the card's TMDB image gallery auto-collapses.
+  const [collapseSignals, setCollapseSignals] = useState<Map<string, number>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [makerInfoOpen, setMakerInfoOpen] = useState(false)
   // Per-card archive-thread state: requestId → 'loading' | 'done' | error string
@@ -228,7 +230,10 @@ export default function CommunityRequests() {
         return next
       })
       void refreshCommunityRequestCount()
-      if (action === 'complete') fetchRequestsRef.current?.()   // re-fetch so the list re-sorts/re-filters
+      if (action === 'complete') {
+        setCollapseSignals((prev) => new Map(prev).set(requestId, (prev.get(requestId) ?? 0) + 1))   // fold the open image gallery
+        fetchRequestsRef.current?.()   // re-fetch so the list re-sorts/re-filters
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : `${action} failed`
       if (action === 'claim') {
@@ -721,6 +726,7 @@ export default function CommunityRequests() {
                 psdConfig={psdConfig}
                 posterAvailability={req.tmdb_id != null ? posterAvailability[req.tmdb_id] : undefined}
                 posterAvailabilityChecked={posterAvailabilityChecked}
+                collapseSignal={collapseSignals.get(req.id) ?? 0}
                 dragOver={dragOverId === req.id}
                 onDragEnter={() => setDragOverId(req.id)}
                 onDragLeave={() => setDragOverId(null)}
