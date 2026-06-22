@@ -39,12 +39,22 @@ function GDrives() {
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
   const [idTooltip, setIdTooltip] = useState<number | null>(null)
+  const [tooltipAlign, setTooltipAlign] = useState<'left' | 'center' | 'right'>('center')
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const tooltipHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showIdTooltip = (id: number) => {
     if (tooltipHideTimer.current) clearTimeout(tooltipHideTimer.current)
     setIdTooltip(id)
+  }
+
+  // Flip the tooltip's anchor based on the icon's position so it never spills off-screen
+  const openIdTooltip = (id: number, e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const center = rect.left + rect.width / 2
+    const half = 170 // ~half of tooltip max-width plus a small margin
+    setTooltipAlign(center + half > window.innerWidth - 8 ? 'left' : center - half < 8 ? 'right' : 'center')
+    showIdTooltip(id)
   }
 
   const hideIdTooltip = () => {
@@ -535,7 +545,7 @@ function GDrives() {
                         </div>
                         <div
                           className="drive-id-wrapper"
-                          onMouseEnter={() => showIdTooltip(drive.id)}
+                          onMouseEnter={(e) => openIdTooltip(drive.id, e)}
                           onMouseLeave={hideIdTooltip}
                         >
                           <button className="btn-drive-id-info">
@@ -544,6 +554,7 @@ function GDrives() {
                           {idTooltip === drive.id && (
                             <div
                               className="drive-id-tooltip"
+                              data-align={tooltipAlign}
                               onMouseEnter={() => showIdTooltip(drive.id)}
                               onMouseLeave={hideIdTooltip}
                             >
@@ -682,7 +693,7 @@ function GDrives() {
                 </div>
                 <div
                   className="drive-id-wrapper"
-                  onMouseEnter={() => showIdTooltip(drive.id)}
+                  onMouseEnter={(e) => openIdTooltip(drive.id, e)}
                   onMouseLeave={hideIdTooltip}
                 >
                   <button className="btn-drive-id-info">
@@ -691,6 +702,7 @@ function GDrives() {
                   {idTooltip === drive.id && (
                     <div
                       className="drive-id-tooltip"
+                      data-align={tooltipAlign}
                       onMouseEnter={() => showIdTooltip(drive.id)}
                       onMouseLeave={hideIdTooltip}
                     >

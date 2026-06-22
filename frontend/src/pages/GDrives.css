@@ -590,7 +590,20 @@
   z-index: 9999;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
   min-width: 240px;
-  max-width: 320px;
+  max-width: min(320px, calc(100vw - 16px));
+}
+
+/* Flip the anchor for edge cards so the tooltip stays on-screen */
+.drive-id-tooltip[data-align="left"] {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.drive-id-tooltip[data-align="right"] {
+  left: 0;
+  right: auto;
+  transform: none;
 }
 
 .drive-id-tooltip-desc {
