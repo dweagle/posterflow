@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-22
+### Added
+- Community Lists: a new "Lists" tab on the Community Requests page where makers can publish their unmatched assets and poster-style fallback lists as a shared worklist that other makers can claim and complete — no per-item Discord thread. Lists can be published through the Unmatched Assets and Poster Style Modals. List cards reuse the existing request card UI and maker tooling.
+- Unmatched: stat cards and Unmatched/Poster Style modals now show per-item community status indicators - an orange "in progress" badge for items claimed in the community, and a green "made" checkmark for completed ones to show the progress of requests already underway.
+- Unmatched/Poster Style: a red "M" badge to indicate items that are missing or not yet downloaded in Sonarr/Radarr but hold the 'released' status.
+- Maker Tools: in-place drive poster search directly from TMDB maker cards via a new search modal.
+- Maker Tools/Requests: TMDB cards now show a Miniseries badge based on the show's series type.
+- Maker Monitor: sidebar badge showing the count of monitored items needing posters from the last scan.
+
+### Changed
+- IDarr / Maker Monitor: added a TMDB circuit breaker that backs off after consecutive failures, with clearer error logging and toast messages.
+- Plex Upload: removed Clear Duplicate Lock Movie/TV dropdown for easier searching of upload locks.  Input field empties after clearing a lock.
+- Community Requests: a card's TMDB image gallery now auto-closes when the item is completed.
+
+### Fixed
+- Google Drives: drive description tooltips no longer overflow off-screen on the GDrives page.
+
+### Security/Requirements
+- Dependencies: patched frontend and backend security advisories (axios, react-router, vite, vitest, starlette, python-multipart, pydantic-settings).
+- Updated requirements
+
 ## [0.8.6] - 2026-06-18
 ### Changed
 - Style Usage/Unmatched Assets: request modals now allow grouping by All/Movies/Shows/Collections with sorting options instead of random order.
