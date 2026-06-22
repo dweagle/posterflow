@@ -1,4 +1,8 @@
 import { getData, postData } from './http'
+// Inlined as a data URI (Vite ?inline) so Photopea renders it without a network fetch.
+// A remote-URL icon at our origin is passive mixed content on an http LAN instance — Chrome
+// auto-upgrades it to https, the upgrade fails (no TLS), and the button shows with no image.
+import pluginIcon from '../assets/photopea-plugin-icon.png?inline'
 
 export interface MakerMonitorConfig {
   tmdb_api_key: string
@@ -296,9 +300,10 @@ export const openPhotopeaWithPsd = (psdUrl: string, filename: string): void => {
   const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`
   const params = new URLSearchParams({ save: saveUrl, name: filename.replace(/\.psd$/i, '') })
   const pluginUrl = `${window.location.origin}/photopea-plugin.html?${params.toString()}`
-  // icon: Posterflow's favicon (a colored logo, so no "===" theme-recolor prefix).
+  // icon: Posterflow's logo as an inlined data URI (a colored logo, so no "===" theme-recolor
+  // prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
   // w/h: fix the panel to 184px wide — fits 5 season chips per row.
-  const icon = `${window.location.origin}/favicon.webp`
+  const icon = pluginIcon
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
   // editor boots. Photopea trims the doc name out of the URL (dropping the "(year) {ids}" part), so we pass a launch `script`
   // (runs once after the file loads) that renames the doc to the full export filename — the tab,
