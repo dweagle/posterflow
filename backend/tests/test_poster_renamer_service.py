@@ -117,7 +117,7 @@ def test_rename_posters_successful_flow_returns_stats(test_db, monkeypatch):
             {"movies": [{"title": "Movie One", "year": 2024, "folder": "Movie One (2024)", "messages": ["renamed"]}], "series": [], "collections": []},
             ["/tmp/dest/Movie One (2024)/poster.jpg"],
             ["/tmp/source/Movie One.jpg"],
-            {"/tmp/dest/Movie One (2024)/poster.jpg": ("/tmp/source/Movie One.jpg", "Movie One", 2024, "movie", None)},
+            {"/tmp/dest/Movie One (2024)/poster.jpg": ("/tmp/source/Movie One.jpg", "Movie One", 2024, "movie", None, 27205, None, "tt0000001", "https://image.tmdb.org/t/p/original/x.jpg", True)},
         ),
     )
 

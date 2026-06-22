@@ -60,3 +60,75 @@ export const getCommunityRequests = (
 
 export const submitCommunityRequest = (payload: SubmitRequestPayload): Promise<SubmitRequestResponse> =>
   postData('/api/community/requests', payload)
+
+// ── Community Lists ──────────────────────────────────────────────────────────
+
+export interface CommunityListItem {
+  id: string
+  tmdb_id: number | null
+  media_type: 'movie' | 'show' | 'season' | 'collection'
+  title: string
+  year: number | null
+  season_number: number | null
+  poster_path: string | null
+  imdb_id: string | null
+  tvdb_id: number | null
+  style_tag: string | null
+  source: 'unmatched' | 'style_fallback' | null
+  notes: string | null
+  added_by: string | null
+  added_by_discord_id: string | null
+  status: 'open' | 'in_progress' | 'fulfilled' | 'rejected'
+  claimed_by: string | null
+  claimed_by_discord_id: string | null
+  fulfilled_by: string | null
+  fulfilled_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+// One item to publish to a community list. Identity (added_by) is set
+// server-side from the verified Discord token, never here.
+export interface ListItemInput {
+  tmdb_id?: number | null
+  media_type: string
+  title: string
+  year?: number | null
+  season_number?: number | null
+  poster_path?: string | null
+  imdb_id?: string | null
+  tvdb_id?: number | null
+  style_tag?: string | null
+  source?: 'unmatched' | 'style_fallback'
+  notes?: string | null
+}
+
+export interface SubmitListItemsPayload {
+  items: ListItemInput[]
+  discord_token: string
+}
+
+export interface SubmitListItemsResponse {
+  inserted: number
+  skipped: number
+  message?: string
+}
+
+export interface CommunityListOwner {
+  id: string
+  name: string
+  count: number
+}
+
+export const getCommunityListItems = (
+  params?: Record<string, string | number>,
+): Promise<{ items: CommunityListItem[]; total: number }> =>
+  getData('/api/community/lists', { params })
+
+export const getCommunityListOwners = (
+  params?: Record<string, string | number>,
+): Promise<{ owners: CommunityListOwner[] }> =>
+  getData('/api/community/lists/owners', { params })
+
+export const submitCommunityListItems = (payload: SubmitListItemsPayload): Promise<SubmitListItemsResponse> =>
+  postData('/api/community/lists', payload)

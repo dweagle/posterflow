@@ -33,8 +33,10 @@ const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const USER_DAILY_LIMIT = 5
 
 // Per-IP daily backstop. Submissions arrive via the PosterFlow backend, so
-// this IP is the instance server's IP — effectively a per-instance cap.
-const IP_DAILY_LIMIT = 5
+// this IP is the instance server's IP — effectively a per-instance cap. Set
+// above the per-user limit so a user can delete and re-submit their 5/day
+// without the per-instance backstop blocking them.
+const IP_DAILY_LIMIT = 10
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {

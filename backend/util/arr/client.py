@@ -173,6 +173,7 @@ class ARRClient:
                     "root_folder": movie.get("rootFolderPath"),
                     "tmdb_id": tmdb_id,
                     "imdb_id": imdb_id,
+                    "poster_url": self._poster_remote_url(movie),
                     "monitored": movie.get("monitored"),
                     "normalized_title": normalize_titles(title),
                     "alternate_titles": self._get_alternate_titles(movie),
@@ -209,6 +210,7 @@ class ARRClient:
                 folder = show.get("path", "")
                 tvdb_id = show.get("tvdbId")
                 imdb_id = show.get("imdbId")
+                tmdb_id = show.get("tmdbId") or None  # Sonarr v3/v4 expose this; 0 = unmapped
                 
                 # Get seasons info
                 seasons = []
@@ -231,7 +233,12 @@ class ARRClient:
                     "folder": folder,
                     "root_folder": show.get("rootFolderPath"),
                     "tvdb_id": tvdb_id,
+                    # Reference-only — NOT used for matching (series match on tvdb_id;
+                    # feeding tmdb into search_matches would bypass the tvdb lookup).
+                    # Surfaced so published list cards get a TMDB link/poster/panel.
+                    "tmdb_id_ref": tmdb_id,
                     "imdb_id": imdb_id,
+                    "poster_url": self._poster_remote_url(show),
                     "monitored": show.get("monitored"),
                     "normalized_title": normalize_titles(title),
                     "alternate_titles": self._get_alternate_titles(show),
@@ -247,6 +254,18 @@ class ARRClient:
 
         return parsed_series
     
+    @staticmethod
+    def _poster_remote_url(media: Dict[str, Any]) -> Optional[str]:
+        """Public poster URL from the *arr images list (TMDB/TVDB/fanart source).
+
+        Uses remoteUrl (the original public image), not the local *arr-proxied
+        `url`, so the poster is reachable by other community instances.
+        """
+        for image in media.get("images") or []:
+            if image.get("coverType") == "poster" and image.get("remoteUrl"):
+                return image.get("remoteUrl")
+        return None
+
     def _get_alternate_titles(self, media: Dict[str, Any]) -> List[str]:
         """Extract alternate titles from media object."""
         alt_titles = []

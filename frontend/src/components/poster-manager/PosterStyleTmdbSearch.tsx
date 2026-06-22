@@ -3,13 +3,17 @@ import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'l
 import { useNavigate } from 'react-router-dom'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { type FallbackItem } from '../../api/posterManager'
+import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import { useToast } from '../Toast'
+import CommunityStatusBadge from './CommunityStatusBadge'
+import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
 
 type PosterStyleTmdbSearchProps = {
   item: FallbackItem
   tmdbApiKeyConfigured: boolean
   seasons?: (number | null)[]
+  claimStatus?: ClaimStatus | null
 }
 
 function getTmdbLink(candidate: TmdbCandidate): string {
@@ -18,7 +22,7 @@ function getTmdbLink(candidate: TmdbCandidate): string {
   return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
 }
 
-export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seasons }: PosterStyleTmdbSearchProps) {
+export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seasons, claimStatus }: PosterStyleTmdbSearchProps) {
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [isExpanded, setIsExpanded] = useState(false)
@@ -139,6 +143,8 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
             }`}>
               {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'}
             </span>
+            <CommunityStatusBadge status={claimStatus ?? null} />
+            <ArrMissingBadge available={item.available} />
           </div>
           <div className="unmatched-item-actions">
             <button

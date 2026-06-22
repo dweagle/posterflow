@@ -1,7 +1,12 @@
 import { AlertCircle, Download, List, RefreshCw, Save, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
+import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import CommunityStatusBadge from './CommunityStatusBadge'
+import ArrMissingBadge from './ArrMissingBadge'
 import Toolbar from './Toolbar'
+
+type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null }
 
 type UnmatchedTabProps = {
   unmatchedStats: UnmatchedStats | null
@@ -49,6 +54,15 @@ function UnmatchedTab({
   onOpenModal,
 }: UnmatchedTabProps) {
   const navigate = useNavigate()
+  const { getStatus: getClaimStatus } = useCommunityClaimStatus()
+
+  // Orange/green "already claimed/made" indicator for a preview row — icon-only
+  // (checkmark + hover) so the compact rows don't carry extra text.
+  const claimBadge = (item: PreviewItem, mediaType: string) => (
+    <CommunityStatusBadge iconOnly status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: mediaType, title: item.title, year: item.year })} />
+  )
+  // Red "M" indicator when the item is tracked in *arr but not downloaded.
+  const arrBadge = (item: PreviewItem) => <ArrMissingBadge available={item.available} />
 
   const openSchedulingSettings = () => {
     localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
@@ -136,7 +150,11 @@ function UnmatchedTab({
                       <div key={idx} className="list-item">
                         <span>{item.title}</span>
                         {item.year && <span className="item-year">({item.year})</span>}
-                        {item.instance && <span className="item-instance">{item.instance}</span>}
+                        <span className="list-item-badges">
+                          {claimBadge(item, 'movie')}
+                          {arrBadge(item)}
+                          {item.instance && <span className="item-instance">{item.instance}</span>}
+                        </span>
                       </div>
                     ))}
                     {unmatchedStats.unmatched.movies.length > cardPreviewLimit && (
@@ -185,7 +203,11 @@ function UnmatchedTab({
                         <div key={idx} className="list-item">
                           <span>{item.title}</span>
                           {item.year && <span className="item-year">({item.year})</span>}
-                          {item.instance && <span className="item-instance">{item.instance}</span>}
+                          <span className="list-item-badges">
+                            {claimBadge(item, 'show')}
+                            {arrBadge(item)}
+                            {item.instance && <span className="item-instance">{item.instance}</span>}
+                          </span>
                         </div>
                       ))}
                     {unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length > cardPreviewLimit && (
@@ -237,7 +259,11 @@ function UnmatchedTab({
                               <span>{item.title}</span>
                               {item.year && <span className="item-year">({item.year})</span>}
                             </div>
-                            {item.instance && <span className="item-instance">{item.instance}</span>}
+                            <span className="list-item-badges">
+                              {claimBadge(item, 'show')}
+                              {arrBadge(item)}
+                              {item.instance && <span className="item-instance">{item.instance}</span>}
+                            </span>
                           </div>
                           <div className="missing-seasons-list">Missing: {item.missing_seasons.map((s: number) => `S${s}`).join(', ')}</div>
                         </div>
@@ -284,7 +310,11 @@ function UnmatchedTab({
                     {unmatchedStats.unmatched.collections.slice(0, cardPreviewLimit).map((item, idx: number) => (
                       <div key={idx} className="list-item">
                         <span>{item.title}</span>
-                        {item.instance && <span className="item-instance">{item.instance}</span>}
+                        <span className="list-item-badges">
+                          {claimBadge(item, 'collection')}
+                          {arrBadge(item)}
+                          {item.instance && <span className="item-instance">{item.instance}</span>}
+                        </span>
                       </div>
                     ))}
                     {unmatchedStats.unmatched.collections.length > cardPreviewLimit && (

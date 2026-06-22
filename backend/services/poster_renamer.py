@@ -440,7 +440,8 @@ class PosterRenameService:
             
         Returns:
             Tuple of (output dict, destination files copied/updated, source files processed,
-            winning_source_files mapping dest_path -> (source_file_path, title, year, tmdb_type, season)).
+            winning_source_files mapping dest_path -> (source_file_path, title, year,
+            tmdb_type, season, tmdb_id, tvdb_id, imdb_id, poster_url)).
         """
         output: MediaDict = {}
         renamed_files = []  # Destination files that were copied/updated
@@ -610,7 +611,11 @@ class PosterRenameService:
 
                         written_dest_paths[new_file_path] = file_name
                         _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
-                        winning_source_files[new_file_path] = (file, item["title"], item.get("year"), _tmdb_type, _season_num)
+                        winning_source_files[new_file_path] = (
+                            file, item["title"], item.get("year"), _tmdb_type, _season_num,
+                            item.get("tmdb_id"), item.get("tvdb_id"), item.get("imdb_id"), item.get("poster_url"),
+                            item.get("available"),
+                        )
 
                     if progress_callback:
                         if item_had_changes:
@@ -1100,7 +1105,7 @@ class PosterRenameService:
 
             if winning_source_files:
                 for dest_path, entry in winning_source_files.items():
-                    src_file, title, year, tmdb_type, season = entry
+                    src_file, title, year, tmdb_type, season, f_tmdb_id, f_tvdb_id, f_imdb_id, f_poster_url, f_available = entry
                     resolved_src = str(Path(src_file).resolve())
                     poster = self.db.query(Poster).filter(Poster.file_path == resolved_src).first()
                     if poster:
@@ -1115,6 +1120,11 @@ class PosterRenameService:
                         "year": year,
                         "type": tmdb_type,
                         "season": season,
+                        "tmdb_id": f_tmdb_id,
+                        "tvdb_id": f_tvdb_id,
+                        "imdb_id": f_imdb_id,
+                        "poster_url": f_poster_url,
+                        "available": f_available,
                     })
 
             stats["style_counts"] = style_counts

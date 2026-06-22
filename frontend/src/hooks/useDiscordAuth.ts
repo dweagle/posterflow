@@ -6,6 +6,7 @@ const SUPABASE_PROJECT = 'qwudwkxfqowjtisdlplv'
 const OAUTH_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/discord-oauth`
 const POST_POSTER_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/post-poster`
 const UPDATE_STATUS_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/update-request-status`
+const UPDATE_LIST_ITEM_URL = `https://${SUPABASE_PROJECT}.supabase.co/functions/v1/update-list-item`
 
 interface DiscordAuth {
   token: string
@@ -157,7 +158,7 @@ export function useDiscordAuth() {
   const updateRequestStatus = useCallback(
     async (
       requestId: string,
-      action: 'claim' | 'complete' | 'reject' | 'close',
+      action: 'claim' | 'complete' | 'reject' | 'close' | 'remove' | 'release',
       message?: string,
     ): Promise<{ status: string; claimed_by: string | null; fulfilled_by: string | null }> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
@@ -176,6 +177,30 @@ export function useDiscordAuth() {
     [auth],
   )
 
+  // Community list-item actions — mirrors updateRequestStatus, different endpoint.
+  // 'remove' is publisher-or-owner; 'remove_mine' (no itemId) clears all the
+  // caller's own items; the maker actions require the Maker role.
+  const updateListItem = useCallback(
+    async (
+      itemId: string | null,
+      action: 'claim' | 'complete' | 'release' | 'reject' | 'remove' | 'remove_mine',
+    ): Promise<{ status?: string; claimed_by?: string | null; claimed_by_discord_id?: string | null; removed?: boolean | number }> => {
+      if (!auth?.token) throw new Error('Not connected to Discord')
+
+      const resp = await fetch(UPDATE_LIST_ITEM_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: auth.token, item_id: itemId ?? undefined, action }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        throw new Error((data as { error?: string }).error ?? `Action "${action}" failed`)
+      }
+      return data as { status?: string; claimed_by?: string | null; claimed_by_discord_id?: string | null; removed?: boolean | number }
+    },
+    [auth],
+  )
+
   return {
     isConnected: auth !== null,
     isMaker: auth?.is_maker ?? false,
@@ -189,5 +214,6 @@ export function useDiscordAuth() {
     logout,
     uploadPoster,
     updateRequestStatus,
+    updateListItem,
   }
 }

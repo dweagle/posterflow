@@ -1,0 +1,185 @@
+import { ReactNode } from 'react'
+import { ExternalLink, Upload } from 'lucide-react'
+import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
+import { type PosterAvailability } from '../../api/makerTools'
+
+export type CardMediaType = 'movie' | 'show' | 'season' | 'collection'
+
+// Format a request/list timestamp the same way across both Community tabs.
+function formatCardDate(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    + ' · '
+    + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+// Community poster style (CL2K/MM2K) from a request's style tags or a list item's style_tag.
+export function getStyleLabel(tags: string[] | null | undefined): 'CL2K' | 'MM2K' | null {
+  const t = tags ?? []
+  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
+  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
+  return null
+}
+
+function tmdbLinkFor(mediaType: CardMediaType, tmdbId: number | null): string {
+  if (!tmdbId) return ''
+  if (mediaType === 'movie') return `https://www.themoviedb.org/movie/${tmdbId}`
+  if (mediaType === 'collection') return `https://www.themoviedb.org/collection/${tmdbId}`
+  return `https://www.themoviedb.org/tv/${tmdbId}`
+}
+
+function tvdbLinkFor(tvdbId: number | null): string {
+  return tvdbId ? `https://thetvdb.com/dereferrer/series/${tvdbId}` : ''
+}
+
+type RequestItemCardProps = {
+  id: string
+  posterPath: string | null
+  title: string
+  year: number | null
+  seasonLabels?: string[]
+  mediaType: CardMediaType
+  styleLabel: 'CL2K' | 'MM2K' | null
+  status: string
+  notes?: string | null
+  createdAt: string
+  imdbId: string | null
+  tvdbId: number | null
+  tmdbId: number | null
+  /** View-specific lines (requested/added/claimed/fulfilled) shown under the id links. */
+  infoLines?: ReactNode
+  /** Footer buttons rendered inside `.request-actions` — supplied per view. */
+  actions: ReactNode
+  // Maker tools (shared with the requests card)
+  isMaker: boolean
+  showMakerTools: boolean
+  psdConfig: PsdConfig
+  posterAvailability?: PosterAvailability
+  // Drag/drop poster upload (only wired when isMaker)
+  dragOver: boolean
+  onDragEnter?: () => void
+  onDragLeave?: () => void
+  onDrop?: (e: React.DragEvent) => void
+  dropLabel?: string
+}
+
+/**
+ * Shared community card used by both the Requests and Lists tabs so list cards
+ * are visually identical to request cards, including the maker tooling. Each
+ * view supplies its own `infoLines` and footer `actions`.
+ */
+export default function RequestItemCard({
+  id,
+  posterPath,
+  title,
+  year,
+  seasonLabels,
+  mediaType,
+  styleLabel,
+  status,
+  notes,
+  createdAt,
+  imdbId,
+  tvdbId,
+  tmdbId,
+  infoLines,
+  actions,
+  isMaker,
+  showMakerTools,
+  psdConfig,
+  posterAvailability,
+  dragOver,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
+  dropLabel = 'Drop poster(s) here',
+}: RequestItemCardProps) {
+  const tmdbLink = tmdbLinkFor(mediaType, tmdbId)
+  const tvdbLink = tvdbLinkFor(tvdbId)
+  const tmdbMediaType = mediaType === 'movie' ? 'movie' : mediaType === 'collection' ? 'collection' : 'tv'
+
+  return (
+    <div className="community-request-wrapper">
+      <div
+        className={`community-request-item${dragOver ? ' drag-over' : ''}`}
+        onDragOver={isMaker ? (e) => { e.preventDefault(); onDragEnter?.() } : undefined}
+        onDragLeave={isMaker ? () => onDragLeave?.() : undefined}
+        onDrop={isMaker ? (e) => onDrop?.(e) : undefined}
+      >
+        <div className="request-poster">
+          {posterPath ? (
+            <img src={posterPath} alt="" loading="lazy" />
+          ) : (
+            <div className="request-poster-empty" />
+          )}
+        </div>
+
+        <div className="request-info">
+          <div className="request-title-row">
+            <span className="request-title">{title}</span>
+            {year && <span className="request-year">({year})</span>}
+            {(seasonLabels ?? []).map((lbl, i) => <span key={i} className="request-season">{lbl}</span>)}
+            <span className={`request-type-badge type-${mediaType}`}>{mediaType}</span>
+            {styleLabel && <span className={`request-style-badge style-${styleLabel.toLowerCase()}`}>{styleLabel}</span>}
+            <span className={`request-status-badge status-${status}`}>
+              {status === 'in_progress' ? 'in progress' : status}
+            </span>
+          </div>
+          {(tmdbLink || tvdbLink) && (
+            <div className="request-id-links">
+              {tmdbLink && (
+                <a className="request-tmdb-link" href={tmdbLink} target="_blank" rel="noopener noreferrer" title="Open on TMDB">
+                  <ExternalLink size={11} />
+                  TMDB
+                </a>
+              )}
+              {tvdbLink && (
+                <a className="request-tmdb-link request-tvdb-link" href={tvdbLink} target="_blank" rel="noopener noreferrer" title="Open on TheTVDB">
+                  <ExternalLink size={11} />
+                  TVDB
+                </a>
+              )}
+            </div>
+          )}
+          {infoLines}
+          {notes && <div className="request-notes">{notes}</div>}
+          <div className="request-timestamp">{formatCardDate(createdAt)}</div>
+        </div>
+
+        <div className="request-maker-actions-group">
+          {showMakerTools && tmdbId != null && (
+            <div className="request-maker-tools-panel">
+              <TmdbItemCard
+                item={{
+                  tmdb_id: tmdbId,
+                  media_type: tmdbMediaType,
+                  title,
+                  year: year ? String(year) : '',
+                  overview: '',
+                  poster_url: posterPath || '',
+                  homepage: tmdbLink,
+                  imdb_id: imdbId,
+                  tvdb_id: tvdbId ?? null,
+                }}
+                psdConfig={psdConfig}
+                posterAvailability={posterAvailability}
+                hidePoster
+                hideTitle
+                galleryPortalId={`gallery-portal-${id}`}
+              />
+              <div className={`request-drop-zone${dragOver ? ' drop-active' : ''}`}>
+                <Upload size={22} />
+                <span>{dropLabel}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="request-actions">{actions}</div>
+        </div>
+      </div>
+
+      {/* Gallery panel portals here when Browse Images is open */}
+      <div id={`gallery-portal-${id}`} />
+    </div>
+  )
+}

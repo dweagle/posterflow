@@ -37,7 +37,7 @@ const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close'])
+const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close', 'remove', 'release'])
 
 // ── Token verification (same as post-poster) ───────────────────────────────
 
@@ -111,16 +111,54 @@ interface RequestRow {
   title: string
   requested_by_discord_id: string | null
   claimed_by_discord_id: string | null
+  created_at: string | null
 }
 
 async function fetchRequest(requestId: string): Promise<RequestRow | null> {
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id&limit=1`,
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id,created_at&limit=1`,
     { headers: SB_HEADERS },
   )
   if (!resp.ok) return null
   const rows = await resp.json() as RequestRow[]
   return rows[0] ?? null
+}
+
+// Hard-delete a request row (used by the requester/owner "remove" action).
+async function deleteRequestRow(requestId: string): Promise<boolean> {
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}`,
+    { method: 'DELETE', headers: SB_HEADERS },
+  )
+  if (!resp.ok) {
+    console.error('[update-request-status] DELETE failed:', await resp.text())
+    return false
+  }
+  return true
+}
+
+// Best-effort refund of the requester's per-user daily submission slot. Only
+// meaningful when the request was created on the current UTC day (the counter
+// resets daily). Calls the decrement_user_limit RPC (applied out-of-band).
+async function refundUserLimit(discordUserId: string, createdAt: string | null): Promise<void> {
+  if (!discordUserId || !createdAt) return
+  const created = new Date(createdAt)
+  const now = new Date()
+  const sameUtcDay =
+    created.getUTCFullYear() === now.getUTCFullYear() &&
+    created.getUTCMonth() === now.getUTCMonth() &&
+    created.getUTCDate() === now.getUTCDate()
+  if (!sameUtcDay) return
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/decrement_user_limit`, {
+      method: 'POST',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ p_user_id: discordUserId }),
+    })
+    if (!resp.ok) console.error('[update-request-status] refundUserLimit failed:', await resp.text())
+  } catch (e) {
+    console.error('[update-request-status] refundUserLimit error:', e)
+  }
 }
 
 async function updateRequest(
@@ -194,12 +232,14 @@ async function updateStarterMessage(
   const originalEmbed: Record<string, unknown> = msg.embeds?.[0] ?? {}
 
   const statusLabel =
-    action === 'claim'  ? `🎨 Claimed by ${makerName}` :
-    action === 'reject' ? `❌ Rejected by ${makerName}` :
+    action === 'claim'   ? `🎨 Claimed by ${makerName}` :
+    action === 'reject'  ? `❌ Rejected by ${makerName}` :
+    action === 'release' ? `🟢 Open for claims` :
     `✅ Completed by ${makerName}`
   const newColor =
-    action === 'claim'  ? 0xffb74d :
-    action === 'reject' ? 0x9e9e9e :
+    action === 'claim'   ? 0xffb74d :
+    action === 'reject'  ? 0x9e9e9e :
+    action === 'release' ? 0x64b5f6 :
     0x4caf50
 
   const updatedEmbed = {
@@ -266,7 +306,12 @@ Deno.serve(async (req) => {
     return json({ error: 'Missing required fields: token, request_id, action' }, 400)
   }
   if (!VALID_ACTIONS.has(action)) {
-    return json({ error: 'Invalid action — must be claim, complete, reject, or close' }, 400)
+    return json({ error: 'Invalid action — must be claim, complete, reject, close, remove, or release' }, 400)
+  }
+  // request_id is interpolated into PostgREST query strings, so require a strict
+  // UUID — this blocks query-parameter injection via crafted ids.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request_id)) {
+    return json({ error: 'Invalid request_id' }, 400)
   }
 
   // ── Step 1: Verify token signature and expiry ──────────────────────────────
@@ -315,6 +360,109 @@ Deno.serve(async (req) => {
     }
 
     return json({ ok: true })
+  }
+
+  // ── Remove action: requester (or server owner) deletes the request ────────
+  if (action === 'remove') {
+    const row = await fetchRequest(request_id)
+    if (!row) return json({ error: 'Request not found' }, 404)
+
+    const isRequester = maker.discord_user_id === row.requested_by_discord_id
+    let allowed = isRequester
+    if (!allowed) {
+      const ownerId = await getGuildOwnerId()
+      allowed = maker.discord_user_id === ownerId
+    }
+    if (!allowed) {
+      return json({ error: 'Only the requester or server owner can remove this request' }, 403)
+    }
+    if (row.status === 'fulfilled') {
+      return json({ error: 'A completed request can no longer be removed' }, 409)
+    }
+
+    // Delete first — if this fails (e.g. missing privilege) we bail *before*
+    // touching Discord, so we never archive a thread for a request that's still here.
+    const deleted = await deleteRequestRow(request_id)
+    if (!deleted) return json({ error: 'Failed to remove the request' }, 500)
+
+    // Refund the requester's per-user daily slot (only if removed the same UTC day).
+    await refundUserLimit(row.requested_by_discord_id ?? '', row.created_at)
+
+    // Lock + archive the Discord thread with a note (we keep the thread, like Archive).
+    if (row.discord_message_id) {
+      const channelId = row.discord_message_id
+      const bgTask = (async () => {
+        await postThreadMessage(
+          channelId,
+          `🗑️ Request removed by ${maker.discord_username}${isRequester ? ' (requester)' : ' (moderator)'}.`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        const lockResp = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bot ${BOT_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locked: true, archived: true }),
+        })
+        if (!lockResp.ok) console.error('[update-request-status] remove archive failed:', await lockResp.text())
+      })().catch(console.error)
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        await bgTask
+      }
+    }
+
+    return json({ ok: true, removed: true })
+  }
+
+  // ── Release action: the claiming maker (or owner) un-claims it ────────────
+  if (action === 'release') {
+    const row = await fetchRequest(request_id)
+    if (!row) return json({ error: 'Request not found' }, 404)
+    if (row.status !== 'in_progress') {
+      return json({ error: 'Only a claimed (in-progress) request can be released' }, 409)
+    }
+    const isClaimer = maker.discord_user_id === row.claimed_by_discord_id
+    let allowed = isClaimer
+    if (!allowed) {
+      const ownerId = await getGuildOwnerId()
+      allowed = maker.discord_user_id === ownerId
+    }
+    if (!allowed) {
+      return json({ error: 'Only the maker who claimed this request can release it' }, 403)
+    }
+
+    const released = await updateRequest(
+      request_id,
+      { status: 'pending', claimed_by: null, claimed_by_discord_id: null },
+      'in_progress',
+    )
+    if (!released) return json({ error: 'This request was just updated — please refresh' }, 409)
+
+    // Revert the Discord post to open: restore the buttons and post a note.
+    if (row.discord_message_id) {
+      const channelId = row.discord_message_id
+      const freshComponents = [{
+        type: 1,
+        components: [
+          { type: 2, style: 2, label: 'Claim Poster', custom_id: `claim:${request_id}`, emoji: { name: '🎨' } },
+          { type: 2, style: 3, label: 'Mark Complete', custom_id: `complete:${request_id}:`, emoji: { name: '✅' } },
+          { type: 2, style: 4, label: '✕ Reject', custom_id: `reject:${request_id}` },
+        ],
+      }]
+      const bgTask = Promise.all([
+        postThreadMessage(channelId, `🟢 **Released by ${maker.discord_username}** — open for claims again.`),
+        updateStarterMessage(channelId, 'release', maker.discord_username, freshComponents),
+      ]).catch(console.error)
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        await bgTask
+      }
+    }
+
+    return json({ ok: true, status: 'pending', claimed_by: null, claimed_by_discord_id: null })
   }
 
   // ── Step 2: Re-check Discord role live (maker actions only) ───────────────

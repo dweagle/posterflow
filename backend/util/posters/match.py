@@ -8,6 +8,31 @@ from util.posters.index import search_matches
 from util.data.normalization import normalize_titles
 
 
+def media_source_refs(media: Dict[str, Any]) -> Dict[str, Any]:
+    """Authoritative external IDs + poster carried from the Plex/*arr source.
+
+    Surfaced on matched/unmatched items so a published community card uses real
+    IDs (and a poster preview) instead of guessing via TMDB title search — never
+    from the poster filename. Series tmdb lives on tmdb_id_ref (kept off the
+    matcher), so fall back to it here for display.
+    """
+    mtype = media.get("type")
+    if mtype == "movies":
+        available = bool(media.get("has_file", False))
+    elif mtype == "series":
+        available = bool(media.get("has_episodes", False))
+    else:
+        available = None  # collections (Plex) have no arr file concept
+    return {
+        "tmdb_id": media.get("tmdb_id") or media.get("tmdb_id_ref"),
+        "tvdb_id": media.get("tvdb_id"),
+        "imdb_id": media.get("imdb_id"),
+        "poster_url": media.get("poster_url"),
+        # False = tracked in Sonarr/Radarr but not downloaded ("Missing in Arr").
+        "available": available,
+    }
+
+
 def compare_strings(string1: str, string2: str) -> bool:
     """Loosely compare two strings by removing non-alphanumeric characters and comparing lowercase."""
     string1 = re.sub(r"\W+", "", string1)
@@ -350,6 +375,9 @@ def match_assets_to_media(
                                 else None
                             ),
                             "asset_ref": search_asset,
+                            # Authoritative refs from the Plex/*arr record (IDs +
+                            # poster) so style-fallback publishing matches exactly.
+                            **media_source_refs(media),
                         }
                     )
             

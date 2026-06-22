@@ -18,3 +18,9 @@ verify_jwt = false
 
 [functions.update-request-status]
 verify_jwt = false
+
+[functions.submit-list-items]
+verify_jwt = false
+
+[functions.update-list-item]
+verify_jwt = false

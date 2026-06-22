@@ -110,6 +110,11 @@ Deno.serve(async (req) => {
   if (!token || !requestId || files.length === 0) {
     return json({ error: 'Missing required fields: token, request_id, file' }, 400)
   }
+  // requestId is interpolated into a PostgREST query string, so require a strict
+  // UUID — this blocks query-parameter injection via crafted ids.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+    return json({ error: 'Invalid request_id' }, 400)
+  }
   if (files.length > MAX_FILES) {
     return json({ error: `Too many files — Discord allows a maximum of ${MAX_FILES} images per message` }, 400)
   }

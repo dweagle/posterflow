@@ -1,9 +1,14 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, Search, Star, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, ListPlus, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { useToast } from '../Toast'
+import { publishToCommunityLists } from './publishToCommunityLists'
+import { useDiscordAuth } from '../../hooks/useDiscordAuth'
+import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import CommunityStatusBadge from './CommunityStatusBadge'
+import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
@@ -21,6 +26,12 @@ interface NormalizedItem {
   missingSeasonsNumbers?: number[]
   tmdbType?: TmdbSearchType
   category?: string
+  // Authoritative refs carried from Plex/*arr (when available)
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  poster_url?: string | null
+  available?: boolean | null
 }
 
 type UnmatchedItemsModalProps = {
@@ -53,6 +64,17 @@ function getModalTitle(modalType: UnmatchedModalType): string {
   return ''
 }
 
+// Authoritative refs (IDs + poster) carried from Plex/*arr, normalized to null.
+function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null }) {
+  return {
+    tmdb_id: item.tmdb_id ?? null,
+    tvdb_id: item.tvdb_id ?? null,
+    imdb_id: item.imdb_id ?? null,
+    poster_url: item.poster_url ?? null,
+    available: item.available ?? null,
+  }
+}
+
 function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedStats): NormalizedItem[] {
   if (modalType === 'movies') {
     return (unmatchedStats.unmatched.movies ?? []).map((item, i) => ({
@@ -61,12 +83,13 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
       origIdx: i,
       type: 'movie',
       seasonCount: 0,
+      ...srcRefs(item),
     }))
   }
   if (modalType === 'series') {
     return (unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
-      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0 }))
+      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, ...srcRefs(item) }))
   }
   if (modalType === 'seasons') {
     return (unmatchedStats.unmatched.series ?? [])
@@ -78,6 +101,7 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
         type: 'show',
         seasonCount: item.missing_seasons.length,
         missingSeasonsNumbers: item.missing_seasons,
+        ...srcRefs(item),
       }))
   }
   if (modalType === 'collections') {
@@ -87,17 +111,18 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
       origIdx: i,
       type: 'collection',
       seasonCount: 0,
+      ...srcRefs(item),
     }))
   }
   if (modalType === 'all') {
     const result: NormalizedItem[] = []
     ;(unmatchedStats.unmatched.movies ?? []).forEach((item, i) => {
-      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'movie', seasonCount: 0, tmdbType: 'movie', category: 'Movie' })
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'movie', seasonCount: 0, tmdbType: 'movie', category: 'Movie', ...srcRefs(item) })
     })
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
       .forEach((item, i) => {
-        result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, tmdbType: 'show', category: 'Series' })
+        result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, tmdbType: 'show', category: 'Series', ...srcRefs(item) })
       })
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_seasons.length > 0)
@@ -111,14 +136,38 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
           missingSeasonsNumbers: item.missing_seasons,
           tmdbType: 'show',
           category: 'Season',
+          ...srcRefs(item),
         })
       })
     ;(unmatchedStats.unmatched.collections ?? []).forEach((item, i) => {
-      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'collection', seasonCount: 0, tmdbType: 'collection', category: 'Collection' })
+      result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'collection', seasonCount: 0, tmdbType: 'collection', category: 'Collection', ...srcRefs(item) })
     })
     return result
   }
   return []
+}
+
+// Map an unmatched row to a community list item, carrying the authoritative
+// Plex/*arr refs (IDs + poster) when present so the card matches exactly.
+// Season rows use the same encoding as the Poster Style modal — media_type
+// 'season' + raw "Seasons: 1, 2, 3" notes — so ListsView renders per-season
+// badges identically regardless of where the item was published.
+function toListInput(item: NormalizedItem): ListItemInput {
+  const cleanTitle = item.year ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : item.title
+  const seasons = [...(item.missingSeasonsNumbers ?? [])].sort((a, b) => a - b)
+  const isSeasonItem = seasons.length > 0
+  return {
+    media_type: isSeasonItem ? 'season' : item.type,
+    title: cleanTitle,
+    year: item.year,
+    season_number: null,
+    tmdb_id: item.tmdb_id ?? null,
+    tvdb_id: item.tvdb_id ?? null,
+    imdb_id: item.imdb_id ?? null,
+    poster_path: item.poster_url ?? null,
+    notes: isSeasonItem ? `Seasons: ${seasons.join(', ')}` : null,
+    source: 'unmatched',
+  }
 }
 
 function UnmatchedItemsModal({
@@ -131,6 +180,9 @@ function UnmatchedItemsModal({
 }: UnmatchedItemsModalProps) {
   const { showToast } = useToast()
   const navigate = useNavigate()
+  const { isConnected, token, login } = useDiscordAuth()
+  const { getStatus: getClaimStatus } = useCommunityClaimStatus()
+  const [publishing, setPublishing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [prefs, setPrefs] = useSortPrefs('unmatchedSort')
   const [candidatesMap, setCandidatesMap] = useState<Record<string, TmdbCandidate[]>>({})
@@ -292,6 +344,19 @@ function UnmatchedItemsModal({
     : searchedItems
   const sortedItems = sortItems(groupFilteredItems, prefs)
 
+  // Publish the current (filtered) list to the community Lists tab for makers to work from.
+  const handleAddToLists = async () => {
+    if (!isConnected || !token) { login(); return }
+    const inputs = sortedItems.map(toListInput)
+    if (!inputs.length) return
+    setPublishing(true)
+    try {
+      await publishToCommunityLists(inputs, token, showToast)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   // Only cap the rendered count when not searching (search results show in full).
   const displayItems = lowerQuery ? sortedItems : sortedItems.slice(0, modalDisplayLimit)
   const hasMore = !lowerQuery && sortedItems.length > modalDisplayLimit
@@ -319,6 +384,8 @@ function UnmatchedItemsModal({
                 {item.category}
               </span>
             )}
+            <CommunityStatusBadge status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: item.type, title: item.title, year: item.year })} />
+            <ArrMissingBadge available={item.available} />
           </div>
           <div className="unmatched-item-actions">
           <button
@@ -505,6 +572,15 @@ function UnmatchedItemsModal({
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>Close</button>
+          <button
+            className="btn-secondary"
+            onClick={handleAddToLists}
+            disabled={publishing || sortedItems.length === 0}
+            title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
+          >
+            {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
+            Add to Lists
+          </button>
           {modalType !== 'all' && (
             <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
               <Download size={18} />

@@ -3138,7 +3138,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .unmatched-card .card-list {
   margin-top: 0.3rem;
   flex: 1;
-  max-height: 250px;
+  /* Fits the 5-item preview cap + the "+N more" line + sticky header without a
+     scrollbar; taller content (e.g. multi-line season rows) still scrolls. */
+  max-height: 300px;
   overflow-y: auto;
   padding-right: 0.5rem;
 }
@@ -3146,10 +3148,15 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .unmatched-card .list-header {
   font-size: 0.875rem;
   color: #888;
-  margin-bottom: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  /* Stay pinned at the top of the scrolling list instead of scrolling away. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #1e1e1e;
+  padding-bottom: 0.5rem;
 }
 
 .unmatched-card .list-item {
@@ -3163,14 +3170,23 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   font-size: 0.9rem;
 }
 
-.unmatched-card .list-item span:first-child {
+.unmatched-card .list-item > span:first-child {
   color: #E8ECEF;
-  flex: 1;
+  /* Direct child only — must not bleed into the first badge inside
+     .list-item-badges (that was recoloring the M white when no checkmark
+     preceded it). Take only the title's width (truncating if long) so the
+     year sits right next to it rather than being pushed across the row. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .unmatched-card .item-year {
   color: #888;
   font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
 .unmatched-card .item-instance {
@@ -3179,6 +3195,16 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   padding: 0.125rem 0.5rem;
   background-color: rgba(91, 137, 196, 0.15);
   border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* Badge cluster (M, claim, instance) pinned to the right of a row. */
+.unmatched-card .list-item-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .unmatched-card .list-item-group {
@@ -3203,7 +3229,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   min-width: 0;
 }
 
-.unmatched-card .list-item-title span:first-child {
+.unmatched-card .list-item-title-main > span:first-child {
   color: #E8ECEF;
   font-weight: 500;
   font-size: 0.85rem;
@@ -3219,11 +3245,6 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border-left: 2px solid #ff6b6b;
   margin-bottom: 0;
   display: inline-block;
-}
-
-.unmatched-card .list-item-group .item-instance {
-  padding: 0.1rem 0.4rem;
-  font-size: 0.7rem;
 }
 
 .unmatched-card .list-more {
@@ -4769,3 +4790,52 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   margin-top: 0.3rem;
 }
 
+
+/* Community claim/fulfillment indicator on unmatched + poster-style items.
+   Tells the user an item is already being worked on (orange) or done (green),
+   so they don't request/list it again. */
+.community-claim-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.community-claim-in-progress {
+  background: rgba(255, 183, 77, 0.14);
+  color: #ffb74d;
+}
+.community-claim-fulfilled {
+  background: rgba(76, 175, 80, 0.14);
+  color: #81c784;
+}
+/* Icon-only variant (compact rows): just the checkmark + hover hint. */
+.community-claim-icon-only {
+  /* Match the M badge's fixed square so the indicator cluster is uniform. */
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  cursor: help;
+}
+
+/* "Missing in Arr" — red M badge (tracked in *arr but not downloaded). */
+.arr-missing-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: rgba(244, 67, 54, 0.18);
+  color: #ff5252;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+}

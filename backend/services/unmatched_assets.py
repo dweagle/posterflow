@@ -14,7 +14,7 @@ from models.setting import get_setting, upsert_setting
 from util.constants import season_pattern
 from util.posters.assets import get_assets_files
 from util.posters.index import search_matches
-from util.posters.match import collection_title_variants, is_match
+from util.posters.match import collection_title_variants, is_match, media_source_refs
 
 
 class UnmatchedAssetsService:
@@ -511,6 +511,7 @@ class UnmatchedAssetsService:
                                         "missing_seasons": missing_seasons,
                                         "missing_main_poster": not has_main_poster,
                                         "instance": media.get("instance", "Unknown"),
+                                        **media_source_refs(media),
                                     })
                                 else:
                                     match_stats[media_type]["matched"] += 1
@@ -589,6 +590,7 @@ class UnmatchedAssetsService:
                                                 "missing_seasons": missing_seasons,
                                                 "missing_main_poster": not has_main_poster,
                                                 "instance": media.get("instance", "Unknown"),
+                                                **media_source_refs(media),
                                             })
                                         else:
                                             match_stats[media_type]["matched"] += 1
@@ -619,12 +621,14 @@ class UnmatchedAssetsService:
                                 ],
                                 "missing_main_poster": True,
                                 "instance": media.get("instance", "Unknown"),
+                                **media_source_refs(media),
                             })
                         else:
                             unmatched[media_type].append({
                                 "title": media.get("title"),
                                 "year": media.get("year"),
                                 "instance": media.get("instance", "Unknown"),
+                                **media_source_refs(media),
                             })
                 
                 # Log summary for this media type

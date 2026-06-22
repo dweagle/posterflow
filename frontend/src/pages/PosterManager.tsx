@@ -12,6 +12,7 @@ import PosterManagerTabs, { PosterManagerTab } from '../components/poster-manage
 import UnmatchedItemsModal, { UnmatchedModalType } from '../components/poster-manager/UnmatchedItemsModal'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import PriorityTab from '../components/poster-manager/PriorityTab'
+import { CommunityClaimStatusProvider } from '../hooks/useCommunityClaimStatus'
 import FlowTab from '../components/poster-manager/FlowTab'
 import UnmatchedTab from '../components/poster-manager/UnmatchedTab'
 import RenamerTab from '../components/poster-manager/RenamerTab'
@@ -390,6 +391,7 @@ function PosterManager() {
   })
 
   return (
+    <CommunityClaimStatusProvider>
     <div className="page-container poster-manager">
       <div className="poster-manager-header">
         <h1>Poster Manager</h1>
@@ -581,6 +583,7 @@ function PosterManager() {
         onDiscard={handleDiscardChangesWithReset}
       />
     </div>
+    </CommunityClaimStatusProvider>
   )
 }
 

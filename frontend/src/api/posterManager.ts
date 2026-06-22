@@ -39,9 +39,9 @@ export interface UnmatchedStats {
     }
   }
   unmatched: {
-    movies: Array<{ title: string; year: number; instance: string }>
-    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string }>
-    collections: Array<{ title: string; year: number; instance: string }>
+    movies: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null }>
+    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null }>
+    collections: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null }>
   }
   last_run: string | null
 }
@@ -257,6 +257,11 @@ export interface FallbackItem {
   year: number | null
   type: 'movie' | 'show' | 'collection'
   season?: number | null
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  poster_url?: string | null
+  available?: boolean | null
 }
 
 export interface PosterStyleStats {

@@ -3,6 +3,58 @@
   margin-bottom: 1.5rem;
 }
 
+/* ── Page tabs (Requests | Lists) — matches the underline tab bar used on
+   other pages (e.g. Maker Tools / Poster Manager) ───────────────────────── */
+.community-page-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #333;
+  margin-bottom: 1.5rem;
+}
+
+.community-page-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #888;
+  padding: 0.5rem 0.25rem;
+  margin-bottom: -2px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.community-page-tabs button:hover {
+  color: #ccc;
+}
+
+.community-page-tabs button.active {
+  color: #64b5f6;
+  border-bottom-color: #64b5f6;
+}
+
+/* Destructive "Remove My Items" button on the Lists toolbar */
+.community-clear-mine-btn {
+  color: #ef9a9a;
+  border-color: rgba(244, 67, 54, 0.3);
+}
+.community-clear-mine-btn:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.12);
+  border-color: rgba(244, 67, 54, 0.5);
+  color: #ff8a80;
+}
+
+/* "Load more" pager at the bottom of the lists view */
+.community-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
 /* ── Close-thread confirm modal ─────────────────────────────────────────── */
 .close-confirm-modal {
   max-width: 480px;
@@ -58,15 +110,28 @@
   color: #ccc;
 }
 
+/* Heading row: title on the left, the rate-limit notice on the right so it
+   doesn't add/remove a row (and shift the page) when switching tabs. */
+.community-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
 .community-rate-limit-notice {
   background: rgba(255, 183, 77, 0.08);
   border: 1px solid rgba(255, 183, 77, 0.3);
   border-radius: 6px;
-  padding: 0.6rem 0.85rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.78rem;
   color: #ffb74d;
-  margin-bottom: 1.5rem;
-  line-height: 1.5;
+  line-height: 1.4;
+  /* Size to its text rather than stretching across the row. */
+  width: fit-content;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .community-rate-limit-notice strong {
@@ -629,7 +694,8 @@
   text-transform: capitalize;
 }
 
-.request-status-badge.status-pending {
+.request-status-badge.status-pending,
+.request-status-badge.status-open {
   background: rgba(255, 183, 77, 0.12);
   color: #ffb74d;
 }
@@ -939,6 +1005,43 @@
   cursor: pointer;
   flex-shrink: 1;
   min-width: 0;
+}
+
+/* Keep the IDarr toggle + drive picker grouped on the right so the toggle
+   doesn't drift to the center when the picker appears. */
+.community-list-header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* IDarr destination picker shown next to the toggle when the maker has
+   multiple sync targets/scopes. */
+.maker-idarr-target-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #aaa;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.maker-idarr-target-picker select {
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.5rem;
+  max-width: 200px;
+  cursor: pointer;
+}
+/* Native option menu — explicit dark bg + light text so it's readable
+   regardless of the OS default menu background. */
+.maker-idarr-target-picker select option {
+  background: #2a2a2a;
+  color: #fff;
 }
 
 .maker-idarr-toggle-info-wrap {

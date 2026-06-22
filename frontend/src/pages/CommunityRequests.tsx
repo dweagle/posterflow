@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
-import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings } from '../api/client'
+import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
-import TmdbItemCard, { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
+import { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
+import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
+import ListsView from '../components/community/ListsView'
+import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
@@ -14,6 +17,9 @@ import './CommunityRequests.css'
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type StatusFilter = 'active' | 'all' | 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
 type SortOrder = 'newest' | 'oldest'
+type PageTab = 'requests' | 'lists'
+
+const PAGE_TAB_STORAGE_KEY = 'posterflow.community.activeTab'
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -22,33 +28,6 @@ const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'season', label: 'Seasons' },
   { key: 'collection', label: 'Collections' },
 ]
-
-function getTmdbLink(req: CommunityRequest): string {
-  if (!req.tmdb_id) return ''
-  if (req.media_type === 'movie') return `https://www.themoviedb.org/movie/${req.tmdb_id}`
-  if (req.media_type === 'collection') return `https://www.themoviedb.org/collection/${req.tmdb_id}`
-  return `https://www.themoviedb.org/tv/${req.tmdb_id}`
-}
-
-function getTvdbLink(req: CommunityRequest): string {
-  if (!req.tvdb_id) return ''
-  return `https://thetvdb.com/dereferrer/series/${req.tvdb_id}`
-}
-
-function formatRequestDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-    + ' · '
-    + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
-
-// Derive the community poster style (CL2K/MM2K) from a request's style tags, if present.
-function getStyleLabel(req: CommunityRequest): 'CL2K' | 'MM2K' | null {
-  const tags = req.style_tags ?? []
-  if (tags.includes('CL2K Style')) return 'CL2K'
-  if (tags.includes('MM2K Style')) return 'MM2K'
-  return null
-}
 
 // Stable fingerprint of a dropped file set, used to skip a duplicate IDarr add
 // when the same files are re-submitted (e.g. via the Retry button).
@@ -96,20 +75,29 @@ export default function CommunityRequests() {
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
-  const [idarrQuickAddEnabled, setIdarrQuickAddEnabled] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
+  // Top-level page tab: the requests list or the published worklists.
+  const [pageTab, setPageTab] = useState<PageTab>(() => {
+    const saved = localStorage.getItem(PAGE_TAB_STORAGE_KEY)
+    return saved === 'lists' ? 'lists' : 'requests'
+  })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
   // requestId → signature of the file set already handed to IDarr, so a Retry
   // of the same files doesn't add them to IDarr twice. Cleared when the card resets.
   const idarrSentRef = useRef<Map<string, string>>(new Map())
+  // Shared "Image Drop also adds to IDarr" behaviour (also used by the Lists tab).
+  const { enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
+
+  useEffect(() => {
+    localStorage.setItem(PAGE_TAB_STORAGE_KEY, pageTab)
+  }, [pageTab])
 
   useEffect(() => {
     getSettings().then((settings) => {
       setPsdConfig(derivePsdConfig(settings))
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
-      setIdarrQuickAddEnabled((settings.idarr_quick_add_community || '').trim().toLowerCase() === 'true')
     }).catch(() => {})
   }, [])
 
@@ -135,33 +123,6 @@ export default function CommunityRequests() {
   }, [])
 
   const DISCORD_MAX_FILES = 10
-
-  const doIdarrUpload = useCallback(async (files: File[]) => {
-    try {
-      const config = await getMakerIdarrConfig()
-      const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
-      if (!syncTargets.length) return
-
-      const storedKey = 'posterflow.idarr.selectedSyncTarget'
-      const storedValue = localStorage.getItem(storedKey)
-      let resolvedIndex = -1
-      if (storedValue) {
-        resolvedIndex = syncTargets.findIndex((t) => {
-          const scopeToken = String(t.scope_token || '').trim()
-          if (scopeToken) return `scope:${scopeToken}` === storedValue
-          return `${String(t.personal_drive_id || '')}::${String(t.source_dir || '')}::${String(t.label || '')}` === storedValue
-        })
-      }
-      const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
-
-      const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
-      if (config.auto_rename_quick_add && response.uploaded_count > 0) {
-        await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
-      }
-    } catch {
-      // Silently ignore — Discord upload was the primary action
-    }
-  }, [])
 
   // Post one batch to Discord, auto-retrying transient failures (rate limits,
   // network blips) with a short backoff before surfacing the error to the user.
@@ -232,25 +193,30 @@ export default function CommunityRequests() {
     doUpload(requestId, allFiles)
   }, [doUpload])
 
-  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject', message?: string) => {
+  const handleStatusAction = useCallback(async (requestId: string, action: 'claim' | 'complete' | 'reject' | 'release' | 'remove', message?: string) => {
     setActionStates((prev) => new Map(prev).set(requestId, 'loading'))
     try {
       const result = await updateRequestStatus(requestId, action, message)
-      setRequests((prev) =>
-        prev.map((r) =>
-          r.id === requestId
-            ? {
-                ...r,
-                status: result.status as CommunityRequest['status'],
-                claimed_by: result.claimed_by,
-                // The API response omits claimed_by_discord_id; on a claim the claimer
-                // is the current user, so set it so the Complete button shows immediately.
-                claimed_by_discord_id: action === 'claim' ? discordUserId : r.claimed_by_discord_id,
-                fulfilled_by: result.fulfilled_by,
-              }
-            : r
+      if (action === 'remove') {
+        // Removed entirely — drop it from the list.
+        setRequests((prev) => prev.filter((r) => r.id !== requestId))
+      } else {
+        setRequests((prev) =>
+          prev.map((r) =>
+            r.id === requestId
+              ? {
+                  ...r,
+                  status: result.status as CommunityRequest['status'],
+                  claimed_by: result.claimed_by,
+                  // The API omits claimed_by_discord_id; on claim the claimer is the
+                  // current user, on release it's cleared, otherwise leave it.
+                  claimed_by_discord_id: action === 'claim' ? discordUserId : action === 'release' ? null : r.claimed_by_discord_id,
+                  fulfilled_by: result.fulfilled_by,
+                }
+              : r
+          )
         )
-      )
+      }
       setActionStates((prev) => {
         const next = new Map(prev)
         next.delete(requestId)
@@ -336,15 +302,18 @@ export default function CommunityRequests() {
     <>
     <div className="page-container community-requests">
       <div className="community-header">
-        <h1>Community Requests</h1>
+        <div className="community-header-top">
+          <h1>Community Requests</h1>
+          {pageTab === 'requests' && (
+            <div className="community-rate-limit-notice">
+              Limited to <strong>5 new requests per day</strong>.
+            </div>
+          )}
+        </div>
         <p>
           Poster makers use this list to prioritize their work. Submit new requests using the{' '}
           <strong>New Request</strong> button or from the <strong>Unmatched Assets</strong> tab in Poster Manager.
         </p>
-      </div>
-
-      <div className="community-rate-limit-notice">
-        Limited to <strong>5 new requests per day</strong>.
       </div>
 
       {/* Maker connect bar */}
@@ -408,6 +377,20 @@ export default function CommunityRequests() {
         )}
       </div>
 
+      {/* Page tabs — Requests vs published Lists */}
+      <div className="community-page-tabs">
+        <button className={pageTab === 'requests' ? 'active' : ''} onClick={() => setPageTab('requests')}>
+          <MessageSquare size={16} />
+          Requests
+        </button>
+        <button className={pageTab === 'lists' ? 'active' : ''} onClick={() => setPageTab('lists')}>
+          <ListChecks size={16} />
+          Lists
+        </button>
+      </div>
+
+      {pageTab === 'requests' && (
+      <>
       {/* Hidden file input shared across all upload buttons */}
       <input
         ref={fileInputRef}
@@ -501,6 +484,7 @@ export default function CommunityRequests() {
             <p className="community-count">
               {visibleRequests.length} request{visibleRequests.length !== 1 ? 's' : ''}
             </p>
+            <div className="community-list-header-controls">
             {isMaker && isConnected && (
               <label className="maker-idarr-toggle-label">
                 <span>Image Drop also adds to IDarr</span>
@@ -514,147 +498,68 @@ export default function CommunityRequests() {
                   <input
                     type="checkbox"
                     checked={idarrQuickAddEnabled}
-                    onChange={(e) => {
-                      const next = e.target.checked
-                      setIdarrQuickAddEnabled(next)
-                      void saveSettings({ idarr_quick_add_community: String(next) })
-                    }}
+                    onChange={(e) => setIdarrQuickAddEnabled(e.target.checked)}
                   />
                   <span className="idarr-toggle-slider" />
                 </span>
               </label>
             )}
+            {isMaker && isConnected && idarrQuickAddEnabled && idarrTargets.length > 1 && (
+              <label className="maker-idarr-target-picker">
+                <span>IDarr drive</span>
+                <select value={idarrTarget} onChange={(e) => setIdarrTarget(e.target.value)}>
+                  {idarrTargets.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            </div>
           </div>
           {visibleRequests.map((req) => {
-            const tmdbLink = getTmdbLink(req)
-            const tvdbLink = getTvdbLink(req)
             const showMakerTools = isMaker && isConnected && req.tmdb_id != null
-            return (
-              <div key={req.id} className="community-request-wrapper">
-              <div
-                className={`community-request-item${dragOverId === req.id ? ' drag-over' : ''}`}
-                onDragOver={isMaker ? (e) => { e.preventDefault(); setDragOverId(req.id) } : undefined}
-                onDragLeave={isMaker ? () => setDragOverId(null) : undefined}
-                onDrop={isMaker ? (e) => handleDrop(e, req.id) : undefined}
-              >
-                <div className="request-poster">
-                  {req.poster_path ? (
-                    <img src={req.poster_path} alt="" loading="lazy" />
-                  ) : (
-                    <div className="request-poster-empty" />
-                  )}
-                </div>
-
-                <div className="request-info">
-                  <div className="request-title-row">
-                    <span className="request-title">{req.title}</span>
-                    {req.year && <span className="request-year">({req.year})</span>}
-                    {(() => {
-                      const lbl = getSeasonLabel(req)
-                      return lbl ? <span className="request-season">{lbl}</span> : null
-                    })()}
-                    <span className={`request-type-badge type-${req.media_type}`}>{req.media_type}</span>
-                    {(() => {
-                      const style = getStyleLabel(req)
-                      return style ? <span className={`request-style-badge style-${style.toLowerCase()}`}>{style}</span> : null
-                    })()}
-                    <span className={`request-status-badge status-${req.status}`}>
-                      {req.status === 'in_progress' ? 'in progress' : req.status}
-                    </span>
+            const infoLines = (
+              <>
+                {req.requested_by && (
+                  <div className="request-maker-info request-maker-requested">
+                    👤 Requested by <strong>{req.requested_by}</strong>
                   </div>
-                  {(tmdbLink || tvdbLink) && (
-                    <div className="request-id-links">
-                      {tmdbLink && (
-                        <a className="request-tmdb-link" href={tmdbLink} target="_blank" rel="noopener noreferrer" title="Open on TMDB">
-                          <ExternalLink size={11} />
-                          TMDB
-                        </a>
-                      )}
-                      {tvdbLink && (
-                        <a className="request-tmdb-link request-tvdb-link" href={tvdbLink} target="_blank" rel="noopener noreferrer" title="Open on TheTVDB">
-                          <ExternalLink size={11} />
-                          TVDB
-                        </a>
-                      )}
-                    </div>
-                  )}
-                  {req.requested_by && (
-                    <div className="request-maker-info request-maker-requested">
-                      👤 Requested by <strong>{req.requested_by}</strong>
-                    </div>
-                  )}
-                  {req.status === 'in_progress' && req.claimed_by && (
-                    <div className="request-maker-info request-maker-claimed">
-                      🎨 Claimed by <strong>{req.claimed_by}</strong>
-                    </div>
-                  )}
-                  {req.status === 'fulfilled' && req.fulfilled_by && (
-                    <div className="request-maker-info request-maker-fulfilled">
-                      ✅ Completed by <strong>{req.fulfilled_by}</strong>
-                    </div>
-                  )}
-                  {req.notes && (
-                    <div className="request-notes">{req.notes}</div>
-                  )}
-                  <div className="request-timestamp">{formatRequestDate(req.created_at)}</div>
-                </div>
-
-                <div className="request-maker-actions-group">
-                  {showMakerTools && (
-                    <div className="request-maker-tools-panel">
-                      <TmdbItemCard
-                        item={{
-                          tmdb_id: req.tmdb_id!,
-                          media_type: req.media_type === 'movie' ? 'movie' : req.media_type === 'collection' ? 'collection' : 'tv',
-                          title: req.title,
-                          year: req.year ? String(req.year) : '',
-                          overview: '',
-                          poster_url: req.poster_path || '',
-                          homepage: req.tmdb_id != null
-                            ? req.media_type === 'movie'
-                              ? `https://www.themoviedb.org/movie/${req.tmdb_id}`
-                              : req.media_type === 'collection'
-                                ? `https://www.themoviedb.org/collection/${req.tmdb_id}`
-                                : `https://www.themoviedb.org/tv/${req.tmdb_id}`
-                            : '',
-                          imdb_id: req.imdb_id,
-                          tvdb_id: req.tvdb_id ?? null,
-                        }}
-                        psdConfig={psdConfig}
-                        posterAvailability={posterAvailability[req.tmdb_id!]}
-                        hidePoster
-                        hideTitle
-                        galleryPortalId={`gallery-portal-${req.id}`}
-                      />
-                      <div className={`request-drop-zone${dragOverId === req.id ? ' drop-active' : ''}`}>
-                        <Upload size={22} />
-                        <span>Drop poster(s) here</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="request-actions">
-                  {req.discord_thread_url && (
-                    <a
-                      className="request-tmdb-link request-discord-link"
-                      href={req.discord_thread_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="View Discord thread"
-                    >
-                      <ExternalLink size={11} />
-                      Discord
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className="request-maker-btn"
-                    title="Search in Maker Tools"
-                    onClick={() => navigate('/maker-tools', { state: { tmdbSearch: req.year ? `${req.title} ${req.year}` : req.title } })}
+                )}
+                {req.status === 'in_progress' && req.claimed_by && (
+                  <div className="request-maker-info request-maker-claimed">
+                    🎨 Claimed by <strong>{req.claimed_by}</strong>
+                  </div>
+                )}
+                {req.status === 'fulfilled' && req.fulfilled_by && (
+                  <div className="request-maker-info request-maker-fulfilled">
+                    ✅ Completed by <strong>{req.fulfilled_by}</strong>
+                  </div>
+                )}
+              </>
+            )
+            const actions = (
+              <>
+                {req.discord_thread_url && (
+                  <a
+                    className="request-tmdb-link request-discord-link"
+                    href={req.discord_thread_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View Discord thread"
                   >
-                    <Search size={11} />
-                    <span>Maker</span>
-                  </button>
+                    <ExternalLink size={11} />
+                    Discord
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="request-maker-btn"
+                  title="Search in Maker Tools"
+                  onClick={() => navigate('/maker-tools', { state: { tmdbSearch: req.year ? `${req.title} ${req.year}` : req.title } })}
+                >
+                  <Search size={11} />
+                  <span>Maker</span>
+                </button>
                   {isMaker && (() => {
                     const us = uploadStates.get(req.id)
                     const as_ = actionStates.get(req.id)
@@ -708,6 +613,17 @@ export default function CommunityRequests() {
                                 <span>Complete</span>
                               </button>
                             )}
+                            {req.status === 'in_progress' && canComplete && (
+                              <button
+                                type="button"
+                                className="request-action-btn"
+                                disabled={actionLoading}
+                                title="Release your claim (back to open)"
+                                onClick={() => handleStatusAction(req.id, 'release')}
+                              >
+                                <span>Release</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="request-action-btn action-reject"
@@ -727,8 +643,8 @@ export default function CommunityRequests() {
                       </>
                     )
                   })()}
-                  {/* Archive Thread button — visible to the original requester, archives the Discord thread */}
-                  {isConnected && discordUserId && req.requested_by_discord_id === discordUserId && req.discord_thread_url && req.status !== 'rejected' && (() => {
+                  {/* Archive Thread button — requester closes the thread on a completed request */}
+                  {isConnected && discordUserId && req.requested_by_discord_id === discordUserId && req.discord_thread_url && req.status === 'fulfilled' && (() => {
                     const archiveState = archiveStates.get(req.id)
                     const isLoading = archiveState === 'loading'
                     const isDone = archiveState === 'done'
@@ -751,18 +667,66 @@ export default function CommunityRequests() {
                       </div>
                     )
                   })()}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Gallery panel portals here when Browse Images is open */}
-              <div id={`gallery-portal-${req.id}`} />
-            </div>
+                  {/* Remove button — requester or server owner; hidden once fulfilled */}
+                  {isConnected && discordUserId && (req.requested_by_discord_id === discordUserId || isOwner) && req.status !== 'fulfilled' && (() => {
+                    const as_ = actionStates.get(req.id)
+                    const actionLoading = as_ === 'loading'
+                    const removeError = typeof as_ === 'string' && as_ !== 'loading' ? as_ : null
+                    const isRequester = req.requested_by_discord_id === discordUserId
+                    return (
+                      <div className="request-status-actions">
+                        <button
+                          type="button"
+                          className="request-action-btn action-reject"
+                          disabled={actionLoading}
+                          title={isRequester ? 'Remove your request' : 'Remove this request (server owner)'}
+                          onClick={() => handleStatusAction(req.id, 'remove')}
+                        >
+                          {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
+                          <span>Remove</span>
+                        </button>
+                        {removeError && (
+                          <span className="request-action-error" title={removeError}>{removeError}</span>
+                        )}
+                      </div>
+                    )
+                  })()}
+              </>
+            )
+            return (
+              <RequestItemCard
+                key={req.id}
+                id={req.id}
+                posterPath={req.poster_path}
+                title={req.title}
+                year={req.year}
+                seasonLabels={getSeasonLabel(req) ? [getSeasonLabel(req) as string] : []}
+                mediaType={req.media_type as CardMediaType}
+                styleLabel={getStyleLabel(req.style_tags)}
+                status={req.status}
+                notes={req.notes}
+                createdAt={req.created_at}
+                imdbId={req.imdb_id}
+                tvdbId={req.tvdb_id}
+                tmdbId={req.tmdb_id}
+                infoLines={infoLines}
+                actions={actions}
+                isMaker={isMaker}
+                showMakerTools={showMakerTools}
+                psdConfig={psdConfig}
+                posterAvailability={req.tmdb_id != null ? posterAvailability[req.tmdb_id] : undefined}
+                dragOver={dragOverId === req.id}
+                onDragEnter={() => setDragOverId(req.id)}
+                onDragLeave={() => setDragOverId(null)}
+                onDrop={(e) => handleDrop(e, req.id)}
+              />
             )
           })}
         </div>
       )}
+      </>
+      )}
+      {pageTab === 'lists' && <ListsView />}
     </div>
 
     {/* ── Archive thread confirm modal ──────────────────────────────────────────────────────────────── */}

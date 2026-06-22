@@ -44,6 +44,27 @@ class PosterRequestPayload(BaseModel):
     discord_token: Optional[str] = None
 
 
+class ListItemPayload(BaseModel):
+    tmdb_id: Optional[int] = None
+    media_type: str  # movie | show | season | collection
+    title: str
+    year: Optional[int] = None
+    season_number: Optional[int] = None
+    poster_path: Optional[str] = None
+    imdb_id: Optional[str] = None
+    tvdb_id: Optional[int] = None
+    style_tag: Optional[str] = None
+    source: Optional[str] = None  # unmatched | style_fallback
+    notes: Optional[str] = None
+
+
+class SubmitListItemsPayload(BaseModel):
+    items: list[ListItemPayload]
+    # Signed Discord token — the submit-list-items edge function derives the
+    # publisher's identity from it (never from client-supplied fields).
+    discord_token: Optional[str] = None
+
+
 @router.get("/requests/count")
 async def get_community_requests_count():
     """Return a lightweight count of unclaimed (pending) community requests.
@@ -309,6 +330,155 @@ async def submit_community_request(payload: PosterRequestPayload):
                 detail = "Request already exists"
             raise HTTPException(status_code=409, detail=detail)
         raise HTTPException(status_code=502, detail="Failed to submit request")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Supabase connection error: {e}")
+        raise HTTPException(status_code=502, detail="Could not connect to community service")
+
+
+# ── Community Lists ──────────────────────────────────────────────────────────
+# A lightweight, bulk worklist that makers claim/complete from the Lists tab.
+# Same Supabase split as requests: public reads here, writes via token-verified
+# edge functions (submit-list-items / update-list-item).
+
+def _list_status_filter(status: Optional[str]) -> str:
+    """PostgREST status filter for the lists views (rejected always hidden)."""
+    if status == "fulfilled":
+        return "eq.fulfilled"
+    if status == "all":
+        return "in.(open,in_progress,fulfilled)"
+    return "in.(open,in_progress)"  # active
+
+
+@router.get("/lists")
+async def get_community_lists(
+    media_type: Optional[str] = Query(None),
+    added_by_discord_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    sort: str = Query("newest"),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0),
+):
+    """Fetch a page of community list items from Supabase.
+
+    status filter: active (default) = open+in_progress, fulfilled, or all.
+    Returns {items, total} — total is the full match count, so the UI knows when
+    there's more to load.
+    """
+    params: dict = {
+        "select": "*",
+        "status": _list_status_filter(status),
+        "limit": limit,
+        "offset": offset,
+        "order": "created_at.asc" if sort == "oldest" else "created_at.desc",
+    }
+    if media_type:
+        params["media_type"] = f"eq.{media_type}"
+    if added_by_discord_id:
+        params["added_by_discord_id"] = f"eq.{added_by_discord_id}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/poster_list_items",
+                headers={**SUPABASE_HEADERS, "Prefer": "count=exact"},
+                params=params,
+            )
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-range", "*/0").split("/")[-1] or 0)
+            return {"items": resp.json(), "total": total}
+    except httpx.HTTPStatusError as e:
+        log_error(LogTags.API, f"Supabase list fetch failed: {e.response.text}", status_code=e.response.status_code)
+        raise HTTPException(status_code=502, detail="Failed to fetch community lists")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Supabase connection error: {e}")
+        raise HTTPException(status_code=502, detail="Could not connect to community service")
+
+
+@router.get("/lists/owners")
+async def get_community_list_owners(
+    status: Optional[str] = Query(None),
+    media_type: Optional[str] = Query(None),
+):
+    """Distinct publishers (id, name, count) for the current list view — used to
+    populate the "List owner" filter independent of which items are loaded."""
+    params: dict = {
+        "select": "added_by,added_by_discord_id",
+        "status": _list_status_filter(status),
+        "order": "created_at.desc",
+        "limit": 2000,
+    }
+    if media_type:
+        params["media_type"] = f"eq.{media_type}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/poster_list_items",
+                headers=SUPABASE_HEADERS,
+                params=params,
+            )
+            resp.raise_for_status()
+            owners: dict[str, dict] = {}
+            for row in resp.json():
+                did = row.get("added_by_discord_id")
+                if not did:
+                    continue
+                entry = owners.get(did)
+                if entry is None:
+                    owners[did] = {"id": did, "name": row.get("added_by") or did, "count": 1}
+                else:
+                    entry["count"] += 1
+            result = sorted(owners.values(), key=lambda o: (o["name"] or "").lower())
+            return {"owners": result}
+    except httpx.HTTPStatusError as e:
+        log_error(LogTags.API, f"Supabase list owners fetch failed: {e.response.text}", status_code=e.response.status_code)
+        raise HTTPException(status_code=502, detail="Failed to fetch list owners")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Supabase connection error: {e}")
+        raise HTTPException(status_code=502, detail="Could not connect to community service")
+
+
+@router.post("/lists")
+async def submit_community_list_items(payload: SubmitListItemsPayload):
+    """Publish a bulk worklist to the shared community Lists tab."""
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items to add")
+    if not payload.discord_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Connect your Discord account to publish a list",
+        )
+
+    valid_types = {"movie", "show", "season", "collection"}
+    items: list[dict] = []
+    for item in payload.items:
+        if item.media_type not in valid_types or not item.title or not item.title.strip():
+            continue
+        items.append(item.model_dump(exclude_none=True))
+    if not items:
+        raise HTTPException(status_code=400, detail="No valid items to add")
+
+    log_user_action(f"Publishing {len(items)} item(s) to a community list")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{SUPABASE_URL}/functions/v1/submit-list-items",
+                headers=SUPABASE_HEADERS,
+                json={"token": payload.discord_token, "items": items},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        log_error(LogTags.API, f"Supabase list submit failed: {e.response.text}", status_code=status)
+        if status in (400, 401, 429):
+            try:
+                detail = e.response.json().get("error", "Failed to publish list")
+            except Exception:
+                detail = "Failed to publish list"
+            raise HTTPException(status_code=status, detail=detail)
+        raise HTTPException(status_code=502, detail="Failed to publish list")
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Supabase connection error: {e}")
         raise HTTPException(status_code=502, detail="Could not connect to community service")
