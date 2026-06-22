@@ -149,6 +149,7 @@ export interface TmdbSeasonInfo {
 export interface TmdbTvDetails {
   season_count: number
   seasons: TmdbSeasonInfo[]
+  series_type: string | null  // TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
 }
 
 export const getTvDetails = async (tmdb_id: number): Promise<TmdbTvDetails> => {

@@ -564,6 +564,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // Derived values
   // -------------------------------------------------------------------------
 
+  // A TMDB "Miniseries" replaces the generic "Series" badge rather than adding a second one.
+  const isMiniseries = item.media_type === 'tv' && tvDetails?.series_type === 'Miniseries'
+
   const galleryTabs: Array<{ id: 'posters' | 'backdrops' | 'logos' | 'season-posters'; label: string; count: number | null }> =
     galleryImages
       ? [
@@ -659,9 +662,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
 
           <div className="tmdb-result-meta">
-            <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? 'badge-green' : 'badge-orange'}`}>
+            <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? (isMiniseries ? 'badge-purple' : 'badge-green') : 'badge-orange'}`}>
               {item.media_type === 'movie' ? <MovieIcon size={12} /> : item.media_type === 'tv' ? <Tv size={12} /> : <FolderOpen size={12} />}
-              {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? 'Series' : 'Collection'}
+              {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? (isMiniseries ? 'Miniseries' : 'Series') : 'Collection'}
             </span>
             {item.media_type === 'tv' && tvDetails && (
               <>

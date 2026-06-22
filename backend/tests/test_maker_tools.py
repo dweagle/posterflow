@@ -505,6 +505,7 @@ def test_tmdb_images_language_all_omits_include_image_language(client, test_db):
 
 _FAKE_TV_DETAILS = {
     "number_of_seasons": 2,
+    "type": "Miniseries",
     "seasons": [
         {"season_number": 0, "name": "Specials", "episode_count": 3, "air_date": "2020-01-01", "poster_path": "/sp.jpg"},
         {"season_number": 1, "name": "Season 1", "episode_count": 10, "air_date": "2020-06-01", "poster_path": "/s1.jpg"},
@@ -525,6 +526,7 @@ def test_tmdb_tv_details_returns_seasons(client, test_db):
     assert response.status_code == 200
     data = response.json()
     assert data["season_count"] == 2
+    assert data["series_type"] == "Miniseries"
     assert len(data["seasons"]) == 3
 
     specials = data["seasons"][0]

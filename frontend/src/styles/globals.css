@@ -189,6 +189,12 @@ input, textarea, select {
   border-color: rgba(255, 183, 77, 0.3);
 }
 
+.tmdb-result-wrapper .badge-purple {
+  background: rgba(156, 39, 176, 0.14);
+  color: #e5e7eb;
+  border-color: rgba(156, 39, 176, 0.32);
+}
+
 /* TMDB attribution — used wherever TMDB API is exposed in the UI */
 .tmdb-attribution {
   font-size: 0.75rem;

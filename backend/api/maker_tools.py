@@ -1201,6 +1201,7 @@ class TmdbSeasonInfo(BaseModel):
 class TmdbTvDetails(BaseModel):
     season_count: int
     seasons: list[TmdbSeasonInfo]
+    series_type: str | None = None  # TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
 
 
 def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300") -> list[TmdbImage]:
@@ -1322,6 +1323,7 @@ def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetail
     return TmdbTvDetails(
         season_count=int(data.get("number_of_seasons") or 0),
         seasons=seasons,
+        series_type=str(data.get("type") or "") or None,
     )
 
 
