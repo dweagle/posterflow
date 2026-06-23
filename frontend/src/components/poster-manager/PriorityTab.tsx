@@ -1,6 +1,6 @@
 import { Download, GripVertical, List, Minus, Plus, Save, Trash2 } from 'lucide-react'
 import Toolbar from './Toolbar'
-import { DragEvent, useState } from 'react'
+import { DragEvent, TouchEvent as ReactTouchEvent, useState } from 'react'
 import { Drive } from '../../api/client'
 import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
 import PosterStyleModal from './PosterStyleModal'
@@ -24,6 +24,7 @@ type PriorityTabProps = {
   onDropInPriority: (e: DragEvent, index?: number) => void
   onDragOverEnd: (e: DragEvent) => void
   onDragLeave: (e: DragEvent) => void
+  onDriveTouchStart: (e: ReactTouchEvent<HTMLElement>, drive: Drive) => void
   onRemoveFromPriority: (driveId: number) => void
   onAddAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
   onRemoveAllStyle: (style: 'MM2K' | 'CL2K' | 'Custom') => void
@@ -50,6 +51,7 @@ function PriorityTab({
   onDropInPriority,
   onDragOverEnd,
   onDragLeave,
+  onDriveTouchStart,
   onRemoveFromPriority,
   onAddAllStyle,
   onRemoveAllStyle,
@@ -249,7 +251,7 @@ function PriorityTab({
                     {drives
                       .filter((d) => d.style_type === 'MM2K' && !priorityList.find((p) => p.id === d.id))
                       .map((drive) => (
-                        <div key={drive.id} className="drive-card-small mm2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                        <div key={drive.id} className="drive-card-small mm2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd} onTouchStart={(e) => onDriveTouchStart(e, drive)}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
                             <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
@@ -268,7 +270,7 @@ function PriorityTab({
                     {drives
                       .filter((d) => d.style_type === 'CL2K' && !priorityList.find((p) => p.id === d.id))
                       .map((drive) => (
-                        <div key={drive.id} className="drive-card-small cl2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                        <div key={drive.id} className="drive-card-small cl2k" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd} onTouchStart={(e) => onDriveTouchStart(e, drive)}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
                             <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
@@ -287,7 +289,7 @@ function PriorityTab({
                     {drives
                       .filter((d) => d.is_custom && !priorityList.find((p) => p.id === d.id))
                       .map((drive) => (
-                        <div key={drive.id} className="drive-card-small custom" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd}>
+                        <div key={drive.id} className="drive-card-small custom" draggable onDragStart={() => onDragStart(drive)} onDragEnd={onDragEnd} onTouchStart={(e) => onDriveTouchStart(e, drive)}>
                           <GripVertical size={14} className="drag-handle" />
                           <div className="drive-info">
                             <div className="drive-name" title={drive.display_name || drive.name}>{drive.display_name || drive.name}</div>
@@ -349,6 +351,7 @@ function PriorityTab({
 
                         return (
                           <div
+                            data-priority-index={index}
                             className={`priority-drive-card ${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()} ${showInsertBeforeCue ? 'drop-target-before' : ''} ${showInsertAfterCue ? 'drop-target-after' : ''}`}
                             draggable
                             onDragStart={() => onDragStart(drive)}
@@ -356,6 +359,7 @@ function PriorityTab({
                             onDragOver={(e) => onDragOverCard(e, index)}
                             onDrop={(e) => onDropInPriority(e, getCardDropIndex(e, index))}
                             onDragLeave={onDragLeave}
+                            onTouchStart={(e) => onDriveTouchStart(e, drive)}
                           >
                             <GripVertical size={16} className="drag-handle" />
                             <div className="priority-number">{index + 1}</div>

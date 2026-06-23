@@ -115,6 +115,7 @@ function PosterManager() {
     handleRemoveAllStyle,
     handleDropInAvailable,
     handleDragOverEnd,
+    handleDriveTouchStart,
     savePriority,
     resetPriorityToOriginal,
     clearDragOverTimeout,
@@ -436,6 +437,7 @@ function PosterManager() {
           onDropInPriority={handleDropInPriority}
           onDragOverEnd={handleDragOverEnd}
           onDragLeave={handleDragLeave}
+          onDriveTouchStart={handleDriveTouchStart}
           onRemoveFromPriority={handleRemoveFromPriority}
           onAddAllStyle={handleAddAllStyle}
           onRemoveAllStyle={handleRemoveAllStyle}

@@ -1562,6 +1562,35 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .drag-handle {
   color: #666;
   flex-shrink: 0;
+  /* Let a touch drag start on the handle without the page scrolling (no effect on mouse). */
+  touch-action: none;
+}
+
+/* ---- Touch drag styles (only active during a touch drag; desktop is unaffected) ---- */
+
+/* Floating clone that follows the finger; moved via transform for smoothness. */
+.drag-ghost {
+  opacity: 0.92;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  will-change: transform;
+}
+
+/* The original card dims while its ghost is being dragged. */
+.touch-source-dragging {
+  opacity: 0.4;
+}
+
+/* During a touch drag, draw the drop bar as an overlay so it never reflows the
+   list (an in-flow bar would shift cards and make the hit-test jitter). The
+   desktop native-drag indicator keeps its original in-flow style. */
+.touch-dragging .drop-indicator {
+  position: absolute;
+  top: -4px;
+  left: 10px;
+  right: 10px;
+  width: auto;
+  margin: 0;
+  z-index: 2;
 }
 
 .drive-info {
