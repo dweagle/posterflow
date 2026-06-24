@@ -588,6 +588,23 @@
   border-radius: 3px;
 }
 
+/* Stock tile for a custom collection with no TMDB match (poster-shaped "C"). */
+.request-poster-collection {
+  width: 70px;
+  height: 105px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #2e2433 0%, #241f2b 100%);
+  border: 1px solid rgba(186, 104, 200, 0.35);
+  color: #ce93d8;
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
 /* Info */
 .request-info {
   flex: 1 1 0%;
@@ -1244,9 +1261,14 @@
 
   /* Smaller poster on narrow screens */
   .request-poster,
-  .request-poster-empty {
+  .request-poster-empty,
+  .request-poster-collection {
     width: 55px;
     height: 82px;
+  }
+
+  .request-poster-collection {
+    font-size: 2rem;
   }
 
   /* Info fills the row next to the poster */

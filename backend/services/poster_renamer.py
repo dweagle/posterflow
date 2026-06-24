@@ -4,13 +4,15 @@ import os
 import re
 import shutil
 import traceback
+
+import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pathvalidate import is_valid_filename, sanitize_filename
 
 from core.logging import logger, LogTags, log_success, log_error, log_info, log_warning, log_debug, log_section_start, log_section_end
-from models.setting import get_setting
+from models.setting import get_setting, upsert_setting
 from sqlalchemy.orm import Session
 from util.arr.client import create_arr_client
 from util.constants import illegal_chars_regex
@@ -18,7 +20,7 @@ from util.data.construct import generate_title_variants
 from util.data.normalization import normalize_titles
 from util.posters.assets import get_assets_files
 from util.posters.index import build_search_index, create_new_empty_index
-from util.posters.match import match_assets_to_media
+from util.posters.match import match_assets_to_media, match_tmdb_collection
 
 MediaItem = Dict[str, Any]
 MediaDict = Dict[str, List[MediaItem]]
@@ -860,10 +862,142 @@ class PosterRenameService:
         media_dict["series"] = self._merge_duplicate_series(media_dict["series"], log_tag)
         media_dict["collections"] = self._merge_duplicate_collections(media_dict["collections"], log_tag)
 
+        # Plex collections carry no TMDB id (unlike Radarr movies / Sonarr series).
+        # Match them against TMDB's collection search so they get the same id +
+        # poster treatment downstream (stats, unmatched, community lists).
+        self._enrich_collections_with_tmdb(media_dict, log_tag)
+
         # Inject manually added media entries (items in Plex not managed by Sonarr/Radarr)
         self._inject_manual_media(media_dict, log_tag)
 
         return media_dict
+
+    def _enrich_collections_with_tmdb(
+        self, media_dict: MediaDict, log_tag: str = LogTags.POSTER_RENAMER
+    ) -> None:
+        """Attach a TMDB id + poster to Plex collections via exact-title matching.
+
+        Plex exposes no TMDB id for collections, so unlike movies/series they reach
+        the community Lists tab id-less. For each collection without one we query
+        TMDB's collection search and accept only an exact normalized-title match
+        (``match_tmdb_collection``); matches gain a ``poster_url`` plus the id on
+        ``tmdb_id_ref`` — deliberately NOT ``tmdb_id`` — so the poster matcher (which
+        branches on ``media.get("tmdb_id")`` and would switch collections from
+        title-based to ID-based matching) is untouched, while ``media_source_refs``
+        still surfaces the id for lists/requests via its ``tmdb_id_ref`` fallback.
+        This mirrors how series keep their TMDB id off the matcher. Everything else
+        stays a "custom" collection. Results (matches and non-matches) are cached so
+        scheduled runs don't re-query TMDB every time. A non-match stays cached until
+        the collection is renamed in Plex (which changes the title-keyed cache entry).
+        """
+        collections = media_dict.get("collections", [])
+        pending = [c for c in collections if not c.get("tmdb_id") and not c.get("tmdb_id_ref")]
+        if not pending:
+            return
+
+        api_key_setting = get_setting(self.db, "tmdb_api_key")
+        api_key = api_key_setting.value.strip() if api_key_setting and api_key_setting.value else ""
+        if not api_key:
+            log_info(
+                log_tag,
+                f"Skipping TMDB collection matching for {len(pending)} collection(s): no TMDB API key configured",
+                count=len(pending),
+            )
+            return
+
+        # Load the persistent cache: normalized title -> {tmdb_id, poster_url}.
+        # A null tmdb_id is a remembered non-match (custom collection).
+        cache: Dict[str, Dict[str, Any]] = {}
+        cache_setting = get_setting(self.db, "poster_collection_tmdb_cache")
+        if cache_setting and cache_setting.value:
+            try:
+                loaded = json.loads(cache_setting.value)
+                if isinstance(loaded, dict):
+                    cache = loaded
+            except json.JSONDecodeError:
+                cache = {}
+
+        matched = 0
+        cache_dirty = False
+        # De-dup TMDB lookups within this run (same collection across libraries).
+        run_seen: Dict[str, Optional[Dict[str, Any]]] = {}
+
+        for collection in pending:
+            title = str(collection.get("title") or "").strip()
+            if not title:
+                continue
+            norm = normalize_titles(title)
+
+            entry = cache.get(norm)
+            if entry is not None:
+                if entry.get("tmdb_id"):
+                    # tmdb_id_ref (not tmdb_id) keeps this off the poster matcher.
+                    collection["tmdb_id_ref"] = entry["tmdb_id"]
+                    if entry.get("poster_url"):
+                        collection["poster_url"] = entry["poster_url"]
+                    matched += 1
+                continue
+
+            if norm in run_seen:
+                result = run_seen[norm]
+            else:
+                result = self._search_tmdb_collection(title, api_key, log_tag)
+                run_seen[norm] = result
+
+            tmdb_id: Optional[int] = None
+            poster_url: Optional[str] = None
+            if result:
+                raw_id = result.get("id")
+                tmdb_id = int(raw_id) if isinstance(raw_id, int) else None
+                poster_path = result.get("poster_path")
+                if isinstance(poster_path, str) and poster_path:
+                    poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}"
+
+            if tmdb_id:
+                # tmdb_id_ref (not tmdb_id) keeps this off the poster matcher.
+                collection["tmdb_id_ref"] = tmdb_id
+                if poster_url:
+                    collection["poster_url"] = poster_url
+                cache[norm] = {"tmdb_id": tmdb_id, "poster_url": poster_url}
+                matched += 1
+            else:
+                cache[norm] = {"tmdb_id": None, "poster_url": None}
+            cache_dirty = True
+
+        if cache_dirty:
+            try:
+                upsert_setting(self.db, "poster_collection_tmdb_cache", json.dumps(cache))
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                log_warning(log_tag, f"Could not persist collection TMDB cache: {e}", error=str(e))
+
+        log_info(
+            log_tag,
+            f"TMDB collection matching: {matched}/{len(pending)} collection(s) matched to a TMDB collection",
+            matched=matched, total=len(pending),
+        )
+
+    def _search_tmdb_collection(
+        self, title: str, api_key: str, log_tag: str = LogTags.POSTER_RENAMER
+    ) -> Optional[Dict[str, Any]]:
+        """Query TMDB's collection search and return the exact-title match, if any."""
+        try:
+            response = requests.get(
+                "https://api.themoviedb.org/3/search/collection",
+                params={"api_key": api_key, "query": title, "include_adult": "false"},
+                timeout=20,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError) as e:
+            log_debug(log_tag, f"TMDB collection search failed for '{title}': {e}", title=title, error=str(e))
+            return None
+
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            return None
+        return match_tmdb_collection(title, results)
 
     def rename_posters(
         self,

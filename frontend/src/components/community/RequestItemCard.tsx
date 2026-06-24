@@ -114,6 +114,8 @@ export default function RequestItemCard({
         <div className="request-poster">
           {posterPath ? (
             <img src={posterPath} alt="" loading="lazy" />
+          ) : mediaType === 'collection' ? (
+            <div className="request-poster-collection" title="Custom collection — no TMDB match" aria-label="Custom collection">C</div>
           ) : (
             <div className="request-poster-empty" />
           )}

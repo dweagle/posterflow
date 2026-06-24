@@ -1,7 +1,12 @@
 """Tests for util/posters/match.py"""
 import pytest
 
-from util.posters.match import compare_strings, collection_title_variants, is_match
+from util.posters.match import (
+    compare_strings,
+    collection_title_variants,
+    is_match,
+    match_tmdb_collection,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +61,50 @@ class TestCollectionTitleVariants:
         # suffix matching should be case-insensitive
         variants = collection_title_variants("Avengers collection")
         assert "Avengers" in variants
+
+
+# ---------------------------------------------------------------------------
+# match_tmdb_collection
+# ---------------------------------------------------------------------------
+
+class TestMatchTmdbCollection:
+    def test_plex_plain_title_matches_tmdb_collection_suffix(self):
+        # Plex names it "Star Wars"; TMDB always uses "X Collection".
+        results = [{"id": 10, "name": "Star Wars Collection", "poster_path": "/a.jpg"}]
+        match = match_tmdb_collection("Star Wars", results)
+        assert match is not None
+        assert match["id"] == 10
+
+    def test_plex_collection_suffix_matches(self):
+        results = [{"id": 404, "name": "John Wick Collection", "poster_path": "/jw.jpg"}]
+        match = match_tmdb_collection("John Wick Collection", results)
+        assert match is not None
+        assert match["id"] == 404
+
+    def test_picks_exact_match_among_several(self):
+        results = [
+            {"id": 1, "name": "The Avengers (1998) Collection"},
+            {"id": 2, "name": "The Avengers Collection"},
+        ]
+        match = match_tmdb_collection("The Avengers", results)
+        assert match is not None
+        assert match["id"] == 2
+
+    def test_no_match_returns_none(self):
+        results = [{"id": 99, "name": "Star Wars Collection"}]
+        assert match_tmdb_collection("My Favorite Movies", results) is None
+
+    def test_empty_results_returns_none(self):
+        assert match_tmdb_collection("Star Wars", []) is None
+
+    def test_empty_title_returns_none(self):
+        assert match_tmdb_collection("", [{"id": 1, "name": "Star Wars Collection"}]) is None
+
+    def test_falls_back_to_original_name(self):
+        results = [{"id": 7, "original_name": "James Bond Collection"}]
+        match = match_tmdb_collection("James Bond", results)
+        assert match is not None
+        assert match["id"] == 7
 
 
 # ---------------------------------------------------------------------------

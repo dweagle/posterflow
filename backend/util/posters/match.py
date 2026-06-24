@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.logging import log_debug, LogTags
 from util.constants import folder_year_regex
@@ -64,6 +64,41 @@ def collection_title_variants(title: str) -> List[str]:
     # No suffix present — add the "Collection" variant
     variants.append(f"{title} Collection")
     return variants
+
+
+def match_tmdb_collection(
+    plex_title: str, tmdb_results: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Exact-name match a Plex collection against TMDB /search/collection results.
+
+    Plex names collections inconsistently ("Star Wars" vs "Star Wars Collection")
+    while TMDB always uses the "X Collection" form. Normalize both sides and try
+    each naming variant so either convention matches, but only on an exact
+    normalized title — anything uncertain returns None so it stays a custom
+    collection (no TMDB id).
+
+    Args:
+        plex_title: The collection title as it appears in Plex.
+        tmdb_results: The "results" list from TMDB's /search/collection response.
+
+    Returns:
+        The matching TMDB result dict, or None if no exact match.
+    """
+    if not plex_title:
+        return None
+    variants = {
+        normalize_titles(v) for v in collection_title_variants(plex_title) if v
+    }
+    variants.discard("")
+    if not variants:
+        return None
+    for result in tmdb_results:
+        if not isinstance(result, dict):
+            continue
+        name = result.get("name") or result.get("original_name") or ""
+        if name and normalize_titles(name) in variants:
+            return result
+    return None
 
 
 def is_match(

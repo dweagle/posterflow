@@ -1,4 +1,83 @@
+from models.setting import Setting, get_setting
 from services.poster_renamer import PosterRenameService
+
+
+class _FakeTmdbResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_enrich_collections_with_tmdb_matches_and_skips(test_db, monkeypatch):
+    test_db.add(Setting(key="tmdb_api_key", value="fake-key"))
+    test_db.commit()
+
+    service = PosterRenameService(test_db)
+
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        query = (params or {}).get("query", "")
+        calls.append(query)
+        if "john wick" in query.lower():
+            return _FakeTmdbResponse(
+                {"results": [{"id": 404, "name": "John Wick Collection", "poster_path": "/jw.jpg"}]}
+            )
+        return _FakeTmdbResponse({"results": []})
+
+    monkeypatch.setattr("services.poster_renamer.requests.get", fake_get)
+
+    media_dict = {
+        "movies": [],
+        "series": [],
+        "collections": [
+            {"type": "collections", "title": "John Wick", "tmdb_id": None},
+            {"type": "collections", "title": "My Favorites", "tmdb_id": None},
+            {"type": "collections", "title": "Already Linked", "tmdb_id": 999},
+        ],
+    }
+
+    service._enrich_collections_with_tmdb(media_dict)
+
+    matched, custom, preset = media_dict["collections"]
+    # The id lands on tmdb_id_ref (display-only), NOT tmdb_id, so the poster
+    # matcher — which branches on media["tmdb_id"] — is left untouched.
+    assert matched["tmdb_id_ref"] == 404
+    assert not matched.get("tmdb_id")
+    assert matched["poster_url"] == "https://image.tmdb.org/t/p/w185/jw.jpg"
+    assert not custom.get("tmdb_id_ref")
+    assert not custom.get("tmdb_id")
+    assert not custom.get("poster_url")
+    # A collection that already had an id is not re-queried.
+    assert preset["tmdb_id"] == 999
+    assert "Already Linked" not in calls
+
+    # Both the positive and negative result are cached for the next run.
+    cache_setting = get_setting(test_db, "poster_collection_tmdb_cache")
+    assert cache_setting is not None and cache_setting.value
+
+
+def test_enrich_collections_with_tmdb_noops_without_api_key(test_db, monkeypatch):
+    service = PosterRenameService(test_db)
+
+    def fail_get(*args, **kwargs):  # pragma: no cover - must not be called
+        raise AssertionError("TMDB should not be queried without an API key")
+
+    monkeypatch.setattr("services.poster_renamer.requests.get", fail_get)
+
+    media_dict = {
+        "movies": [],
+        "series": [],
+        "collections": [{"type": "collections", "title": "John Wick", "tmdb_id": None}],
+    }
+    service._enrich_collections_with_tmdb(media_dict)
+    assert not media_dict["collections"][0].get("tmdb_id")
+    assert not media_dict["collections"][0].get("tmdb_id_ref")
 
 
 def test_rename_posters_fails_when_no_assets_found(test_db, monkeypatch):
