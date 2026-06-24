@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { AlertCircle, Check, ExternalLink, Loader2, Star, LogOut, User } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
@@ -63,6 +63,10 @@ export default function CommunityRequestModal({
   const [pingDiscordId, setPingDiscordId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  // Set when the user hits submit without picking a TMDB match (and not custom);
+  // surfaces an inline warning + highlights the results. Auto-clears once resolved.
+  const [pickWarning, setPickWarning] = useState(false)
+  const candidatesRef = useRef<HTMLDivElement>(null)
 
   const effectiveName = username ?? ''
 
@@ -105,9 +109,20 @@ export default function CommunityRequestModal({
   // Determine if the submit should be blocked because of missing TMDB selection
   const hasResults = allCandidates.length > 0
   const tmdbSelectionRequired = tmdbApiKeyConfigured && hasResults && !selected && !isCustomRequest
+  // Only show the warning while the selection is actually still missing — picking a
+  // match or checking "custom request" flips tmdbSelectionRequired and hides it.
+  const showPickWarning = pickWarning && tmdbSelectionRequired
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return
+    // Block + warn if there are TMDB results but the user never picked one (or
+    // marked it custom). Surface the results so they can choose.
+    if (tmdbSelectionRequired) {
+      setPickWarning(true)
+      showToast('Pick the correct TMDB match below, or check “This is a custom request.”', 'error')
+      candidatesRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      return
+    }
     const trimmedName = effectiveName.trim()
     if (!trimmedName || !token) return
     setSubmitting(true)
@@ -158,7 +173,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired])
 
   // Auto-close shortly after a successful submit. Cleared on unmount so a pending
   // close can't fire after the modal is gone (which leaked stray onClose calls into tests).
@@ -202,6 +217,13 @@ export default function CommunityRequestModal({
           {/* TMDB match picker */}
           <div className="creq-section-label">Pick the correct TMDB match:</div>
 
+          {showPickWarning && (
+            <div className="creq-pick-warning" role="alert">
+              <AlertCircle size={14} />
+              <span>Pick the correct TMDB match below, or check <strong>“This is a custom request.”</strong></span>
+            </div>
+          )}
+
           {!tmdbApiKeyConfigured ? (
             <div className="tmdb-candidates-warning">
               <AlertCircle size={14} />
@@ -217,7 +239,7 @@ export default function CommunityRequestModal({
               No TMDB results found.
             </div>
           ) : (
-            <div className="creq-candidates">
+            <div className={`creq-candidates${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
               {allCandidates.map((c, i) => {
                 const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
                 const isPerson = c.media_type === 'person'
@@ -374,10 +396,10 @@ export default function CommunityRequestModal({
           <button
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || tmdbSelectionRequired || !posterStyle}
+            disabled={submitting || submitted || !isConnected || !effectiveName.trim() || !posterStyle}
             title={
-              tmdbSelectionRequired ? 'Select a TMDB match or check "custom request" to proceed' :
               !posterStyle ? 'Select a poster style (CL2K or MM2K)' :
+              tmdbSelectionRequired ? 'Pick a TMDB match or check "custom request"' :
               undefined
             }
           >

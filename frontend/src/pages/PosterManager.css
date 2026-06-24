@@ -4690,6 +4690,36 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   overflow-y: auto;
 }
 
+/* Shown when the user tries to submit without picking a match (or marking custom). */
+.creq-pick-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 6px;
+  color: #ffb74d;
+  font-size: 0.8rem;
+}
+
+.creq-pick-warning svg {
+  flex-shrink: 0;
+}
+
+.creq-candidates--warn {
+  outline: 2px solid rgba(255, 152, 0, 0.55);
+  outline-offset: 2px;
+  border-radius: 6px;
+  animation: creq-pick-pulse 0.9s ease-in-out 2;
+}
+
+@keyframes creq-pick-pulse {
+  0%, 100% { outline-color: rgba(255, 152, 0, 0.2); }
+  50% { outline-color: rgba(255, 152, 0, 0.85); }
+}
+
 .creq-candidate {
   display: flex;
   align-items: center;

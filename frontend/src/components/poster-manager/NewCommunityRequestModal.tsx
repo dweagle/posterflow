@@ -68,8 +68,13 @@ export default function NewCommunityRequestModal({
   const [pingDiscordId, setPingDiscordId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  // Set when a search returned matches but the user submitted without picking one
+  // and without confirming it's custom — surfaces a warning + highlights the results.
+  const [isCustomRequest, setIsCustomRequest] = useState(false)
+  const [pickWarning, setPickWarning] = useState(false)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const candidatesRef = useRef<HTMLDivElement>(null)
 
   const effectiveName = username ?? ''
 
@@ -80,6 +85,9 @@ export default function NewCommunityRequestModal({
     setHasSearched(false)
     setCandidates([])
     setSelected(null)
+    // A fresh search invalidates any earlier "custom" confirmation / warning.
+    setIsCustomRequest(false)
+    setPickWarning(false)
     try {
       const result = await searchUnmatchedTmdb({ title: query, year: null, type: searchType })
       setCandidates(result.candidates)
@@ -104,6 +112,12 @@ export default function NewCommunityRequestModal({
   const effectiveTitle = selected?.title ?? customTitle.trim()
   const effectiveYear = selected?.year ?? (customYear.trim() ? parseInt(customYear.trim(), 10) : null)
 
+  // A search surfaced matches, but the user hasn't picked one or confirmed it's
+  // custom — e.g. they typed a custom title while a real match sat in the results.
+  const tmdbSelectionMissed =
+    tmdbApiKeyConfigured && hasSearched && candidates.length > 0 && !selected && !isCustomRequest
+  const showPickWarning = pickWarning && tmdbSelectionMissed
+
   const canSubmit =
     !submitting &&
     !submitted &&
@@ -115,6 +129,13 @@ export default function NewCommunityRequestModal({
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || !token) return
+    // Block + warn if matches were found but none was picked (or marked custom).
+    if (tmdbSelectionMissed) {
+      setPickWarning(true)
+      showToast('Pick the correct TMDB match below, or check “None of these fit — custom request.”', 'error')
+      candidatesRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      return
+    }
     setSubmitting(true)
     try {
       const trimmedPingId = pingDiscordId.trim()
@@ -147,7 +168,7 @@ export default function NewCommunityRequestModal({
       setSubmitting(false)
     }
   }, [
-    canSubmit, selected, searchType, effectiveTitle, effectiveYear,
+    canSubmit, tmdbSelectionMissed, selected, searchType, effectiveTitle, effectiveYear,
     notes, posterStyle, extraTags, pingDiscordId, effectiveName, token, showToast,
   ])
 
@@ -237,10 +258,16 @@ export default function NewCommunityRequestModal({
               <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
                 Pick the correct TMDB match:
               </div>
+              {showPickWarning && (
+                <div className="creq-pick-warning" role="alert">
+                  <AlertCircle size={14} />
+                  <span>Pick the correct TMDB match below, or check <strong>“None of these fit.”</strong></span>
+                </div>
+              )}
               {candidates.length === 0 ? (
                 <div className="creq-no-results">No TMDB results found.</div>
               ) : (
-                <div className="creq-candidates">
+                <div className={`creq-candidates${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
                   {candidates.map((c, i) => {
                     const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
                     const isPerson = c.media_type === 'person'
@@ -250,7 +277,7 @@ export default function NewCommunityRequestModal({
                         key={i}
                         type="button"
                         className={`creq-candidate${isSelected ? ' selected' : ''}`}
-                        onClick={() => setSelected(isSelected ? null : c)}
+                        onClick={() => { setSelected(isSelected ? null : c); setPickWarning(false) }}
                       >
                         {c.poster_url ? (
                           <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
@@ -283,6 +310,16 @@ export default function NewCommunityRequestModal({
                     )
                   })}
                 </div>
+              )}
+              {candidates.length > 0 && !selected && (
+                <label className="creq-custom-request-label">
+                  <input
+                    type="checkbox"
+                    checked={isCustomRequest}
+                    onChange={(e) => setIsCustomRequest(e.target.checked)}
+                  />
+                  None of these fit — submit as a custom request
+                </label>
               )}
             </>
           )}

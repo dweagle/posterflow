@@ -353,6 +353,48 @@ describe('CommunityRequestModal', () => {
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Failed to submit request', 'error'))
     })
+
+    it('warns and blocks submit when TMDB results exist but none is picked', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({
+        candidates: [
+          { tmdb_id: 1, title: 'Inception', year: 2010, media_type: 'movie', poster_url: null, imdb_id: null, tvdb_id: null },
+          { tmdb_id: 2, title: 'Inception: Encore', year: 2010, media_type: 'movie', poster_url: null, imdb_id: null, tvdb_id: null },
+        ],
+      })
+      const user = userEvent.setup()
+      renderModal({ tmdbApiKeyConfigured: true })
+      await waitFor(() => expect(screen.getByText('Inception: Encore')).toBeTruthy())
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      expect(mockSubmitCommunityRequest).not.toHaveBeenCalled()
+      expect(mockShowToast).toHaveBeenCalledWith(
+        expect.stringMatching(/pick the correct tmdb match/i),
+        'error',
+      )
+      expect(screen.getByRole('alert')).toBeTruthy()
+    })
+
+    it('submits once a TMDB match is picked after the warning', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({
+        candidates: [
+          { tmdb_id: 1, title: 'Inception', year: 2010, media_type: 'movie', poster_url: null, imdb_id: null, tvdb_id: null },
+          { tmdb_id: 2, title: 'Inception: Encore', year: 2010, media_type: 'movie', poster_url: null, imdb_id: null, tvdb_id: null },
+        ],
+      })
+      const user = userEvent.setup()
+      renderModal({ tmdbApiKeyConfigured: true })
+      await waitFor(() => expect(screen.getByText('Inception: Encore')).toBeTruthy())
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      expect(mockSubmitCommunityRequest).not.toHaveBeenCalled()
+      // Pick a candidate, then submit succeeds.
+      await user.click(screen.getByRole('button', { name: /inception: encore/i }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ tmdb_id: 2, title: 'Inception: Encore' }),
+      )
+    })
   })
 
   // ── Close behaviour ───────────────────────────────────────────────────────
