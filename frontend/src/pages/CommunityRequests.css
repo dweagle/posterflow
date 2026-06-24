@@ -580,29 +580,43 @@
   border-radius: 3px;
 }
 
-.request-poster-empty {
-  width: 70px;
-  height: 105px;
-  background: #2a2a2a;
-  border: 1px solid #333;
-  border-radius: 3px;
-}
-
-/* Stock tile for a custom collection with no TMDB match (poster-shaped "C"). */
-.request-poster-collection {
+/* Stock tile shown when a card has no poster — a custom item or one with no TMDB
+   match. Poster-shaped, with a per-type letter + accent color from the type badges. */
+.request-poster-placeholder {
   width: 70px;
   height: 105px;
   border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(160deg, #2e2433 0%, #241f2b 100%);
-  border: 1px solid rgba(186, 104, 200, 0.35);
-  color: #ce93d8;
+  background: linear-gradient(160deg, #262626 0%, #1c1c1c 100%);
+  border: 1px solid #333;
+  color: #aaa;
   font-size: 2.6rem;
   font-weight: 700;
   line-height: 1;
   user-select: none;
+}
+
+.request-poster-placeholder.type-movie { border-color: rgba(100, 181, 246, 0.4); color: #64b5f6; }
+.request-poster-placeholder.type-show { border-color: rgba(129, 199, 132, 0.4); color: #81c784; }
+.request-poster-placeholder.type-season { border-color: rgba(255, 183, 77, 0.4); color: #ffb74d; }
+.request-poster-placeholder.type-collection { border-color: rgba(186, 104, 200, 0.4); color: #ce93d8; }
+.request-poster-placeholder.type-person { border-color: rgba(255, 138, 101, 0.4); color: #ff8a65; }
+
+/* Variant for a real TMDB item that simply has no poster on TMDB — neutral, with an
+   icon + label so it reads as "no image available" rather than a custom-type tile. */
+.request-poster-noposter {
+  flex-direction: column;
+  gap: 0.3rem;
+  color: #777;
+  border-style: dashed;
+}
+
+.request-poster-noposter-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 /* Info */
@@ -1261,13 +1275,12 @@
 
   /* Smaller poster on narrow screens */
   .request-poster,
-  .request-poster-empty,
-  .request-poster-collection {
+  .request-poster-placeholder {
     width: 55px;
     height: 82px;
   }
 
-  .request-poster-collection {
+  .request-poster-placeholder {
     font-size: 2rem;
   }
 

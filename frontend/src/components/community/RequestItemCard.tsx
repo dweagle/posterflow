@@ -1,9 +1,19 @@
 import { ReactNode } from 'react'
-import { ExternalLink, Upload } from 'lucide-react'
+import { ExternalLink, ImageOff, Upload } from 'lucide-react'
 import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
 import { type PosterAvailability } from '../../api/makerTools'
 
-export type CardMediaType = 'movie' | 'show' | 'season' | 'collection'
+export type CardMediaType = 'movie' | 'show' | 'season' | 'collection' | 'person'
+
+// Single-letter stock preview shown when a card has no poster — a custom item or
+// one the requester never matched to a TMDB entry. Colored per type via CSS.
+const PLACEHOLDER_LETTER: Record<CardMediaType, string> = {
+  movie: 'M',
+  show: 'S',
+  season: 'S',
+  collection: 'C',
+  person: 'P',
+}
 
 // Format a request/list timestamp the same way across both Community tabs.
 function formatCardDate(dateStr: string): string {
@@ -114,10 +124,23 @@ export default function RequestItemCard({
         <div className="request-poster">
           {posterPath ? (
             <img src={posterPath} alt="" loading="lazy" />
-          ) : mediaType === 'collection' ? (
-            <div className="request-poster-collection" title="Custom collection — no TMDB match" aria-label="Custom collection">C</div>
+          ) : tmdbId != null ? (
+            <div
+              className="request-poster-placeholder request-poster-noposter"
+              title="No poster available on TMDB yet"
+              aria-label="No poster available"
+            >
+              <ImageOff size={22} />
+              <span className="request-poster-noposter-label">No poster</span>
+            </div>
           ) : (
-            <div className="request-poster-empty" />
+            <div
+              className={`request-poster-placeholder type-${mediaType}`}
+              title="No poster — custom item or no TMDB match"
+              aria-label={`${mediaType} placeholder`}
+            >
+              {PLACEHOLDER_LETTER[mediaType] ?? '?'}
+            </div>
           )}
         </div>
 
