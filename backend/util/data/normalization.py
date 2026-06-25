@@ -9,6 +9,7 @@ from util.constants import (
     id_content_regex,
     illegal_chars_regex,
     remove_special_chars,
+    unknown_year_regex,
     words_to_remove,
     year_regex,
 )
@@ -79,7 +80,7 @@ def normalize_titles(title: str) -> str:
     """Normalize media title for matching and indexing.
 
     Steps:
-      1. Strip year tag.
+      1. Strip year tag (and the *arr "(0)" unknown-year placeholder).
       2. Convert HTML entities and unicode to ASCII.
       3. Remove ID tokens in curly braces.
       4. Remove specified unwanted substrings.
@@ -94,6 +95,7 @@ def normalize_titles(title: str) -> str:
         str: Normalized title.
     """
     normalized_title = year_regex.sub("", title)
+    normalized_title = unknown_year_regex.sub("", normalized_title)
     normalized_title = unidecode(html.unescape(normalized_title)).strip()
     normalized_title = id_content_regex.sub("", normalized_title)
     normalized_title = remove_tokens(normalized_title)

@@ -93,6 +93,13 @@ class TestNormalizeTitles:
         assert "2010" not in result
         assert "(" not in result
 
+    def test_strips_unknown_year_placeholder(self):
+        # *arr writes "(0)" when the release year is unknown; it must normalize the
+        # same as the bare title so a folder built from that path still matches.
+        assert normalize_titles("The Savant (0)") == normalize_titles("The Savant")
+        assert normalize_titles("The Savant (0)") == "thesavant"
+        assert normalize_titles("The Savant (0000)") == "thesavant"
+
     def test_lowercases(self):
         result = normalize_titles("Inception")
         assert result == result.lower()

@@ -128,9 +128,22 @@ def is_match(
 
     def year_matches() -> bool:
         asset_year = asset.get("year")
-        media_years = [
-            media.get(key) for key in ["year", "secondary_year", "folder_year"]
-        ]
+        primary_year = media.get("year")
+        # *arr reports year 0 when the release year is unknown (unaired/unannounced).
+        # Treat 0 as "no year" rather than a literal year, for two reasons:
+        #   1. Round-trip: the renamer copies a poster into "Title"/poster.jpg, which
+        #      re-scans with no year. Comparing that yearless asset against the year-0
+        #      media must succeed, or Asset Cleanup orphans and deletes the folder every
+        #      run while the renamer recreates it — a rename loop.
+        #   2. The folder_year parsed from the *arr path can be stale/guessed when the
+        #      real year is unknown, so don't let it validate a fuzzy title match.
+        # ID matches run earlier and are unaffected, so an ID-tagged poster still grabs.
+        if primary_year == 0:
+            media_years = [media.get("secondary_year")]
+        else:
+            media_years = [
+                media.get(key) for key in ["year", "secondary_year", "folder_year"]
+            ]
         if asset_year is None and all(year is None for year in media_years):
             return True
         return any(asset_year == year for year in media_years if year is not None)

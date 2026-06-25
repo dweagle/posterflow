@@ -90,6 +90,56 @@ def test_keeps_live_removes_orphans(test_db, tmp_path):
     assert result["counts"]["removed_orphans"] == 2
 
 
+def test_year_zero_series_folder_is_kept_not_looped(test_db, tmp_path):
+    """Regression: 'The Savant' has no year in Sonarr (year=0), so the renamer copies
+    its poster into a yearless 'The Savant' folder. On re-scan that folder has no year
+    (poster.jpg lost it), and it must still match the live show so cleanup keeps it.
+    Before the fix, year 0 != None blocked the match, so with delete_unknown on the
+    folder was removed as an orphan every run while the renamer recreated it — a loop.
+
+    Uses the literal "(0)" placeholder *arr writes into the folder name: that "0" both
+    sticks to the normalized title and is not a real year, so the fix has to strip the
+    placeholder (normalization) and treat year 0 as unknown (match) for the round-trip.
+    """
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Savant (0)", ["poster.jpg", "Season01.jpg"])  # *arr "(0)" placeholder
+
+    media = {
+        "movies": [_movie("Filler", 2000, "/movies/Filler (2000)")],
+        "series": [_series("The Savant", 0, "/tv/The Savant", tvdb_id=432966)],
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "The Savant (0)").exists()
+    assert result["counts"]["removed_orphans"] == 0
+
+
+def test_year_resolved_later_keeps_new_folder_removes_stale_zero(test_db, tmp_path):
+    """Lifecycle: once Sonarr learns the year it renames the show folder to
+    'The Savant (2026)'. The next renamer run creates that new folder (which matches
+    the now-year-bearing show and is kept), while the old yearless 'The Savant (0)'
+    no longer matches and becomes a genuine orphan — removed once with delete_unknown
+    on. It is not recreated, so there is no new loop; the transition self-resolves.
+    """
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Savant (0)", ["poster.jpg", "Season01.jpg"])     # stale, pre-year
+    _make_folder(dest, "The Savant (2026)", ["poster.jpg", "Season01.jpg"])  # current
+
+    media = {
+        "movies": [_movie("Filler", 2000, "/movies/Filler (2000)")],
+        "series": [_series("The Savant", 2026, "/tv/The Savant (2026)", tvdb_id=432966)],
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "The Savant (2026)").exists()       # new, year-bearing -> kept
+    assert not (dest / "The Savant (0)").exists()      # stale placeholder -> removed once
+    assert result["counts"]["removed_orphans"] == 1
+
+
 def test_stale_duplicate_after_rename(test_db, tmp_path):
     """Workin' Moms case: keep the current-named folder, remove the stale one."""
     dest = tmp_path / "assets"

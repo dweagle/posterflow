@@ -198,6 +198,65 @@ class TestIsMatchByTitle:
         assert matched is True
 
 
+class TestIsMatchUnknownYear:
+    """*arr returns year 0 when a release year is unknown (unaired/unannounced).
+
+    A 0 must be treated as "no year", not a literal year. The driving case: the
+    renamer copies a poster into "Title"/poster.jpg, which re-scans with no year;
+    that yearless asset must still match the year-0 media or Asset Cleanup orphans
+    and deletes the folder every run while the renamer recreates it (rename loop).
+    The folder year parsed from a stale/guessed *arr path must likewise not
+    validate a fuzzy title match. ID matches are unaffected.
+    """
+
+    def test_zero_year_matches_rescanned_yearless_folder(self):
+        # Regression: 'The Savant' has no year in Sonarr (year=0). The copied
+        # poster.jpg/Season01.jpg folder re-scans with no year and no IDs; it must
+        # still match the live show so cleanup keeps it instead of looping.
+        rescanned = {"title": "The Savant", "normalized_title": "thesavant", "season_numbers": [1]}
+        media = {
+            "title": "The Savant",
+            "normalized_title": "thesavant",
+            "year": 0,
+            "tvdb_id": 432966,
+            "folder": "/tv/The Savant",
+        }
+        matched, _ = is_match(rescanned, media)
+        assert matched is True
+
+    def test_zero_year_does_not_match_via_stale_folder_year(self):
+        asset = {"title": "Some Show", "normalized_title": "someshow", "year": 2019}
+        media = {
+            "title": "Some Show",
+            "normalized_title": "someshow",
+            "year": 0,
+            "tvdb_id": 12345,
+            "folder": "/tv/Some Show (2019)",
+        }
+        matched, _ = is_match(asset, media)
+        assert matched is False
+
+    def test_zero_year_still_matches_by_id(self):
+        asset = {"title": "Some Show", "normalized_title": "someshow", "year": 2019, "tvdb_id": 12345}
+        media = {
+            "title": "Some Show",
+            "normalized_title": "someshow",
+            "year": 0,
+            "tvdb_id": 12345,
+            "folder": "/tv/Some Show (2019)",
+        }
+        matched, reason = is_match(asset, media)
+        assert matched is True
+        assert "tvdb_id" in reason
+
+    def test_zero_year_matches_yearless_poster_by_title(self):
+        # No year conflict on either side — an unambiguously-titled poster still resolves.
+        asset = {"title": "Some Show", "normalized_title": "someshow"}
+        media = {"title": "Some Show", "normalized_title": "someshow", "year": 0}
+        matched, _ = is_match(asset, media)
+        assert matched is True
+
+
 class TestIsMatchStrictFolder:
     def test_strict_folder_match_by_media_folder(self):
         asset = {"media_folder": "/media/movies/Avatar (2009)", "year": 2009}

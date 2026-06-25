@@ -23,6 +23,12 @@ folder_year_regex: Pattern = re.compile(r"(.*)\s\((\d{4})\)")
 # Matches an optional space, a 4-digit year in parentheses (captured as group 1), ensures "Collection" does not appear later, and consumes any trailing text
 year_regex: Pattern = re.compile(r"\s?\((\d{4})\)(?!.*Collection).*")
 
+# Matches a parenthesized all-zero "year" placeholder that *arr writes when the real
+# release year is unknown (e.g. "The Savant (0)"). Stripped like a year so a folder
+# created from that path still normalizes/matches the live item (otherwise the "0"
+# sticks to the title and cleanup orphans the folder every run — a rename loop).
+unknown_year_regex: Pattern = re.compile(r"\s*\(0+\)")
+
 # Matches one or more illegal filename characters—including < > : " / \ | ? * and control characters U+0000–U+001F
 illegal_chars_regex: Pattern = re.compile(r"[<>:\"/\\|?*\x00-\x1f]+")
 

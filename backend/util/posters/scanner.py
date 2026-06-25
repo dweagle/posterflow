@@ -12,6 +12,7 @@ from util.constants import (
     illegal_chars_regex,
     remove_special_chars,
     season_pattern,
+    unknown_year_regex,
     year_regex,
 )
 from util.data.construct import create_collection, create_movie, create_series
@@ -136,6 +137,7 @@ def parse_folder_group(folder_path: str, base_name: str, files: List[str]) -> Di
     """
     try:
         title = re.sub(year_regex, "", base_name)
+        title = unknown_year_regex.sub("", title)
         title = unidecode(html.unescape(title))
         year = extract_year(base_name)
         tmdb_id, tvdb_id, imdb_id = extract_ids(base_name)
@@ -194,6 +196,7 @@ def parse_file_group(folder_path: str, base_name: str, files: List[str]) -> Dict
     try:
         id_cleaned_name = re.sub(r"\{(?:tmdb|tvdb|imdb)-\w+\}", "", base_name).strip()
         title = re.sub(year_regex, "", id_cleaned_name).strip()
+        title = unknown_year_regex.sub("", title).strip()
         title = unidecode(html.unescape(title))
         year = extract_year(base_name)
         tmdb_id, tvdb_id, imdb_id = extract_ids(base_name)
