@@ -56,6 +56,13 @@ const cloneMonitorConfig = (value: MakerMonitorConfig): MakerMonitorConfig => ({
     : ['en', 'ko', 'ja', 'zh', 'es'],
 })
 
+// Monitor entries carry a TMDB homepage like ".../movie/123" or ".../tv/123";
+// pull the id + type so we can render the poster-maker card for them.
+function parseTmdbHomepage(homepage: string | undefined): { tmdb_id: number; media_type: 'movie' | 'tv' } | null {
+  const m = (homepage || '').match(/themoviedb\.org\/(movie|tv)\/(\d+)/)
+  return m ? { media_type: m[1] as 'movie' | 'tv', tmdb_id: Number(m[2]) } : null
+}
+
 function MakerTools() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -404,13 +411,19 @@ function MakerTools() {
   // Handle incoming search from other pages — via navigation state (same tab) or a
   // ?tmdbSearch= query param (when opened in a new tab, where router state is unavailable).
   useEffect(() => {
-    const state = location.state as { tmdbSearch?: string } | null
-    const queryParam = new URLSearchParams(location.search).get('tmdbSearch')
-    const query = state?.tmdbSearch ?? queryParam
+    const params = new URLSearchParams(location.search)
+    const state = location.state as { tmdbSearch?: string; tmdbType?: string } | null
+    const query = state?.tmdbSearch ?? params.get('tmdbSearch')
     if (query) {
+      // Optional pre-filter to the item's known media type so the search lands on
+      // movie/tv/collection instead of "all".
+      const rawType = state?.tmdbType ?? params.get('type')
+      const valid: TmdbSearchFilter[] = ['movie', 'tv', 'collection']
+      const filter = valid.includes(rawType as TmdbSearchFilter) ? (rawType as TmdbSearchFilter) : null
       setTmdbQuery(query)
       setActiveTab('tmdb-search')
-      void handleTmdbSearch(query)
+      if (filter) setTmdbFilter(filter)
+      void handleTmdbSearch(query, filter ?? undefined)
       navigate(location.pathname, { replace: true, state: null })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -567,8 +580,13 @@ function MakerTools() {
                     {libraryResult.shows
                       .slice()
                       .sort((left, right) => String(left.date || '').localeCompare(String(right.date || '')))
-                      .map((show) => (
-                        <div className={`maker-show-item ${show.poster_exists ? 'ready' : 'todo'}`} key={`${libraryResult.library_name}-${show.tmdb_id}-${show.season_number}`}>
+                      .map((show) => {
+                        const key = `${libraryResult.library_name}-${show.tmdb_id}-${show.season_number}`
+                        const tmdbId = Number(show.tmdb_id)
+                        const hasTmdb = Number.isFinite(tmdbId) && tmdbId > 0
+                        return (
+                        <div className={`maker-show-entry ${show.poster_exists ? 'ready' : 'todo'}`} key={key}>
+                        <div className="maker-show-item">
                           <div className="maker-show-main">
                             <a href={show.homepage} target="_blank" rel="noreferrer">{show.name}{show.first_air_year ? <> <span className="tmdb-result-year">{show.first_air_year}</span></> : ''}</a>
                             <span>{show.season_number === 0 ? 'Specials' : `Season ${show.season_number}`} starts: {show.date}</span>
@@ -589,7 +607,20 @@ function MakerTools() {
                             </button>
                           </div>
                         </div>
-                      ))}
+                        {hasTmdb && (
+                          <div className="maker-card-panel">
+                            <TmdbItemCard
+                              item={{ tmdb_id: tmdbId, media_type: 'tv', title: show.name, year: show.first_air_year, overview: '', poster_url: show.poster_url || '', homepage: show.homepage, imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
+                              psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+                              posterAvailability={posterAvailability[tmdbId]}
+                              posterAvailabilityChecked={posterAvailabilityChecked}
+                              hideTitle
+                            />
+                          </div>
+                        )}
+                        </div>
+                        )
+                      })}
                   </div>
                 </div>
               )
@@ -616,8 +647,12 @@ function MakerTools() {
                   <div className="maker-language-group" key={`${discoveryTab}-${language}`}>
                     <h4>{language}</h4>
                     <div className="maker-show-list full-width">
-                      {items.map((item) => (
-                        <div className={`maker-show-item ${item.statuses.some((status) => status.have || status.synced) ? 'ready' : 'todo'}`} key={`${discoveryTab}-${item.type}-${item.homepage}`}>
+                      {items.map((item) => {
+                        const key = `${discoveryTab}-${item.type}-${item.homepage}`
+                        const parsed = parseTmdbHomepage(item.homepage)
+                        return (
+                        <div className={`maker-show-entry ${item.statuses.some((status) => status.have || status.synced) ? 'ready' : 'todo'}`} key={key}>
+                        <div className="maker-show-item">
                           <div className="maker-show-main">
                             <div className="maker-show-title-row">
                               <a href={item.homepage} target="_blank" rel="noreferrer">{item.name}{item.date?.slice(0, 4) ? <> <span className="tmdb-result-year">{item.date.slice(0, 4)}</span></> : ''}</a>
@@ -656,7 +691,20 @@ function MakerTools() {
                             </button>
                           </div>
                         </div>
-                      ))}
+                        {parsed && (
+                          <div className="maker-card-panel">
+                            <TmdbItemCard
+                              item={{ tmdb_id: parsed.tmdb_id, media_type: parsed.media_type, title: item.name, year: item.date?.slice(0, 4) ?? '', overview: '', poster_url: item.poster_url || '', homepage: item.homepage, imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
+                              psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+                              posterAvailability={posterAvailability[parsed.tmdb_id]}
+                              posterAvailabilityChecked={posterAvailabilityChecked}
+                              hideTitle
+                            />
+                          </div>
+                        )}
+                        </div>
+                        )
+                      })}
                     </div>
                   </div>
                 ))}

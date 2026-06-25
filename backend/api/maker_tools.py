@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
@@ -69,6 +70,9 @@ class MakerMonitorShowResult(BaseModel):
     date: str
     first_air_year: str = ""
     poster_exists: bool
+    poster_url: str = ""
+    imdb_id: str = ""
+    tvdb_id: int | None = None
     external_sources: list[str] = Field(default_factory=list)
 
 
@@ -97,6 +101,9 @@ class MakerDiscoveryItem(BaseModel):
     type: str
     homepage: str
     language: str
+    poster_url: str = ""
+    imdb_id: str = ""
+    tvdb_id: int | None = None
     statuses: list[MakerDiscoveryTypeStatus] = Field(default_factory=list)
 
 
@@ -261,6 +268,9 @@ def _merge_recent_missing_items(
                     date=resolved_date,
                     first_air_year=first_air_year,
                     poster_exists=poster_exists_now,
+                    poster_url=str(previous_show.get("poster_url") or ""),
+                    imdb_id=str(previous_show.get("imdb_id") or ""),
+                    tvdb_id=previous_show.get("tvdb_id") if isinstance(previous_show.get("tvdb_id"), int) else None,
                     external_sources=external_sources,
                 )
             )
@@ -485,8 +495,14 @@ def _check_show_status(
     lookahead_days: int,
 ) -> MakerMonitorShowResult | None:
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+    # append_to_response=external_ids folds the IMDb/TVDB ids into this same call
+    # (free — no extra request) so the card can show them like the request cards.
     # Raises TmdbUpstreamError on failure so the run's circuit breaker can count it (vs. a legit no-premiere None).
-    payload = _tmdb_fetch_json(url, {"api_key": tmdb_api_key, "language": "en-US"}, "show status")
+    payload = _tmdb_fetch_json(
+        url,
+        {"api_key": tmdb_api_key, "language": "en-US", "append_to_response": "external_ids"},
+        "show status",
+    )
 
     next_episode = payload.get("next_episode_to_air")
     if not isinstance(next_episode, dict):
@@ -516,6 +532,12 @@ def _check_show_status(
     name = str(payload.get("name") or "Unknown")
     first_air_date = str(payload.get("first_air_date") or "")
     first_air_year = first_air_date[:4] if len(first_air_date) >= 4 else ""
+    poster_path = str(payload.get("poster_path") or "")
+    poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else ""
+    ext_ids = payload.get("external_ids") if isinstance(payload.get("external_ids"), dict) else {}
+    imdb_id = str(ext_ids.get("imdb_id") or "").strip()
+    tvdb_raw = ext_ids.get("tvdb_id")
+    tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
     log_info(
         LogTags.MONITOR,
         (
@@ -536,6 +558,9 @@ def _check_show_status(
         date=air_date,
         first_air_year=first_air_year,
         poster_exists=poster_exists,
+        poster_url=poster_url,
+        imdb_id=imdb_id,
+        tvdb_id=tvdb_id,
         external_sources=[],
     )
 
@@ -733,9 +758,33 @@ def _fetch_discovery_items(
                 type="Movie" if is_movie else "Series",
                 homepage=f"https://www.themoviedb.org/{'movie' if is_movie else 'tv'}/{tmdb_id}",
                 language=str(item.get("original_language") or "en").upper(),
+                poster_url=(
+                    f"https://image.tmdb.org/t/p/w185{item.get('poster_path')}"
+                    if item.get("poster_path") else ""
+                ),
                 statuses=statuses,
             )
         )
+
+    # discover/* doesn't return external ids, so fetch IMDb/TVDB ids in parallel
+    # (bounded by discovery_max_results) so discovery cards can show the external
+    # links like the request cards. Best-effort — _fetch_external_ids never raises.
+    if discovery_results:
+        media_type = "movie" if is_movie else "tv"
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futs: dict[Any, int] = {}
+            for idx, dres in enumerate(discovery_results):
+                try:
+                    tid = int(dres.homepage.rsplit("/", 1)[-1])
+                except ValueError:
+                    continue
+                futs[pool.submit(_fetch_external_ids, tid, media_type, config.tmdb_api_key)] = idx
+            for fut in as_completed(futs):
+                imdb_id, tvdb_id = fut.result()
+                if imdb_id:
+                    discovery_results[futs[fut]].imdb_id = imdb_id
+                if tvdb_id:
+                    discovery_results[futs[fut]].tvdb_id = tvdb_id
 
     return discovery_results
 
@@ -870,25 +919,38 @@ def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
     return HTTPException(status_code=502, detail=f"{err.reason[:1].upper()}{err.reason[1:]} — try again shortly.")
 
 
-def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: int = 10) -> dict[str, Any]:
-    """Low-level TMDB GET: logs + raises TmdbUpstreamError on any failure, else returns the parsed JSON dict."""
-    try:
-        resp = requests.get(url, params=params, timeout=timeout)
-    except Exception as exc:
-        reason = _tmdb_failure_reason(context, exc=exc)
-        _log_tmdb_failure(reason, severe=True, exc=exc)
-        raise TmdbUpstreamError(reason)
-    if resp.status_code != 200:
-        reason = _tmdb_failure_reason(context, status=resp.status_code)
-        _log_tmdb_failure(reason, severe=_tmdb_is_severe(status=resp.status_code))
-        raise TmdbUpstreamError(reason, status=resp.status_code)
-    try:
-        data = resp.json()
-    except Exception:
-        reason = f"TMDB sent an unreadable (non-JSON) response loading {context}"
-        _log_tmdb_failure(reason, severe=True)
-        raise TmdbUpstreamError(reason)
-    return data if isinstance(data, dict) else {}
+def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: int = 10, retries: int = 2) -> dict[str, Any]:
+    """Low-level TMDB GET: logs + raises TmdbUpstreamError on any failure, else returns the parsed JSON dict.
+
+    A 429 (rate limit) is retried up to ``retries`` times, honoring the Retry-After
+    header, before giving up — so a brief throttle doesn't fail the request outright."""
+    attempt = 0
+    while True:
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+        except Exception as exc:
+            reason = _tmdb_failure_reason(context, exc=exc)
+            _log_tmdb_failure(reason, severe=True, exc=exc)
+            raise TmdbUpstreamError(reason)
+        if resp.status_code == 429 and attempt < retries:
+            try:
+                retry_after = float(resp.headers.get("Retry-After", ""))
+            except ValueError:
+                retry_after = 0.0
+            time.sleep(min(max(retry_after, 0.5 * (attempt + 1)), 10.0))
+            attempt += 1
+            continue
+        if resp.status_code != 200:
+            reason = _tmdb_failure_reason(context, status=resp.status_code)
+            _log_tmdb_failure(reason, severe=_tmdb_is_severe(status=resp.status_code))
+            raise TmdbUpstreamError(reason, status=resp.status_code)
+        try:
+            data = resp.json()
+        except Exception:
+            reason = f"TMDB sent an unreadable (non-JSON) response loading {context}"
+            _log_tmdb_failure(reason, severe=True)
+            raise TmdbUpstreamError(reason)
+        return data if isinstance(data, dict) else {}
 
 
 def _tmdb_get_json(url: str, params: dict[str, Any], context: str, timeout: int = 10) -> dict[str, Any]:
@@ -2311,58 +2373,79 @@ def run_maker_monitor_scan_internal(
                 lookahead_days=resolved_config.lookahead_days,
             )
 
-            for index, (tmdb_id, seasons) in enumerate(tv_inventory.items(), start=1):
-                try:
-                    show_result = _check_show_status(
-                        tmdb_id=tmdb_id,
-                        existing_seasons=seasons,
-                        tmdb_api_key=resolved_config.tmdb_api_key,
-                        lookahead_days=resolved_config.lookahead_days,
-                    )
-                    breaker.record_success()
-                except TmdbUpstreamError as err:
-                    breaker.record_failure(err.reason)
-                    if breaker.tripped:
-                        msg = breaker.abort_message()
-                        log_error(LogTags.MONITOR, msg)
-                        raise MonitorAborted(msg)
-                    continue
-                if show_result and not show_result.poster_exists:
-                    ext_sources: list[str] = []
-                    type_inventory = my_tv_inventory_by_type.get(drive_type, {})
-                    synced_entry = type_inventory.get(tmdb_id)
-                    if synced_entry and show_result.season_number in synced_entry.get("seasons", set()):
-                        ext_sources = sorted(
-                            source
-                            for source in synced_entry.get("sources", set())
-                            if str(source) != str(drive.name)
-                        )
-                    show_result.external_sources = ext_sources
-                if show_result:
-                    shows.append(show_result)
+            # Each premiere check is one independent /tv/{id} lookup (we already
+            # have the ids from the filenames), so run them in a small thread pool
+            # instead of one-at-a-time — a big library otherwise takes minutes. The
+            # HTTP calls run in parallel; results are consumed here on the main
+            # thread so the circuit breaker and progress stay single-threaded.
+            # 6 workers keeps us comfortably under TMDB's abuse threshold.
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                future_to_id = {
+                    pool.submit(
+                        _check_show_status,
+                        tmdb_id,
+                        seasons,
+                        resolved_config.tmdb_api_key,
+                        resolved_config.lookahead_days,
+                    ): tmdb_id
+                    for tmdb_id, seasons in tv_inventory.items()
+                }
+                index = 0
+                for future in as_completed(future_to_id):
+                    index += 1
+                    tmdb_id = future_to_id[future]
+                    try:
+                        show_result = future.result()
+                        breaker.record_success()
+                    except TmdbUpstreamError as err:
+                        # A 429 is rate-limiting, not an outage — skip this show but
+                        # don't let it trip the abort (the fetch already backed off).
+                        if err.status == 429:
+                            continue
+                        breaker.record_failure(err.reason)
+                        if breaker.tripped:
+                            for pending in future_to_id:
+                                pending.cancel()
+                            msg = breaker.abort_message()
+                            log_error(LogTags.MONITOR, msg)
+                            raise MonitorAborted(msg)
+                        continue
+                    if show_result and not show_result.poster_exists:
+                        ext_sources: list[str] = []
+                        type_inventory = my_tv_inventory_by_type.get(drive_type, {})
+                        synced_entry = type_inventory.get(tmdb_id)
+                        if synced_entry and show_result.season_number in synced_entry.get("seasons", set()):
+                            ext_sources = sorted(
+                                source
+                                for source in synced_entry.get("sources", set())
+                                if str(source) != str(drive.name)
+                            )
+                        show_result.external_sources = ext_sources
+                    if show_result:
+                        shows.append(show_result)
 
-                if index % progress_step == 0 or index == total_tmdb_ids:
-                    log_info(
-                        LogTags.MONITOR,
-                        (
-                            f"TMDB progress: '{drive.name}' | checked={index}/{total_tmdb_ids} "
-                            f"| matches={len(shows)}"
-                        ),
-                        drive_id=drive.id,
-                        drive_name=drive.name,
-                        checked=index,
-                        total=total_tmdb_ids,
-                        matches=len(shows),
-                    )
-
-                    if progress_callback and total_tmdb_ids > 0:
-                        drive_base = drive_progress_start + int(((drive_index - 1) / total_drives) * (drive_progress_end - drive_progress_start))
-                        drive_cap = drive_progress_start + int((drive_index / total_drives) * (drive_progress_end - drive_progress_start))
-                        drive_percent = drive_base + int((index / total_tmdb_ids) * max(1, drive_cap - drive_base))
-                        progress_callback(
-                            drive_percent,
-                            f"Checking TMDB ({index}/{total_tmdb_ids}) for {drive.name}",
+                    if index % progress_step == 0 or index == total_tmdb_ids:
+                        log_info(
+                            LogTags.MONITOR,
+                            (
+                                f"TMDB progress: '{drive.name}' | checked={index}/{total_tmdb_ids} "
+                                f"| matches={len(shows)}"
+                            ),
+                            drive_id=drive.id,
+                            drive_name=drive.name,
+                            checked=index,
+                            total=total_tmdb_ids,
+                            matches=len(shows),
                         )
+
+                        if progress_callback and total_tmdb_ids > 0:
+                            drive_base = drive_progress_start + int(((drive_index - 1) / total_drives) * (drive_progress_end - drive_progress_start))
+                            drive_cap = drive_progress_start + int((drive_index / total_drives) * (drive_progress_end - drive_progress_start))
+                            drive_percent = drive_base + int((index / total_tmdb_ids) * max(1, drive_cap - drive_base))
+                            progress_callback(
+                                drive_percent,
+                                f"Checking TMDB ({index}/{total_tmdb_ids}) for {drive.name}",
+                            )
 
             shows.sort(key=lambda item: item.date)
             scanned = len(tv_inventory)

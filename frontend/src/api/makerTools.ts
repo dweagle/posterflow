@@ -24,6 +24,9 @@ export interface MakerMonitorShowResult {
   date: string
   first_air_year: string
   poster_exists: boolean
+  poster_url?: string
+  imdb_id?: string
+  tvdb_id?: number | null
   external_sources: string[]
 }
 
@@ -62,6 +65,9 @@ export interface MakerDiscoveryItem {
   type: string
   homepage: string
   language: string
+  poster_url?: string
+  imdb_id?: string
+  tvdb_id?: number | null
   statuses: MakerDiscoveryTypeStatus[]
 }
 
@@ -114,6 +120,21 @@ export interface TmdbSearchResult {
 }
 
 export type TmdbSearchFilter = 'all' | 'movie' | 'tv' | 'collection'
+
+// Map a poster-manager item's media type onto a TMDB search filter, so opening
+// Maker Tools can pre-filter to the known type instead of "all". Returns null for
+// types with no matching filter (e.g. person), leaving it on "all".
+export function mediaTypeToTmdbFilter(t: string | null | undefined): TmdbSearchFilter | null {
+  switch ((t || '').toLowerCase()) {
+    case 'movie': return 'movie'
+    case 'show':
+    case 'series':
+    case 'tv':
+    case 'season': return 'tv'
+    case 'collection': return 'collection'
+    default: return null
+  }
+}
 
 export const searchTmdb = async (q: string, type: TmdbSearchFilter = 'all'): Promise<TmdbSearchResult[]> => {
   return getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/search?q=${encodeURIComponent(q)}&type=${type}`)

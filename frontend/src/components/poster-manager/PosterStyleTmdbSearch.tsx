@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { type FallbackItem } from '../../api/posterManager'
 import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import { useToast } from '../Toast'
@@ -157,7 +158,11 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               type="button"
               className="maker-nav-btn"
               title="Search in Maker Tools (opens in a new tab)"
-              onClick={() => window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(item.year ? `${cleanTitle} ${item.year}` : cleanTitle)}`, '_blank', 'noopener,noreferrer')}
+              onClick={() => {
+                const filter = mediaTypeToTmdbFilter(item.type)
+                const q = item.year ? `${cleanTitle} ${item.year}` : cleanTitle
+                window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(q)}${filter ? `&type=${filter}` : ''}`, '_blank', 'noopener,noreferrer')
+              }}
             >
               <Search size={13} />
               <span>Maker</span>
