@@ -142,7 +142,8 @@
 .community-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* Left-pack the filter groups (tabs → dropdowns → Claimed → owner-toggle); the
+     action buttons get pushed to the right via margin-left:auto below. */
   gap: 1rem;
   margin-bottom: 2rem;
   padding: 0.75rem;
@@ -158,7 +159,7 @@
 }
 
 .community-tab-btn {
-  padding: 0.4rem 0.85rem;
+  padding: 0.4rem 0.6rem;
   font-size: 0.875rem;
   font-weight: 500;
   background: rgba(255, 255, 255, 0.07);
@@ -209,11 +210,21 @@
   font-size: 0.875rem;
   padding: 0.4rem 0.6rem;
   cursor: pointer;
+  /* Fixed width (sized to the longest option) so the toolbar never reflows when
+     the selected option changes — longer text (e.g. a long owner name) truncates.
+     Short selections leave a little space; that's the trade-off for no reflow. */
+  width: 8rem;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
 }
 
 .community-filter-group select:focus {
   outline: none;
   border-color: #64b5f6;
+}
+
+.community-filter-group select.community-status-select {
+  width: 7rem;
 }
 
 .community-owner-toggle {
@@ -226,6 +237,7 @@
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+  margin-left: auto;  /* push the action buttons to the right edge of the toolbar */
 }
 
 .community-refresh-btn {
@@ -460,7 +472,42 @@
   font-size: 0.8rem;
   color: #666;
   margin: 0;
+  margin-right: auto; /* keep search + count left; push the filters to the right */
 }
+
+/* Search box, sits to the left of the item count (matches the filter selects). */
+.community-list-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.community-list-search input {
+  width: 210px;
+  max-width: 42vw;
+  padding: 0.28rem 1.5rem 0.28rem 0.55rem;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.78rem;
+}
+.community-list-search input::placeholder { color: #888; }
+.community-list-search input:focus {
+  outline: none;
+  border-color: #ffb74d;
+}
+.community-list-search-clear {
+  position: absolute;
+  right: 0.35rem;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.community-list-search-clear:hover { color: #fff; }
 
 .community-list {
   display: flex;
@@ -767,6 +814,52 @@
   font-weight: 600;
 }
 
+/* Soft cross-sync callout: a matching list item was completed; a maker should
+   verify it fits this request and close it (the request is never auto-closed). */
+.request-list-completed-callout {
+  font-size: 0.75rem;
+  margin-top: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  border-left: 3px solid #ffb74d;
+  background: rgba(255, 183, 77, 0.1);
+  color: #ffb74d;
+}
+
+.request-list-completed-callout strong {
+  font-weight: 600;
+}
+
+/* Passive overlap chip in the title row ("also on a list" / "also requested"). */
+.request-overlap-chip {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(149, 117, 205, 0.14);
+  color: #b39ddb;
+  white-space: nowrap;
+}
+
+/* "Available in a drive" — a wanter's workflow already pulled this poster, so the
+   rest just need to run theirs. Green card accent + badge + line. */
+.community-request-item--available {
+  border-color: rgba(76, 175, 80, 0.5);
+  background: rgba(76, 175, 80, 0.06);
+}
+.list-available-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(76, 175, 80, 0.16);
+  color: #81c784;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  white-space: nowrap;
+}
+.request-maker-info.list-available-info {
+  color: #81c784;
+  font-weight: 500;
+}
+
 .request-notes {
   font-size: 0.82rem;
   color: #bbb;
@@ -917,6 +1010,16 @@
   flex-shrink: 0;
   transition: all 0.2s;
   width: 100%;
+  /* Neutral outlined default so unmodified buttons (e.g. Release) match the
+     action-* family instead of rendering as a solid white button. */
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: #94a3b8;
+}
+.request-action-btn:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.7);
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
 }
 .request-action-btn:disabled {
   cursor: default;
@@ -954,6 +1057,51 @@
   border-color: #f44336;
   background: rgba(244, 67, 54, 0.1);
   color: #ff6b6b;
+}
+
+/* Move-to-request — orange, matching the "Request" button (.community-request-btn). */
+.action-request {
+  border: 1px solid rgba(255, 183, 77, 0.4);
+  background: transparent;
+  color: #ffb74d;
+}
+.action-request:hover:not(:disabled) {
+  border-color: #ffb74d;
+  background: rgba(255, 183, 77, 0.1);
+  color: #ffcc80;
+}
+
+/* Custom hover tooltip for the right-column action buttons. Native `title`
+   tooltips drift off the right edge of the page for these, so anchor a styled
+   tooltip to the button's right edge — it grows leftward/upward and stays
+   on-screen. Buttons here use data-tooltip instead of title. */
+.request-maker-actions-group [data-tooltip] {
+  position: relative;
+}
+.request-maker-actions-group [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 220px;
+  padding: 0.35rem 0.55rem;
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.request-maker-actions-group [data-tooltip]:hover::after {
+  opacity: 1;
 }
 
 .request-action-error {

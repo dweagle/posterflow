@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { storeDiscordIdentity } from '../api/community'
 
 const STORAGE_KEY = 'posterflow_discord_auth'
 const RESULT_KEY = 'discord_oauth_result'
@@ -65,6 +66,14 @@ export function useDiscordAuth() {
       localStorage.removeItem(STORAGE_KEY)
     }
   }, [])
+
+  // Persist the connected identity + token to the backend so headless scan jobs
+  // can reconcile this user's own community-list items. Idempotent; fires on
+  // fresh login, on restore-from-storage, and when the token refreshes. Best-effort.
+  useEffect(() => {
+    if (!auth?.discord_user_id || !auth.token) return
+    storeDiscordIdentity(auth.discord_user_id, auth.discord_username, auth.token).catch(() => {})
+  }, [auth?.discord_user_id, auth?.discord_username, auth?.token])
 
   const login = useCallback(() => {
     if (connecting) return

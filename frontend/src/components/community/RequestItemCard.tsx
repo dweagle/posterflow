@@ -51,6 +51,10 @@ type RequestItemCardProps = {
   mediaType: CardMediaType
   styleLabel: 'CL2K' | 'MM2K' | null
   status: string
+  /** Small badges shown in the title row after the status badge (overlap chips). */
+  titleExtras?: ReactNode
+  /** Optional whole-card accent, e.g. 'available' → green (poster is in a drive). */
+  accent?: 'available' | null
   notes?: string | null
   createdAt: string
   imdbId: string | null
@@ -90,6 +94,8 @@ export default function RequestItemCard({
   mediaType,
   styleLabel,
   status,
+  titleExtras,
+  accent,
   notes,
   createdAt,
   imdbId,
@@ -116,7 +122,7 @@ export default function RequestItemCard({
   return (
     <div className="community-request-wrapper">
       <div
-        className={`community-request-item${dragOver ? ' drag-over' : ''}`}
+        className={`community-request-item${dragOver ? ' drag-over' : ''}${accent ? ` community-request-item--${accent}` : ''}`}
         onDragOver={isMaker ? (e) => { e.preventDefault(); onDragEnter?.() } : undefined}
         onDragLeave={isMaker ? () => onDragLeave?.() : undefined}
         onDrop={isMaker ? (e) => onDrop?.(e) : undefined}
@@ -154,6 +160,7 @@ export default function RequestItemCard({
             <span className={`request-status-badge status-${status}`}>
               {status === 'in_progress' ? 'in progress' : status}
             </span>
+            {titleExtras}
           </div>
           {(tmdbLink || tvdbLink) && (
             <div className="request-id-links">

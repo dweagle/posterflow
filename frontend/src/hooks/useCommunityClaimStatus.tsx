@@ -1,5 +1,28 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { getCommunityRequests, getCommunityListItems } from '../api/community'
+import { getCommunityRequests, getCommunityListItems, type CommunityRequest, type CommunityListItem } from '../api/community'
+
+// Page through everything (the API caps a page at 200) up to a sane ceiling, so
+// the claim/overlap index stays correct as the community grows.
+const PAGE = 200
+const MAX_PAGES = 25
+async function fetchAllRequests(): Promise<CommunityRequest[]> {
+  const out: CommunityRequest[] = []
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const d = await getCommunityRequests({ status: 'all', limit: PAGE, offset: i * PAGE }).catch(() => ({ requests: [] }))
+    out.push(...d.requests)
+    if (d.requests.length < PAGE) break
+  }
+  return out
+}
+async function fetchAllListItems(): Promise<CommunityListItem[]> {
+  const out: CommunityListItem[] = []
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const d = await getCommunityListItems({ status: 'all', limit: PAGE, offset: i * PAGE }).catch(() => ({ items: [], total: 0 }))
+    out.push(...d.items)
+    if (d.items.length < PAGE) break
+  }
+  return out
+}
 
 // Whether an item is currently being worked (claimed) or already done somewhere
 // in the community (a request or a published list item).
@@ -30,13 +53,23 @@ function keysFor(item: LookupItem): string[] {
   return keys
 }
 
+// Whether an item also has an active counterpart elsewhere in the community:
+// onList = a matching open/in_progress list item; requested = a matching
+// pending/in_progress request. Powers the "also on a list" / "also requested" chips.
+export type CommunityOverlap = { onList: boolean; requested: boolean }
+
 interface CommunityClaimStatusValue {
   getStatus: (item: LookupItem) => ClaimStatus | null
+  getOverlap: (item: LookupItem) => CommunityOverlap
   loaded: boolean
 }
 
 // No provider → no flags (and no fetch). Keeps consumers safe in isolation.
-const defaultValue: CommunityClaimStatusValue = { getStatus: () => null, loaded: false }
+const defaultValue: CommunityClaimStatusValue = {
+  getStatus: () => null,
+  getOverlap: () => ({ onList: false, requested: false }),
+  loaded: false,
+}
 
 const CommunityClaimStatusContext = createContext<CommunityClaimStatusValue>(defaultValue)
 
@@ -49,16 +82,18 @@ const CommunityClaimStatusContext = createContext<CommunityClaimStatusValue>(def
  */
 export function CommunityClaimStatusProvider({ children }: { children: ReactNode }) {
   const [index, setIndex] = useState<Map<string, ClaimStatus>>(new Map())
+  // Keys with an active (pending/open + in_progress) counterpart, split by source.
+  const [activeRequests, setActiveRequests] = useState<Set<string>>(new Set())
+  const [activeLists, setActiveLists] = useState<Set<string>>(new Set())
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      getCommunityRequests({ status: 'all', limit: 200 }).then((d) => d.requests).catch(() => []),
-      getCommunityListItems({ status: 'all', limit: 200 }).then((d) => d.items).catch(() => []),
-    ]).then(([requests, items]) => {
+    Promise.all([fetchAllRequests(), fetchAllListItems()]).then(([requests, items]) => {
       if (cancelled) return
       const map = new Map<string, ClaimStatus>()
+      const reqKeys = new Set<string>()
+      const listKeys = new Set<string>()
       const add = (item: LookupItem, status: string) => {
         const s: ClaimStatus | null = status === 'fulfilled' ? 'fulfilled' : status === 'in_progress' ? 'in_progress' : null
         if (!s) return
@@ -67,9 +102,17 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
           if (s === 'fulfilled' || map.get(k) !== 'fulfilled') map.set(k, s)
         }
       }
-      for (const r of requests) add(r, r.status)
-      for (const it of items) add(it, it.status)
+      for (const r of requests) {
+        add(r, r.status)
+        if (r.status === 'pending' || r.status === 'in_progress') for (const k of keysFor(r)) reqKeys.add(k)
+      }
+      for (const it of items) {
+        add(it, it.status)
+        if (it.status === 'open' || it.status === 'in_progress') for (const k of keysFor(it)) listKeys.add(k)
+      }
       setIndex(map)
+      setActiveRequests(reqKeys)
+      setActiveLists(listKeys)
       setLoaded(true)
     })
     return () => { cancelled = true }
@@ -85,8 +128,17 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
       }
       return best
     },
+    getOverlap: (item: LookupItem): CommunityOverlap => {
+      let onList = false
+      let requested = false
+      for (const k of keysFor(item)) {
+        if (activeLists.has(k)) onList = true
+        if (activeRequests.has(k)) requested = true
+      }
+      return { onList, requested }
+    },
     loaded,
-  }), [index, loaded])
+  }), [index, activeRequests, activeLists, loaded])
 
   return <CommunityClaimStatusContext.Provider value={value}>{children}</CommunityClaimStatusContext.Provider>
 }

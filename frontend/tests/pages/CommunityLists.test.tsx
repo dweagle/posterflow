@@ -74,9 +74,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-// ── Publish entry point: PosterStyleModal "Add to Lists" ───────────────────────
+// ── Publish entry point: PosterStyleModal "Add All to List" ────────────────────
 
-describe('PosterStyleModal — Add to Lists', () => {
+describe('PosterStyleModal — Add All to List', () => {
   const items: FallbackItem[] = [
     { title: 'Movie A', year: 2020, type: 'movie', tmdb_id: 27205, imdb_id: 'tt1375666', poster_url: 'https://image.tmdb.org/t/p/original/a.jpg' },
     // Seasons-only series → one season card carrying both seasons.
@@ -110,7 +110,7 @@ describe('PosterStyleModal — Add to Lists', () => {
   it('prompts Discord login when not connected', async () => {
     mockDiscordAuth = { isConnected: false, token: null, login: mockLogin }
     renderModal()
-    await userEvent.click(screen.getByRole('button', { name: /Add to Lists/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Add All to List/i }))
     expect(mockLogin).toHaveBeenCalledTimes(1)
     expect(mockSubmitListItems).not.toHaveBeenCalled()
   })
@@ -119,7 +119,7 @@ describe('PosterStyleModal — Add to Lists', () => {
     mockDiscordAuth = { isConnected: true, token: 'tok', login: mockLogin }
     mockSubmitListItems.mockResolvedValue({ inserted: 3, skipped: 0 })
     renderModal()
-    await userEvent.click(screen.getByRole('button', { name: /Add to Lists/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Add All to List/i }))
 
     await waitFor(() => expect(mockSubmitListItems).toHaveBeenCalledTimes(1))
     expect(mockSubmitListItems).toHaveBeenCalledWith({
@@ -150,8 +150,7 @@ describe('ListsView — claim and complete', () => {
     style_tag: 'CL2K',
     source: 'unmatched',
     notes: null,
-    added_by: 'alice',
-    added_by_discord_id: 'discord-alice',
+    poster_list_wanters: [{ discord_id: 'discord-alice', name: 'alice' }],
     status: 'open',
     claimed_by: null,
     claimed_by_discord_id: null,
@@ -179,7 +178,7 @@ describe('ListsView — claim and complete', () => {
     render(<ListsView />)
 
     await waitFor(() => expect(screen.getByText('Lonely Movie')).toBeTruthy())
-    expect(screen.getByText(/From/)).toBeTruthy()
+    expect(screen.getByText(/Wanted by/, { selector: '.request-maker-requested' })).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: /^Claim$/i }))
     await waitFor(() => expect(mockUpdateListItem).toHaveBeenCalledWith('item-1', 'claim'))
@@ -201,15 +200,19 @@ describe('ListsView — owner remove & bulk clear', () => {
   const alicesItem = {
     id: 'item-1', tmdb_id: null, media_type: 'movie', title: 'Alice Movie', year: 2021,
     season_number: null, poster_path: null, imdb_id: null, tvdb_id: null, style_tag: 'CL2K',
-    source: 'unmatched', notes: null, added_by: 'alice', added_by_discord_id: 'discord-alice',
+    source: 'unmatched', notes: null, poster_list_wanters: [{ discord_id: 'discord-alice', name: 'alice' }],
     status: 'open', claimed_by: null, claimed_by_discord_id: null,
     created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
   }
-  const myItem = { ...alicesItem, id: 'item-mine', title: 'My Movie', added_by: 'me', added_by_discord_id: 'discord-me' }
+  const myItem = { ...alicesItem, id: 'item-mine', title: 'My Movie', poster_list_wanters: [{ discord_id: 'discord-me', name: 'me' }] }
 
   it('lets the server owner remove an item they did not publish', async () => {
     mockDiscordAuth = { isConnected: true, isMaker: false, isOwner: true, discordUserId: 'discord-me', updateListItem: mockUpdateListItem }
-    mockGetListItems.mockResolvedValue({ items: [alicesItem], total: 1 })
+    // remove now re-reads (the poster can persist for other wanters); after the
+    // owner force-remove the re-read returns it gone.
+    mockGetListItems
+      .mockResolvedValueOnce({ items: [alicesItem], total: 1 })
+      .mockResolvedValue({ items: [], total: 0 })
     mockGetListOwners.mockResolvedValue({ owners: [{ id: 'discord-alice', name: 'alice', count: 1 }] })
     mockUpdateListItem.mockResolvedValue({ ok: true, removed: true })
 

@@ -12,6 +12,7 @@ import MakerTools from './pages/MakerTools'
 import PosterSearch from './pages/PosterSearch'
 import PlexUpload from './pages/PlexUpload'
 import CommunityRequests from './pages/CommunityRequests'
+import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
 import { ToastProvider } from './components/Toast'
 import { UnmatchedProvider } from './contexts/UnmatchedContext'
@@ -149,7 +150,7 @@ function AppContent() {
                 <Route path="plex-upload" element={<PlexUpload />} />
                 <Route path="poster-search" element={<PosterSearch />} />
                 <Route path="logs" element={<Logs />} />
-                <Route path="community-requests" element={<CommunityRequests />} />
+                <Route path="community-requests" element={<CommunityClaimStatusProvider><CommunityRequests /></CommunityClaimStatusProvider>} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

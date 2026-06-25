@@ -107,6 +107,9 @@ const SB_HEADERS = {
 interface RequestRow {
   id: string
   status: string
+  tmdb_id: number | null
+  media_type: string
+  season_number: number | null
   discord_message_id: string | null
   title: string
   requested_by_discord_id: string | null
@@ -116,7 +119,7 @@ interface RequestRow {
 
 async function fetchRequest(requestId: string): Promise<RequestRow | null> {
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id,created_at&limit=1`,
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,tmdb_id,media_type,season_number,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id,created_at&limit=1`,
     { headers: SB_HEADERS },
   )
   if (!resp.ok) return null
@@ -183,6 +186,48 @@ async function updateRequest(
   const rows = await resp.json() as unknown[]
   // If no rows returned, the status condition didn't match — another maker got there first
   return rows.length > 0
+}
+
+// Cross-sync: a fulfilled request means the poster now exists, so mark every
+// matching community-list item (any owner) fulfilled — keeps it out of the
+// active worklist while preserving history/credit. Best-effort; never blocks
+// the request completion.
+async function fulfillMatchingListItems(
+  row: RequestRow,
+  makerName: string,
+  makerId: string,
+): Promise<void> {
+  try {
+    const params = new URLSearchParams()
+    params.set('media_type', `eq.${row.media_type}`)
+    params.set('status', 'in.(open,in_progress)')
+    if (row.tmdb_id != null) {
+      params.set('tmdb_id', `eq.${row.tmdb_id}`)
+      if (row.media_type === 'season' && row.season_number != null) {
+        params.set('season_number', `eq.${row.season_number}`)
+      } else {
+        params.set('season_number', 'is.null')
+      }
+    } else {
+      params.set('tmdb_id', 'is.null')
+      params.set('title', `ilike.${row.title}`)
+    }
+    const now = new Date().toISOString()
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?${params}`, {
+      method: 'PATCH',
+      headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        status: 'fulfilled',
+        fulfilled_by: makerName,
+        fulfilled_by_discord_id: makerId,
+        fulfilled_at: now,
+        updated_at: now,
+      }),
+    })
+    if (!resp.ok) console.error('[update-request-status] list mirror failed:', await resp.text())
+  } catch (e) {
+    console.error('[update-request-status] list mirror error:', e)
+  }
 }
 
 // ── Discord helpers ────────────────────────────────────────────────────────
@@ -328,6 +373,17 @@ Deno.serve(async (req) => {
     const { discord_message_id, requested_by_discord_id } = row
     if (maker.discord_user_id !== requested_by_discord_id) {
       return json({ error: 'Only the person who submitted this request can archive it' }, 403)
+    }
+
+    // Persist the archive so the UI keeps showing "Archived" after a reload (the
+    // Discord lock below is best-effort/background; this is the source of truth).
+    const archiveResp = await fetch(`${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${request_id}`, {
+      method: 'PATCH',
+      headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({ thread_archived_at: new Date().toISOString() }),
+    })
+    if (!archiveResp.ok) {
+      console.error('[update-request-status] archive flag persist failed:', await archiveResp.text())
     }
 
     if (discord_message_id) {
@@ -533,6 +589,11 @@ Deno.serve(async (req) => {
   const updated = await updateRequest(request_id, patch, expectedStatus)
   if (!updated) {
     return json({ error: 'This request was just updated by another maker — please refresh' }, 409)
+  }
+
+  // Cross-sync: clear any matching community-list items now the poster exists.
+  if (action === 'complete') {
+    await fulfillMatchingListItems(row, maker.discord_username, maker.discord_user_id)
   }
 
   // ── Step 7: Update Discord thread ────────────────────────────────────────

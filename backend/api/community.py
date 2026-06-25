@@ -1,4 +1,5 @@
 """Community poster requests API - connects to Supabase for cross-instance request sharing."""
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 import httpx
 
 from database import get_db
+from models.setting import upsert_setting
 from core.logging import LogTags, log_info, log_error, log_user_action
 
 # Supabase project configuration.
@@ -24,6 +26,37 @@ SUPABASE_HEADERS = {
 }
 
 router = APIRouter(prefix="/api/community", tags=["community"])
+
+# Stores this instance's connected Discord identity {discord_user_id, discord_username}
+# so headless reconciliation knows whose published list items to clean up.
+SETTING_DISCORD_IDENTITY = "community_discord_identity"
+
+
+class DiscordIdentityPayload(BaseModel):
+    discord_user_id: str
+    discord_username: Optional[str] = None
+    discord_token: Optional[str] = None
+
+
+@router.post("/identity")
+async def store_discord_identity(payload: DiscordIdentityPayload, db: Session = Depends(get_db)):
+    """Persist the connected Discord identity + signed token so background scan
+    jobs can reconcile this user's own published list items headlessly.
+
+    The token is the user's own (already held in their browser) and is used only
+    to authorize removal of their own items through the update-list-item edge
+    function — the very same auth a manual "remove" uses. Stored in the settings
+    table alongside other app credentials; no extra setup required."""
+    uid = payload.discord_user_id.strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="discord_user_id is required")
+    upsert_setting(db, SETTING_DISCORD_IDENTITY, json.dumps({
+        "discord_user_id": uid,
+        "discord_username": (payload.discord_username or "").strip() or None,
+        "discord_token": (payload.discord_token or "").strip() or None,
+    }))
+    db.commit()
+    return {"ok": True}
 
 
 class PosterRequestPayload(BaseModel):
@@ -126,6 +159,7 @@ async def get_my_request_counts(discord_id: str = ""):
 async def get_community_requests(
     status: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
+    claimed_by_discord_id: Optional[str] = Query(None),
     sort: str = Query("recent"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -154,6 +188,10 @@ async def get_community_requests(
         params["or"] = f"(status.neq.fulfilled,fulfilled_at.gt.{cutoff})"
     if media_type:
         params["media_type"] = f"eq.{media_type}"
+    # "Claimed" filter (maker viewing their own claims; caller pairs it with
+    # status=in_progress).
+    if claimed_by_discord_id:
+        params["claimed_by_discord_id"] = f"eq.{claimed_by_discord_id}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -342,6 +380,8 @@ async def submit_community_request(payload: PosterRequestPayload):
 
 def _list_status_filter(status: Optional[str]) -> str:
     """PostgREST status filter for the lists views (rejected always hidden)."""
+    if status == "in_progress":
+        return "eq.in_progress"
     if status == "fulfilled":
         return "eq.fulfilled"
     if status == "all":
@@ -349,11 +389,23 @@ def _list_status_filter(status: Optional[str]) -> str:
     return "in.(open,in_progress)"  # active
 
 
+def _safe_like(s: str) -> str:
+    """Sanitize a free-text search for use in a PostgREST ilike value — strip the
+    chars that have meaning in filter syntax (commas, parens, wildcards, quotes)
+    so it can't break out of the filter or inject wildcards. Returns '' if empty."""
+    s = (s or "").strip()[:100]
+    for ch in ',()*%"\\':
+        s = s.replace(ch, " ")
+    return " ".join(s.split())
+
+
 @router.get("/lists")
 async def get_community_lists(
     media_type: Optional[str] = Query(None),
     added_by_discord_id: Optional[str] = Query(None),
+    claimed_by_discord_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     sort: str = Query("newest"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -364,20 +416,64 @@ async def get_community_lists(
     Returns {items, total} — total is the full match count, so the UI knows when
     there's more to load.
     """
+    # Each poster is one shared row now; embed its wanters so the UI can show
+    # "wanted by N". added_by_discord_id is reinterpreted as "items I want".
+    # claim_rank.asc keeps claimed (in_progress) items pinned at the top; the
+    # newest/oldest choice then orders within each rank group.
+    date_order = "created_at.asc" if sort == "oldest" else "created_at.desc"
     params: dict = {
-        "select": "*",
+        "select": "*,poster_list_wanters(discord_id,name)",
         "status": _list_status_filter(status),
         "limit": limit,
         "offset": offset,
-        "order": "created_at.asc" if sort == "oldest" else "created_at.desc",
+        "order": f"claim_rank.asc,{date_order}",
     }
     if media_type:
         params["media_type"] = f"eq.{media_type}"
-    if added_by_discord_id:
-        params["added_by_discord_id"] = f"eq.{added_by_discord_id}"
+    # "Claimed" filter (maker viewing their own claims). Caller also sends
+    # status=in_progress so completed/released items don't slip in.
+    if claimed_by_discord_id:
+        params["claimed_by_discord_id"] = f"eq.{claimed_by_discord_id}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # "Mine" and search both resolve to an id-restriction; intersect them.
+            restrict: Optional[set] = None
+
+            # "Mine" filter → restrict to the posters this user is a wanter of.
+            if added_by_discord_id:
+                wresp = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
+                    headers=SUPABASE_HEADERS,
+                    params={"select": "item_id", "discord_id": f"eq.{added_by_discord_id}", "limit": 2000},
+                )
+                wresp.raise_for_status()
+                restrict = {r["item_id"] for r in wresp.json()}
+
+            # Search → match the item title OR a wanter's name (case-insensitive).
+            q = _safe_like(search) if search else ""
+            if q:
+                like = f"ilike.*{q}*"
+                tresp = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/poster_list_items",
+                    headers=SUPABASE_HEADERS,
+                    params={"select": "id", "title": like, "limit": 2000},
+                )
+                tresp.raise_for_status()
+                nresp = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
+                    headers=SUPABASE_HEADERS,
+                    params={"select": "item_id", "name": like, "limit": 2000},
+                )
+                nresp.raise_for_status()
+                matched = {r["id"] for r in tresp.json()} | {r["item_id"] for r in nresp.json()}
+                restrict = matched if restrict is None else (restrict & matched)
+
+            if restrict is not None:
+                if not restrict:
+                    return {"items": [], "total": 0}
+                params["id"] = f"in.({','.join(restrict)})"
+
             resp = await client.get(
                 f"{SUPABASE_URL}/rest/v1/poster_list_items",
                 headers={**SUPABASE_HEADERS, "Prefer": "count=exact"},
@@ -399,33 +495,32 @@ async def get_community_list_owners(
     status: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
 ):
-    """Distinct publishers (id, name, count) for the current list view — used to
-    populate the "List owner" filter independent of which items are loaded."""
+    """Distinct people who *want* items in the current list view (id, name, count)
+    — populates the wanter filter independent of which items are loaded."""
     params: dict = {
-        "select": "added_by,added_by_discord_id",
-        "status": _list_status_filter(status),
-        "order": "created_at.desc",
-        "limit": 2000,
+        "select": "discord_id,name,poster_list_items!inner(status,media_type)",
+        "poster_list_items.status": _list_status_filter(status),
+        "limit": 5000,
     }
     if media_type:
-        params["media_type"] = f"eq.{media_type}"
+        params["poster_list_items.media_type"] = f"eq.{media_type}"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/poster_list_items",
+                f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
                 headers=SUPABASE_HEADERS,
                 params=params,
             )
             resp.raise_for_status()
             owners: dict[str, dict] = {}
             for row in resp.json():
-                did = row.get("added_by_discord_id")
+                did = row.get("discord_id")
                 if not did:
                     continue
                 entry = owners.get(did)
                 if entry is None:
-                    owners[did] = {"id": did, "name": row.get("added_by") or did, "count": 1}
+                    owners[did] = {"id": did, "name": row.get("name") or did, "count": 1}
                 else:
                     entry["count"] += 1
             result = sorted(owners.values(), key=lambda o: (o["name"] or "").lower())

@@ -9,6 +9,7 @@ import { useUnmatched } from '../contexts/UnmatchedContext'
 import { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
 import ListsView from '../components/community/ListsView'
+import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
 import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import { useToast } from '../components/Toast'
@@ -18,8 +19,6 @@ type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type StatusFilter = 'active' | 'all' | 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
 type SortOrder = 'newest' | 'oldest'
 type PageTab = 'requests' | 'lists'
-
-const PAGE_TAB_STORAGE_KEY = 'posterflow.community.activeTab'
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -51,6 +50,7 @@ export default function CommunityRequests() {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
+  const { getOverlap } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useUnmatched()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
   const fetchRequestsRef = useRef<(() => void) | null>(null)
@@ -59,6 +59,7 @@ export default function CommunityRequests() {
   const [error, setError] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const [status, setStatus] = useState<StatusFilter>('active')
+  const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed requests
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   // Separate from the status/sort filters: show all requests or only the connected user's own.
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
@@ -80,11 +81,10 @@ export default function CommunityRequests() {
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
-  // Top-level page tab: the requests list or the published worklists.
-  const [pageTab, setPageTab] = useState<PageTab>(() => {
-    const saved = localStorage.getItem(PAGE_TAB_STORAGE_KEY)
-    return saved === 'lists' ? 'lists' : 'requests'
-  })
+  // Top-level page tab: the requests list or the published worklists. Always
+  // starts on Requests when the page (re)mounts — leaving and returning resets
+  // to Requests rather than restoring the last tab.
+  const [pageTab, setPageTab] = useState<PageTab>('requests')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
   // requestId → signature of the file set already handed to IDarr, so a Retry
@@ -92,10 +92,6 @@ export default function CommunityRequests() {
   const idarrSentRef = useRef<Map<string, string>>(new Map())
   // Shared "Image Drop also adds to IDarr" behaviour (also used by the Lists tab).
   const { enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
-
-  useEffect(() => {
-    localStorage.setItem(PAGE_TAB_STORAGE_KEY, pageTab)
-  }, [pageTab])
 
   useEffect(() => {
     getSettings().then((settings) => {
@@ -276,7 +272,13 @@ export default function CommunityRequests() {
     try {
       const params: Record<string, string> = {}
       if (mediaType !== 'all') params.media_type = mediaType
-      if (status !== 'active') params.status = status
+      // "Claimed" overrides the status filter — my in-progress claims.
+      if (claimedByMe && discordUserId) {
+        params.status = 'in_progress'
+        params.claimed_by_discord_id = discordUserId
+      } else if (status !== 'active') {
+        params.status = status
+      }
       const data = await getCommunityRequests(params)
       const isActive = (s: string) => s === 'pending' || s === 'in_progress'
       const sorted = [...data.requests].sort((a, b) => {
@@ -295,7 +297,7 @@ export default function CommunityRequests() {
     } finally {
       setLoading(false)
     }
-  }, [mediaType, status, sortOrder])
+  }, [mediaType, status, claimedByMe, discordUserId, sortOrder])
 
   useEffect(() => {
     fetchRequestsRef.current = fetchRequests
@@ -426,7 +428,7 @@ export default function CommunityRequests() {
         <div className="community-filters">
           <div className="community-filter-group">
             <label>Status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+            <select className="community-status-select" value={status} disabled={claimedByMe} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
               <option value="active">Active</option>
               <option value="all">All</option>
               <option value="pending">Pending</option>
@@ -442,6 +444,15 @@ export default function CommunityRequests() {
               <option value="oldest">Oldest first</option>
             </select>
           </div>
+          {isMaker && (
+            <button
+              className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
+              onClick={() => setClaimedByMe((v) => !v)}
+              title="Show only the requests you've claimed"
+            >
+              Claimed
+            </button>
+          )}
         </div>
         {isConnected && discordUserId && (
           <div className="community-owner-toggle">
@@ -528,8 +539,19 @@ export default function CommunityRequests() {
           </div>
           {visibleRequests.map((req) => {
             const showMakerTools = isMaker && isConnected && req.tmdb_id != null
+            const isActive = req.status === 'pending' || req.status === 'in_progress'
+            // Soft cross-sync signal: a matching list item was completed elsewhere.
+            const listCompleted = isActive && !!req.list_completed_at
+            // Passive overlap: this item also sits on someone's active list.
+            const alsoOnList = getOverlap(req).onList
             const infoLines = (
               <>
+                {listCompleted && (
+                  <div className="request-list-completed-callout">
+                    ✋ A matching poster was completed from a list
+                    {req.list_completed_by ? <> by <strong>{req.list_completed_by}</strong></> : null} — verify it fits, then close.
+                  </div>
+                )}
                 {req.requested_by && (
                   <div className="request-maker-info request-maker-requested">
                     👤 Requested by <strong>{req.requested_by}</strong>
@@ -555,7 +577,7 @@ export default function CommunityRequests() {
                     href={req.discord_thread_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="View Discord thread"
+                    data-tooltip="View Discord thread"
                   >
                     <ExternalLink size={11} />
                     Discord
@@ -564,7 +586,7 @@ export default function CommunityRequests() {
                 <button
                   type="button"
                   className="request-maker-btn"
-                  title="Search in Maker Tools"
+                  data-tooltip="Search in Maker Tools"
                   onClick={() => navigate('/maker-tools', { state: { tmdbSearch: req.year ? `${req.title} ${req.year}` : req.title } })}
                 >
                   <Search size={11} />
@@ -588,7 +610,7 @@ export default function CommunityRequests() {
                         <button
                           type="button"
                           className={`request-upload-btn${isUploading || isPosted ? (isUploading ? '' : ' upload-done') : us ? ' upload-error' : ''}`}
-                          title={typeof us === 'string' && !isUploading && !isPosted ? us : 'Upload poster(s) to Discord thread'}
+                          data-tooltip={typeof us === 'string' && !isUploading && !isPosted ? us : 'Upload poster(s) to Discord thread'}
                           disabled={isUploading || isPosted}
                           onClick={() => handleUploadClick(req.id)}
                         >
@@ -604,7 +626,7 @@ export default function CommunityRequests() {
                                 type="button"
                                 className="request-action-btn action-claim"
                                 disabled={actionLoading}
-                                title="Claim this request"
+                                data-tooltip="Claim this request"
                                 onClick={() => handleStatusAction(req.id, 'claim')}
                               >
                                 {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
@@ -616,7 +638,7 @@ export default function CommunityRequests() {
                                 type="button"
                                 className="request-action-btn action-complete"
                                 disabled={actionLoading}
-                                title="Mark as complete"
+                                data-tooltip="Mark as complete"
                                 onClick={() => handleStatusAction(req.id, 'complete')}
                               >
                                 {actionLoading ? <Loader2 size={11} className="spin-icon" /> : <Check size={11} />}
@@ -628,7 +650,7 @@ export default function CommunityRequests() {
                                 type="button"
                                 className="request-action-btn"
                                 disabled={actionLoading}
-                                title="Release your claim (back to open)"
+                                data-tooltip="Release your claim (back to open)"
                                 onClick={() => handleStatusAction(req.id, 'release')}
                               >
                                 <span>Release</span>
@@ -638,13 +660,13 @@ export default function CommunityRequests() {
                               type="button"
                               className="request-action-btn action-reject"
                               disabled={actionLoading}
-                              title="Reject this request"
+                              data-tooltip="Reject this request"
                               onClick={() => handleStatusAction(req.id, 'reject')}
                             >
                               <span>Reject</span>
                             </button>
                             {actionError && (
-                              <span className="request-action-error" title={actionError}>
+                              <span className="request-action-error" data-tooltip={actionError}>
                                 {actionError}
                               </span>
                             )}
@@ -657,14 +679,15 @@ export default function CommunityRequests() {
                   {isConnected && discordUserId && req.requested_by_discord_id === discordUserId && req.discord_thread_url && req.status === 'fulfilled' && (() => {
                     const archiveState = archiveStates.get(req.id)
                     const isLoading = archiveState === 'loading'
-                    const isDone = archiveState === 'done'
+                    // Persisted flag (survives reload) OR the just-archived local state.
+                    const isDone = archiveState === 'done' || req.thread_archived_at != null
                     const archiveError = typeof archiveState === 'string' && archiveState !== 'loading' && archiveState !== 'done' ? archiveState : null
                     return (
                       <div className="request-status-actions">
                         <button
                           type="button"
                           className={`request-action-btn action-reject${isDone ? ' upload-done' : ''}`}
-                          title={isDone ? 'Discord thread archived' : 'Archive the Discord thread for this request'}
+                          data-tooltip={isDone ? 'Discord thread archived' : 'Archive the Discord thread for this request'}
                           disabled={isLoading || isDone}
                           onClick={() => setArchiveConfirm({ requestId: req.id, message: '' })}
                         >
@@ -672,7 +695,7 @@ export default function CommunityRequests() {
                           <span>{isDone ? 'Archived' : 'Archive'}</span>
                         </button>
                         {archiveError && (
-                          <span className="request-action-error" title={archiveError}>{archiveError}</span>
+                          <span className="request-action-error" data-tooltip={archiveError}>{archiveError}</span>
                         )}
                       </div>
                     )
@@ -689,14 +712,14 @@ export default function CommunityRequests() {
                           type="button"
                           className="request-action-btn action-reject"
                           disabled={actionLoading}
-                          title={isRequester ? 'Remove your request' : 'Remove this request (server owner)'}
+                          data-tooltip={isRequester ? 'Remove your request' : 'Remove this request (server owner)'}
                           onClick={() => handleStatusAction(req.id, 'remove')}
                         >
                           {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
                           <span>Remove</span>
                         </button>
                         {removeError && (
-                          <span className="request-action-error" title={removeError}>{removeError}</span>
+                          <span className="request-action-error" data-tooltip={removeError}>{removeError}</span>
                         )}
                       </div>
                     )
@@ -714,6 +737,7 @@ export default function CommunityRequests() {
                 mediaType={req.media_type as CardMediaType}
                 styleLabel={getStyleLabel(req.style_tags)}
                 status={req.status}
+                titleExtras={alsoOnList ? <span className="request-overlap-chip" title="This item is also on a community list">📋 also on a list</span> : null}
                 notes={req.notes}
                 createdAt={req.created_at}
                 imdbId={req.imdb_id}

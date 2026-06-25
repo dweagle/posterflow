@@ -86,6 +86,54 @@ async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
   }
 }
 
+// ── Cross-sync with community lists ──────────────────────────────────────────
+// A formal request supersedes the community-list entry for that poster, so
+// creating one removes the SHARED list row (for everyone who wanted it — the
+// list is now one row per poster). Only an `open` row is cleared; a row a maker
+// has already claimed from the list (in_progress) is left so the request can't
+// yank in-progress work. Deleting the row cascades its wanters. Best-effort.
+async function clearListEntryForRequest(
+  // The remote supabase-js import's default generics don't line up with the
+  // inferred client instance, so type just the query builder we use here.
+  supabase: { from: (table: string) => any },
+  body: Record<string, unknown>,
+): Promise<void> {
+  try {
+    // Find the matching OPEN shared list row(s) for this media.
+    let q = supabase
+      .from('poster_list_items')
+      .select('id')
+      .eq('media_type', body.p_media_type as string)
+      .eq('status', 'open')
+    if (body.p_tmdb_id != null) {
+      q = q.eq('tmdb_id', body.p_tmdb_id as number)
+      // Season requests match on season number; everything else has none.
+      if (body.p_media_type === 'season' && body.p_season_number != null) {
+        q = q.eq('season_number', body.p_season_number as number)
+      } else {
+        q = q.is('season_number', null)
+      }
+    } else {
+      // Custom item (no TMDB id) — match by exact title, case-insensitive.
+      q = q.is('tmdb_id', null).ilike('title', String(body.p_title ?? ''))
+    }
+    const { data: rows, error: selErr } = await q
+    if (selErr) {
+      console.error('[submit-request] list clear lookup failed:', selErr)
+      return
+    }
+    const ids = (rows ?? []).map((r: { id: string }) => r.id)
+    if (ids.length === 0) return
+    // Delete the wanters; the orphan-cleanup trigger then removes the now-empty
+    // open poster row(s). Going through wanters (not deleting the poster row
+    // directly) avoids the cascade re-firing the orphan trigger.
+    const { error: delErr } = await supabase.from('poster_list_wanters').delete().in('item_id', ids)
+    if (delErr) console.error('[submit-request] list clear failed:', delErr)
+  } catch (e) {
+    console.error('[submit-request] list clear error:', e)
+  }
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -233,6 +281,11 @@ Deno.serve(async (req: Request) => {
       console.error('Failed to store discord IDs:', updateErr)
     }
   }
+
+  // Cross-sync: a formal request supersedes the community-list entry, so clear
+  // the shared list row (for everyone who wanted it). Runs on new requests and
+  // duplicate votes alike.
+  await clearListEntryForRequest(supabase, body)
 
   return json(data)
 })

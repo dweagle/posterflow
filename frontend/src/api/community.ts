@@ -19,6 +19,13 @@ export interface CommunityRequest {
   discord_thread_url: string | null
   notes?: string | null
   style_tags?: string[] | null
+  // Soft cross-sync marker set when a matching community LIST item is completed.
+  // The request stays open; the board shows a "verify & close" callout.
+  list_completed_by?: string | null
+  list_completed_at?: string | null
+  // Set when the requester archives the thread; keeps the "Archived" button state
+  // across reloads.
+  thread_archived_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -61,6 +68,16 @@ export const getCommunityRequests = (
 export const submitCommunityRequest = (payload: SubmitRequestPayload): Promise<SubmitRequestResponse> =>
   postData('/api/community/requests', payload)
 
+// Persist the connected Discord identity + token so headless scan jobs can
+// reconcile this user's own published list items (remove ones resolved locally).
+// The token authorizes removal via the same edge function a manual remove uses.
+export const storeDiscordIdentity = (
+  discord_user_id: string,
+  discord_username?: string | null,
+  discord_token?: string | null,
+): Promise<{ ok: boolean }> =>
+  postData('/api/community/identity', { discord_user_id, discord_username, discord_token })
+
 // ── Community Lists ──────────────────────────────────────────────────────────
 
 export interface CommunityListItem {
@@ -76,8 +93,6 @@ export interface CommunityListItem {
   style_tag: string | null
   source: 'unmatched' | 'style_fallback' | null
   notes: string | null
-  added_by: string | null
-  added_by_discord_id: string | null
   status: 'open' | 'in_progress' | 'fulfilled' | 'rejected'
   claimed_by: string | null
   claimed_by_discord_id: string | null
@@ -85,10 +100,20 @@ export interface CommunityListItem {
   fulfilled_at: string | null
   created_at: string
   updated_at: string
+  // Embedded by the backend read — who wants this poster ("wanted by N").
+  poster_list_wanters?: ListItemWanter[] | null
+  // A wanter's workflow found this poster made → it's in a drive; the rest will
+  // get it on their next run.
+  available_in_drive?: boolean
 }
 
-// One item to publish to a community list. Identity (added_by) is set
-// server-side from the verified Discord token, never here.
+export interface ListItemWanter {
+  discord_id: string
+  name: string | null
+}
+
+// One item to publish to a community list. The publisher is attached as a wanter
+// server-side from the verified Discord token, never from client fields.
 export interface ListItemInput {
   tmdb_id?: number | null
   media_type: string

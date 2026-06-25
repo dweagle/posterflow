@@ -191,50 +191,118 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   })
 
-  // Existing items for this publisher. Dedup considers fulfilled too, so a
-  // completed item can't be re-added as a fresh duplicate row; the open-items
-  // cap, however, only counts items still on the working list.
-  const { data: existing, error: existErr } = await supabase
-    .from('poster_list_items')
-    .select('tmdb_id, media_type, season_number, title, status')
-    .eq('added_by_discord_id', user.discord_user_id)
-    .in('status', ['open', 'in_progress', 'fulfilled'])
-  if (existErr) {
-    console.error('[submit-list-items] existing fetch failed:', existErr)
-    return json({ error: 'Internal error' }, 500)
+  // One row per poster now (shared across everyone who wants it); this user is
+  // attached as a "wanter". dedupKey is the in-memory media key (matches the DB
+  // unique indexes), letting us map a batch item to its existing row id.
+  type KeyedRow = { id: string; tmdb_id: number | null; media_type: string; season_number: number | null; title: string }
+  const idByKey = new Map<string, string>()
+  const indexRows = (rows: KeyedRow[] | null) => {
+    for (const r of rows ?? []) idByKey.set(dedupKey(r), r.id)
   }
 
-  const existingKeys = new Set((existing ?? []).map((r) => dedupKey(r as never)))
-  const toInsert = normalized.filter((it) => !existingKeys.has(dedupKey(it)))
-  const skipped = normalized.length - toInsert.length
-
-  if (toInsert.length === 0) {
-    return json({ inserted: 0, skipped, message: 'All items are already on (or completed from) your list' })
+  // Find existing poster rows for the batch (active + fulfilled).
+  const tmdbIds = [...new Set(normalized.filter((i) => i.tmdb_id != null).map((i) => i.tmdb_id as number))]
+  if (tmdbIds.length) {
+    const { data, error } = await supabase
+      .from('poster_list_items')
+      .select('id, tmdb_id, media_type, season_number, title')
+      .in('status', ['open', 'in_progress', 'fulfilled'])
+      .in('tmdb_id', tmdbIds)
+    if (error) {
+      console.error('[submit-list-items] existing (tmdb) fetch failed:', error)
+      return json({ error: 'Internal error' }, 500)
+    }
+    indexRows(data)
+  }
+  const customTitles = new Set(normalized.filter((i) => i.tmdb_id == null).map((i) => i.title.toLowerCase()))
+  if (customTitles.size) {
+    const { data, error } = await supabase
+      .from('poster_list_items')
+      .select('id, tmdb_id, media_type, season_number, title')
+      .in('status', ['open', 'in_progress', 'fulfilled'])
+      .is('tmdb_id', null)
+    if (error) {
+      console.error('[submit-list-items] existing (custom) fetch failed:', error)
+      return json({ error: 'Internal error' }, 500)
+    }
+    indexRows((data ?? []).filter((r) => customTitles.has((r.title ?? '').toLowerCase())))
   }
 
-  const currentOpen = (existing ?? []).filter((r) => r.status === 'open' || r.status === 'in_progress').length
-  if (currentOpen + toInsert.length > MAX_OPEN_ITEMS) {
+  // Create poster rows for items that don't exist yet. The partial unique index
+  // is the race backstop: if a concurrent publisher created the same poster, the
+  // insert fails and we re-read so we can still attach this user as a wanter.
+  const toCreate = normalized.filter((it) => !idByKey.has(dedupKey(it)))
+  if (toCreate.length) {
+    const newRows = toCreate.map((it) => ({ ...it, status: 'open' }))
+    const { data: created, error: createErr } = await supabase
+      .from('poster_list_items')
+      .insert(newRows)
+      .select('id, tmdb_id, media_type, season_number, title')
+    if (createErr) {
+      console.error('[submit-list-items] create failed, re-reading:', createErr)
+      const retryTmdb = [...new Set(toCreate.filter((i) => i.tmdb_id != null).map((i) => i.tmdb_id as number))]
+      if (retryTmdb.length) {
+        const { data } = await supabase
+          .from('poster_list_items')
+          .select('id, tmdb_id, media_type, season_number, title')
+          .in('status', ['open', 'in_progress', 'fulfilled'])
+          .in('tmdb_id', retryTmdb)
+        indexRows(data)
+      }
+      // (custom-title races are rare; any still-unresolved items are skipped.)
+    } else {
+      indexRows(created)
+    }
+  }
+
+  // Resolve every batch item to a poster id; abuse cap on total posters wanted.
+  const itemIds = [...new Set(
+    normalized.map((it) => idByKey.get(dedupKey(it))).filter((id): id is string => typeof id === 'string'),
+  )]
+  if (itemIds.length === 0) {
+    return json({ inserted: 0, skipped: normalized.length })
+  }
+
+  // The source the caller added each poster from, so reconciliation can later use
+  // THIS user's context rather than the row's first-creator source.
+  const sourceByItemId = new Map<string, string>()
+  for (const it of normalized) {
+    const id = idByKey.get(dedupKey(it))
+    if (id && !sourceByItemId.has(id)) sourceByItemId.set(id, it.source)
+  }
+
+  const { count: wanterCount } = await supabase
+    .from('poster_list_wanters')
+    .select('id', { count: 'exact', head: true })
+    .eq('discord_id', user.discord_user_id)
+  if ((wanterCount ?? 0) + itemIds.length > MAX_OPEN_ITEMS) {
     return json(
-      { error: `That would exceed your ${MAX_OPEN_ITEMS}-item list limit. Complete or remove some items first.` },
+      { error: `That would exceed your ${MAX_OPEN_ITEMS}-item list limit. Remove some items first.` },
       429,
     )
   }
 
-  const rows = toInsert.map((it) => ({
-    ...it,
-    added_by: user.discord_username,
-    added_by_discord_id: user.discord_user_id,
-    status: 'open',
-  }))
+  // Which posters does this user already want? (for an accurate inserted/skipped)
+  const { data: alreadyRows } = await supabase
+    .from('poster_list_wanters')
+    .select('item_id')
+    .eq('discord_id', user.discord_user_id)
+    .in('item_id', itemIds)
+  const already = new Set((alreadyRows ?? []).map((r) => r.item_id as string))
+  const newItemIds = itemIds.filter((id) => !already.has(id))
 
-  const { data: inserted, error: insertErr } = await supabase
-    .from('poster_list_items')
-    .insert(rows)
-    .select('id')
-  if (insertErr) {
-    console.error('[submit-list-items] insert failed:', insertErr)
-    return json({ error: 'Failed to add items' }, 500)
+  if (newItemIds.length) {
+    const { error: wanterErr } = await supabase
+      .from('poster_list_wanters')
+      .upsert(
+        newItemIds.map((id) => ({ item_id: id, discord_id: user.discord_user_id, name: user.discord_username, source: sourceByItemId.get(id) ?? null })),
+        { onConflict: 'item_id,discord_id', ignoreDuplicates: true },
+      )
+    if (wanterErr) {
+      console.error('[submit-list-items] wanter upsert failed:', wanterErr)
+      return json({ error: 'Failed to add items' }, 500)
+    }
   }
 
-  return json({ inserted: inserted?.length ?? 0, skipped })
+  return json({ inserted: newItemIds.length, skipped: normalized.length - newItemIds.length })
 })

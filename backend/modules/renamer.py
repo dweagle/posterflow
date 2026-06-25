@@ -33,6 +33,7 @@ from models.job import (
 )
 from services.poster_renamer import PosterRenameService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.community_reconcile import reconcile_community_lists
 from core.hooks import run_post_job_hook, HOOK_KEY_RENAMER
 
 
@@ -250,6 +251,11 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
             upsert_setting(db, "poster_renamer_stats", stats_json)
             db.commit()
             log_info(LogTags.POSTER_RENAMER, f"Stored stats: matched={stats.get('total_matched', 0)}, movies={stats.get('movies', 0)}, series={stats.get('series', 0)}, collections={stats.get('collections', 0)}, styles={style_counts}")
+
+            # Headless cross-sync: the style-fallback set is now fresh, so drop any
+            # of this user's published list items whose preferred-style poster now
+            # exists locally (resolved outside the request/list path). Best-effort.
+            reconcile_community_lists(db, {"style_fallback"})
 
         auto_run_border_override = config_data.get("auto_run_border")
         if isinstance(auto_run_border_override, bool):

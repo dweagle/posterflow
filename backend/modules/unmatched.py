@@ -28,6 +28,7 @@ from models.job import (
 )
 from services.poster_renamer import PosterRenameService
 from services.unmatched_assets import UnmatchedAssetsService
+from services.community_reconcile import reconcile_community_lists
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 from core.hooks import run_post_job_hook, HOOK_KEY_UNMATCHED
 
@@ -155,6 +156,11 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
             total=total_items,
             percent_complete=percent
         )
+
+        # Headless cross-sync: now that the unmatched set is fresh, drop any of
+        # this user's published community-list items whose posters now exist
+        # locally (resolved outside the request/list path). Best-effort.
+        reconcile_community_lists(db, {"unmatched"})
 
         movies_missing = int(summary.get("movies", {}).get("unmatched", 0))
         shows_missing = int(summary.get("series", {}).get("unmatched", 0))

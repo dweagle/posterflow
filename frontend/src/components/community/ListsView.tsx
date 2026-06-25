@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, Search, Loader2, Check, Info, Trash2, ChevronDown } from 'lucide-react'
-import { getCommunityListItems, getCommunityListOwners, type CommunityListItem, type CommunityListOwner } from '../../api/community'
+import { RefreshCw, Globe, Search, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload } from 'lucide-react'
+import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/makerTools'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -10,6 +10,7 @@ import { useToast } from '../Toast'
 import { derivePsdConfig, type PsdConfig } from '../maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from './RequestItemCard'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
+import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type SortOrder = 'newest' | 'oldest'
@@ -39,10 +40,32 @@ function seasonLabels(item: CommunityListItem): string[] {
   return []
 }
 
+// Map a list item onto a full poster-request payload. The two share a field
+// shape (both were published from the same sources), so this is a straight
+// carry-over — season encoding ("Seasons: 1,2,3" in notes / a single
+// season_number) rides along unchanged, exactly as the request modal builds it.
+function toRequestPayload(item: CommunityListItem, token: string): SubmitRequestPayload {
+  return {
+    tmdb_id: item.tmdb_id,
+    media_type: item.media_type,
+    title: item.title,
+    year: item.year,
+    season_number: item.season_number,
+    poster_path: item.poster_path,
+    imdb_id: item.imdb_id,
+    tvdb_id: item.tvdb_id,
+    notes: item.notes,
+    style_tags: item.style_tag ? [item.style_tag] : undefined,
+    // requested_by is left to the edge function (the connected user's Discord name).
+    discord_token: token,
+  }
+}
+
 export default function ListsView() {
   const navigate = useNavigate()
   const { showToast } = useToast()
-  const { isConnected, isMaker, isOwner, discordUserId, updateListItem } = useDiscordAuth()
+  const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
+  const { getOverlap } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useUnmatched()
   const { enabled: idarrEnabled, setEnabled: setIdarrEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
@@ -52,9 +75,12 @@ export default function ListsView() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
-  const [ownerFilter, setOwnerFilter] = useState<string>('all')   // 'all' or an added_by_discord_id
-  const [statusFilter, setStatusFilter] = useState<'active' | 'fulfilled' | 'all'>('active')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')   // 'all' | a wanter's discord_id
+  const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
+  const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed items
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
+  const [searchInput, setSearchInput] = useState('')   // raw input box value
+  const [search, setSearch] = useState('')             // debounced value sent to the API
   const [owners, setOwners] = useState<CommunityListOwner[]>([])
 
   // Per-card action state: itemId → 'loading' | error string
@@ -66,6 +92,13 @@ export default function ListsView() {
   const [claimConflict, setClaimConflict] = useState<string | null>(null)
   const [confirmClearMine, setConfirmClearMine] = useState(false)
   const [clearingMine, setClearingMine] = useState(false)
+  // Item pending "Move to Request" confirmation, and the in-flight flag.
+  const [moveTarget, setMoveTarget] = useState<CommunityListItem | null>(null)
+  const [moving, setMoving] = useState(false)
+  // Per-card IDarr upload-button state: itemId → 'uploading' | 'done'.
+  const [uploadStates, setUploadStates] = useState<Map<string, 'uploading' | 'done'>>(new Map())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadTargetRef = useRef<string | null>(null)
   const fetchRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -81,13 +114,18 @@ export default function ListsView() {
     setError(null)
     try {
       const params: Record<string, string> = {
-        status: statusFilter,
+        // "Claimed" overrides the status dropdown — it's my in-progress claims.
+        status: claimedByMe ? 'in_progress' : statusFilter,
         sort: sortOrder,
         limit: String(PAGE_SIZE),
         offset: String(offset),
       }
       if (mediaType !== 'all') params.media_type = mediaType
+      // Wanter filter → items the selected person wants (backend resolves
+      // added_by_discord_id via the wanters table).
       if (ownerFilter !== 'all') params.added_by_discord_id = ownerFilter
+      if (claimedByMe && discordUserId) params.claimed_by_discord_id = discordUserId
+      if (search) params.search = search
       const data = await getCommunityListItems(params)
       setTotal(data.total)
       setItems((prev) => {
@@ -101,9 +139,15 @@ export default function ListsView() {
       if (append) setLoadingMore(false)
       else setLoading(false)
     }
-  }, [statusFilter, sortOrder, mediaType, ownerFilter])
+  }, [statusFilter, claimedByMe, discordUserId, sortOrder, mediaType, ownerFilter, search])
 
-  // (Re)load the first page whenever a filter or sort changes.
+  // Debounce the search box so we fetch on a pause, not every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  // (Re)load the first page whenever a filter, sort, or search changes.
   useEffect(() => {
     fetchRef.current = () => fetchPage(0, false)
     fetchPage(0, false)
@@ -113,8 +157,7 @@ export default function ListsView() {
     fetchPage(items.length, true)
   }, [fetchPage, items.length])
 
-  // Distinct publishers across the whole current view (not just the loaded
-  // page), so the owner filter lists everyone even with pagination.
+  // People who want items in the current view — populates the wanter filter.
   const fetchOwners = useCallback(async () => {
     try {
       const params: Record<string, string> = { status: statusFilter }
@@ -126,8 +169,7 @@ export default function ListsView() {
 
   useEffect(() => { fetchOwners() }, [fetchOwners])
 
-  // If the selected owner is no longer present (e.g. status filter changed),
-  // fall back to "All owners".
+  // If the selected wanter is no longer present (filter changed), reset to Everyone.
   useEffect(() => {
     if (ownerFilter !== 'all' && owners.length > 0 && !owners.some((o) => o.id === ownerFilter)) {
       setOwnerFilter('all')
@@ -164,8 +206,11 @@ export default function ListsView() {
         setItems((prev) => prev.map((i) => i.id === item.id
           ? { ...i, status: (result.status as CommunityListItem['status']) ?? i.status, claimed_by: result.claimed_by ?? null, claimed_by_discord_id: result.claimed_by_discord_id ?? null }
           : i))
+      } else if (action === 'remove') {
+        // Detach this user — the poster stays if others still want it, so re-read.
+        fetchRef.current?.()
       } else {
-        // complete / reject / remove all drop the item from the list.
+        // complete / reject — terminal; drop the card.
         setItems((prev) => prev.filter((i) => i.id !== item.id))
         setTotal((t) => Math.max(0, t - 1))
       }
@@ -183,6 +228,47 @@ export default function ListsView() {
     }
   }, [updateListItem, showToast, refreshCommunityRequestCount])
 
+  // Move a list item to a full community request: post it via the real request
+  // route, then remove it from the list. The cross-sync (direction A) may have
+  // already removed the publisher's copy server-side, so tolerate "already gone".
+  const handleMoveToRequest = useCallback(async () => {
+    if (!moveTarget) return
+    if (!token) { login(); return }
+    const item = moveTarget
+    setMoving(true)
+    const drop = () => {
+      setItems((prev) => prev.filter((i) => i.id !== item.id))
+      setTotal((t) => Math.max(0, t - 1))
+      setMoveTarget(null)
+      void refreshCommunityRequestCount()
+    }
+    try {
+      const result = await submitCommunityRequest(toRequestPayload(item, token))
+      try { await updateListItem(item.id, 'remove') } catch { /* may already be removed by cross-sync */ }
+      drop()
+      showToast(
+        result.status === 'already_requested'
+          ? 'Already requested — removed from your list'
+          : 'Moved to Community Requests',
+        result.status === 'already_requested' ? 'info' : 'success',
+      )
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      // A 409 means a request for this item already exists — the goal is already
+      // met, so still drop the now-redundant list item to complete the move.
+      if (status === 409) {
+        try { await updateListItem(item.id, 'remove') } catch { /* */ }
+        drop()
+        showToast(detail ?? 'Already requested — removed from your list', 'info')
+      } else {
+        showToast(detail ?? 'Failed to move to a request', 'error')
+      }
+    } finally {
+      setMoving(false)
+    }
+  }, [moveTarget, token, login, updateListItem, showToast, refreshCommunityRequestCount])
+
   const handleDrop = useCallback((e: React.DragEvent, _itemId: string) => {
     e.preventDefault()
     setDragOverId(null)
@@ -190,6 +276,31 @@ export default function ListsView() {
     if (!files.length) return
     if (idarrEnabled) void doIdarrUpload(files)
   }, [idarrEnabled, doIdarrUpload])
+
+  // Click-to-upload equivalent of the IDarr drop: open a file picker and push the
+  // chosen poster(s) to the maker's IDarr pipeline (same path as a drag-drop).
+  const doIdarrUploadForItem = useCallback(async (itemId: string, files: File[]) => {
+    setUploadStates((prev) => new Map(prev).set(itemId, 'uploading'))
+    await doIdarrUpload(files)
+    setUploadStates((prev) => new Map(prev).set(itemId, 'done'))
+    setTimeout(() => setUploadStates((prev) => {
+      const next = new Map(prev)
+      next.delete(itemId)
+      return next
+    }), 3000)
+  }, [doIdarrUpload])
+
+  const handleUploadClick = useCallback((itemId: string) => {
+    uploadTargetRef.current = itemId
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    const itemId = uploadTargetRef.current
+    e.target.value = ''
+    if (files.length && itemId) void doIdarrUploadForItem(itemId, files)
+  }, [doIdarrUploadForItem])
 
   // Bulk: remove every item the connected user published.
   const handleClearMine = useCallback(async () => {
@@ -227,16 +338,17 @@ export default function ListsView() {
         <div className="community-filters">
           <div className="community-filter-group">
             <label>Status</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'fulfilled' | 'all')}>
+            <select className="community-status-select" value={statusFilter} disabled={claimedByMe} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'in_progress' | 'fulfilled' | 'all')}>
               <option value="active">Active</option>
+              <option value="in_progress">In Progress</option>
               <option value="fulfilled">Fulfilled</option>
               <option value="all">All</option>
             </select>
           </div>
           <div className="community-filter-group">
-            <label>List owner</label>
+            <label>Wanted by</label>
             <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
-              <option value="all">All owners</option>
+              <option value="all">Everyone</option>
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>{o.name} ({o.count})</option>
               ))}
@@ -249,18 +361,27 @@ export default function ListsView() {
               <option value="oldest">Oldest first</option>
             </select>
           </div>
+          {isMaker && (
+            <button
+              className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
+              onClick={() => setClaimedByMe((v) => !v)}
+              title="Show only the items you've claimed"
+            >
+              Claimed
+            </button>
+          )}
         </div>
         <div className="community-toolbar-actions">
           <button className="community-refresh-btn" onClick={() => { void fetchPage(0, false); void fetchOwners() }} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
             Refresh
           </button>
-          {isConnected && discordUserId && owners.some((o) => o.id === discordUserId) && (
+          {isConnected && discordUserId && (
             <button
               className="community-refresh-btn community-clear-mine-btn"
               onClick={() => setConfirmClearMine(true)}
               disabled={clearingMine}
-              title="Remove all items you published from the list"
+              title="Stop wanting every item you've added"
             >
               {clearingMine ? <Loader2 size={14} className="spin-icon" /> : <Trash2 size={14} />}
               Remove My Items
@@ -287,6 +408,18 @@ export default function ListsView() {
       ) : (
         <div className="community-list">
           <div className="community-list-header">
+            <div className="community-list-search">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search title or user…"
+                aria-label="Search community list by item title or user"
+              />
+              {searchInput && (
+                <button type="button" className="community-list-search-clear" onClick={() => setSearchInput('')} aria-label="Clear search">×</button>
+              )}
+            </div>
             <p className="community-count">
               {items.length < total
                 ? `Showing ${items.length} of ${total} items`
@@ -321,21 +454,42 @@ export default function ListsView() {
             </div>
           </div>
 
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+
           {items.map((item) => {
             const showMakerTools = isMaker && isConnected && item.tmdb_id != null
             const as_ = actionStates.get(item.id)
             const actionLoading = as_ === 'loading'
+            const uploadState = uploadStates.get(item.id)
             const actionError = typeof as_ === 'string' && as_ !== 'loading' ? as_ : null
             const canComplete = item.claimed_by_discord_id === discordUserId || isOwner
-            const isPublisher = isConnected && discordUserId != null && item.added_by_discord_id === discordUserId
-            // The server (guild) owner can remove any item; publishers their own.
-            const canRemove = isPublisher || (isConnected && isOwner)
+            const wanters = item.poster_list_wanters ?? []
+            const iWant = isConnected && discordUserId != null && wanters.some((w) => w.discord_id === discordUserId)
+            // I can drop my own want; the server (guild) owner can force-remove the poster.
+            const canRemove = iWant || (isConnected && isOwner)
+            // Passive overlap: this item also has an open formal request. Reminds
+            // makers that completing it won't auto-close the request (they should).
+            const alsoRequested = getOverlap(item).requested
+            // A wanter (or owner) can escalate an unclaimed poster to a formal request.
+            const canMove = canRemove && item.status === 'open'
 
             const infoLines = (
               <>
-                {item.added_by && (
+                {wanters.length > 0 && (
                   <div className="request-maker-info request-maker-requested">
-                    📋 From <strong>{item.added_by}</strong>'s list
+                    📋 Wanted by <strong>{wanters.map((w) => w.name || w.discord_id).join(', ')}</strong>
+                  </div>
+                )}
+                {item.available_in_drive && (
+                  <div className="request-maker-info list-available-info">
+                    ✅ A copy is in a drive — run your workflow to pull it
                   </div>
                 )}
                 {item.status === 'in_progress' && item.claimed_by && (
@@ -356,12 +510,37 @@ export default function ListsView() {
                 <button
                   type="button"
                   className="request-maker-btn"
-                  title="Search in Maker Tools"
+                  data-tooltip="Search in Maker Tools"
                   onClick={() => navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${item.title} ${item.year}` : item.title } })}
                 >
                   <Search size={11} />
                   <span>Maker</span>
                 </button>
+                {isMaker && idarrEnabled && (
+                  <button
+                    type="button"
+                    className={`request-upload-btn${uploadState === 'done' ? ' upload-done' : ''}`}
+                    data-tooltip="Upload poster(s) to IDarr"
+                    disabled={uploadState === 'uploading'}
+                    onClick={() => handleUploadClick(item.id)}
+                  >
+                    {uploadState === 'uploading' ? <Loader2 size={11} className="spin-icon" /> :
+                     uploadState === 'done' ? <Check size={11} /> :
+                     <Upload size={11} />}
+                    <span>{uploadState === 'uploading' ? 'Uploading…' : uploadState === 'done' ? 'Added!' : 'Upload'}</span>
+                  </button>
+                )}
+                {canMove && (
+                  <button
+                    type="button"
+                    className="request-action-btn action-request"
+                    data-tooltip="Move this item to a Community Request (removes it from the list)"
+                    onClick={() => setMoveTarget(item)}
+                  >
+                    <Send size={11} />
+                    <span>Request</span>
+                  </button>
+                )}
                 {isMaker && (item.status === 'open' || item.status === 'in_progress') && (
                   <div className="request-status-actions">
                     {item.status === 'open' && (
@@ -369,7 +548,7 @@ export default function ListsView() {
                         type="button"
                         className="request-action-btn action-claim"
                         disabled={actionLoading}
-                        title="Claim this item"
+                        data-tooltip="Claim this item"
                         onClick={() => handleAction(item, 'claim')}
                       >
                         {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
@@ -382,7 +561,7 @@ export default function ListsView() {
                           type="button"
                           className="request-action-btn action-complete"
                           disabled={actionLoading}
-                          title="Mark as complete (removes it from the list)"
+                          data-tooltip="Mark as complete (removes it from the list)"
                           onClick={() => handleAction(item, 'complete')}
                         >
                           {actionLoading ? <Loader2 size={11} className="spin-icon" /> : <Check size={11} />}
@@ -392,7 +571,7 @@ export default function ListsView() {
                           type="button"
                           className="request-action-btn"
                           disabled={actionLoading}
-                          title="Release this item back to the list"
+                          data-tooltip="Release this item back to the list"
                           onClick={() => handleAction(item, 'release')}
                         >
                           <span>Release</span>
@@ -403,7 +582,7 @@ export default function ListsView() {
                       type="button"
                       className="request-action-btn action-reject"
                       disabled={actionLoading}
-                      title="Reject this item"
+                      data-tooltip="Reject this item"
                       onClick={() => handleAction(item, 'reject')}
                     >
                       <span>Reject</span>
@@ -416,7 +595,7 @@ export default function ListsView() {
                       type="button"
                       className="request-action-btn action-reject"
                       disabled={actionLoading}
-                      title={isPublisher ? 'Remove this item from your list' : 'Remove this item (server owner)'}
+                      data-tooltip={iWant ? 'Stop wanting this (removes it for you)' : 'Remove this poster (server owner)'}
                       onClick={() => handleAction(item, 'remove')}
                     >
                       <span>Remove</span>
@@ -424,7 +603,7 @@ export default function ListsView() {
                   </div>
                 )}
                 {actionError && (
-                  <span className="request-action-error" title={actionError}>{actionError}</span>
+                  <span className="request-action-error" data-tooltip={actionError}>{actionError}</span>
                 )}
               </>
             )
@@ -440,6 +619,11 @@ export default function ListsView() {
                 mediaType={item.media_type as CardMediaType}
                 styleLabel={getStyleLabel(item.style_tag ? [item.style_tag] : null)}
                 status={item.status}
+                accent={item.available_in_drive ? 'available' : null}
+                titleExtras={<>
+                  {item.available_in_drive && <span className="list-available-badge" title="A copy is already in a drive — run your workflow to pull it">✓ In drives</span>}
+                  {alsoRequested && <span className="request-overlap-chip" title="This item also has an open poster request">📨 also requested</span>}
+                </>}
                 notes={item.notes}
                 createdAt={item.created_at}
                 imdbId={item.imdb_id}
@@ -506,6 +690,29 @@ export default function ListsView() {
               <button className="btn-primary" onClick={handleClearMine} disabled={clearingMine}>
                 {clearingMine ? <Loader2 size={13} className="spin-icon" /> : <Trash2 size={13} />}
                 {' '}Remove My Items
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveTarget && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !moving) setMoveTarget(null) }}>
+          <div className="modal-content schedule-modal" style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <h2>Move to a Community Request?</h2>
+              <button className="modal-close" onClick={() => setMoveTarget(null)} disabled={moving}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ margin: 0 }}>
+                <strong>{moveTarget.title}{moveTarget.year ? ` (${moveTarget.year})` : ''}</strong> will be posted as a community poster request — with a Discord thread makers can claim — and removed from this list.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setMoveTarget(null)} disabled={moving}>Cancel</button>
+              <button className="btn-primary" onClick={handleMoveToRequest} disabled={moving}>
+                {moving ? <Loader2 size={13} className="spin-icon" /> : <Send size={13} />}
+                {' '}Move to Request
               </button>
             </div>
           </div>
