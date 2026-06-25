@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-25
+
+### Fixed
+- Logging: TMDB 404 errors when no poster is available for items in request cards, etc. no longer spam system logs.
+- Community Lists: list items added from the Poster Style Modal correctly reconcile when added to a drive when the user runs a workflow.
+- GDrives: disabled drive syncing for community drives is now respected by workflow syncs
+- Gdrives: counts for drive cards updated correctly after a single drive sync or reload.
+- Maker Monitor: side bar counts update after Monitor runs
+ 
 ## [0.9.1] - 2026-06-24
 ### Added
 - Community Lists: a Create List picker to publish a chosen subset of items instead of the whole list.
