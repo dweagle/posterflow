@@ -100,6 +100,7 @@ export default function ListsView() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
   const fetchRef = useRef<(() => void) | null>(null)
+  const availabilityKeyRef = useRef('')
 
   useEffect(() => {
     getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => {})
@@ -176,7 +177,9 @@ export default function ListsView() {
     }
   }, [owners, ownerFilter])
 
-  // Poster availability for the loaded items
+  // Poster availability for the loaded items. Keyed on the set of tmdb_ids so
+  // in-place card updates (claim/release/upload) don't refetch and flash the
+  // ✓/✗ indicators off — we only re-check when the actual set of items changes.
   useEffect(() => {
     const lookups = items
       .filter((i) => i.tmdb_id != null)
@@ -187,6 +190,9 @@ export default function ListsView() {
         media_type: i.media_type === 'movie' ? 'movie' : i.media_type === 'collection' ? 'collection' : ('tv' as const),
       }))
     if (lookups.length === 0) return
+    const key = lookups.map((l) => l.tmdb_id).sort((a, b) => a - b).join(',')
+    if (key === availabilityKeyRef.current) return
+    availabilityKeyRef.current = key
     setPosterAvailabilityChecked(false)
     checkTmdbPosterAvailability(lookups)
       .then((availability) => {
@@ -321,6 +327,22 @@ export default function ListsView() {
     }
   }, [updateListItem, showToast, fetchPage, fetchOwners, refreshCommunityRequestCount])
 
+  // Clear the search box and reset every filter to its default, so a user can
+  // recover from a zero-result view without leaving and re-entering the page.
+  const resetFilters = useCallback(() => {
+    setSearchInput('')
+    setSearch('')
+    setMediaType('all')
+    setOwnerFilter('all')
+    setStatusFilter('active')
+    setClaimedByMe(false)
+  }, [])
+
+  // A search or any non-default filter "narrows" the view. While narrowed we keep
+  // the search/header mounted even at zero results, so the search box can't vanish
+  // mid-search and the input keeps focus (no flashing on result changes).
+  const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe
+
   return (
     <>
       <div className="community-toolbar">
@@ -392,12 +414,12 @@ export default function ListsView() {
 
       {error && <div className="community-error">{error}</div>}
 
-      {loading && items.length === 0 ? (
+      {loading && items.length === 0 && !isFiltered ? (
         <div className="community-loading">
           <RefreshCw size={20} className="spin-icon" />
           <span>Loading lists…</span>
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && !isFiltered ? (
         <div className="community-empty">
           <Globe size={48} />
           <p>No list items found</p>
@@ -462,6 +484,23 @@ export default function ListsView() {
             style={{ display: 'none' }}
             onChange={handleFileChange}
           />
+
+          {loading && items.length === 0 && (
+            <div className="community-loading">
+              <RefreshCw size={20} className="spin-icon" />
+              <span>Loading lists…</span>
+            </div>
+          )}
+          {!loading && items.length === 0 && (
+            <div className="community-empty">
+              <Globe size={48} />
+              <p>No items match your search or filters</p>
+              <button type="button" className="community-refresh-btn" onClick={resetFilters}>
+                <RefreshCw size={14} />
+                Reset filters
+              </button>
+            </div>
+          )}
 
           {items.map((item) => {
             const showMakerTools = isMaker && isConnected && item.tmdb_id != null
