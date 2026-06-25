@@ -293,9 +293,12 @@ class PosterSyncService:
                 if not needs_full_update:
                     log_info(LogTags.SYNC, f"No changes detected for '{drive.name}', skipping DB update", drive=drive.name)
                     
-                    # Update drive stats
+                    # Update drive stats. Refresh sync_file_count from the live poster
+                    # count (== disk here, since no changes were detected) so it stays
+                    # consistent instead of keeping a stale value.
                     drive.last_synced = datetime.now(timezone.utc)
                     drive.last_files_transferred = 0
+                    drive.sync_file_count = existing_poster_count
                     
                     # Update job
                     update_job_state(

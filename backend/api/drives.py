@@ -526,12 +526,14 @@ def update_file_counts(db: Session) -> Dict[str, Any]:
             drive_path = drive.get_local_path(validate=False)
             
             if drive_path.exists():
-                # Count only image files (jpg, jpeg, png), exclude hidden files
+                # Count image files. Match the sync scan's extension set and include
+                # dot-prefixed titles (e.g. "...ing (2003)") so this stays consistent
+                # with poster_count; non-image junk (.DS_Store, temp files) is already
+                # excluded by the suffix check.
                 file_count = sum(
-                    1 for f in drive_path.rglob('*') 
-                    if f.is_file() 
-                    and not f.name.startswith('.')
-                    and f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+                    1 for f in drive_path.rglob('*')
+                    if f.is_file()
+                    and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
                 )
                 drive.sync_file_count = file_count
                 total_files += file_count
