@@ -290,7 +290,14 @@
       } catch (e) { flashSave('✗'); console.error('PSD save failed:', e); }
       return;
     }
-    const filename = pendingDocName.replace(/\.[^./\\]+$/, '') + activeSuffix() + '.jpg';
+    // Name the JPG after the poster's authoritative full name from the query string — Photopea
+    // mangles the doc name (truncating at a dot in the title, e.g. "S.H.I.E.L.D."), dropping the
+    // year + {tmdb/imdb/tvdb} tags. For any OTHER active doc, fall back to its name with only a
+    // real document extension stripped.
+    const base = (cfg.name && pendingDocName === posterDocName)
+      ? cfg.name
+      : pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    const filename = base + activeSuffix() + '.jpg';
     try {
       const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename), {
         method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
