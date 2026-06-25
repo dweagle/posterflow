@@ -37,6 +37,9 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastJobStatusRef = useRef<{ [key: string]: string }>({})
   const isMountedRef = useRef<boolean>(true)
+  // Timestamp of the last real user interaction — gates the community poll so it
+  // only runs while the app is actually being used.
+  const lastActivityRef = useRef<number>(Date.now())
 
   const refreshStats = async () => {
     try {
@@ -159,10 +162,26 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
     void refreshCommunityRequestCount()
     
     // Poll community request count every 60 seconds so new requests from
-    // external users are reflected without a full page reload
+    // external users are reflected without a full page reload — but only while
+    // the user is actively using the app. If they've been idle (no interaction)
+    // past the active window, skip the poll so an open-but-unused app stops
+    // hitting the server.
+    const ACTIVE_WINDOW = 90_000  // treated as "in use" for 90s after any interaction
     const communityPollInterval = setInterval(() => {
-      void refreshCommunityRequestCount()
+      if (Date.now() - lastActivityRef.current < ACTIVE_WINDOW) {
+        void refreshCommunityRequestCount()
+      }
     }, 60_000)
+
+    // Track real user interaction. When they come back after being idle, refresh
+    // immediately so the badge is current without waiting for the next poll.
+    const markActivity = () => {
+      const wasIdle = Date.now() - lastActivityRef.current >= ACTIVE_WINDOW
+      lastActivityRef.current = Date.now()
+      if (wasIdle) void refreshCommunityRequestCount()
+    }
+    const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart']
+    ACTIVITY_EVENTS.forEach((evt) => window.addEventListener(evt, markActivity, { passive: true }))
 
     // Connect to WebSocket for job updates
     const connectTimeout = setTimeout(() => {
@@ -173,6 +192,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
       isMountedRef.current = false
       clearInterval(communityPollInterval)
       clearTimeout(connectTimeout)
+      ACTIVITY_EVENTS.forEach((evt) => window.removeEventListener(evt, markActivity))
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
