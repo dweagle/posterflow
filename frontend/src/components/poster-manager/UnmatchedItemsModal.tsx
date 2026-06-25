@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, ListPlus, Search, Star, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
+import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { useToast } from '../Toast'
 import { publishToCommunityLists } from './publishToCommunityLists'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -9,6 +10,7 @@ import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
+import CreateListModal, { type SelectableListItem } from './CreateListModal'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 
@@ -191,6 +193,7 @@ function UnmatchedItemsModal({
   const [noKeyItems, setNoKeyItems] = useState<Set<string>>(new Set())
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [requestItem, setRequestItem] = useState<NormalizedItem | null>(null)
+  const [createListOpen, setCreateListOpen] = useState(false)
 
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose()
@@ -355,6 +358,37 @@ function UnmatchedItemsModal({
     }
   }
 
+  // Create List: rows for the picker (all items of this view), and a publish
+  // handler that turns the chosen keys back into list inputs.
+  const selectableItems: SelectableListItem[] = allItems.map((item) => ({
+    key: itemKey(item),
+    title: item.year ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : item.title,
+    year: item.year,
+    badgeType: item.category
+      ? (item.category.toLowerCase() as 'movie' | 'series' | 'season' | 'collection')
+      : item.seasonCount > 0 ? 'season'
+      : item.type === 'show' ? 'series'
+      : item.type === 'collection' ? 'collection'
+      : 'movie',
+    posterUrl: item.poster_url,
+    claimStatus: getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: item.type, title: item.title, year: item.year }),
+    available: item.available,
+  }))
+
+  const handleCreateListAdd = async (keys: string[]) => {
+    if (!isConnected || !token) { login(); return }
+    const set = new Set(keys)
+    const inputs = allItems.filter((i) => set.has(itemKey(i))).map(toListInput)
+    if (!inputs.length) return
+    setPublishing(true)
+    try {
+      await publishToCommunityLists(inputs, token, showToast)
+      setCreateListOpen(false)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   // Only cap the rendered count when not searching (search results show in full).
   const displayItems = lowerQuery ? sortedItems : sortedItems.slice(0, modalDisplayLimit)
   const hasMore = !lowerQuery && sortedItems.length > modalDisplayLimit
@@ -403,7 +437,8 @@ function UnmatchedItemsModal({
                 ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
                 : item.title
               const query = item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle
-              window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
+              const filter = mediaTypeToTmdbFilter(item.type)
+              window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(query)}${filter ? `&type=${filter}` : ''}`, '_blank', 'noopener,noreferrer')
             }}
           >
             <Search size={13} />
@@ -578,7 +613,16 @@ function UnmatchedItemsModal({
             title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
           >
             {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
-            Add to Lists
+            Add All to List
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+            disabled={publishing || allItems.length === 0}
+            title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+          >
+            <ListChecks size={16} />
+            Create List
           </button>
           {modalType !== 'all' && (
             <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
@@ -610,6 +654,15 @@ function UnmatchedItemsModal({
         seasonNumbers={requestItem.missingSeasonsNumbers}
         tmdbApiKeyConfigured={tmdbApiKeyConfigured}
         onClose={() => setRequestItem(null)}
+      />
+    )}
+
+    {createListOpen && (
+      <CreateListModal
+        items={selectableItems}
+        submitting={publishing}
+        onAdd={handleCreateListAdd}
+        onClose={() => setCreateListOpen(false)}
       />
     )}
     </>

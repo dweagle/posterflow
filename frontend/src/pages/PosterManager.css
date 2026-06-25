@@ -4898,3 +4898,132 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   cursor: help;
   flex-shrink: 0;
 }
+
+/* ── Create List picker modal (mirrors the request modal's candidate rows) ───── */
+.create-list-modal {
+  max-width: 560px;
+  width: 100%;
+}
+
+.create-list-sub {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: #aaa;
+}
+
+.create-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.6rem 0 0.5rem;
+}
+
+.create-list-selectall {
+  background: transparent;
+  border: 1px solid #424242;
+  color: #ddd;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.create-list-selectall:hover:not(:disabled) {
+  border-color: #64b5f6;
+  background: #1e2d3e;
+}
+.create-list-selectall:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.create-list-count {
+  font-size: 0.78rem;
+  color: #aaa;
+}
+
+.create-list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.create-list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.create-list-row:hover {
+  border-color: #64b5f6;
+  background: #1e2d3e;
+}
+.create-list-row.selected {
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
+}
+
+.create-list-poster {
+  width: 36px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.create-list-poster--empty {
+  background: #333;
+}
+
+.create-list-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.create-list-year {
+  color: #aaa;
+  font-weight: 400;
+}
+
+.create-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.create-list-meta .unmatched-cat-badge {
+  flex-shrink: 0;
+}
+
+/* Fixed slot pinned to the right (margin-left:auto) and always present, so the
+   badges sit just after the title and don't shift when the check toggles. */
+.create-list-check {
+  flex-shrink: 0;
+  width: 20px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64b5f6;
+}
+
+.create-list-empty {
+  padding: 1rem;
+  text-align: center;
+  color: #888;
+  font-size: 0.85rem;
+}
