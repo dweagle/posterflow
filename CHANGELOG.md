@@ -6,6 +6,24 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-24
+### Added
+- Community Lists: a Create List picker to publish a chosen subset of items instead of the whole list.
+- Community Lists: shared lists now sync between requests and lists, with reconciliation to keep the two consistent.
+- Monitor: integrated the TMDB Maker Card into series/discover items.
+- Poster Manager: touch-drag support for reordering drive cards on the Priority tab (mobile devices).
+- Google Drives: added the MajorGiant drive.
+- Community Lists: Plex collections are now enriched with TMDB data so unmatched-assets and poster-style requests get correct naming in lists.
+
+### Changed
+- Community Requests: the community count poll now pauses while the tab is idle and refreshes on return, reducing calls to the Supabase server.
+- Community Requests: improved sorting and handling of list items.
+- Maker Search: the Unmatched and Poster Style modals now open Maker Tools in a new browser tab.
+
+### Fixed
+- Asset Cleanup: Arr media with unknown years is no longer treated as orphaned during cleanup.
+- Maker Tools: the Photopea plugin icon is now inlined to prevent mixed-content issues and improve loading.
+
 ## [0.9.0] - 2026-06-22
 ### Added
 - Community Lists: a new "Lists" tab on the Community Requests page where makers can publish their unmatched assets and poster-style fallback lists as a shared worklist that other makers can claim and complete — no per-item Discord thread. Lists can be published through the Unmatched Assets and Poster Style Modals. List cards reuse the existing request card UI and maker tooling.
