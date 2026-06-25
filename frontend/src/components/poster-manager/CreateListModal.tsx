@@ -36,11 +36,11 @@ type CreateListModalProps = {
  * Lets the user pick a subset of items to publish to the community Lists tab,
  * instead of the all-or-nothing "Add to Lists". Shared by the Unmatched and
  * Poster Style modals — each supplies its own rows (key/title/year/badge) and an
- * onAdd that turns the chosen keys into list items. Starts with everything
- * selected so it's a quick trim-down from "all".
+ * onAdd that turns the chosen keys into list items. Starts with nothing
+ * selected so the user picks exactly what to publish.
  */
 export default function CreateListModal({ items, submitting, onAdd, onClose }: CreateListModalProps) {
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(items.map((i) => i.key)))
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [query, setQuery] = useState('')
 
   const lower = query.trim().toLowerCase()
