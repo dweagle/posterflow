@@ -4,7 +4,7 @@ import re
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable
@@ -2722,7 +2722,7 @@ def run_maker_monitor_background_job(
                 status=JOB_STATUS_COMPLETED,
                 progress=100,
                 message=format_complete_message("Maker Monitor scan"),
-                completed_at=datetime.now().astimezone(),
+                completed_at=datetime.now(timezone.utc),
                 error="",
             )
 
@@ -2735,7 +2735,7 @@ def run_maker_monitor_background_job(
                 status=JOB_STATUS_FAILED,
                 progress=100,
                 error=str(exc.detail),
-                completed_at=datetime.now().astimezone(),
+                completed_at=datetime.now(timezone.utc),
             )
         raise
     except Exception as exc:
@@ -2746,7 +2746,7 @@ def run_maker_monitor_background_job(
                 status=JOB_STATUS_FAILED,
                 progress=100,
                 error=str(exc),
-                completed_at=datetime.now().astimezone(),
+                completed_at=datetime.now(timezone.utc),
             )
         raise
     finally:

@@ -1,6 +1,8 @@
 import importlib.util as _importlib_util
 import json
+import os
 import tempfile
+import time
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -329,6 +331,74 @@ def test_run_maker_monitor_queues_job_and_returns_job_id(client):
     assert isinstance(data["job_id"], int)
     assert "queued" in data["message"].lower() or "monitor" in data["message"].lower()
     mock_queue.submit.assert_called_once()
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="requires POSIX time.tzset()")
+def test_completed_monitor_job_stays_in_ws_recent_window():
+    """A finished Maker Monitor job must record completed_at in UTC so it remains
+    inside the job-WebSocket 'recently completed' window the sidebar relies on.
+
+    Regression: storing local wall-clock time (datetime.now().astimezone()) put the
+    completed_at hours behind the UTC cutoff for users behind UTC, so the completed
+    job was filtered out of the broadcast and the Maker Tools badge never refreshed
+    after a scan (it only updated on a full page reload).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from database import SessionLocal
+    from models.job import (
+        JOB_STATUS_COMPLETED,
+        JOB_STATUSES_RECENT_TERMINAL,
+        JOB_TYPE_MAKER_MONITOR,
+        Job,
+        create_job,
+    )
+    from api import maker_tools
+
+    # Force a timezone well behind UTC so local wall-clock differs from UTC; under
+    # the old code this is exactly what pushed completed_at outside the window.
+    original_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+
+    session = SessionLocal()
+    job_id = None
+    try:
+        job = create_job(session, JOB_TYPE_MAKER_MONITOR, "test monitor scan")
+        job_id = job.id
+
+        # Skip the real scan; we only care about how the job lifecycle stamps completed_at.
+        with patch.object(maker_tools, "run_maker_monitor_scan_internal", return_value=MagicMock()):
+            maker_tools.run_maker_monitor_background_job(job_id, {}, False, False)
+
+        session.expire_all()
+        completed = session.query(Job).filter(Job.id == job_id).one()
+        assert completed.status == JOB_STATUS_COMPLETED
+
+        # Replicate the exact filter the job WebSocket uses to choose which finished
+        # jobs to broadcast (api/jobs.py): the job must still be visible right after it
+        # completes, otherwise the sidebar never sees the completion event.
+        two_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=2)
+        visible = (
+            session.query(Job)
+            .filter(
+                Job.id == job_id,
+                Job.status.in_(JOB_STATUSES_RECENT_TERMINAL),
+                Job.completed_at >= two_minutes_ago,
+            )
+            .first()
+        )
+        assert visible is not None, "completed maker_monitor job fell outside the WS recent window"
+    finally:
+        if job_id is not None:
+            session.query(Job).filter(Job.id == job_id).delete()
+            session.commit()
+        session.close()
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        time.tzset()
 
 
 # ---------------------------------------------------------------------------
