@@ -639,18 +639,21 @@ class PosterSyncService:
                 log_warning(LogTags.SYNC, f"Drive {drive_id} not found, skipping")
                 continue
 
-            is_local_only_custom = drive.is_custom and (
-                drive.drive_id.startswith('manual-') or not (drive.drive_id or '').strip()
+            # Skip rclone if GDrive sync is disabled, or it's a manual custom drive with no real Drive ID
+            is_local_only = (not drive.sync_enabled) or (
+                drive.is_custom and (
+                    drive.drive_id.startswith('manual-') or not (drive.drive_id or '').strip()
+                )
             )
             result_key = drive.drive_id if (drive.drive_id and drive.drive_id.strip()) else f"local-only-{drive.id}"
             local_folder = drive.get_local_path()
-            
+
             sync_tasks.append({
                 'drive_id': drive.drive_id,
                 'drive_name': drive.name,
                 'db_id': drive.id,
                 'local_folder': local_folder,
-                'is_local_only': is_local_only_custom,
+                'is_local_only': is_local_only,
                 'result_key': result_key,
             })
         
