@@ -902,14 +902,24 @@ def _tmdb_failure_reason(context: str, *, exc: Exception | None = None, status: 
     return f"TMDB returned HTTP {status} loading {context}"
 
 
-def _tmdb_is_severe(*, exc: Exception | None = None, status: int | None = None) -> bool:
-    """Outage-class failures (transport error / 5xx) log as ERROR; client-ish ones (401/429/4xx) as WARNING."""
-    return exc is not None or status in (500, 502, 503, 504)
+def _tmdb_log_level(*, exc: Exception | None = None, status: int | None = None):
+    """Pick the log fn for a failed TMDB call, or None to skip logging.
+
+    404 just means the resource isn't on TMDB (stale/missing id) — benign and handled by the caller,
+    so it isn't logged (it was spamming the console as a MONITOR warning during normal Maker card use).
+    Outage-class failures (transport error / 5xx) log as ERROR; the rest (401/429/other 4xx) as WARNING."""
+    if status == 404:
+        return None
+    if exc is not None or status in (500, 502, 503, 504):
+        return log_error
+    return log_warning
 
 
-def _log_tmdb_failure(reason: str, *, severe: bool, exc: Exception | None = None) -> None:
+def _log_tmdb_failure(reason: str, *, level, exc: Exception | None = None) -> None:
+    if level is None:
+        return
     detail = f"{reason}: {exc}" if exc is not None else reason
-    (log_error if severe else log_warning)(LogTags.MONITOR, detail)
+    level(LogTags.MONITOR, detail)
 
 
 def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
@@ -930,7 +940,7 @@ def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: in
             resp = requests.get(url, params=params, timeout=timeout)
         except Exception as exc:
             reason = _tmdb_failure_reason(context, exc=exc)
-            _log_tmdb_failure(reason, severe=True, exc=exc)
+            _log_tmdb_failure(reason, level=log_error, exc=exc)
             raise TmdbUpstreamError(reason)
         if resp.status_code == 429 and attempt < retries:
             try:
@@ -942,13 +952,13 @@ def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: in
             continue
         if resp.status_code != 200:
             reason = _tmdb_failure_reason(context, status=resp.status_code)
-            _log_tmdb_failure(reason, severe=_tmdb_is_severe(status=resp.status_code))
+            _log_tmdb_failure(reason, level=_tmdb_log_level(status=resp.status_code))
             raise TmdbUpstreamError(reason, status=resp.status_code)
         try:
             data = resp.json()
         except Exception:
             reason = f"TMDB sent an unreadable (non-JSON) response loading {context}"
-            _log_tmdb_failure(reason, severe=True)
+            _log_tmdb_failure(reason, level=log_error)
             raise TmdbUpstreamError(reason)
         return data if isinstance(data, dict) else {}
 
@@ -964,7 +974,7 @@ def _tmdb_get_json(url: str, params: dict[str, Any], context: str, timeout: int 
 def _tmdb_raise_http(context: str, *, exc: Exception | None = None, status: int | None = None) -> HTTPException:
     """Log + build the user-facing HTTPException for a non-JSON TMDB call (image streams)."""
     reason = _tmdb_failure_reason(context, exc=exc, status=status)
-    _log_tmdb_failure(reason, severe=_tmdb_is_severe(exc=exc, status=status), exc=exc)
+    _log_tmdb_failure(reason, level=_tmdb_log_level(exc=exc, status=status), exc=exc)
     return _tmdb_http_error(TmdbUpstreamError(reason, status=status))
 
 
