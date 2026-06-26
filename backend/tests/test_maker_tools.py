@@ -1225,12 +1225,11 @@ def test_psd_export_conflict_existing_untagged_returns_409(client, test_db):
     assert body["existing_filename"] == "My Show (2026).psd"
 
 
-def test_psd_export_conflict_matches_despite_different_id_tag(client, test_db):
-    """A wrong/reordered ID tag must still flag — the guard matches on title (year) alone."""
+def test_psd_export_conflict_matches_same_id(client, test_db):
+    """A same-id file still flags (409) — re-exporting the same show overwrites in place."""
     _seed_tmdb_key(test_db)
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Saved file carries a different tmdb id than the item being exported.
-        (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").write_bytes(b"PSD")
+        (Path(tmpdir) / "My Show (2026) {tmdb-123}.psd").write_bytes(b"PSD")
         test_db.add(Setting(key="psd_export_folder", value=tmpdir))
         test_db.commit()
 
@@ -1240,7 +1239,55 @@ def test_psd_export_conflict_matches_despite_different_id_tag(client, test_db):
         )
 
     assert response.status_code == 409
-    assert response.json()["existing_filename"] == "My Show (2026) {tmdb-999}.psd"
+    assert response.json()["existing_filename"] == "My Show (2026) {tmdb-123}.psd"
+
+
+def test_psd_export_different_id_tag_is_separate_show(client, test_db):
+    """A different {tmdb-…} tag means a different show that merely shares the title/year:
+    New Export creates its own file and leaves the existing one untouched (no conflict)."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").write_bytes(b"OTHER")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "tmdb_id": "123", "poster_paths": ["/p1.jpg"]},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026) {tmdb-123}.psd"
+        # Both shows coexist — the other id's file is untouched.
+        assert (Path(tmpdir) / "My Show (2026) {tmdb-123}.psd").read_bytes() == b"FAKEPSD"
+        assert (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").read_bytes() == b"OTHER"
+
+
+def test_psd_export_overwrite_replaces_untagged_predecessor(client, test_db):
+    """Confirming overwrite on an untagged "Title (Year)" file re-tags it: the new
+    {tmdb-…} file is written and the untagged predecessor is removed (no duplicate)."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026).psd").write_bytes(b"OLD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "tmdb_id": "123",
+                      "poster_paths": ["/p1.jpg"], "confirm_overwrite": True},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026) {tmdb-123}.psd"
+        assert (Path(tmpdir) / "My Show (2026) {tmdb-123}.psd").read_bytes() == b"FAKEPSD"
+        assert not (Path(tmpdir) / "My Show (2026).psd").exists()
 
 
 def test_psd_export_confirm_overwrite_proceeds_and_saves(client, test_db):
@@ -1279,4 +1326,76 @@ def test_psd_export_no_conflict_for_different_title_proceeds(client, test_db):
             )
 
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# API: POST /api/maker-tools/tmdb/psd-export — Use Existing PSD id matching
+# Two shows sharing "Title (Year)" but with different TMDB ids must not bleed
+# into each other: Use Existing only reuses a file whose {tmdb-…} tag matches
+# (or an untagged one); a lone different-id file is treated as not-found.
+# ---------------------------------------------------------------------------
+
+
+def test_psd_use_existing_skips_different_id_returns_404(client, test_db):
+    """Use Existing for tmdb-123 must NOT reuse a same-title file tagged tmdb-999 —
+    that would export show B's posters under show A's id (the wrong-id bug)."""
+    _seed_tmdb_key(test_db)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        response = client.post(
+            "/api/maker-tools/tmdb/psd-export",
+            json={"title": "My Show", "year": "2026", "tmdb_id": "123",
+                  "use_existing": True, "poster_paths": ["/p1.jpg"]},
+        )
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["not_found"] is True
+    assert body["expected_filename"] == "My Show (2026).psd"
+
+
+def test_psd_use_existing_matching_id_reuses(client, test_db):
+    """Use Existing reuses the file whose {tmdb-…} tag matches the requested id."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026) {tmdb-123}.psd").write_bytes(b"PSD")
+        (Path(tmpdir) / "My Show (2026) {tmdb-999}.psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "tmdb_id": "123",
+                      "use_existing": True, "poster_paths": ["/p1.jpg"]},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026) {tmdb-123}.psd"
+
+
+def test_psd_use_existing_untagged_reuses(client, test_db):
+    """Use Existing still reuses a plain untagged "Title (Year)" file (not yet ID-tagged)."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "My Show (2026).psd").write_bytes(b"PSD")
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "tmdb_id": "123",
+                      "use_existing": True, "poster_paths": ["/p1.jpg"]},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026).psd"
 

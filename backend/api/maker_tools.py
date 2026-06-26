@@ -1504,22 +1504,32 @@ def _validate_image_filename(filename: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
 
-def _find_psd_by_title(save_dir: Path, base_stem: str) -> Path | None:
-    """Return an existing PSD in *save_dir* whose name matches "Title (Year)" once
-    IDarr ID tags are stripped — regardless of which ``{tmdb-…}``/``{tvdb-…}``/
-    ``{imdb-…}`` tag it carries. Prefers the exact untagged name, else the most
-    recently modified match.
+def _find_psd_by_title(save_dir: Path, base_stem: str, tmdb_id: str = "") -> Path | None:
+    """Return an existing PSD in *save_dir* that represents the SAME item as a New Export of
+    "Title (Year)" — the overwrite guard.
 
-    This is the New Export overwrite guard: a wrong or reordered ID can't slip
-    past it and overwrite an existing file silently.
+    TMDB id is authoritative: a file tagged with a *different* ``{tmdb-…}`` id is a different
+    show that merely shares the title/year, so it's NOT a conflict (the two coexist). A match
+    is only reported for:
+      • a file carrying the same ``{tmdb-<id>}`` tag,
+      • a plain untagged "Title (Year)" file (the same item, not yet ID-tagged), or
+      • any same-title file when the caller gave no id (can't disambiguate).
+
+    Prefers the exact untagged name, else the most recently modified match.
     """
+    requested_id = str(tmdb_id or "").strip()
     target_stem = PSD_ID_TAG_REGEX.sub("", base_stem).strip().lower()
     matches: list[Path] = []
     try:
         for entry in save_dir.iterdir():
-            if (entry.is_file() and entry.suffix.lower() == ".psd"
-                    and PSD_ID_TAG_REGEX.sub("", entry.stem).strip().lower() == target_stem):
-                matches.append(entry)
+            if not (entry.is_file() and entry.suffix.lower() == ".psd"):
+                continue
+            if PSD_ID_TAG_REGEX.sub("", entry.stem).strip().lower() != target_stem:
+                continue
+            # Skip files tagged with a different TMDB id — a distinct show, not a conflict.
+            if requested_id and (m := TMDB_REGEX.search(entry.name)) and m.group(1) != requested_id:
+                continue
+            matches.append(entry)
     except OSError:
         return None
     if not matches:
@@ -1903,9 +1913,11 @@ def _find_existing_psd(save_dir: Path, base_stem: str, tmdb_id: str = "") -> Pat
             return exact
         return max(untagged, key=lambda p: p.stat().st_mtime)
 
-    # 3. Exactly one stem-match left → safe to use. More than one with differing ids and no
-    #    way to disambiguate → ambiguous; don't guess.
-    if len(stem_matches) == 1:
+    # 3. Any remaining files carry a DIFFERENT {tmdb-…} tag (id-matches and untagged are
+    #    already handled above). When the caller gave an id, reusing one would inject layers
+    #    into another show that happens to share the same "Title (Year)" — don't guess. Only a
+    #    lone stem-match with no requested id is safe to reuse.
+    if not requested_id and len(stem_matches) == 1:
         return stem_matches[0]
     raise _PsdMatchAmbiguous()
 
@@ -1984,6 +1996,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     #   use_existing=False → guard against silently overwriting an existing title (409 exists),
     #                        then configured template → bundled default → scratch
     template_path: Path | None = None
+    overwrite_target: Path | None = None   # same-item predecessor to remove after a rename overwrite
     if payload.use_existing:
         if save_dir is None:
             raise HTTPException(
@@ -2003,10 +2016,16 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         output_filename = existing_psd.name
         log_info(LogTags.API, f"Existing PSD found — adding poster layers: {existing_psd.name}", folder=str(save_dir))
     else:
-        if save_dir is not None and not payload.confirm_overwrite:
-            existing = _find_psd_by_title(save_dir, base_stem)
+        if save_dir is not None:
+            existing = _find_psd_by_title(save_dir, base_stem, payload.tmdb_id)
             if existing is not None:
-                return JSONResponse(status_code=409, content={"exists": True, "existing_filename": existing.name})
+                if not payload.confirm_overwrite:
+                    return JSONResponse(status_code=409, content={"exists": True, "existing_filename": existing.name})
+                # Confirmed overwrite: if the existing file's name differs from the new output
+                # (e.g. an untagged "Title (Year)" file we're now ID-tagging), remove it after a
+                # successful write so the export replaces it instead of leaving a duplicate.
+                if existing.name != output_filename:
+                    overwrite_target = existing
         template_path = _resolve_new_export_template(db)
 
     # ── Commit: require the TMDB key only when images need fetching, then fetch them ──
@@ -2044,6 +2063,14 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         except Exception as exc:
             log_warning(LogTags.API, f"PSD save failed: {exc}")
             raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
+        # Remove the superseded predecessor (e.g. the untagged file we just re-tagged), now that
+        # the new PSD is safely written. Never touches the file we just wrote.
+        if overwrite_target is not None and overwrite_target != (save_dir / output_filename):
+            try:
+                overwrite_target.unlink()
+                log_info(LogTags.API, f"Removed superseded PSD: {overwrite_target.name}", folder=str(save_dir))
+            except OSError as exc:
+                log_warning(LogTags.API, f"Could not remove superseded PSD {overwrite_target.name}: {exc}")
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
         # When a password is set, Photopea fetches the PSD via files:[url] and can't send the
         # Bearer header — append a signed, file-scoped, expiring token it can use instead.
