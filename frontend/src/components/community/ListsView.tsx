@@ -76,6 +76,7 @@ export default function ListsView() {
   const [error, setError] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')   // 'all' | a wanter's discord_id
+  const [ownerLabel, setOwnerLabel] = useState('')                // remembered name of the selected wanter
   const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
   const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed items
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
@@ -101,6 +102,7 @@ export default function ListsView() {
   const uploadTargetRef = useRef<string | null>(null)
   const fetchRef = useRef<(() => void) | null>(null)
   const availabilityKeyRef = useRef('')
+  const requestSeqRef = useRef(0)
 
   useEffect(() => {
     getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => {})
@@ -110,8 +112,18 @@ export default function ListsView() {
   // offset = items.length (append=true) appends the next batch ("Load more").
   // All filtering/sorting is server-side so each batch is a correct slice.
   const fetchPage = useCallback(async (offset: number, append: boolean) => {
-    if (append) setLoadingMore(true)
-    else setLoading(true)
+    // Sequence every fetch. Filter/sort/search changes (and the owner-reset
+    // cascade) fire overlapping requests whose responses can resolve out of
+    // order; "Load more" runs concurrently with all of them. Only the latest
+    // request is allowed to touch state, so a stale response can't blank the
+    // view or append items from a since-changed filter.
+    const seq = ++requestSeqRef.current
+    if (append) {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+      setLoadingMore(false)  // a fresh fetch supersedes any in-flight "Load more"
+    }
     setError(null)
     try {
       const params: Record<string, string> = {
@@ -128,6 +140,7 @@ export default function ListsView() {
       if (claimedByMe && discordUserId) params.claimed_by_discord_id = discordUserId
       if (search) params.search = search
       const data = await getCommunityListItems(params)
+      if (seq !== requestSeqRef.current) return  // superseded — drop this response
       setTotal(data.total)
       setItems((prev) => {
         if (!append) return data.items
@@ -135,10 +148,15 @@ export default function ListsView() {
         return [...prev, ...data.items.filter((i) => !seen.has(i.id))]
       })
     } catch {
+      if (seq !== requestSeqRef.current) return
       setError('Failed to load community lists. Check your network connection.')
     } finally {
-      if (append) setLoadingMore(false)
-      else setLoading(false)
+      // Only the latest request owns the spinners — a superseded one must not
+      // clear a flag the current request set.
+      if (seq === requestSeqRef.current) {
+        if (append) setLoadingMore(false)
+        else setLoading(false)
+      }
     }
   }, [statusFilter, claimedByMe, discordUserId, sortOrder, mediaType, ownerFilter, search])
 
@@ -169,13 +187,6 @@ export default function ListsView() {
   }, [statusFilter, mediaType])
 
   useEffect(() => { fetchOwners() }, [fetchOwners])
-
-  // If the selected wanter is no longer present (filter changed), reset to Everyone.
-  useEffect(() => {
-    if (ownerFilter !== 'all' && owners.length > 0 && !owners.some((o) => o.id === ownerFilter)) {
-      setOwnerFilter('all')
-    }
-  }, [owners, ownerFilter])
 
   // Poster availability for the loaded items. Keyed on the set of tmdb_ids so
   // in-place card updates (claim/release/upload) don't refetch and flash the
@@ -334,6 +345,7 @@ export default function ListsView() {
     setSearch('')
     setMediaType('all')
     setOwnerFilter('all')
+    setOwnerLabel('')
     setStatusFilter('active')
     setClaimedByMe(false)
   }, [])
@@ -369,8 +381,21 @@ export default function ListsView() {
           </div>
           <div className="community-filter-group">
             <label>Wanted by</label>
-            <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
+            <select
+              value={ownerFilter}
+              onChange={(e) => {
+                const id = e.target.value
+                setOwnerFilter(id)
+                setOwnerLabel(id === 'all' ? '' : (owners.find((o) => o.id === id)?.name ?? ownerLabel))
+              }}
+            >
               <option value="all">Everyone</option>
+              {/* Keep the selected wanter listed even when the current media-type/
+                  status view has none of their items, so switching tabs never
+                  silently drops the filter back to Everyone. */}
+              {ownerFilter !== 'all' && !owners.some((o) => o.id === ownerFilter) && (
+                <option value={ownerFilter}>{ownerLabel || ownerFilter}</option>
+              )}
               {owners.map((o) => (
                 <option key={o.id} value={o.id}>{o.name} ({o.count})</option>
               ))}
