@@ -151,13 +151,16 @@ function PriorityTab({
               <div className="style-usage-fallback-note">
                 {fallbackEntries.map(([style, count]) => {
                   const items: FallbackItem[] = styleFallbacks[style] ?? []
+                  // Distinct titles (a show's seasons collapse to one) vs the raw poster count.
+                  const titleCount = new Set(items.map((it) => `${it.type}::${it.title}::${it.year}`)).size
                   const styleKey = style.toLowerCase().replace(/[^a-z0-9]/g, '')
                   const preferredKey = preferredStyle.toLowerCase().replace(/[^a-z0-9]/g, '')
                   return (
                     <div key={style} className="style-usage-fallback-card">
                       <div className="style-usage-fallback-card-header">
                         <span className="style-usage-fallback-label">
-                          {count.toLocaleString()} item{count !== 1 ? 's' : ''} used{' '}
+                          {count.toLocaleString()} poster{count !== 1 ? 's' : ''} across{' '}
+                          {titleCount.toLocaleString()} title{titleCount !== 1 ? 's' : ''} used{' '}
                           <span className={`style-badge style-${styleKey}`}>{style}</span>{' '}
                           instead of{' '}
                           <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span>
@@ -192,7 +195,7 @@ function PriorityTab({
                       </div>
                       <button className="card-view-all-btn" onClick={() => setOpenFallbackStyle(style)}>
                         <List size={14} />
-                        View All {count.toLocaleString()} Items
+                        View All {count.toLocaleString()} Posters
                       </button>
                     </div>
                   )

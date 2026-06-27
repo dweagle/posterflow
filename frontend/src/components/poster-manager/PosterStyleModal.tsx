@@ -210,7 +210,8 @@ export default function PosterStyleModal({
 
         <div className="modal-body">
           <p className="style-fallback-modal-subtitle">
-            These {items.length.toLocaleString()} item{items.length !== 1 ? 's' : ''} used{' '}
+            These {items.length.toLocaleString()} poster{items.length !== 1 ? 's' : ''} across{' '}
+            {selectableItems.length.toLocaleString()} title{selectableItems.length !== 1 ? 's' : ''} used{' '}
             <span className={`style-badge style-${fallbackKey}`}>{fallbackStyle}</span> because no{' '}
             <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> poster was available.
           </p>
@@ -220,7 +221,7 @@ export default function PosterStyleModal({
             <input
               type="text"
               className="unmatched-search-input"
-              placeholder={`Search ${items.length} items…`}
+              placeholder={`Search ${items.length} posters…`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -236,8 +237,8 @@ export default function PosterStyleModal({
           <div className="unmatched-list">
             <p className="list-count">
               {sortedItems.length !== groupedItems.length
-                ? `${sortedItems.length} of ${groupedItems.length} items`
-                : `${groupedItems.length} items`}
+                ? `${sortedItems.length} of ${groupedItems.length} titles`
+                : `${groupedItems.length} titles`}
             </p>
             {sortedItems.map(renderItem)}
           </div>
