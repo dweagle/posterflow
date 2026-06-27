@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Check, CircleHelp, Clapperboard, Clapperboard as MovieIcon, FolderOpen, Info, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { Check, CircleHelp, Clapperboard, Clapperboard as MovieIcon, FolderOpen, Info, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -20,13 +20,14 @@ import {
   TmdbSearchResult,
 } from '../api/client'
 import TmdbItemCard, { derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
+import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
 import './MakerTools.css'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
-type MainTab = 'monitor' | 'tmdb-search'
+type MainTab = 'monitor' | 'tmdb-search' | 'unmatched'
 
 const DEFAULT_MONITOR_CONFIG: MakerMonitorConfig = {
   tmdb_api_key: '',
@@ -96,7 +97,7 @@ function MakerTools() {
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
 
-  const { jobs } = useUnmatched()
+  const { jobs, unmatchedStats } = useUnmatched()
   const completionHandledRef = useRef(false)
   const prevIsMonitorJobActiveRef = useRef(false)
   const tmdbCacheRef = useRef<Map<string, TmdbSearchResult[]>>(new Map())
@@ -491,6 +492,15 @@ function MakerTools() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === 'unmatched'}
+          className={activeTab === 'unmatched' ? 'active' : ''}
+          onClick={() => setActiveTab('unmatched')}
+        >
+          <LayoutGrid size={16} /> Unmatched
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === 'monitor'}
           className={activeTab === 'monitor' ? 'active' : ''}
           onClick={() => setActiveTab('monitor')}
@@ -840,6 +850,13 @@ function MakerTools() {
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'unmatched' && (
+        <UnmatchedMakerTab
+          unmatchedStats={unmatchedStats}
+          psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+        />
       )}
 
       {showPsdConfigModal && (
