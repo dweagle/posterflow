@@ -290,12 +290,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [seasonImages, setSeasonImages] = useState<Record<string, TmdbImagesResponse>>({})
   const [seasonImagesLoading, setSeasonImagesLoading] = useState<Record<string, boolean>>({})
 
-  // Apple TV popup
-  const [appleTvPopupOpen, setAppleTvPopupOpen] = useState(false)
-  const [appleTvStorefront, setAppleTvStorefront] = useState(() =>
-    localStorage.getItem('apple-tv-storefront') ?? '143441'
-  )
-  const appleTvUserPickedRef = useRef(false)     // user manually chose a region → stop auto-selecting
+  // Apple TV artwork: storefront auto-detected from the title's country of origin
+  const [appleTvStorefront, setAppleTvStorefront] = useState('143441')
   const appleTvOriginFetchedRef = useRef(false)  // origin country resolved once per card
 
   // Poster lightbox
@@ -322,33 +318,21 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.tmdb_id])
 
-  // Lazily resolve the item's origin country the first time the Apple TV popup opens, and
-  // pre-select the matching region — unless the user has already chosen one manually.
-  useEffect(() => {
-    if (!appleTvPopupOpen || appleTvOriginFetchedRef.current || appleTvUserPickedRef.current) return
+  // Resolve the title's origin country once (on first hover/focus of the link) and pre-select
+  // the matching Apple storefront, so the link opens the right region by click time.
+  const ensureAppleTvStorefront = useCallback(() => {
+    if (appleTvOriginFetchedRef.current) return
     if (item.media_type !== 'movie' && item.media_type !== 'tv') return
     appleTvOriginFetchedRef.current = true
     getTmdbOriginCountry(item.tmdb_id, item.media_type)
       .then((countries) => {
-        if (appleTvUserPickedRef.current) return
         for (const iso of countries) {
           const storefront = STOREFRONT_BY_ISO.get(iso.toUpperCase())
           if (storefront) { setAppleTvStorefront(storefront); break }
         }
       })
       .catch(() => { /* keep the current default */ })
-  }, [appleTvPopupOpen, item.tmdb_id, item.media_type])
-
-  // Close Apple TV popup on outside click
-  useEffect(() => {
-    if (!appleTvPopupOpen) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.apple-tv-popup-wrapper')) setAppleTvPopupOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [appleTvPopupOpen])
+  }, [item.tmdb_id, item.media_type])
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -701,48 +685,17 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 <ExternalLink size={12} /> TVDB
               </a>
             )}
-            <div className="apple-tv-popup-wrapper">
-              <button
-                type="button"
-                className={`tmdb-result-link apple-tv-popup-trigger${appleTvPopupOpen ? ' active' : ''}`}
-                onClick={() => setAppleTvPopupOpen((o) => !o)}
-                title="Find Apple TV artwork"
-              >
-                <ExternalLink size={12} /> Apple TV Art
-              </button>
-              {appleTvPopupOpen && (
-                <div className="apple-tv-popup">
-                  <div className="apple-tv-popup-row">
-                    <span className="apple-tv-popup-label">Country</span>
-                    <select
-                      className="apple-tv-storefront-select"
-                      value={appleTvStorefront}
-                      onChange={(e) => {
-                        appleTvUserPickedRef.current = true
-                        setAppleTvStorefront(e.target.value)
-                        localStorage.setItem('apple-tv-storefront', e.target.value)
-                      }}
-                    >
-                      {APPLE_TV_STOREFRONTS.map((sf) => (
-                        <option key={sf.value} value={sf.value}>{sf.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <p className="apple-tv-popup-hint">
-                    Defaults to the title's country of origin. If no artwork comes back, try again with United States selected.
-                  </p>
-                  <a
-                    className="apple-tv-open-btn"
-                    href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setAppleTvPopupOpen(false)}
-                  >
-                    <ExternalLink size={12} /> Open
-                  </a>
-                </div>
-              )}
-            </div>
+            <a
+              className="tmdb-result-link"
+              href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
+              target="_blank"
+              rel="noreferrer"
+              onMouseEnter={ensureAppleTvStorefront}
+              onFocus={ensureAppleTvStorefront}
+              title="Find Apple TV artwork"
+            >
+              <ExternalLink size={12} /> Apple TV Art
+            </a>
             <button
               type="button"
               className="tmdb-copy-btn"
