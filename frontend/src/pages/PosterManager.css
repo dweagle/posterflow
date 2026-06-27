@@ -3140,7 +3140,10 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 /* Unmatched Grid */
 .unmatched-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, 1fr) — not plain 1fr — so a card can't refuse to shrink below its
+     content's min-width (e.g. long collection titles), which was making the
+     columns unequal and overflowing the row. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -3158,6 +3161,11 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
+  /* Reserve room for a two-line title (e.g. "Series (Main Posters)") so every
+     card's header is the same height and the rows below stay aligned as the
+     columns shrink. */
+  min-height: 3rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid #333;
 }
@@ -3170,6 +3178,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 
 .unmatched-card .badge {
   letter-spacing: 0.02em;
+  /* Keep the count pill on one line and let the title wrap instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .unmatched-card .badge-warning {
@@ -3397,13 +3408,13 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 /* Responsive breakpoints for unmatched grid */
 @media (max-width: 1300px) {
   .unmatched-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 700px) {
   .unmatched-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
