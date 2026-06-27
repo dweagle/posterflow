@@ -153,6 +153,15 @@
   justify-content: center;
 }
 
+/* The footer's primary (Download) button has no .poster-manager base rule, so
+   match it to the secondary buttons' box model — same padding, border and font
+   size — so every footer button is the same height. */
+.poster-manager .modal-footer .btn-primary {
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+}
+
 .poster-manager .btn-toolbar {
   display: flex;
   align-items: center;
@@ -2217,6 +2226,12 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
    column squash them down to their borders. */
 .list-items-modal .unmatched-list > * {
   flex-shrink: 0;
+}
+/* Let footer buttons wrap on narrow screens instead of overflowing and pushing
+   the Close button off-screen. */
+.list-items-modal .modal-footer,
+.create-list-modal .modal-footer {
+  flex-wrap: wrap;
 }
 
 .success-modal-body {

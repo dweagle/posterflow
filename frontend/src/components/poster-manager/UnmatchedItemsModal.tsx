@@ -626,7 +626,7 @@ function UnmatchedItemsModal({
           </button>
           {modalType !== 'all' && (
             <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
-              <Download size={18} />
+              <Download size={16} />
               Download List
             </button>
           )}
