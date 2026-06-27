@@ -561,7 +561,7 @@ function UnmatchedItemsModal({
   return (
     <>
     <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal">
+      <div className="modal-content schedule-modal list-items-modal">
         <div className="modal-header">
           <h2>{getModalTitle(modalType)}</h2>
           <button className="modal-close" onClick={onClose}>×</button>

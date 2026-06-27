@@ -2197,6 +2197,28 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   max-height: none;
 }
 
+/* Unmatched / Poster Style list modals: fixed height so the modal doesn't
+   shrink when fewer items are listed; the list scrolls while the search bar
+   and sort controls stay pinned at the top. */
+.modal-content.list-items-modal {
+  height: 80vh;
+}
+.list-items-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.list-items-modal .unmatched-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Keep rows at their natural height and scroll instead of letting the flex
+   column squash them down to their borders. */
+.list-items-modal .unmatched-list > * {
+  flex-shrink: 0;
+}
+
 .success-modal-body {
   display: flex;
   flex-direction: column;
@@ -4903,6 +4925,14 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 .create-list-modal {
   max-width: 560px;
   width: 100%;
+  /* Fixed height so the picker doesn't shrink when only a few items are listed. */
+  height: 80vh;
+}
+
+.create-list-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .create-list-sub {
@@ -4946,9 +4976,15 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-height: 50vh;
+  /* Fill the remaining modal height and scroll, keeping search/toolbar pinned. */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 0.25rem;
+}
+/* Keep rows at their natural height and scroll instead of squashing them. */
+.create-list-rows > * {
+  flex-shrink: 0;
 }
 
 .create-list-row {

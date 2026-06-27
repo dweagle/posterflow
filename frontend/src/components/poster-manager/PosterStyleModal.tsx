@@ -200,7 +200,7 @@ export default function PosterStyleModal({
   return (
     <>
     <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal">
+      <div className="modal-content schedule-modal list-items-modal">
         <div className="modal-header">
           <h2>
             Missing <span className={`style-badge style-${preferredKey}`}>{preferredStyle}</span> Posters
