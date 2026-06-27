@@ -2452,14 +2452,30 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   font-size: 0.8rem;
 }
 
-.sort-select {
+/* Scoped with .sort-controls to outrank the generic `.modal-body select` rule
+   (which forces width:100% and padding:0.75rem and would otherwise win). */
+.sort-controls .sort-select {
   background-color: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 6px;
   color: #fff;
   font-size: 0.85rem;
-  padding: 0.35rem 0.5rem;
+  /* Custom rendering so the box can be shorter without the native min-height
+     clipping the selected value; chevron is drawn as a background image. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: auto;
+  /* Vertical padding sizes the box to ~match the sort buttons and keeps the
+     selected value vertically centered (a fixed height on a native select
+     leaves the value sitting low/clipped). */
+  padding: 0.3rem 1.5rem 0.3rem 0.5rem;
+  line-height: 1.2;
   cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23cccccc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 0.7rem;
 }
 
 .sort-select:focus {
