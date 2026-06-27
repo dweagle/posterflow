@@ -3,6 +3,8 @@ import type { MouseEvent } from 'react'
 import { ListPlus, Loader2, Search, X, Check } from 'lucide-react'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
+import SortControls from './SortControls'
+import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
 
 export interface SelectableListItem {
@@ -42,12 +44,35 @@ type CreateListModalProps = {
 export default function CreateListModal({ items, submitting, onAdd, onClose }: CreateListModalProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [query, setQuery] = useState('')
+  const [prefs, setPrefs] = useSortPrefs('createListSort')
+
+  // Add the type/seasonCount the shared sort + group helpers need, derived from
+  // each row's badge so the picker can sort/filter like the parent modals.
+  const sortable = useMemo(
+    () =>
+      items.map((it) => ({
+        ...it,
+        type: (it.badgeType === 'collection'
+          ? 'collection'
+          : it.badgeType === 'series' || it.badgeType === 'season'
+            ? 'show'
+            : 'movie') as ItemType,
+        seasonCount: it.badgeType === 'season' ? 1 : 0,
+      })),
+    [items],
+  )
+
+  // Only offer the type pills / seasons sort when the picker actually has them.
+  const showGroup = useMemo(() => new Set(sortable.map((i) => i.type)).size > 1, [sortable])
+  const hasSeasons = useMemo(() => sortable.some((i) => i.seasonCount > 0), [sortable])
 
   const lower = query.trim().toLowerCase()
-  const visible = useMemo(
-    () => (lower ? items.filter((i) => i.title.toLowerCase().includes(lower)) : items),
-    [items, lower],
-  )
+  const visible = useMemo(() => {
+    let rows = sortable
+    if (showGroup && prefs.group !== 'all') rows = rows.filter((i) => i.type === prefs.group)
+    if (lower) rows = rows.filter((i) => i.title.toLowerCase().includes(lower))
+    return sortItems(rows, prefs)
+  }, [sortable, showGroup, prefs, lower])
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -99,9 +124,11 @@ export default function CreateListModal({ items, submitting, onAdd, onClose }: C
             )}
           </div>
 
+          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} />
+
           <div className="create-list-toolbar">
             <button type="button" className="create-list-selectall" onClick={toggleAllVisible} disabled={visible.length === 0}>
-              {allVisibleSelected ? 'Clear' : 'Select all'}{lower ? ' (filtered)' : ''}
+              {allVisibleSelected ? 'Clear' : 'Select all'}{lower || (showGroup && prefs.group !== 'all') ? ' (filtered)' : ''}
             </button>
             <span className="create-list-count">{count} of {items.length} selected</span>
           </div>
