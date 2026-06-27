@@ -2495,7 +2495,10 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.5rem;
   flex: 1;
-  min-width: 0;
+  /* Keep a real minimum so the title stays readable; when the row can't fit
+     this plus the action buttons, the buttons wrap to the next line instead
+     of the title getting squeezed to nothing. */
+  min-width: 11rem;
   overflow: hidden;
 }
 
@@ -2504,6 +2507,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .unmatched-item-meta .item-title {
@@ -2528,6 +2532,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.5rem;
   justify-content: space-between;
+  /* Let the action buttons drop below the title on narrow rows. */
+  flex-wrap: wrap;
 }
 
 .unmatched-seasons-row {
