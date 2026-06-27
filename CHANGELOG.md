@@ -6,6 +6,25 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-06-27
+### Added
+- Maker Tools: a new Unmatched tab with TMDB search cards for managing your own library items that are missing posters.
+- Community Lists: sort controls (type pills, sort field, direction) in the Create List picker.
+- Google Drives: a toast reminder to add subscribed drives to your priority list.
+
+### Changed
+- Community Lists: filtering and sorting improvements.
+- Poster Manager: poster-style views now read "N posters across M titles" to clearly separate poster totals from grouped title counts.
+- Maker Tools: simplified Apple TV poster search and removed the popup region selection.
+- Google Drives: updated the MajorGiant drive description to reflect its broader catalog of films.
+
+### Fixed
+- Community Lists: the search bar no longer disappears when a search returns no results (which also reset "available in drives" stats to null).
+- Community Lists: the Create List modal now starts with no items selected.
+- Maker Tools: improved PSD export conflict handling for TMDB IDs and overwrite logic.
+- Maker Tools: fixed JPG filename generation in the Photopea plugin export.
+- UI: layout polish across the Unmatched, Poster Style, and List modals — equal-width cards with consistent headers, buttons that wrap on narrow screens, fixed-height modals with internal scrolling, and a shorter sort dropdown.
+
 ## [0.9.2] - 2026-06-25
 
 ### Fixed
