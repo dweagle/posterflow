@@ -110,6 +110,8 @@ function GDrives() {
       fetchDrives()
       if (result.restored_to_priority) {
         showToast('Subscribed. This drive was restored to its previous position in Poster Manager → Drive Priority.', 'info')
+      } else {
+        showToast('Subscribed. Remember to add this drive to your list in Poster Manager → Drive Priority.', 'info')
       }
       if (result.scan_job_id) {
         showToast('Initial scan queued. Check Dashboard for progress.', 'info')
@@ -141,10 +143,14 @@ function GDrives() {
     try {
       const results = await Promise.all(drivesToSubscribe.map(d => subscribeDrive(d.id)))
       const restoredCount = results.filter(result => result.restored_to_priority).length
+      const newCount = drivesToSubscribe.length - restoredCount
       fetchDrives()
       showToast(`Subscribed to ${drivesToSubscribe.length} ${styleType} drives`)
       if (restoredCount > 0) {
         showToast(`${restoredCount} drive(s) were restored to Poster Manager → Drive Priority`, 'info')
+      }
+      if (newCount > 0) {
+        showToast(`Remember to add ${newCount} new drive(s) to your list in Poster Manager → Drive Priority`, 'info')
       }
     } catch (error) {
       console.error('Error bulk subscribing:', error)
