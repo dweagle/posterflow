@@ -9,7 +9,8 @@
  *   complete maker who claimed it (server owner exempt); in_progress -> fulfilled
  *   release  the claiming maker (or owner); in_progress -> open
  *   reject   maker only; open|in_progress -> rejected
- *   remove   detach the caller as a wanter; guild owner can force-delete the row
+ *   remove   detach the caller as a wanter; guild owner can force-delete the
+ *            row only when they aren't a wanter themselves
  *
  * Verifies the signed Discord token, then re-checks the live Discord guild role
  * for maker actions so a revoked role blocks access. Conditional updates make
@@ -341,21 +342,26 @@ Deno.serve(async (req) => {
 
   // ── Remove: detach the caller as a wanter (the poster stays for anyone else
   //    who wants it). The Discord server (guild) owner can force-delete the whole
-  //    poster row outright. ──────────────────────────────────────────────────────
+  //    poster row outright — but only when they aren't a wanter themselves, so
+  //    the owner dropping their own want never nukes everyone else's. ───────────
   if (action === 'remove') {
-    const ownerId = await getGuildOwnerId()
-    if (user.discord_user_id === ownerId) {
-      // Force-remove: clear wanters first so deleting the poster has nothing to
-      // cascade (which would otherwise re-fire the orphan trigger). The trigger
-      // already removes it if it was open; delete any non-open remainder.
-      await fetch(`${SUPABASE_URL}/rest/v1/poster_list_wanters?item_id=eq.${item_id}`, { method: 'DELETE', headers: SB_HEADERS })
-      await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?id=eq.${item_id}`, { method: 'DELETE', headers: SB_HEADERS })
-      return json({ ok: true, removed: true })
-    }
-    // Everyone else: drop only their own want (scoped by their discord_id, so it
-    // can't touch anyone else). The trigger deletes the row if they were the last.
+    // Always drop only the caller's own want first (scoped by their discord_id,
+    // so it can't touch anyone else). The trigger deletes the row if they were
+    // the last wanter of an open poster.
     const count = await deleteWanters(`item_id=eq.${item_id}&discord_id=eq.${encodeURIComponent(user.discord_user_id)}`)
     if (count < 0) return json({ error: 'Could not remove — please try again' }, 500)
+    // If the caller actually had a want, this was a personal removal — done.
+    if (count > 0) return json({ ok: true, removed: true })
+    // The caller wasn't a wanter: treat this as a moderator force-remove. Only
+    // the guild owner may delete a poster outright. Clear any remaining wanters
+    // first so deleting the poster has nothing to cascade (which would otherwise
+    // re-fire the orphan trigger), then delete any non-open remainder.
+    const ownerId = await getGuildOwnerId()
+    if (user.discord_user_id !== ownerId) {
+      return json({ error: 'Only the server owner can remove a poster you do not want' }, 403)
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/poster_list_wanters?item_id=eq.${item_id}`, { method: 'DELETE', headers: SB_HEADERS })
+    await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?id=eq.${item_id}`, { method: 'DELETE', headers: SB_HEADERS })
     return json({ ok: true, removed: true })
   }
 
