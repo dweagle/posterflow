@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-06-28
+### Fixed
+- Unmatched Assets/Poster Style: feat: enhance TMDB search to resolve titles by ID and pin exact matches to results.
+- Community Lists - clarify removal logic for wanter and Supabase server owner
+
 ## [0.9.3] - 2026-06-27
 ### Added
 - Maker Tools: a new Unmatched tab with TMDB search cards for managing your own library items that are missing posters.
