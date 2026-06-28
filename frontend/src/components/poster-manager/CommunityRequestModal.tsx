@@ -40,6 +40,11 @@ type CommunityRequestModalProps = {
   seasonNumbers?: number[]
   tmdbApiKeyConfigured: boolean
   onClose: () => void
+  // Authoritative refs from Plex/*arr — used to resolve the exact TMDB match by
+  // id and preselect it (fixes foreign titles the name search can't find).
+  tmdbId?: number | null
+  tvdbId?: number | null
+  imdbId?: string | null
 }
 
 export default function CommunityRequestModal({
@@ -49,6 +54,9 @@ export default function CommunityRequestModal({
   seasonNumbers,
   tmdbApiKeyConfigured,
   onClose,
+  tmdbId,
+  tvdbId,
+  imdbId,
 }: CommunityRequestModalProps) {
   const { showToast } = useToast()
   const { isConnected, username, token, connecting, connectError, login, logout } = useDiscordAuth()
@@ -86,7 +94,7 @@ export default function CommunityRequestModal({
     if (!tmdbApiKeyConfigured) return
     setLoading(true)
     // Run main search + person search in parallel (skip person search if already searching persons)
-    const mainSearch = searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType })
+    const mainSearch = searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType, tmdb_id: tmdbId, tvdb_id: tvdbId, imdb_id: imdbId })
     const personSearch = tmdbType !== 'person'
       ? searchUnmatchedTmdb({ title: cleanTitle, year: null, type: 'person' })
       : Promise.resolve({ candidates: [] as TmdbCandidate[] })
@@ -94,9 +102,17 @@ export default function CommunityRequestModal({
     Promise.all([mainSearch, personSearch])
       .then(([mainResult, personResult]) => {
         setCandidates(mainResult.candidates)
-        setPersonCandidates(personResult.candidates)
-        // Auto-select first result if it's a single unambiguous match (main type only)
-        if (mainResult.candidates.length === 1) setSelected(mainResult.candidates[0])
+        // Preselect the exact id-resolved match if the backend found one; otherwise
+        // fall back to auto-selecting a single unambiguous result.
+        const matched = mainResult.candidates.find((c) => c.auto_matched)
+        // Person results are a fallback for when the media search is unsure. When we
+        // already have a confident match (exact id match, or a single media result)
+        // they're just noise that pushes the list into a scrollbar — drop them so the
+        // one real card shows in full.
+        const confident = !!matched || mainResult.candidates.length === 1
+        setPersonCandidates(confident ? [] : personResult.candidates)
+        if (matched) setSelected(matched)
+        else if (mainResult.candidates.length === 1) setSelected(mainResult.candidates[0])
       })
       .catch(() => { setCandidates([]); setPersonCandidates([]) })
       .finally(() => setLoading(false))
@@ -239,7 +255,7 @@ export default function CommunityRequestModal({
               No TMDB results found.
             </div>
           ) : (
-            <div className={`creq-candidates${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
+            <div className={`creq-candidates${allCandidates.length <= 1 ? ' creq-candidates--single' : ''}${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
               {allCandidates.map((c, i) => {
                 const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
                 const isPerson = c.media_type === 'person'
@@ -262,6 +278,11 @@ export default function CommunityRequestModal({
                       <div className="creq-candidate-title">
                         {c.title}
                         {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
+                        {c.auto_matched && (
+                          <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                            <Check size={11} /> Matched
+                          </span>
+                        )}
                       </div>
                       {isPerson && (
                         <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>

@@ -642,6 +642,11 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           <div className="tmdb-result-title-row">
             {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
             {!hideTitle && item.year && <span className="tmdb-result-year">{item.year}</span>}
+            {!hideTitle && item.auto_matched && (
+              <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                <Check size={11} /> Matched
+              </span>
+            )}
             {!hideTitle && driveSearchControl}
           </div>
 

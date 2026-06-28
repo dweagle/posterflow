@@ -1399,3 +1399,78 @@ def test_psd_use_existing_untagged_reuses(client, test_db):
         assert response.status_code == 200
         assert response.json()["filename"] == "My Show (2026).psd"
 
+
+
+# ---------------------------------------------------------------------------
+# TMDB search — resolve-by-id (foreign titles + preselect)
+# ---------------------------------------------------------------------------
+
+def _tmdb_resp(json_data, status=200):
+    m = MagicMock()
+    m.status_code = status
+    m.json.return_value = json_data
+    m.headers = {}
+    return m
+
+
+def test_tmdb_search_resolves_foreign_title_by_tvdb_id(client, test_db):
+    """A show whose TVDB English name isn't on TMDB should still resolve via tvdb_id /find."""
+    _seed_tmdb_key(test_db)
+
+    def fake_get(url, params=None, timeout=None):
+        if "/search/tv" in url:
+            return _tmdb_resp({"results": []})  # English name finds nothing
+        if "/find/369137" in url:
+            return _tmdb_resp({"movie_results": [], "tv_results": [
+                {"id": 117057, "name": "Wer stiehlt mir die Show?",
+                 "first_air_date": "2017-09-01", "poster_path": "/x.jpg",
+                 "overview": "", "popularity": 5.0}
+            ]})
+        if "/tv/117057/external_ids" in url:
+            return _tmdb_resp({"imdb_id": "tt12345", "tvdb_id": 369137})
+        return _tmdb_resp({})
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get) as mock_get:
+        response = client.get("/api/maker-tools/tmdb/search?q=Who+Steals+the+Show&type=tv&tvdb_id=369137")
+
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["tmdb_id"] == 117057
+    assert results[0]["media_type"] == "tv"
+    assert results[0]["auto_matched"] is True
+    assert results[0]["title"] == "Wer stiehlt mir die Show?"
+    assert results[0]["tvdb_id"] == 369137
+    find_calls = [c for c in mock_get.call_args_list if "/find/369137" in c[0][0]]
+    assert find_calls and find_calls[0][1]["params"]["external_source"] == "tvdb_id"
+
+
+def test_tmdb_search_pins_id_match_and_dedupes(client, test_db):
+    """A carried tmdb_id should pin the exact entity first and drop its fuzzy duplicate."""
+    _seed_tmdb_key(test_db)
+
+    search_results = [
+        {"id": 100, "title": "The Batman", "release_date": "2022-01-01",
+         "poster_path": "/p100.jpg", "overview": "", "popularity": 50.0},
+        {"id": 200, "title": "Batman Begins", "release_date": "2005-01-01",
+         "poster_path": "/p200.jpg", "overview": "", "popularity": 80.0},
+    ]
+
+    def fake_get(url, params=None, timeout=None):
+        if "/search/movie" in url:
+            return _tmdb_resp({"results": search_results})
+        if url.endswith("/external_ids"):
+            return _tmdb_resp({"imdb_id": "tt" + url.split("/")[-2], "tvdb_id": None})
+        if url.rstrip("/").endswith("/movie/100"):
+            return _tmdb_resp(search_results[0])
+        return _tmdb_resp({})
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get):
+        response = client.get("/api/maker-tools/tmdb/search?q=The+Batman&type=movie&tmdb_id=100")
+
+    assert response.status_code == 200
+    results = response.json()
+    assert [r["tmdb_id"] for r in results] == [100, 200]
+    assert results[0]["auto_matched"] is True
+    assert results[0]["media_type"] == "movie"
+    assert results[1]["auto_matched"] is False

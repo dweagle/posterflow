@@ -117,9 +117,17 @@ export interface TmdbSearchResult {
   homepage: string
   imdb_id: string | null
   tvdb_id: number | null
+  // True when resolved directly from a carried *arr id (pinned to the top).
+  auto_matched?: boolean
 }
 
 export type TmdbSearchFilter = 'all' | 'movie' | 'tv' | 'collection'
+
+export interface TmdbSearchIds {
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+}
 
 // Map a poster-manager item's media type onto a TMDB search filter, so opening
 // Maker Tools can pre-filter to the known type instead of "all". Returns null for
@@ -136,8 +144,12 @@ export function mediaTypeToTmdbFilter(t: string | null | undefined): TmdbSearchF
   }
 }
 
-export const searchTmdb = async (q: string, type: TmdbSearchFilter = 'all'): Promise<TmdbSearchResult[]> => {
-  return getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/search?q=${encodeURIComponent(q)}&type=${type}`)
+export const searchTmdb = async (q: string, type: TmdbSearchFilter = 'all', ids?: TmdbSearchIds): Promise<TmdbSearchResult[]> => {
+  const params = new URLSearchParams({ q, type })
+  if (ids?.tmdb_id) params.set('tmdb_id', String(ids.tmdb_id))
+  if (ids?.tvdb_id) params.set('tvdb_id', String(ids.tvdb_id))
+  if (ids?.imdb_id) params.set('imdb_id', ids.imdb_id)
+  return getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/search?${params.toString()}`)
 }
 
 export interface TmdbImage {

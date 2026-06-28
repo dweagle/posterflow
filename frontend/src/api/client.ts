@@ -169,6 +169,7 @@ export {
   type TmdbImagesResponse,
   type TmdbSearchFilter,
   type TmdbSearchResult,
+  type TmdbSearchIds,
   type TmdbSeasonInfo,
   type TmdbTvDetails,
   type PsdExportResult,

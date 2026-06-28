@@ -125,12 +125,20 @@ export interface TmdbCandidate {
   popularity: number
   media_type: 'movie' | 'show' | 'collection' | 'person'
   match_reason: string
+  // True when this candidate was resolved directly from a carried *arr id
+  // (exact, language-independent) rather than from the fuzzy title search.
+  auto_matched?: boolean
 }
 
 export const searchUnmatchedTmdb = async (params: {
   title: string
   year: number | null
   type: 'movie' | 'show' | 'collection' | 'person'
+  // Authoritative refs from Plex/*arr; when present the backend resolves the
+  // exact TMDB entity by id and pins it to the top of the candidate list.
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
 }): Promise<{ candidates: TmdbCandidate[] }> => {
   return postData('/api/posterflow/unmatched-tmdb-search', params)
 }

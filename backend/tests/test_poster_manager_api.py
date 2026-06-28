@@ -219,6 +219,84 @@ def test_unmatched_tmdb_search_collection_skips_external_ids(client, test_db):
     assert candidates[0]["media_type"] == "collection"
 
 
+def test_unmatched_tmdb_search_resolves_foreign_title_by_tvdb_id(client, test_db):
+    """A show whose TVDB English name isn't on TMDB should still resolve via tvdb_id /find."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if "/search/tv" in url:
+            resp.json.return_value = {"results": []}  # English name finds nothing
+        elif "/find/" in url:
+            resp.json.return_value = {"movie_results": [], "tv_results": [
+                {"id": 117057, "name": "Wer stiehlt mir die Show?",
+                 "first_air_date": "2017-09-01", "poster_path": "/x.jpg",
+                 "overview": "", "popularity": 5.0}
+            ]}
+        elif "/external_ids" in url:
+            resp.json.return_value = {"tvdb_id": 369137, "imdb_id": "tt12345"}
+        else:
+            resp.json.return_value = {}
+        return resp
+
+    with patch("api.poster_manager.http_requests.get", side_effect=fake_get) as mock_get:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "Who Steals the Show", "year": 2017, "type": "show", "tvdb_id": 369137},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["tmdb_id"] == 117057
+    assert candidates[0]["auto_matched"] is True
+    assert candidates[0]["match_reason"] == "id_exact"
+    assert candidates[0]["title"] == "Wer stiehlt mir die Show?"
+    # /find was hit with the numeric tvdb_id as the external source
+    find_calls = [c for c in mock_get.call_args_list if "/find/369137" in c[0][0]]
+    assert find_calls
+    assert find_calls[0][1]["params"]["external_source"] == "tvdb_id"
+
+
+def test_unmatched_tmdb_search_pins_id_match_and_dedupes(client, test_db):
+    """A carried tmdb_id should pin the exact entity first and drop its fuzzy duplicate."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.commit()
+
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        if "/search/movie" in url:
+            resp.json.return_value = {"results": [
+                _tmdb_movie_result(100, "The Batman", 2022, popularity=50.0),
+                _tmdb_movie_result(200, "Batman Begins", 2005, popularity=80.0),
+            ]}
+        elif "/external_ids" in url:
+            resp.json.return_value = {"imdb_id": "tt0", "tvdb_id": None}
+        elif url.rstrip("/").endswith("/movie/100"):
+            resp.json.return_value = _tmdb_movie_result(100, "The Batman", 2022)
+        else:
+            resp.json.return_value = {}
+        return resp
+
+    with patch("api.poster_manager.http_requests.get", side_effect=fake_get):
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "The Batman", "year": 2022, "type": "movie", "tmdb_id": 100},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    # id match pinned first, deduped from the fuzzy results (id 100 not repeated)
+    assert candidates[0]["tmdb_id"] == 100
+    assert candidates[0]["auto_matched"] is True
+    assert candidates[0]["match_reason"] == "id_exact"
+    assert [c["tmdb_id"] for c in candidates] == [100, 200]
+    assert candidates[1]["auto_matched"] is False
+
+
 
     """Rename should fail when destination is missing from payload config."""
     response = client.post("/api/posterflow/rename", json={"config": {}})

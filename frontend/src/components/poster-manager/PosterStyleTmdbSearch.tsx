@@ -64,6 +64,9 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
         title: cleanTitle,
         year: item.year,
         type: item.type,
+        tmdb_id: item.tmdb_id,
+        tvdb_id: item.tvdb_id,
+        imdb_id: item.imdb_id,
       })
       setCandidates(result.candidates)
     } catch {
@@ -161,7 +164,12 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               onClick={() => {
                 const filter = mediaTypeToTmdbFilter(item.type)
                 const q = item.year ? `${cleanTitle} ${item.year}` : cleanTitle
-                window.open(`/maker-tools?tmdbSearch=${encodeURIComponent(q)}${filter ? `&type=${filter}` : ''}`, '_blank', 'noopener,noreferrer')
+                const params = new URLSearchParams({ tmdbSearch: q })
+                if (filter) params.set('type', filter)
+                if (item.tmdb_id) params.set('tmdbId', String(item.tmdb_id))
+                if (item.tvdb_id) params.set('tvdbId', String(item.tvdb_id))
+                if (item.imdb_id) params.set('imdbId', item.imdb_id)
+                window.open(`/maker-tools?${params.toString()}`, '_blank', 'noopener,noreferrer')
               }}
             >
               <Search size={13} />
@@ -216,7 +224,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                 ? candidate.poster_url.replace('/w185/', '/w342/')
                 : null
               return (
-                <div key={cidx} className="tmdb-candidate-item">
+                <div key={cidx} className={`tmdb-candidate-item${candidate.auto_matched ? ' tmdb-candidate-item--matched' : ''}`}>
                   {previewSrc ? (
                     <button
                       className="tmdb-candidate-poster-btn"
@@ -240,6 +248,11 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                       <span className={`tmdb-type-badge tmdb-type-badge--${candidate.media_type}`}>
                         {candidate.media_type}
                       </span>
+                      {candidate.auto_matched && (
+                        <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                          <Check size={11} /> Matched
+                        </span>
+                      )}
                     </div>
                     <div className="tmdb-candidate-link-row">
                       <span className="tmdb-link-text">{link}</span>
@@ -295,6 +308,9 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
           seasonNumbers={item.season != null ? [item.season] : undefined}
           tmdbApiKeyConfigured={tmdbApiKeyConfigured}
           onClose={() => setShowRequestModal(false)}
+          tmdbId={item.tmdb_id}
+          tvdbId={item.tvdb_id}
+          imdbId={item.imdb_id}
         />
       )}
 

@@ -819,6 +819,9 @@ class TmdbSearchResult(BaseModel):
     homepage: str
     imdb_id: str | None = None
     tvdb_id: int | None = None
+    # True when resolved directly from a carried *arr id (exact, language-independent)
+    # rather than from the fuzzy title search — pinned to the top of the results.
+    auto_matched: bool = False
 
 
 def _fetch_external_ids(tmdb_id: int, media_type: str, api_key: str) -> tuple[str | None, int | None]:
@@ -978,11 +981,87 @@ def _tmdb_raise_http(context: str, *, exc: Exception | None = None, status: int 
     return _tmdb_http_error(TmdbUpstreamError(reason, status=status))
 
 
+def _tmdb_result_from_detail(detail: dict[str, Any], media_type: str, api_key: str,
+                            fallback_imdb: str | None, fallback_tvdb: int | None) -> TmdbSearchResult | None:
+    """Build a TmdbSearchResult from a TMDB detail/find object, enriching external IDs."""
+    if not isinstance(detail, dict) or not isinstance(detail.get("id"), int):
+        return None
+    rid = int(detail["id"])
+    if media_type == "movie":
+        title = str(detail.get("title") or detail.get("original_title") or "Unknown")
+        raw_date = str(detail.get("release_date") or "")
+        homepage = f"https://www.themoviedb.org/movie/{rid}"
+    elif media_type == "tv":
+        title = str(detail.get("name") or detail.get("original_name") or "Unknown")
+        raw_date = str(detail.get("first_air_date") or "")
+        homepage = f"https://www.themoviedb.org/tv/{rid}"
+    else:  # collection
+        title = str(detail.get("name") or detail.get("original_name") or "Unknown")
+        raw_date = ""
+        homepage = f"https://www.themoviedb.org/collection/{rid}"
+    poster_path = str(detail.get("poster_path") or "")
+    imdb_out, tvdb_out = fallback_imdb, fallback_tvdb
+    if media_type in ("movie", "tv"):
+        ext_imdb, ext_tvdb = _fetch_external_ids(rid, media_type, api_key)
+        imdb_out = ext_imdb or fallback_imdb
+        tvdb_out = ext_tvdb or fallback_tvdb
+    return TmdbSearchResult(
+        tmdb_id=rid,
+        media_type=media_type,
+        title=title,
+        year=raw_date[:4] if len(raw_date) >= 4 else "",
+        overview=str(detail.get("overview") or ""),
+        poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else "",
+        homepage=homepage,
+        imdb_id=imdb_out,
+        tvdb_id=tvdb_out,
+        auto_matched=True,
+    )
+
+
+def _resolve_tmdb_by_id(filter_type: str, tmdb_id: int | None, tvdb_id: int | None,
+                        imdb_id: str | None, api_key: str) -> TmdbSearchResult | None:
+    """Resolve the exact TMDB entity from a carried tmdb/tvdb/imdb id (best-effort).
+
+    Direct tmdb_id lookup is exact and language-independent; /find on tvdb_id/imdb_id
+    matches on the stable numeric id, so foreign titles whose TVDB English name is
+    absent from TMDB still resolve. Returns None on any failure (title search still runs).
+    """
+    entity = {"movie": "movie", "tv": "tv", "collection": "collection"}.get(filter_type)
+    try:
+        if tmdb_id and entity:
+            detail = _tmdb_fetch_json(
+                f"https://api.themoviedb.org/3/{entity}/{tmdb_id}",
+                {"api_key": api_key}, "id lookup", timeout=8,
+            )
+            return _tmdb_result_from_detail(detail, entity, api_key, imdb_id, tvdb_id)
+        # /find supports movie/tv only (not collections); needs a known entity to pick a side.
+        if (tvdb_id or imdb_id) and entity in ("movie", "tv"):
+            source, ext_id = ("imdb_id", imdb_id) if imdb_id else ("tvdb_id", str(tvdb_id))
+            find_data = _tmdb_fetch_json(
+                f"https://api.themoviedb.org/3/find/{ext_id}",
+                {"api_key": api_key, "external_source": source}, "id lookup", timeout=8,
+            )
+            preferred = find_data.get("tv_results" if entity == "tv" else "movie_results")
+            hits = preferred if isinstance(preferred, list) and preferred else (
+                (find_data.get("movie_results") or []) + (find_data.get("tv_results") or [])
+            )
+            if isinstance(hits, list) and hits:
+                return _tmdb_result_from_detail(hits[0], entity, api_key, imdb_id, tvdb_id)
+    except TmdbUpstreamError:
+        return None
+    return None
+
+
 @router.get("/tmdb/search", response_model=list[TmdbSearchResult])
-def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> list[TmdbSearchResult]:
+def tmdb_search(q: str, type: str = "all", tmdb_id: int | None = None, tvdb_id: int | None = None,
+                imdb_id: str | None = None, db: Session = Depends(get_db)) -> list[TmdbSearchResult]:
     """Proxy a TMDB search and return normalized results with external IDs.
 
     type: 'all' | 'movie' | 'tv' | 'collection'
+
+    When tmdb_id/tvdb_id/imdb_id is supplied, the exact entity is resolved by id and
+    pinned to the top of the results (language-independent — fixes foreign titles).
 
     A trailing 4-digit year in the query, with or without parentheses
     (e.g. "The Office 2005" or "The Office (2005)"), is automatically
@@ -999,6 +1078,10 @@ def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> lis
     filter_type = str(type or "all").strip().lower()
     if filter_type not in ("all", "movie", "tv", "collection"):
         filter_type = "all"
+
+    # Snapshot the carried *arr ids before the result-building loop reuses these names.
+    req_tmdb_id, req_tvdb_id = tmdb_id, tvdb_id
+    req_imdb_id = imdb_id.strip() if isinstance(imdb_id, str) and imdb_id.strip() else None
 
     # Extract a trailing year from the query string and pass it as a structured param
     year_param: str | None = None
@@ -1096,10 +1179,20 @@ def tmdb_search(q: str, type: str = "all", db: Session = Depends(get_db)) -> lis
             for future in as_completed(future_map):
                 idx = future_map[future]
                 try:
-                    imdb_id, tvdb_id = future.result()
-                    results[idx] = results[idx].model_copy(update={"imdb_id": imdb_id, "tvdb_id": tvdb_id})
+                    ext_imdb, ext_tvdb = future.result()
+                    results[idx] = results[idx].model_copy(update={"imdb_id": ext_imdb, "tvdb_id": ext_tvdb})
                 except Exception as e:
                     log_debug(LogTags.MODULE, f"Failed to enrich external IDs for result idx={idx}: {e}")
+
+    # Pin the exact id-resolved entity (from carried *arr refs) to the top so the UI
+    # surfaces it first; drop any duplicate from the fuzzy title results.
+    if req_tmdb_id or req_tvdb_id or req_imdb_id:
+        id_match = _resolve_tmdb_by_id(filter_type, req_tmdb_id, req_tvdb_id, req_imdb_id, api_key)
+        if id_match:
+            results = [id_match] + [
+                r for r in results
+                if not (r.tmdb_id == id_match.tmdb_id and r.media_type == id_match.media_type)
+            ]
 
     return results
 

@@ -2852,6 +2852,31 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border: 1px solid rgba(255, 183, 77, 0.3);
 }
 
+/* Candidate resolved directly from a carried *arr id (exact match) */
+.tmdb-candidate-item--matched {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.tmdb-candidate-item--matched:hover {
+  border-color: #66bb6a;
+}
+
+.tmdb-matched-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: rgba(76, 175, 80, 0.18);
+  color: #81c784;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
 .tmdb-candidate-link-row {
   display: flex;
   align-items: center;
@@ -4758,6 +4783,12 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   gap: 0.4rem;
   max-height: 160px;
   overflow-y: auto;
+}
+
+/* A lone candidate never needs an inner scroll — show the whole card. */
+.creq-candidates--single {
+  max-height: none;
+  overflow: visible;
 }
 
 /* Shown when the user tries to submit without picking a match (or marking custom). */

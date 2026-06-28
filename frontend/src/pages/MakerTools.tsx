@@ -18,6 +18,7 @@ import {
   searchTmdb,
   TmdbSearchFilter,
   TmdbSearchResult,
+  type TmdbSearchIds,
 } from '../api/client'
 import TmdbItemCard, { derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
 import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
@@ -367,11 +368,12 @@ function MakerTools() {
     }))
   }
 
-  const handleTmdbSearch = async (queryOverride?: string, filterOverride?: TmdbSearchFilter) => {
+  const handleTmdbSearch = async (queryOverride?: string, filterOverride?: TmdbSearchFilter, ids?: TmdbSearchIds) => {
     const query = (queryOverride ?? tmdbQuery).trim()
     if (!query) return
     const filter = filterOverride ?? tmdbFilter
-    const cacheKey = `${filter}::${query.toLowerCase()}`
+    const idKey = ids ? `${ids.tmdb_id ?? ''}/${ids.tvdb_id ?? ''}/${ids.imdb_id ?? ''}` : ''
+    const cacheKey = `${filter}::${query.toLowerCase()}::${idKey}`
     const cached = tmdbCacheRef.current.get(cacheKey)
     if (cached) {
       setTmdbResults(cached)
@@ -386,7 +388,7 @@ function MakerTools() {
     setPosterAvailability({})
     setPosterAvailabilityChecked(false)
     try {
-      const results = await searchTmdb(query, filter)
+      const results = await searchTmdb(query, filter, ids)
       tmdbCacheRef.current.set(cacheKey, results)
       setTmdbResults(results)
       void fetchPosterAvailability(results)
@@ -421,10 +423,17 @@ function MakerTools() {
       const rawType = state?.tmdbType ?? params.get('type')
       const valid: TmdbSearchFilter[] = ['movie', 'tv', 'collection']
       const filter = valid.includes(rawType as TmdbSearchFilter) ? (rawType as TmdbSearchFilter) : null
+      // Carried *arr ids (new-tab URL params) → resolve the exact match by id and pin it.
+      const tmdbId = Number(params.get('tmdbId')) || undefined
+      const tvdbId = Number(params.get('tvdbId')) || undefined
+      const imdbId = params.get('imdbId') || undefined
+      const ids: TmdbSearchIds | undefined = (tmdbId || tvdbId || imdbId)
+        ? { tmdb_id: tmdbId, tvdb_id: tvdbId, imdb_id: imdbId }
+        : undefined
       setTmdbQuery(query)
       setActiveTab('tmdb-search')
       if (filter) setTmdbFilter(filter)
-      void handleTmdbSearch(query, filter ?? undefined)
+      void handleTmdbSearch(query, filter ?? undefined, ids)
       navigate(location.pathname, { replace: true, state: null })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

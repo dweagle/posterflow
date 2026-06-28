@@ -635,6 +635,12 @@ class UnmatchedTmdbSearchRequest(BaseModel):
     title: str
     year: Optional[int] = None
     type: str  # "movie", "show", "collection"
+    # Authoritative refs carried from Plex/*arr; when present we resolve the exact
+    # TMDB entity by id instead of by title (language-independent — fixes foreign
+    # titles where TVDB's English name doesn't exist on TMDB).
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
 
 
 def _get_unmatched_tmdb_key(db: Session) -> str:
@@ -866,6 +872,80 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
         tmdb_ext_cache[tmdb_id] = {}
         return {}
 
+    def resolve_by_id() -> Optional[Dict[str, Any]]:
+        """Resolve the exact TMDB entity from a carried tmdb/tvdb/imdb id.
+
+        Direct tmdb_id lookup is exact and language-independent. Falling back to
+        /find with tvdb_id/imdb_id matches on the stable numeric id, so foreign
+        titles (TVDB English name absent from TMDB) still resolve correctly.
+        """
+        req_tmdb = payload.tmdb_id if isinstance(payload.tmdb_id, int) else None
+        req_tvdb = payload.tvdb_id if isinstance(payload.tvdb_id, int) else None
+        req_imdb = payload.imdb_id.strip() if isinstance(payload.imdb_id, str) and payload.imdb_id.strip() else None
+        if not (req_tmdb or req_tvdb or req_imdb):
+            return None
+
+        detail: Optional[Dict[str, Any]] = None
+        if req_tmdb:
+            try:
+                resp = http_requests.get(
+                    f"https://api.themoviedb.org/3/{tmdb_entity}/{req_tmdb}",
+                    params={"api_key": tmdb_api_key},
+                    timeout=12,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict) and isinstance(data.get("id"), int):
+                    detail = data
+            except http_requests.RequestException:
+                detail = None
+        # Collections have no tvdb/imdb external ids; /find only supports movie/tv.
+        if detail is None and tmdb_entity != "collection" and (req_tvdb or req_imdb):
+            external_source, external_id = ("imdb_id", req_imdb) if req_imdb else ("tvdb_id", str(req_tvdb))
+            try:
+                resp = http_requests.get(
+                    f"https://api.themoviedb.org/3/find/{external_id}",
+                    params={"api_key": tmdb_api_key, "external_source": external_source},
+                    timeout=12,
+                )
+                resp.raise_for_status()
+                find_data = resp.json()
+                if isinstance(find_data, dict):
+                    preferred = find_data.get("tv_results" if tmdb_entity == "tv" else "movie_results")
+                    hits = preferred if isinstance(preferred, list) and preferred else (
+                        (find_data.get("movie_results") or []) + (find_data.get("tv_results") or [])
+                    )
+                    if isinstance(hits, list) and hits and isinstance(hits[0], dict):
+                        detail = hits[0]
+            except http_requests.RequestException:
+                detail = None
+
+        if not isinstance(detail, dict) or not isinstance(detail.get("id"), int):
+            return None
+
+        resolved_id = int(detail["id"])
+        ext = fetch_external_ids(resolved_id)
+        imdb_out = ext.get("imdb_id") if isinstance(ext.get("imdb_id"), str) else req_imdb
+        tvdb_out = ext.get("tvdb_id") if isinstance(ext.get("tvdb_id"), int) else req_tvdb
+        candidate_title = str(detail.get("title") or detail.get("name") or "").strip()
+        release_text = str(detail.get("release_date") or detail.get("first_air_date") or "").strip()
+        release_year = int(release_text[:4]) if len(release_text) >= 4 and release_text[:4].isdigit() else None
+        poster_path = detail.get("poster_path")
+        poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if isinstance(poster_path, str) and poster_path else None
+        return {
+            "tmdb_id": resolved_id,
+            "tvdb_id": tvdb_out,
+            "imdb_id": imdb_out,
+            "title": candidate_title,
+            "year": release_year,
+            "poster_url": poster_url,
+            "overview": str(detail.get("overview") or "").strip(),
+            "popularity": float(detail.get("popularity") or 0),
+            "media_type": response_media_type,
+            "match_reason": "id_exact",
+            "auto_matched": True,
+        }
+
     # Score and sort results using fuzzy title + year matching
     scored = _tmdb_score_candidates(title, year, results[:10])
 
@@ -896,9 +976,16 @@ async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session
             "popularity": float(item.get("popularity") or 0),
             "media_type": response_media_type,
             "match_reason": reason,
+            "auto_matched": False,
         })
 
-    log_info(LogTags.UNMATCHED, f"TMDB search for '{title}' ({media_type}): {len(candidates)} candidates", year=year)
+    # Pin the exact id-resolved entity (from carried *arr refs) to the top so the
+    # UI can preselect it; drop any duplicate from the fuzzy title results.
+    id_candidate = resolve_by_id()
+    if id_candidate:
+        candidates = [id_candidate] + [c for c in candidates if c.get("tmdb_id") != id_candidate["tmdb_id"]]
+
+    log_info(LogTags.UNMATCHED, f"TMDB search for '{title}' ({media_type}): {len(candidates)} candidates", year=year, auto_matched=bool(id_candidate))
     return {"candidates": candidates}
 
 
