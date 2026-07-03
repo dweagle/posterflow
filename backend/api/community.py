@@ -173,7 +173,9 @@ async def get_community_requests(
         "select": "*",
         "limit": limit,
         "offset": offset,
-        "order": "created_at.desc",
+        # id.asc is a unique tiebreaker so offset pages don't overlap when requests
+        # share a created_at (see the lists query for the same fix).
+        "order": "created_at.desc,id.asc",
     }
     if show_all:
         # No status filter — return everything
@@ -426,7 +428,10 @@ async def get_community_lists(
         "status": _list_status_filter(status),
         "limit": limit,
         "offset": offset,
-        "order": f"claim_rank.asc,{date_order}",
+        # id.asc is a unique tiebreaker — without it, items sharing a created_at
+        # (bulk publishes) slice inconsistently across offsets, so "Load more"
+        # overlaps the previous page and appears to load a random count.
+        "order": f"claim_rank.asc,{date_order},id.asc",
     }
     if media_type:
         params["media_type"] = f"eq.{media_type}"
