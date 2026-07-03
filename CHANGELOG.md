@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-07-03
+### Changed
+- Community Requests: the maker "Claimed" filter now also includes open (unclaimed) requests and persists across navigation and page reloads.
+
 ## [0.9.7] - 2026-07-03
 ### Fixed
 - Community Lists: search now runs in a Postgres function, fixing 400 errors and UI freezes on heavier searches.
