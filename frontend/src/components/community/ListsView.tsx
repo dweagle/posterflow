@@ -101,7 +101,7 @@ export default function ListsView() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
   const fetchRef = useRef<(() => void) | null>(null)
-  const availabilityKeyRef = useRef('')
+  const checkedTmdbRef = useRef<Set<number>>(new Set())
   const requestSeqRef = useRef(0)
 
   useEffect(() => {
@@ -247,29 +247,36 @@ export default function ListsView() {
     }
   }, [reloadInPlace, fetchOwners, refreshClaimStatus])
 
-  // Poster availability for the loaded items. Keyed on the set of tmdb_ids so
-  // in-place card updates (claim/release/upload) don't refetch and flash the
-  // ✓/✗ indicators off — we only re-check when the actual set of items changes.
+  // Poster availability for the loaded items. Check only tmdb_ids we haven't
+  // checked yet and merge the result — a "Load more" appends items, so re-checking
+  // the whole (growing) set each time made every Load more slower than the last and
+  // could stall the backend (one scan per item). In-place card updates
+  // (claim/release/upload) add no new ids, so they never trigger a re-check or
+  // flash the ✓/✗ indicators.
   useEffect(() => {
-    const lookups = items
-      .filter((i) => i.tmdb_id != null)
-      .map((i) => ({
-        tmdb_id: i.tmdb_id!,
+    const lookups: { tmdb_id: number; title: string; year: string; media_type: 'movie' | 'collection' | 'tv' }[] = []
+    const batch = new Set<number>()
+    for (const i of items) {
+      if (i.tmdb_id == null || checkedTmdbRef.current.has(i.tmdb_id) || batch.has(i.tmdb_id)) continue
+      batch.add(i.tmdb_id)
+      lookups.push({
+        tmdb_id: i.tmdb_id,
         title: i.title,
         year: i.year ? String(i.year) : '',
-        media_type: i.media_type === 'movie' ? 'movie' : i.media_type === 'collection' ? 'collection' : ('tv' as const),
-      }))
+        media_type: i.media_type === 'movie' ? 'movie' : i.media_type === 'collection' ? 'collection' : 'tv',
+      })
+    }
     if (lookups.length === 0) return
-    const key = lookups.map((l) => l.tmdb_id).sort((a, b) => a - b).join(',')
-    if (key === availabilityKeyRef.current) return
-    availabilityKeyRef.current = key
-    setPosterAvailabilityChecked(false)
+    lookups.forEach((l) => checkedTmdbRef.current.add(l.tmdb_id))
     checkTmdbPosterAvailability(lookups)
       .then((availability) => {
-        setPosterAvailability(availability)
+        setPosterAvailability((prev) => ({ ...prev, ...availability }))
         setPosterAvailabilityChecked(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        // let these ids be retried on a later change
+        lookups.forEach((l) => checkedTmdbRef.current.delete(l.tmdb_id))
+      })
   }, [items])
 
   const handleAction = useCallback(async (item: CommunityListItem, action: 'claim' | 'complete' | 'release' | 'reject' | 'remove') => {
