@@ -491,32 +491,40 @@ async def get_community_list_owners(
 ):
     """Distinct people who *want* items in the current list view (id, name, count)
     — populates the wanter filter independent of which items are loaded."""
+    # PostgREST caps every response at 1000 rows regardless of limit
     params: dict = {
         "select": "discord_id,name,poster_list_items!inner(status,media_type)",
         "poster_list_items.status": _list_status_filter(status),
-        "limit": 5000,
+        "order": "id.asc",
     }
     if media_type:
         params["poster_list_items.media_type"] = f"eq.{media_type}"
 
+    PAGE = 1000
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
-                headers=SUPABASE_HEADERS,
-                params=params,
-            )
-            resp.raise_for_status()
             owners: dict[str, dict] = {}
-            for row in resp.json():
-                did = row.get("discord_id")
-                if not did:
-                    continue
-                entry = owners.get(did)
-                if entry is None:
-                    owners[did] = {"id": did, "name": row.get("name") or did, "count": 1}
-                else:
-                    entry["count"] += 1
+            offset = 0
+            while True:
+                resp = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
+                    headers=SUPABASE_HEADERS,
+                    params={**params, "limit": PAGE, "offset": offset},
+                )
+                resp.raise_for_status()
+                rows = resp.json()
+                for row in rows:
+                    did = row.get("discord_id")
+                    if not did:
+                        continue
+                    entry = owners.get(did)
+                    if entry is None:
+                        owners[did] = {"id": did, "name": row.get("name") or did, "count": 1}
+                    else:
+                        entry["count"] += 1
+                if len(rows) < PAGE:
+                    break
+                offset += PAGE
             result = sorted(owners.values(), key=lambda o: (o["name"] or "").lower())
             return {"owners": result}
     except httpx.HTTPStatusError as e:
