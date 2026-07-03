@@ -20,6 +20,17 @@ type StatusFilter = 'active' | 'all' | 'pending' | 'in_progress' | 'fulfilled' |
 type SortOrder = 'newest' | 'oldest'
 type PageTab = 'requests' | 'lists'
 
+// Turning the Claimed filter on stores it here so it stays set when the user
+// navigates away and back (or reloads). Removed when the filter is turned off.
+const CLAIMED_STORAGE_KEY = 'posterflow.communityRequests.claimed'
+function loadClaimedFilter(): boolean {
+  try {
+    return localStorage.getItem(CLAIMED_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'movie', label: 'Movies' },
@@ -59,7 +70,9 @@ export default function CommunityRequests() {
   const [error, setError] = useState<string | null>(null)
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all')
   const [status, setStatus] = useState<StatusFilter>('active')
-  const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed requests
+  // maker-only: my claims + open requests. Persists across navigation while on
+  // (lazy-inits from storage; see loadClaimedFilter).
+  const [claimedByMe, setClaimedByMe] = useState<boolean>(() => loadClaimedFilter())
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   // Separate from the status/sort filters: show all requests or only the connected user's own.
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
@@ -99,6 +112,15 @@ export default function CommunityRequests() {
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
     }).catch(() => {})
   }, [])
+
+  // Persist the Claimed filter while on so it survives navigating away and back;
+  // clear it when off so it resets on the next mount.
+  useEffect(() => {
+    try {
+      if (claimedByMe) localStorage.setItem(CLAIMED_STORAGE_KEY, '1')
+      else localStorage.removeItem(CLAIMED_STORAGE_KEY)
+    } catch { /* storage unavailable; skip persistence */ }
+  }, [claimedByMe])
 
   // Fetch poster availability whenever the visible request list changes
   useEffect(() => {
@@ -272,17 +294,20 @@ export default function CommunityRequests() {
     try {
       const params: Record<string, string> = {}
       if (mediaType !== 'all') params.media_type = mediaType
-      // "Claimed" overrides the status filter — my in-progress claims.
-      if (claimedByMe && discordUserId) {
-        params.status = 'in_progress'
-        params.claimed_by_discord_id = discordUserId
-      } else if (status !== 'active') {
+      // "Claimed" fetches all statuses and narrows client-side to my claims + open
+      // (pending) requests. Otherwise a non-"active" status maps to a server filter.
+      if (!(claimedByMe && discordUserId) && status !== 'active') {
         params.status = status
       }
       const data = await getCommunityRequests(params)
       const isActive = (s: string) => s === 'pending' || s === 'in_progress'
       const sorted = [...data.requests].sort((a, b) => {
-        if (status === 'active') {
+        if (claimedByMe && discordUserId) {
+          // Claimed view: my in-progress claims on top, then open (pending) requests.
+          const aClaimed = a.status === 'in_progress' ? 0 : 1
+          const bClaimed = b.status === 'in_progress' ? 0 : 1
+          if (aClaimed !== bClaimed) return aClaimed - bClaimed
+        } else if (status === 'active') {
           const aActive = isActive(a.status) ? 0 : 1
           const bActive = isActive(b.status) ? 0 : 1
           if (aActive !== bActive) return aActive - bActive
@@ -325,11 +350,20 @@ export default function CommunityRequests() {
     }
   }, [pageTab, refreshClaimStatus])
 
-  // "My requests" is applied client-side so it composes with the status/sort filters.
-  const visibleRequests =
-    ownerFilter === 'mine' && discordUserId
-      ? requests.filter((req) => req.requested_by_discord_id === discordUserId)
-      : requests
+  // Client-side filters, applied so they compose with the status/sort filters.
+  let visibleRequests = requests
+  // Claimed view: my in-progress claims plus every open (pending) request.
+  if (claimedByMe && discordUserId) {
+    visibleRequests = visibleRequests.filter(
+      (req) =>
+        req.status === 'pending' ||
+        (req.status === 'in_progress' && req.claimed_by_discord_id === discordUserId)
+    )
+  }
+  // "My requests" narrows to the connected user's own submissions.
+  if (ownerFilter === 'mine' && discordUserId) {
+    visibleRequests = visibleRequests.filter((req) => req.requested_by_discord_id === discordUserId)
+  }
 
   return (
     <>
@@ -467,9 +501,9 @@ export default function CommunityRequests() {
           </div>
           {isMaker && (
             <button
-              className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
+              className={`community-tab-btn community-claimed-btn${claimedByMe ? ' active' : ''}`}
               onClick={() => setClaimedByMe((v) => !v)}
-              title="Show only the requests you've claimed"
+              title="Show your claims (on top) plus open requests — stays set when you navigate away and back"
             >
               Claimed
             </button>

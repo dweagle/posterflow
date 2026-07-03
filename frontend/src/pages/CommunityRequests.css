@@ -190,6 +190,20 @@
   align-items: center;
 }
 
+/* Claimed on reads as red (a "locked in" cue) rather than the blue active tint —
+   it also stays set across navigation while on. */
+.community-claimed-btn.active {
+  background: rgba(244, 67, 54, 0.15);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #ef9a9a;
+}
+
+.community-claimed-btn.active:hover {
+  background: rgba(244, 67, 54, 0.22);
+  border-color: rgba(244, 67, 54, 0.6);
+  color: #ff8a80;
+}
+
 .community-filter-group {
   display: flex;
   align-items: center;
