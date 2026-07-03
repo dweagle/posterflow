@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from typing import Literal
@@ -204,17 +205,20 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
     # Descriptions are static reference data read from the drives.json source
     descriptions = get_drive_descriptions()
 
-    # Calculate poster counts and stats for each drive
+    # Poster counts per drive in two aggregate queries (backed by
+    # ix_posters_drive_last_processed) instead of two COUNTs per drive.
+    total_counts = dict(
+        db.query(Poster.drive_id, func.count(Poster.id)).group_by(Poster.drive_id).all()
+    )
+    unprocessed_counts = dict(
+        db.query(Poster.drive_id, func.count(Poster.id))
+        .filter(Poster.last_processed.is_(None))
+        .group_by(Poster.drive_id)
+        .all()
+    )
+
     drive_schemas = []
     for drive in drives:
-        poster_count = db.query(Poster).filter(Poster.drive_id == drive.drive_id).count()
-
-        # Count unprocessed posters (last_processed IS NULL)
-        unprocessed_count = db.query(Poster).filter(
-            Poster.drive_id == drive.drive_id,
-            Poster.last_processed.is_(None)
-        ).count()
-
         drive_dict = {
             'id': drive.id,
             'name': drive.name,
@@ -232,8 +236,8 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
             'last_rename_processed': drive.last_rename_processed,
             'sync_file_count': drive.sync_file_count,
             'last_files_transferred': drive.last_files_transferred,
-            'poster_count': poster_count,
-            'unprocessed_count': unprocessed_count
+            'poster_count': total_counts.get(drive.drive_id, 0),
+            'unprocessed_count': unprocessed_counts.get(drive.drive_id, 0)
         }
         drive_schemas.append(DriveSchema(**drive_dict))
     
