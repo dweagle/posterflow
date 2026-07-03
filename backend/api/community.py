@@ -391,6 +391,17 @@ def _list_status_filter(status: Optional[str]) -> str:
     return "in.(open,in_progress)"  # active
 
 
+def _list_status_values(status: Optional[str]) -> list[str]:
+    """Same status mapping as _list_status_filter, as a list for the search RPC."""
+    if status == "in_progress":
+        return ["in_progress"]
+    if status == "fulfilled":
+        return ["fulfilled"]
+    if status == "all":
+        return ["open", "in_progress", "fulfilled"]
+    return ["open", "in_progress"]  # active
+
+
 def _safe_like(s: str) -> str:
     """Sanitize a free-text search for use in a PostgREST ilike value — strip the
     chars that have meaning in filter syntax (commas, parens, wildcards, quotes)
@@ -399,6 +410,48 @@ def _safe_like(s: str) -> str:
     for ch in ',()*%"\\':
         s = s.replace(ch, " ")
     return " ".join(s.split())
+
+
+async def _search_community_list_items(
+    q: str,
+    status: Optional[str],
+    media_type: Optional[str],
+    added_by_discord_id: Optional[str],
+    claimed_by_discord_id: Optional[str],
+    sort: str,
+    limit: int,
+    offset: int,
+):
+    """Title-or-wanter-name search via the search_community_list_items Postgres
+    function. Returns {items, total} with wanters embedded — same shape as the
+    plain read — but the whole match/filter/page/count runs server-side, so a
+    common term can't overflow the request URL (400) the way an id=in.(...) list
+    would, and there are no per-page match sub-queries to freeze the worker."""
+    payload = {
+        "p_q": q,
+        "p_status": _list_status_values(status),
+        "p_media_type": media_type,
+        "p_added_by_discord_id": added_by_discord_id,
+        "p_claimed_by_discord_id": claimed_by_discord_id,
+        "p_sort": sort,
+        "p_limit": limit,
+        "p_offset": offset,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/search_community_list_items",
+                headers=SUPABASE_HEADERS,
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        log_error(LogTags.API, f"Supabase list search failed: {e.response.text}", status_code=e.response.status_code)
+        raise HTTPException(status_code=502, detail="Failed to search community lists")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Supabase connection error: {e}")
+        raise HTTPException(status_code=502, detail="Could not connect to community service")
 
 
 @router.get("/lists")
@@ -418,6 +471,15 @@ async def get_community_lists(
     Returns {items, total} — total is the full match count, so the UI knows when
     there's more to load.
     """
+    # Free-text search (title OR a wanter's name) isn't expressible as a bounded
+    # PostgREST filter, so it runs server-side in a Postgres function.
+    q = _safe_like(search) if search else ""
+    if q:
+        return await _search_community_list_items(
+            q, status, media_type, added_by_discord_id,
+            claimed_by_discord_id, sort, limit, offset,
+        )
+
     # Each poster is one shared row now; embed its wanters so the UI can show
     # "wanted by N". added_by_discord_id is reinterpreted as "items I want".
     # claim_rank.asc keeps claimed (in_progress) items pinned at the top; the
@@ -447,29 +509,6 @@ async def get_community_lists(
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Search → items whose title OR a wanter's name matches (case-insensitive).
-            # The match set is bounded by the query, so an id-restriction is safe; it
-            # ANDs with the Mine join above.
-            q = _safe_like(search) if search else ""
-            if q:
-                like = f"ilike.*{q}*"
-                tresp = await client.get(
-                    f"{SUPABASE_URL}/rest/v1/poster_list_items",
-                    headers=SUPABASE_HEADERS,
-                    params={"select": "id", "title": like, "limit": 2000},
-                )
-                tresp.raise_for_status()
-                nresp = await client.get(
-                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
-                    headers=SUPABASE_HEADERS,
-                    params={"select": "item_id", "name": like, "limit": 2000},
-                )
-                nresp.raise_for_status()
-                matched = {r["id"] for r in tresp.json()} | {r["item_id"] for r in nresp.json()}
-                if not matched:
-                    return {"items": [], "total": 0}
-                params["id"] = f"in.({','.join(matched)})"
-
             resp = await client.get(
                 f"{SUPABASE_URL}/rest/v1/poster_list_items",
                 headers={**SUPABASE_HEADERS, "Prefer": "count=exact"},
