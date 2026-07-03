@@ -50,7 +50,7 @@ export default function CommunityRequests() {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
-  const { getOverlap } = useCommunityClaimStatus()
+  const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useUnmatched()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
   const fetchRequestsRef = useRef<(() => void) | null>(null)
@@ -303,6 +303,27 @@ export default function CommunityRequests() {
     fetchRequestsRef.current = fetchRequests
     fetchRequests()
   }, [fetchRequests])
+
+  // Re-sync when the user returns to the tab/window, but only while the Requests
+  // sub-tab is showing (the Lists tab self-refreshes). focus and visibilitychange
+  // both fire on a tab return, so throttle to collapse the double-fire.
+  const lastFocusSyncRef = useRef(0)
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.hidden || pageTab !== 'requests') return
+      const now = Date.now()
+      if (now - lastFocusSyncRef.current < 3000) return
+      lastFocusSyncRef.current = now
+      fetchRequestsRef.current?.()
+      refreshClaimStatus()  // throttled internally (heavy community-wide scan)
+    }
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
+    return () => {
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
+    }
+  }, [pageTab, refreshClaimStatus])
 
   // "My requests" is applied client-side so it composes with the status/sort filters.
   const visibleRequests =

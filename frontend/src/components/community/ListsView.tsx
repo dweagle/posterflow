@@ -65,7 +65,7 @@ export default function ListsView() {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
-  const { getOverlap } = useCommunityClaimStatus()
+  const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useUnmatched()
   const { enabled: idarrEnabled, setEnabled: setIdarrEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
@@ -108,6 +108,24 @@ export default function ListsView() {
     getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => {})
   }, [])
 
+  // Build the query for one page at `offset` from the current filters.
+  const buildParams = useCallback((offset: number): Record<string, string> => {
+    const params: Record<string, string> = {
+      // "Claimed" overrides the status dropdown — it's my in-progress claims.
+      status: claimedByMe ? 'in_progress' : statusFilter,
+      sort: sortOrder,
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+    }
+    if (mediaType !== 'all') params.media_type = mediaType
+    // Wanter filter → items the selected person wants (backend resolves
+    // added_by_discord_id via the wanters table).
+    if (ownerFilter !== 'all') params.added_by_discord_id = ownerFilter
+    if (claimedByMe && discordUserId) params.claimed_by_discord_id = discordUserId
+    if (search) params.search = search
+    return params
+  }, [statusFilter, claimedByMe, discordUserId, sortOrder, mediaType, ownerFilter, search])
+
   // Fetch a page. offset 0 (append=false) replaces the list (filters changed);
   // offset = items.length (append=true) appends the next batch ("Load more").
   // All filtering/sorting is server-side so each batch is a correct slice.
@@ -126,20 +144,7 @@ export default function ListsView() {
     }
     setError(null)
     try {
-      const params: Record<string, string> = {
-        // "Claimed" overrides the status dropdown — it's my in-progress claims.
-        status: claimedByMe ? 'in_progress' : statusFilter,
-        sort: sortOrder,
-        limit: String(PAGE_SIZE),
-        offset: String(offset),
-      }
-      if (mediaType !== 'all') params.media_type = mediaType
-      // Wanter filter → items the selected person wants (backend resolves
-      // added_by_discord_id via the wanters table).
-      if (ownerFilter !== 'all') params.added_by_discord_id = ownerFilter
-      if (claimedByMe && discordUserId) params.claimed_by_discord_id = discordUserId
-      if (search) params.search = search
-      const data = await getCommunityListItems(params)
+      const data = await getCommunityListItems(buildParams(offset))
       if (seq !== requestSeqRef.current) return  // superseded — drop this response
       setTotal(data.total)
       setItems((prev) => {
@@ -158,7 +163,7 @@ export default function ListsView() {
         else setLoading(false)
       }
     }
-  }, [statusFilter, claimedByMe, discordUserId, sortOrder, mediaType, ownerFilter, search])
+  }, [buildParams])
 
   // Debounce the search box so we fetch on a pause, not every keystroke.
   useEffect(() => {
@@ -187,6 +192,60 @@ export default function ListsView() {
   }, [statusFilter, mediaType])
 
   useEffect(() => { fetchOwners() }, [fetchOwners])
+
+  // Silently re-pull the pages already loaded and swap them in atomically, so a
+  // background refresh reflects others' claims/completions/adds without losing
+  // scroll depth or flashing a spinner. Stable id-ordered pagination keeps the
+  // pages disjoint; dedupe guards the boundaries anyway.
+  const reloadInPlace = useCallback(async () => {
+    const depth = Math.max(PAGE_SIZE, items.length)
+    const seq = ++requestSeqRef.current
+    try {
+      const fresh: CommunityListItem[] = []
+      let freshTotal = 0
+      for (let offset = 0; offset < depth; offset += PAGE_SIZE) {
+        const data = await getCommunityListItems(buildParams(offset))
+        if (seq !== requestSeqRef.current) return  // superseded by a newer fetch
+        freshTotal = data.total
+        fresh.push(...data.items)
+        if (data.items.length < PAGE_SIZE) break  // reached the end
+      }
+      const seen = new Set<string>()
+      const merged: CommunityListItem[] = []
+      for (const it of fresh) if (!seen.has(it.id)) { seen.add(it.id); merged.push(it) }
+      setItems(merged)
+      setTotal(freshTotal)
+      setError(null)
+    } catch { /* keep the current view; the manual Refresh button remains */ }
+    finally {
+      // If this reload superseded an in-flight page fetch, clear the spinner it set.
+      if (seq === requestSeqRef.current) {
+        setLoading(false)
+        setLoadingMore(false)
+      }
+    }
+  }, [items.length, buildParams])
+
+  // Re-sync when the user returns to the tab/window. focus and visibilitychange
+  // both fire on a tab return, so throttle to collapse the double-fire.
+  const lastFocusSyncRef = useRef(0)
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.hidden) return
+      const now = Date.now()
+      if (now - lastFocusSyncRef.current < 3000) return
+      lastFocusSyncRef.current = now
+      void reloadInPlace()
+      void fetchOwners()
+      refreshClaimStatus()  // throttled internally (heavy community-wide scan)
+    }
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
+    return () => {
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
+    }
+  }, [reloadInPlace, fetchOwners, refreshClaimStatus])
 
   // Poster availability for the loaded items. Keyed on the set of tmdb_ids so
   // in-place card updates (claim/release/upload) don't refetch and flash the

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { getCommunityRequests, getCommunityListItems, type CommunityRequest, type CommunityListItem } from '../api/community'
 
 // Page through everything (the API caps a page at 200) up to a sane ceiling, so
@@ -62,6 +62,7 @@ interface CommunityClaimStatusValue {
   getStatus: (item: LookupItem) => ClaimStatus | null
   getOverlap: (item: LookupItem) => CommunityOverlap
   loaded: boolean
+  refresh: () => void
 }
 
 // No provider → no flags (and no fetch). Keeps consumers safe in isolation.
@@ -69,6 +70,7 @@ const defaultValue: CommunityClaimStatusValue = {
   getStatus: () => null,
   getOverlap: () => ({ onList: false, requested: false }),
   loaded: false,
+  refresh: () => {},
 }
 
 const CommunityClaimStatusContext = createContext<CommunityClaimStatusValue>(defaultValue)
@@ -86,37 +88,44 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
   const [activeRequests, setActiveRequests] = useState<Set<string>>(new Set())
   const [activeLists, setActiveLists] = useState<Set<string>>(new Set())
   const [loaded, setLoaded] = useState(false)
+  const lastLoadRef = useRef(0)
 
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([fetchAllRequests(), fetchAllListItems()]).then(([requests, items]) => {
-      if (cancelled) return
-      const map = new Map<string, ClaimStatus>()
-      const reqKeys = new Set<string>()
-      const listKeys = new Set<string>()
-      const add = (item: LookupItem, status: string) => {
-        const s: ClaimStatus | null = status === 'fulfilled' ? 'fulfilled' : status === 'in_progress' ? 'in_progress' : null
-        if (!s) return
-        for (const k of keysFor(item)) {
-          // fulfilled beats in_progress
-          if (s === 'fulfilled' || map.get(k) !== 'fulfilled') map.set(k, s)
-        }
+  const load = useCallback(async () => {
+    lastLoadRef.current = Date.now()
+    const [requests, items] = await Promise.all([fetchAllRequests(), fetchAllListItems()])
+    const map = new Map<string, ClaimStatus>()
+    const reqKeys = new Set<string>()
+    const listKeys = new Set<string>()
+    const add = (item: LookupItem, status: string) => {
+      const s: ClaimStatus | null = status === 'fulfilled' ? 'fulfilled' : status === 'in_progress' ? 'in_progress' : null
+      if (!s) return
+      for (const k of keysFor(item)) {
+        // fulfilled beats in_progress
+        if (s === 'fulfilled' || map.get(k) !== 'fulfilled') map.set(k, s)
       }
-      for (const r of requests) {
-        add(r, r.status)
-        if (r.status === 'pending' || r.status === 'in_progress') for (const k of keysFor(r)) reqKeys.add(k)
-      }
-      for (const it of items) {
-        add(it, it.status)
-        if (it.status === 'open' || it.status === 'in_progress') for (const k of keysFor(it)) listKeys.add(k)
-      }
-      setIndex(map)
-      setActiveRequests(reqKeys)
-      setActiveLists(listKeys)
-      setLoaded(true)
-    })
-    return () => { cancelled = true }
+    }
+    for (const r of requests) {
+      add(r, r.status)
+      if (r.status === 'pending' || r.status === 'in_progress') for (const k of keysFor(r)) reqKeys.add(k)
+    }
+    for (const it of items) {
+      add(it, it.status)
+      if (it.status === 'open' || it.status === 'in_progress') for (const k of keysFor(it)) listKeys.add(k)
+    }
+    setIndex(map)
+    setActiveRequests(reqKeys)
+    setActiveLists(listKeys)
+    setLoaded(true)
   }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  // On-demand re-pull, throttled — callers fire this on tab focus, but the scan is
+  // community-wide and heavy, so actually refetch at most once every 5 minutes.
+  const refresh = useCallback(() => {
+    if (Date.now() - lastLoadRef.current < 300_000) return
+    void load()
+  }, [load])
 
   const value = useMemo<CommunityClaimStatusValue>(() => ({
     getStatus: (item: LookupItem): ClaimStatus | null => {
@@ -138,7 +147,8 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
       return { onList, requested }
     },
     loaded,
-  }), [index, activeRequests, activeLists, loaded])
+    refresh,
+  }), [index, activeRequests, activeLists, loaded, refresh])
 
   return <CommunityClaimStatusContext.Provider value={value}>{children}</CommunityClaimStatusContext.Provider>
 }
