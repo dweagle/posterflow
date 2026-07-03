@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-07-03
+### Added
+- Community Lists/Requests: now refresh automatically when the browser tab regains focus.
+
+### Changed
+- Performance: added a composite database index on posters so unprocessed-poster counts on drive cards resolve faster.
+
+### Fixed
+- Community Lists: resolved errors when applying heavy "Wanted by" filters.
+- Community Lists: the owners count now paginates instead of being truncated at 1000 rows.
+- Community Lists/Requests: added an ID tiebreaker so paginated results no longer overlap or repeat across pages.
+
 ## [0.9.5] - 2026-07-02
 ### Fixed
 - Performance: synchronous API endpoints that were declared `async def` are now plain `def`, so their blocking database/filesystem work no longer stalls the single-worker event loop and freezes the app.
