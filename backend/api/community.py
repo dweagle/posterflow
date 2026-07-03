@@ -421,8 +421,8 @@ async def get_community_lists(
     # claim_rank.asc keeps claimed (in_progress) items pinned at the top; the
     # newest/oldest choice then orders within each rank group.
     date_order = "created_at.asc" if sort == "oldest" else "created_at.desc"
+    select = "*,poster_list_wanters(discord_id,name)"
     params: dict = {
-        "select": "*,poster_list_wanters(discord_id,name)",
         "status": _list_status_filter(status),
         "limit": limit,
         "offset": offset,
@@ -434,23 +434,17 @@ async def get_community_lists(
     # status=in_progress so completed/released items don't slip in.
     if claimed_by_discord_id:
         params["claimed_by_discord_id"] = f"eq.{claimed_by_discord_id}"
+    # "Mine" filter → items this user wants. 
+    if added_by_discord_id:
+        select += ",mine:poster_list_wanters!inner(discord_id)"
+        params["mine.discord_id"] = f"eq.{added_by_discord_id}"
+    params["select"] = select
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # "Mine" and search both resolve to an id-restriction; intersect them.
-            restrict: Optional[set] = None
-
-            # "Mine" filter → restrict to the posters this user is a wanter of.
-            if added_by_discord_id:
-                wresp = await client.get(
-                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
-                    headers=SUPABASE_HEADERS,
-                    params={"select": "item_id", "discord_id": f"eq.{added_by_discord_id}", "limit": 2000},
-                )
-                wresp.raise_for_status()
-                restrict = {r["item_id"] for r in wresp.json()}
-
-            # Search → match the item title OR a wanter's name (case-insensitive).
+            # Search → items whose title OR a wanter's name matches (case-insensitive).
+            # The match set is bounded by the query, so an id-restriction is safe; it
+            # ANDs with the Mine join above.
             q = _safe_like(search) if search else ""
             if q:
                 like = f"ilike.*{q}*"
@@ -467,12 +461,9 @@ async def get_community_lists(
                 )
                 nresp.raise_for_status()
                 matched = {r["id"] for r in tresp.json()} | {r["item_id"] for r in nresp.json()}
-                restrict = matched if restrict is None else (restrict & matched)
-
-            if restrict is not None:
-                if not restrict:
+                if not matched:
                     return {"items": [], "total": 0}
-                params["id"] = f"in.({','.join(restrict)})"
+                params["id"] = f"in.({','.join(matched)})"
 
             resp = await client.get(
                 f"{SUPABASE_URL}/rest/v1/poster_list_items",
@@ -481,7 +472,10 @@ async def get_community_lists(
             )
             resp.raise_for_status()
             total = int(resp.headers.get("content-range", "*/0").split("/")[-1] or 0)
-            return {"items": resp.json(), "total": total}
+            items = resp.json()
+            for row in items:
+                row.pop("mine", None)  # internal join alias, not for the client
+            return {"items": items, "total": total}
     except httpx.HTTPStatusError as e:
         log_error(LogTags.API, f"Supabase list fetch failed: {e.response.text}", status_code=e.response.status_code)
         raise HTTPException(status_code=502, detail="Failed to fetch community lists")
