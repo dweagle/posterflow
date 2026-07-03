@@ -186,7 +186,7 @@ class CustomDriveRequest(BaseModel):
     sync_enabled: bool = True
 
 @router.get("/", response_model=List[DriveSchema])
-async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
+def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
     """
     List all available drives from database.
     If database is empty, load from drives.json.
@@ -240,7 +240,7 @@ async def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
     return drive_schemas
 
 @router.post("/{drive_id}/subscribe")
-async def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Subscribe to a drive for syncing"""
     drive = db.query(Drive).filter(Drive.id == drive_id).first()
     if not drive:
@@ -287,7 +287,7 @@ async def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[
     }
 
 @router.post("/{drive_id}/unsubscribe")
-async def unsubscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def unsubscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Unsubscribe from a drive"""
     drive = db.query(Drive).filter(Drive.id == drive_id).first()
     if not drive:
@@ -310,7 +310,7 @@ async def unsubscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dic
     }
 
 @router.patch("/{drive_id}", response_model=DriveSchema)
-async def update_drive(drive_id: int, request: DriveUpdateRequest, db: Session = Depends(get_db)) -> DriveSchema:
+def update_drive(drive_id: int, request: DriveUpdateRequest, db: Session = Depends(get_db)) -> DriveSchema:
     """Update drive settings (priority, custom path, style, sync inclusion)"""
     drive = db.query(Drive).filter(Drive.id == drive_id).first()
     if not drive:
@@ -367,7 +367,7 @@ async def update_drive(drive_id: int, request: DriveUpdateRequest, db: Session =
     return drive
 
 @router.post("/custom", response_model=DriveSchema)
-async def create_custom_drive(request: CustomDriveRequest, db: Session = Depends(get_db)) -> DriveSchema:
+def create_custom_drive(request: CustomDriveRequest, db: Session = Depends(get_db)) -> DriveSchema:
     """Create a custom user drive"""
     if request.style_type != "Custom":
         raise HTTPException(status_code=400, detail="Custom drives must use Custom style")
@@ -402,7 +402,7 @@ async def create_custom_drive(request: CustomDriveRequest, db: Session = Depends
     return drive
 
 @router.delete("/{drive_id}")
-async def delete_drive(
+def delete_drive(
     drive_id: int,
     delete_files: bool = False,
     confirm: bool = False,
@@ -478,7 +478,7 @@ async def delete_drive(
     }
 
 @router.post("/reload")
-async def reload_drives(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def reload_drives(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Manually reload drives from hybrid source (remote with local fallback).
     Adds new drives but doesn't remove existing ones.
@@ -503,7 +503,7 @@ async def reload_drives(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 @router.post("/refresh-counts")
-async def refresh_file_counts(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def refresh_file_counts(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Refresh filesystem file counts for all drives.
     Counts actual files in each drive's directory and updates sync_file_count.

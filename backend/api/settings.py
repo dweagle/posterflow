@@ -293,7 +293,7 @@ def _mask_webhook(webhook_url: str) -> str:
 
 
 @router.get("/notifications/discord")
-async def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get Discord notification configuration and per-feature toggles."""
     enabled_raw = get_setting(db, "discord_notifications_enabled")
     webhook_raw = get_setting(db, "discord_notifications_webhook_url")
@@ -346,7 +346,7 @@ async def get_discord_notification_config(db: Session = Depends(get_db)) -> Dict
 
 
 @router.post("/notifications/discord")
-async def save_discord_notification_config(
+def save_discord_notification_config(
     payload: DiscordNotificationConfigRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:
@@ -413,7 +413,7 @@ async def save_discord_notification_config(
 
 
 @router.post("/notifications/discord/test")
-async def test_discord_notification(
+def test_discord_notification(
     payload: DiscordNotificationConfigRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -474,7 +474,7 @@ async def test_discord_notification(
     return {"success": True, "message": "Discord test notification sent successfully"}
 
 @router.get("/")
-async def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
+def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     """Get all settings (sensitive values are masked)"""
     settings = db.query(Setting).all()
     payload: Dict[str, str] = {}
@@ -484,7 +484,7 @@ async def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
 
 
 @router.post("/reveal")
-async def reveal_sensitive_setting(
+def reveal_sensitive_setting(
     payload: RevealSensitiveSettingRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -567,7 +567,7 @@ async def reveal_sensitive_setting(
     raise HTTPException(status_code=400, detail="Setting is not marked as sensitive/revealable")
 
 @router.post("/bulk")
-async def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) -> Dict[str, Any]:
+def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Save multiple settings at once.
 
     Only keys in BULK_SETTINGS_ALLOWLIST are accepted; unknown keys are dropped
@@ -663,7 +663,7 @@ async def upload_service_account_json(
         raise HTTPException(status_code=500, detail="Failed to upload service account JSON")
 
 @router.get("/plex-libraries")
-async def get_plex_library_config(db: Session = Depends(get_db)) -> Dict[str, List[Dict[str, Any]]]:
+def get_plex_library_config(db: Session = Depends(get_db)) -> Dict[str, List[Dict[str, Any]]]:
     """Get Plex library configurations for all instances"""
     # Get stored library configurations
     config = get_setting(db, "plex_library_config")
@@ -683,7 +683,7 @@ async def get_plex_library_config(db: Session = Depends(get_db)) -> Dict[str, Li
         return {"configs": []}
 
 @router.post("/plex-libraries")
-async def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depends(get_db)) -> Dict[str, str]:
+def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Save library configuration for a Plex instance"""
     log_user_action(f"Saving Plex library config for instance: {config.instance_name}")
     
@@ -747,7 +747,7 @@ class PlexUploadInstanceMapRequest(BaseModel):
 
 
 @router.get("/plex-upload-instance-map")
-async def get_plex_upload_instance_map(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_upload_instance_map(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return the Radarr/Sonarr instance -> Plex library routing map for Plex Upload."""
     setting = get_setting(db, PLEX_UPLOAD_INSTANCE_MAP_KEY)
     if not setting or not setting.value:
@@ -761,7 +761,7 @@ async def get_plex_upload_instance_map(db: Session = Depends(get_db)) -> Dict[st
 
 
 @router.post("/plex-upload-instance-map")
-async def save_plex_upload_instance_map(
+def save_plex_upload_instance_map(
     payload: PlexUploadInstanceMapRequest, db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Replace the Plex Upload instance -> library routing map.
@@ -802,7 +802,7 @@ class GdriveStoragePathRequest(BaseModel):
 
 
 @router.get("/gdrive-storage")
-async def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
+def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
     """Return the current GDrive poster storage path setting."""
     setting = get_setting(db, "gdrive_storage_path")
     current_path = setting.value.strip() if setting and setting.value else ""
@@ -810,7 +810,7 @@ async def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, st
 
 
 @router.post("/gdrive-storage")
-async def save_gdrive_storage_path(
+def save_gdrive_storage_path(
     payload: GdriveStoragePathRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, str]:

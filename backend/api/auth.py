@@ -36,14 +36,14 @@ class ClearPasswordRequest(BaseModel):
 
 
 @router.get("/status")
-async def get_auth_status(db: Session = Depends(get_db)) -> Dict[str, bool]:
+def get_auth_status(db: Session = Depends(get_db)) -> Dict[str, bool]:
     """Returns whether a password has been configured. Always unauthenticated."""
     return {"password_set": is_password_set(db)}
 
 
 @router.post("/verify")
 @limiter.limit("10/minute")
-async def verify_password_endpoint(
+def verify_password_endpoint(
     request: Request,
     payload: VerifyPasswordRequest,
     db: Session = Depends(get_db),
@@ -57,7 +57,7 @@ async def verify_password_endpoint(
 
 @router.post("/set")
 @limiter.limit("10/minute")
-async def set_password_endpoint(
+def set_password_endpoint(
     request: Request,
     payload: SetPasswordRequest,
     db: Session = Depends(get_db),
@@ -93,7 +93,7 @@ async def set_password_endpoint(
 
 
 @router.post("/clear")
-async def clear_password_endpoint(
+def clear_password_endpoint(
     payload: ClearPasswordRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:

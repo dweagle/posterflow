@@ -39,7 +39,7 @@ class DiscordIdentityPayload(BaseModel):
 
 
 @router.post("/identity")
-async def store_discord_identity(payload: DiscordIdentityPayload, db: Session = Depends(get_db)):
+def store_discord_identity(payload: DiscordIdentityPayload, db: Session = Depends(get_db)):
     """Persist the connected Discord identity + signed token so background scan
     jobs can reconcile this user's own published list items headlessly.
 

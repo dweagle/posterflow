@@ -17,12 +17,14 @@ engine = create_engine(
     poolclass=NullPool,
 )
 
-# Enable WAL mode so readers don't block writers and vice versa
+# Per-connection SQLite pragmas: WAL (readers don't block writers) and a 5s
+# busy_timeout (wait for a write lock instead of erroring with "database is locked").
 @event.listens_for(engine, "connect")
-def set_wal_mode(dbapi_connection, connection_record):
+def set_sqlite_pragmas(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")  # ms; per-connection, so set on every connect
     except Exception:  # nosec B110
         # WAL is a persistent DB-level setting; if another connection already
         # set it (or the DB is briefly locked during startup), this is safe to ignore.

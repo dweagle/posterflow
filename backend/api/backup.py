@@ -24,7 +24,7 @@ DRIVES_CACHE = CONFIG_DIR / "drives_cache.json"
 
 
 @router.get("/")
-async def create_backup() -> FileResponse:
+def create_backup() -> FileResponse:
     """
     Create a backup zip file containing database and configuration files
     """

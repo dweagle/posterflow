@@ -25,7 +25,7 @@ class LogSettings(BaseModel):
     debug_enabled: bool
 
 @router.get("/", response_model=List[LogEntry])
-async def get_logs(
+def get_logs(
     lines: int = Query(default=100, le=1000),
     level: Optional[str] = Query(default=None)
 ) -> List[LogEntry]:
@@ -72,12 +72,12 @@ async def get_logs(
         return []
 
 @router.get("/debug-status")
-async def get_debug_status() -> dict[str, bool]:
+def get_debug_status() -> dict[str, bool]:
     """Get current debug mode status"""
     return {"debug_enabled": settings.debug}
 
 @router.post("/debug-toggle")
-async def toggle_debug(enable: bool, db: Session = Depends(get_db)) -> dict[str, str | bool]:
+def toggle_debug(enable: bool, db: Session = Depends(get_db)) -> dict[str, str | bool]:
     """
     Toggle debug mode and update logging level.
     """
@@ -96,7 +96,7 @@ async def toggle_debug(enable: bool, db: Session = Depends(get_db)) -> dict[str,
     return {"debug_enabled": enable, "message": f"Debug mode {'enabled' if enable else 'disabled'}"}
 
 @router.post("/clear")
-async def clear_logs(confirm: bool = False) -> dict[str, str]:
+def clear_logs(confirm: bool = False) -> dict[str, str]:
     """Clear all log entries from the log file"""
     if not confirm:
         raise HTTPException(status_code=400, detail="Must pass confirm=true to clear logs")

@@ -30,7 +30,7 @@ def _is_path_within(parent: Path, child: Path) -> bool:
 
 
 @router.get("/poster-search")
-async def search_posters(
+def search_posters(
     q: str,
     limit: int = 200,
     db: Session = Depends(get_db),
@@ -122,7 +122,7 @@ async def search_posters(
     }
 
 @router.get("/")
-async def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get comprehensive statistics for the dashboard"""
     
     # Get drive statistics
@@ -196,7 +196,7 @@ async def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.get("/recent-posters")
-async def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get most recent posters for dashboard carousel.
 
     Ordering prioritizes the poster content timestamp (file mtime) and falls back
@@ -261,7 +261,7 @@ async def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_d
 
 
 @router.get("/posters/{poster_id}/image")
-async def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> FileResponse:
     """Stream poster image by poster record id."""
     poster = db.query(Poster).filter(Poster.id == poster_id).first()
     if not poster:
@@ -294,7 +294,7 @@ async def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> Fil
 
 
 @router.get("/poster-daily-activity")
-async def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get daily and weekly poster activity summary for dashboard card."""
     # Use local system time to determine day boundaries so "today" matches the
     # user's calendar day regardless of UTC offset. DB timestamps are UTC-naive,

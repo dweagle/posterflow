@@ -826,13 +826,13 @@ def load_runtime_config(db: Session) -> MakerIdarrConfig:
 
 
 @router.get("/")
-async def get_maker_idarr_config(db: Session = Depends(get_db)) -> MakerIdarrConfig:
+def get_maker_idarr_config(db: Session = Depends(get_db)) -> MakerIdarrConfig:
     """Get Maker Tools IDarr configuration."""
     return load_runtime_config(db)
 
 
 @router.post("/")
-async def save_maker_idarr_config(config: MakerIdarrConfig, db: Session = Depends(get_db)) -> Dict[str, bool]:
+def save_maker_idarr_config(config: MakerIdarrConfig, db: Session = Depends(get_db)) -> Dict[str, bool]:
     """Save Maker Tools IDarr configuration."""
     try:
         incoming_payload = config.model_dump()
@@ -1017,7 +1017,7 @@ async def upload_maker_idarr_files(
 
 
 @router.get("/last-run")
-async def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get last IDarr run details for expandable UI display."""
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, sync_target_index)
@@ -1042,14 +1042,14 @@ async def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Ses
 
 
 @router.get("/pending-matches/count")
-async def get_maker_idarr_pending_count(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_maker_idarr_pending_count(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return total count of pending matches across all sync targets (for sidebar badge)."""
     count = db.query(IdarrPendingMatch).count()
     return {"count": count}
 
 
 @router.get("/pending-matches")
-async def get_maker_idarr_pending_matches(
+def get_maker_idarr_pending_matches(
     sync_target_index: int | None = None,
     limit: int | None = None,
     offset: int = 0,
@@ -1070,7 +1070,7 @@ async def get_maker_idarr_pending_matches(
 
 
 @router.get("/pending-matches/source-image")
-async def get_maker_idarr_pending_source_image(
+def get_maker_idarr_pending_source_image(
     path: str,
     sync_target_index: int | None = None,
     db: Session = Depends(get_db),
@@ -1097,7 +1097,7 @@ class ArchiveIdarrSourceFileRequest(BaseModel):
 
 
 @router.post('/source-file/archive')
-async def archive_idarr_source_file(
+def archive_idarr_source_file(
     request: ArchiveIdarrSourceFileRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1185,7 +1185,7 @@ def _collect_idarr_cache_labels(query: Any, limit: int = _IDARR_PURGE_LOG_CAP) -
 
 
 @router.post("/pending-matches/clear-all")
-async def clear_maker_idarr_pending_matches(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def clear_maker_idarr_pending_matches(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Clear all pending IDarr unmatched rows from the pending match queue."""
     scope_token = _resolve_scope_token(db, sync_target_index)
     rows = _filter_pending_query_by_scope(db.query(IdarrPendingMatch), scope_token).all()
@@ -1604,7 +1604,7 @@ def _build_idarr_pending_preview_url_with_fallback(
 
 
 @router.get("/pending-matches/snapshot")
-async def get_maker_idarr_pending_matches_snapshot(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_maker_idarr_pending_matches_snapshot(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return a structured pending-workflow snapshot payload for external review/audit."""
     scope_token = _resolve_scope_token(db, sync_target_index)
     items, _ = _build_idarr_pending_items_payload(db, scope_token, sync_target_index)
@@ -1617,7 +1617,7 @@ async def get_maker_idarr_pending_matches_snapshot(sync_target_index: int | None
 
 
 @router.post("/pending-matches/resolve")
-async def resolve_maker_idarr_pending_match(payload: IdarrPendingResolveRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def resolve_maker_idarr_pending_match(payload: IdarrPendingResolveRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Resolve or dismiss a pending IDarr match entry."""
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
     return resolve_pending_matches(payload, db, scope_token)
@@ -1954,7 +1954,7 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
 
 
 @router.post("/pending-matches/candidates")
-async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Lookup candidate TMDB matches for a pending IDarr item."""
     title = payload.title.strip()
     requested_media_type = payload.type.strip().lower()
@@ -2161,7 +2161,7 @@ async def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequ
 
 
 @router.post("/pending-matches/candidates/review")
-async def review_maker_idarr_pending_candidate(payload: IdarrPendingCandidateReviewRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def review_maker_idarr_pending_candidate(payload: IdarrPendingCandidateReviewRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Persist accept/reject review state for a pending candidate suggestion."""
     asset_key = payload.asset_key.strip()
     if not asset_key:
@@ -2233,7 +2233,7 @@ async def review_maker_idarr_pending_candidate(payload: IdarrPendingCandidateRev
 
 
 @router.get("/ignored-titles")
-async def get_maker_idarr_ignored_titles(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_maker_idarr_ignored_titles(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """List ignored IDarr titles that are excluded from processing/pending lists."""
     scope_token = _resolve_scope_token(db, sync_target_index)
     items = _load_ignored_titles(db, scope_token)
@@ -2241,7 +2241,7 @@ async def get_maker_idarr_ignored_titles(sync_target_index: int | None = None, d
 
 
 @router.post("/ignored-titles/add")
-async def add_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def add_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Add an ignored IDarr title entry."""
     title = payload.title.strip()
     # Normalize so add/remove/runner all agree on the canonical type string.
@@ -2262,7 +2262,7 @@ async def add_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: S
 
 
 @router.post("/ignored-titles/remove")
-async def remove_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def remove_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Remove an ignored IDarr title entry."""
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
     normalized_type = _normalize_idarr_asset_type(payload.type)
@@ -2344,7 +2344,7 @@ async def remove_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db
 
 
 @router.post("/ignored-titles/import")
-async def import_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def import_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Import ignored titles in bulk (exact title matches with optional year)."""
     normalized_titles = _normalize_bulk_ignored_titles(payload.titles)
     if not normalized_titles:
@@ -2377,7 +2377,7 @@ async def import_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkReque
 
 
 @router.post("/ignored-titles/replace")
-async def replace_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def replace_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Replace ignored titles from a manually edited list."""
     normalized_titles = _normalize_bulk_ignored_titles(payload.titles)
 
@@ -2405,7 +2405,7 @@ async def replace_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequ
 
 
 @router.get("/cache/stats")
-async def get_maker_idarr_cache_stats(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, int]:
+def get_maker_idarr_cache_stats(sync_target_index: int | None = None, db: Session = Depends(get_db)) -> Dict[str, int]:
     """Get cache stats for IDarr cache maintenance controls."""
     scope_token = _resolve_scope_token(db, sync_target_index)
     base_query = _filter_cache_query_by_scope(db.query(IdarrAssetCache), scope_token)
@@ -2422,7 +2422,7 @@ async def get_maker_idarr_cache_stats(sync_target_index: int | None = None, db: 
 
 
 @router.post("/cache/maintenance")
-async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Run IDarr cache maintenance actions in dedicated cache table."""
     # prune_orphaned_scopes is a global (cross-scope) operation — resolve and return early.
     if payload.action == "prune_orphaned_scopes":
@@ -2582,7 +2582,7 @@ async def run_maker_idarr_cache_maintenance(payload: IdarrCacheMaintenanceReques
 
 
 @router.post("/exports/csvs")
-async def export_maker_idarr_csvs(payload: IdarrExportRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def export_maker_idarr_csvs(payload: IdarrExportRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Export latest IDarr run details to CSV files."""
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, payload.sync_target_index)
@@ -2796,7 +2796,7 @@ def export_csvs(*, stats_payload: dict[str, Any], details_payload: dict[str, Any
 
 
 @router.post("/revert-latest")
-async def revert_maker_idarr_latest_run(payload: IdarrRevertRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def revert_maker_idarr_latest_run(payload: IdarrRevertRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Revert latest IDarr run using recorded file operation history."""
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, payload.sync_target_index)

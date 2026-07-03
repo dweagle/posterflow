@@ -159,7 +159,7 @@ class FlowRunRequest(BaseModel):
 
 
 @router.post("/rename")
-async def rename_posters(
+def rename_posters(
     payload: RenameRequestPayload,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -238,7 +238,7 @@ async def rename_posters(
 
 
 @router.post("/border-replacer/run")
-async def run_border_replacer(
+def run_border_replacer(
     payload: Optional[BorderReplacerRunRequest] = None,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -289,7 +289,7 @@ async def run_border_replacer(
 
 
 @router.get("/config")
-async def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get Poster Renamer configuration.
     """
@@ -316,7 +316,7 @@ async def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/config")
-async def save_rename_config(
+def save_rename_config(
     config: PosterConfig,
     db: Session = Depends(get_db)
 ) -> Dict[str, bool]:
@@ -344,7 +344,7 @@ async def save_rename_config(
 
 
 @router.get("/stats")
-async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get poster statistics from last rename operation, or scan organized folder if no stats stored.
     """
@@ -432,7 +432,7 @@ async def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.get("/priority")
-async def get_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get drive priority configuration.
     """
@@ -457,7 +457,7 @@ async def get_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/priority")
-async def save_drive_priority(
+def save_drive_priority(
     priority: DrivePriority,
     db: Session = Depends(get_db)
 ) -> Dict[str, bool]:
@@ -489,7 +489,7 @@ async def save_drive_priority(
 
 
 @router.get("/auto-run-border")
-async def get_auto_run_border(db: Session = Depends(get_db)) -> Dict[str, bool]:
+def get_auto_run_border(db: Session = Depends(get_db)) -> Dict[str, bool]:
     """
     Get auto-run border replacer setting.
     """
@@ -502,7 +502,7 @@ async def get_auto_run_border(db: Session = Depends(get_db)) -> Dict[str, bool]:
 
 
 @router.post("/auto-run-border")
-async def save_auto_run_border(
+def save_auto_run_border(
     enabled: bool,
     db: Session = Depends(get_db)
 ) -> Dict[str, bool]:
@@ -528,7 +528,7 @@ async def save_auto_run_border(
 
 
 @router.get("/auto-run-cleanup")
-async def get_auto_run_cleanup(db: Session = Depends(get_db)) -> Dict[str, bool]:
+def get_auto_run_cleanup(db: Session = Depends(get_db)) -> Dict[str, bool]:
     """Get the asset-cleanup toggle (and its delete-unknown sub-toggle)."""
     try:
         enabled_setting = get_setting(db, SETTING_AUTO_RUN_CLEANUP)
@@ -543,7 +543,7 @@ async def get_auto_run_cleanup(db: Session = Depends(get_db)) -> Dict[str, bool]
 
 
 @router.post("/auto-run-cleanup")
-async def save_auto_run_cleanup(
+def save_auto_run_cleanup(
     enabled: bool,
     delete_unknown: bool = False,
     db: Session = Depends(get_db)
@@ -568,7 +568,7 @@ async def save_auto_run_cleanup(
 
 
 @router.get("/scan")
-async def scan_poster_directory(source_path: Optional[str] = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def scan_poster_directory(source_path: Optional[str] = None, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Scan poster directory (placeholder for future implementation).
     """
@@ -576,7 +576,7 @@ async def scan_poster_directory(source_path: Optional[str] = None, db: Session =
 
 
 @router.get("/unmatched-stats")
-async def get_unmatched_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_unmatched_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get cached unmatched media statistics.
     """
@@ -589,7 +589,7 @@ async def get_unmatched_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/detect-unmatched")
-async def start_unmatched_detection(
+def start_unmatched_detection(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -748,7 +748,7 @@ def _tmdb_score_candidates(
 
 
 @router.post("/unmatched-tmdb-search")
-async def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Search TMDB for candidates matching an unmatched media item.
     Returns up to 10 candidate results with title, year, poster URL, and TMDB link.
@@ -1005,7 +1005,7 @@ class ManualMediaCreateRequest(BaseModel):
 
 
 @router.get("/manual-media")
-async def list_manual_media(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def list_manual_media(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return all manually added media entries."""
     entries = db.query(ManualMediaEntry).order_by(ManualMediaEntry.created_at.asc()).all()
     result = []
@@ -1031,7 +1031,7 @@ async def list_manual_media(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/manual-media")
-async def add_manual_media(
+def add_manual_media(
     payload: ManualMediaCreateRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1091,7 +1091,7 @@ async def add_manual_media(
 
 
 @router.delete("/manual-media/{entry_id}")
-async def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Delete a manual media entry by ID."""
     entry = db.query(ManualMediaEntry).filter(ManualMediaEntry.id == entry_id).first()
     if not entry:
@@ -1106,7 +1106,7 @@ async def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> D
 
 
 @router.get("/flow/config")
-async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
         default_step_config: Dict[str, Dict[str, bool]] = {
             "sync_drives": {"enabled": True, "stop_on_error": True},
@@ -1164,7 +1164,7 @@ async def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/flow/config")
-async def save_flow_config(
+def save_flow_config(
     flow_config: FlowConfig,
     db: Session = Depends(get_db)
 ) -> Dict[str, bool]:
@@ -1184,7 +1184,7 @@ async def save_flow_config(
 
 
 @router.post("/flow/run")
-async def run_flow(
+def run_flow(
     payload: Optional[FlowRunRequest] = None,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:

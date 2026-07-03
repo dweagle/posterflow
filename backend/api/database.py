@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/database", tags=["database"])
 
 
 @router.get("/cleanup/preview")
-async def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Preview orphaned poster records that would be deleted.
     Shows records where the file_path doesn't exist on disk.
@@ -101,7 +101,7 @@ async def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/cleanup/execute")
-async def execute_cleanup(
+def execute_cleanup(
     confirm: bool = False,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -178,7 +178,7 @@ async def execute_cleanup(
 
 
 @router.get("/stats")
-async def database_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def database_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get statistics about the database.
     

@@ -319,13 +319,13 @@ def _extract_last_workflow_timeline(log_path: Path) -> list[dict[str, Any]]:
     return timeline
 
 @router.get("/", response_model=List[JobSchema])
-async def list_jobs(db: Session = Depends(get_db)) -> List[JobSchema]:
+def list_jobs(db: Session = Depends(get_db)) -> List[JobSchema]:
     """List all jobs, most recent first"""
     jobs = db.query(Job).order_by(Job.started_at.desc()).limit(50).all()
     return jobs
 
 @router.get("/{job_id}", response_model=JobSchema)
-async def get_job(job_id: int, db: Session = Depends(get_db)) -> JobSchema:
+def get_job(job_id: int, db: Session = Depends(get_db)) -> JobSchema:
     """Get a specific job"""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
@@ -334,7 +334,7 @@ async def get_job(job_id: int, db: Session = Depends(get_db)) -> JobSchema:
 
 
 @router.get("/workflow/last-run-timeline")
-async def get_last_workflow_timeline() -> Dict[str, Any]:
+def get_last_workflow_timeline() -> Dict[str, Any]:
     """Return timeline points from the most recent real workflow run log."""
     timeline = _extract_last_workflow_timeline(WORKFLOW_LOG_PATH)
     if not timeline:
@@ -355,7 +355,7 @@ async def get_last_workflow_timeline() -> Dict[str, Any]:
     }
 
 @router.post("/sync", response_model=JobSchema)
-async def start_sync_one_drive(request: StartSyncRequest, db: Session = Depends(get_db)) -> JobSchema:
+def start_sync_one_drive(request: StartSyncRequest, db: Session = Depends(get_db)) -> JobSchema:
     """Start a sync job for a single drive"""
     # Check if drive exists and is subscribed
     drive = db.query(Drive).filter(Drive.id == request.drive_id).first()
@@ -401,7 +401,7 @@ async def start_sync_one_drive(request: StartSyncRequest, db: Session = Depends(
 
 
 @router.post("/sync-all", response_model=JobSchema)
-async def start_sync_all_drives(db: Session = Depends(get_db)) -> JobSchema:
+def start_sync_all_drives(db: Session = Depends(get_db)) -> JobSchema:
     """Start a sync job for all subscribed drives"""
     # Get all subscribed drives
     drives = db.query(Drive).filter(Drive.subscribed == True).all()
@@ -446,7 +446,7 @@ async def start_sync_all_drives(db: Session = Depends(get_db)) -> JobSchema:
 
 
 @router.post("/idarr", response_model=JobSchema)
-async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_db)) -> JobSchema:
+def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_db)) -> JobSchema:
     """Start a native in-app idarr job from Maker Tools."""
     existing_idarr_job = (
         db.query(Job)
@@ -550,7 +550,7 @@ async def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_
 
 
 @router.post("/idarr-sync", response_model=JobSchema)
-async def start_idarr_sync_job(request: StartIdarrSyncRequest, db: Session = Depends(get_db)) -> JobSchema:
+def start_idarr_sync_job(request: StartIdarrSyncRequest, db: Session = Depends(get_db)) -> JobSchema:
     """Manually sync idarr output to a personal Google Drive folder ID."""
 
     config_setting = get_setting(db, "maker_tools_idarr_config")
@@ -624,7 +624,7 @@ async def start_idarr_sync_job(request: StartIdarrSyncRequest, db: Session = Dep
 
 
 @router.delete("/{job_id}")
-async def delete_job(job_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
+def delete_job(job_id: int, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Delete a job record"""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:

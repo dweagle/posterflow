@@ -7,7 +7,7 @@ from models.setting import get_setting
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
 @router.get("/status")
-async def get_setup_status(db: Session = Depends(get_db)) -> Dict[str, bool]:
+def get_setup_status(db: Session = Depends(get_db)) -> Dict[str, bool]:
     """Check if initial setup is complete"""
     setting = get_setting(db, "setup_complete")
     

@@ -354,7 +354,7 @@ class PlexUploadSingleManualRequest(BaseModel):
 
 
 @router.post("/plex-upload/run")
-async def run_plex_upload(
+def run_plex_upload(
     payload: Optional[PlexUploadRunRequest] = None,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -429,7 +429,7 @@ async def run_plex_upload(
 
 
 @router.get("/plex-upload/source-search")
-async def search_plex_upload_source_assets(
+def search_plex_upload_source_assets(
     q: str,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -577,7 +577,7 @@ async def search_plex_upload_source_assets(
 
 
 @router.get("/plex-upload/source-image")
-async def get_plex_upload_source_image(
+def get_plex_upload_source_image(
     path: str,
     db: Session = Depends(get_db),
 ) -> FileResponse:
@@ -593,7 +593,7 @@ async def get_plex_upload_source_image(
 
 
 @router.get("/plex-upload/plex-search")
-async def search_plex_items(
+def search_plex_items(
     q: str,
     media_type: Optional[str] = None,
     limit: int = 25,
@@ -726,7 +726,7 @@ async def search_plex_items(
 
 
 @router.get("/plex-upload/plex-thumb")
-async def get_plex_thumb(
+def get_plex_thumb(
     instance: str,
     key: str,
     db: Session = Depends(get_db),
@@ -772,7 +772,7 @@ async def get_plex_thumb(
 
 
 @router.post("/plex-upload/run-single")
-async def run_plex_single_manual_upload(
+def run_plex_single_manual_upload(
     payload: PlexUploadSingleManualRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -864,7 +864,7 @@ def resolve_arr_instance(db: Session, request: Request, parsed: Dict[str, Any]) 
 
 
 @router.post("/plex-upload/webhook")
-async def handle_plex_upload_webhook(
+def handle_plex_upload_webhook(
     payload: Dict[str, Any],
     request: Request,
     db: Session = Depends(get_db)
@@ -969,7 +969,7 @@ async def handle_plex_upload_webhook(
 
 
 @router.get("/plex-upload/webhook-token")
-async def get_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return the webhook token (generating one on first read) and whether a password is set.
 
     The token only needs to be included in the webhook URL when an app password
@@ -984,7 +984,7 @@ async def get_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any
 
 
 @router.post("/plex-upload/webhook-token/regenerate")
-async def regenerate_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def regenerate_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Generate a fresh webhook token, invalidating the previous one.
 
     Existing Radarr/Sonarr webhook URLs using the old token must be updated.
@@ -998,7 +998,7 @@ async def regenerate_plex_webhook_token(db: Session = Depends(get_db)) -> Dict[s
 
 
 @router.get("/plex-upload/webhook-settings")
-async def get_plex_webhook_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_webhook_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get webhook settings for Plex auto-upload endpoint."""
     try:
         return build_webhook_settings_response(db)
@@ -1007,7 +1007,7 @@ async def get_plex_webhook_settings(db: Session = Depends(get_db)) -> Dict[str, 
 
 
 @router.get("/plex-upload/manual-settings")
-async def get_plex_manual_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_manual_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get persisted manual run options for the Plex Upload page."""
     try:
         return build_manual_settings_response(db)
@@ -1016,7 +1016,7 @@ async def get_plex_manual_settings(db: Session = Depends(get_db)) -> Dict[str, A
 
 
 @router.post("/plex-upload/manual-settings")
-async def save_plex_manual_settings(
+def save_plex_manual_settings(
     payload: PlexManualSettingsRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1057,7 +1057,7 @@ async def save_plex_manual_settings(
 
 
 @router.post("/plex-upload/webhook-settings")
-async def save_plex_webhook_settings(
+def save_plex_webhook_settings(
     payload: PlexWebhookSettingsRequest,
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -1117,7 +1117,7 @@ async def save_plex_webhook_settings(
 
 
 @router.get("/plex-upload/webhook-stats")
-async def get_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get webhook processing stats for Plex auto-upload endpoint."""
     try:
         return load_webhook_stats(db)
@@ -1126,7 +1126,7 @@ async def get_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, Any
 
 
 @router.post("/plex-upload/webhook-stats/reset")
-async def reset_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def reset_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Reset webhook processing stats back to default values."""
     try:
         stats = reset_webhook_stats(db)
@@ -1140,7 +1140,7 @@ async def reset_plex_webhook_stats(db: Session = Depends(get_db)) -> Dict[str, A
 
 
 @router.post("/plex-upload/webhook-dedupe/clear")
-async def clear_plex_webhook_dedupe(
+def clear_plex_webhook_dedupe(
     payload: Optional[PlexWebhookDedupeClearRequest] = None,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1183,7 +1183,7 @@ async def clear_plex_webhook_dedupe(
 
 
 @router.get("/plex-upload/webhook-dedupe/entries")
-async def get_plex_webhook_dedupe_entries(
+def get_plex_webhook_dedupe_entries(
     q: str = "",
     media_type: Optional[str] = None,
     limit: int = 25,
@@ -1208,7 +1208,7 @@ async def get_plex_webhook_dedupe_entries(
 
 
 @router.get("/plex-upload/library-override")
-async def get_plex_upload_library_override_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_upload_library_override_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get Plex Upload page-specific library override settings and global library config."""
     try:
         override = load_plex_upload_library_override(db)
@@ -1218,7 +1218,7 @@ async def get_plex_upload_library_override_settings(db: Session = Depends(get_db
 
 
 @router.post("/plex-upload/library-override")
-async def save_plex_upload_library_override_settings(
+def save_plex_upload_library_override_settings(
     payload: PlexLibraryOverrideSettingsRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1241,7 +1241,7 @@ async def save_plex_upload_library_override_settings(
 
 
 @router.get("/plex-upload/upload-cache")
-async def get_plex_upload_cache(db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_plex_upload_cache(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get persisted per-file Plex upload cache used for skip logic."""
     try:
         return fast_cache_summary(db)
@@ -1250,7 +1250,7 @@ async def get_plex_upload_cache(db: Session = Depends(get_db)) -> Dict[str, Any]
 
 
 @router.get("/plex-upload/upload-cache/entries")
-async def get_plex_upload_cache_entries(
+def get_plex_upload_cache_entries(
     q: str = "",
     limit: int = 25,
     offset: int = 0,
@@ -1295,7 +1295,7 @@ async def get_plex_upload_cache_entries(
 
 
 @router.post("/plex-upload/upload-cache/clear")
-async def clear_plex_upload_cache(
+def clear_plex_upload_cache(
     payload: Optional[PlexUploadCacheClearRequest] = None,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -1324,7 +1324,7 @@ async def clear_plex_upload_cache(
 
 
 @router.get("/plex-upload/upload-cache/export")
-async def export_plex_upload_cache(db: Session = Depends(get_db)) -> Response:
+def export_plex_upload_cache(db: Session = Depends(get_db)) -> Response:
     """Export persisted Plex upload cache as downloadable JSON."""
     try:
         cache = load_plex_upload_file_cache(db)
