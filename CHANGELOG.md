@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-02
+### Fixed
+- Performance: synchronous API endpoints that were declared `async def` are now plain `def`, so their blocking database/filesystem work no longer stalls the single-worker event loop and freezes the app.
+
 ## [0.9.4] - 2026-06-28
 ### Fixed
 - Unmatched Assets/Poster Style: feat: enhance TMDB search to resolve titles by ID and pin exact matches to results.
