@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-07-03
+### Fixed
+- Community Lists: search now runs in a Postgres function, fixing 400 errors and UI freezes on heavier searches.
+- Community Lists: in-drive availability is now checked only for newly loaded items, avoiding redundant lookups.
+
 ## [0.9.6] - 2026-07-03
 ### Added
 - Community Lists/Requests: now refresh automatically when the browser tab regains focus.
