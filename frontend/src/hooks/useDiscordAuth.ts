@@ -34,7 +34,8 @@ function parseStoredToken(token: string): Omit<DiscordAuth, 'token'> | null {
   try {
     const dot = token.lastIndexOf('.')
     if (dot === -1) return null
-    const payload = JSON.parse(atob(token.slice(0, dot))) as DiscordAuth
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(token.slice(0, dot)), (c) => c.charCodeAt(0)))
+    const payload = JSON.parse(decoded) as DiscordAuth
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     return {
       discord_user_id: payload.discord_user_id,

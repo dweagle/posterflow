@@ -47,8 +47,17 @@ async function signB64(b64: string): Promise<string> {
     .join('')
 }
 
+// UTF-8-safe base64: btoa() only accepts Latin1, but Discord display names
+// can contain emoji / non-Latin characters. Encode the UTF-8 bytes instead.
+function utf8ToB64(str: string): string {
+  const bytes = new TextEncoder().encode(str)
+  let bin = ''
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return btoa(bin)
+}
+
 async function createToken(payload: object): Promise<string> {
-  const b64 = btoa(JSON.stringify(payload))
+  const b64 = utf8ToB64(JSON.stringify(payload))
   const sig = await signB64(b64)
   return `${b64}.${sig}`
 }

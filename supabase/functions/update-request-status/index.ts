@@ -72,7 +72,8 @@ async function verifyToken(token: string): Promise<MakerPayload | null> {
   if (!valid) return null
 
   try {
-    const payload = JSON.parse(atob(b64)) as MakerPayload
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+    const payload = JSON.parse(decoded) as MakerPayload
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     return payload
   } catch {

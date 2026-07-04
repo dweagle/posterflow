@@ -77,7 +77,8 @@ async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
   if (!valid) return null
 
   try {
-    const payload = JSON.parse(atob(b64)) as DiscordTokenPayload
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+    const payload = JSON.parse(decoded) as DiscordTokenPayload
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     if (!payload.discord_user_id) return null
     return payload
