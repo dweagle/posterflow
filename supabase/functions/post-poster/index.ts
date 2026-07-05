@@ -66,8 +66,14 @@ async function verifyToken(token: string): Promise<MakerPayload | null> {
   if (!valid) return null
 
   try {
-    const decoded = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
-    const payload = JSON.parse(decoded) as MakerPayload
+    // New tokens are UTF-8; older tokens were Latin1 — fall back so their names survive.
+    let raw: string
+    try {
+      raw = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+    } catch {
+      raw = atob(b64)
+    }
+    const payload = JSON.parse(raw) as MakerPayload
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     return payload
   } catch {

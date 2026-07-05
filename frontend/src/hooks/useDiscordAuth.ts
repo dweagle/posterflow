@@ -34,8 +34,15 @@ function parseStoredToken(token: string): Omit<DiscordAuth, 'token'> | null {
   try {
     const dot = token.lastIndexOf('.')
     if (dot === -1) return null
-    const decoded = new TextDecoder().decode(Uint8Array.from(atob(token.slice(0, dot)), (c) => c.charCodeAt(0)))
-    const payload = JSON.parse(decoded) as DiscordAuth
+    // New tokens are UTF-8; older tokens were Latin1 — fall back so their names survive.
+    const b64 = token.slice(0, dot)
+    let raw: string
+    try {
+      raw = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+    } catch {
+      raw = atob(b64)
+    }
+    const payload = JSON.parse(raw) as DiscordAuth
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     return {
       discord_user_id: payload.discord_user_id,
