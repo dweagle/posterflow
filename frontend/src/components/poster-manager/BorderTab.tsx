@@ -1,7 +1,19 @@
-import { useMemo, useState } from 'react'
-import { Eye, Play, Save, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Eye, Info, Play, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toolbar from './Toolbar'
+import BorderStyleControls, { BorderStyleValue, OverlaySelect, StyleValuePreview } from './BorderStyleControls'
+import PlexRulesSection from './PlexRulesSection'
+import NumberField from './NumberField'
+import ConfirmDialog from '../ConfirmDialog'
+import type { BorderStyle, GradientDirection, InnerEffect, PlexBorderRule, RuleRunType, SeasonMode, SeasonStyle } from '../../hooks/usePosterManagerBorder'
+import { DEFAULT_SEASON_STYLE } from '../../hooks/usePosterManagerBorder'
+import {
+  BorderOverlay,
+  deleteBorderOverlay,
+  listBorderOverlays,
+  uploadBorderOverlay,
+} from '../../api/posterManager'
 
 type HolidayPreset = {
   name: string
@@ -13,6 +25,7 @@ type HolidaySchedule = {
   name: string
   schedule: string
   colors: string[]
+  style: SeasonStyle
 }
 
 const MONTHS = [
@@ -54,11 +67,29 @@ type BorderTabProps = {
   holidaySchedules: HolidaySchedule[]
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
-  seasonMode: 'inherit' | 'remove' | 'colors'
+  seasonMode: SeasonMode
   seasonColors: string[]
   seasonWidth: number
-  newSeasonColor: string
+  seasonStyle: SeasonStyle
+  borderStyle: BorderStyle
+  overlayImage: string
+  overlayRemoveExisting: boolean
+  gradientColors: string[]
+  gradientDirection: GradientDirection
+  newGradientColor: string
+  innerEffect: InnerEffect
+  innerColor: string
+  innerOpacity: number
+  innerWidth: number
+  fadeWidth: number
+  plexRules: PlexBorderRule[]
+  ruleRunTypes: RuleRunType[]
+  ruleLibraries: Set<string>
+  onSetPlexRules: (updater: (prev: PlexBorderRule[]) => PlexBorderRule[]) => void
+  onToggleRuleRunType: (type: RuleRunType) => void
+  onToggleRuleLibrary: (fullKey: string) => void
   onSaveSettings: () => void
+  onResetBorderSettings: () => void
   onRunBorderReplacer: (dryRun: boolean) => void
   onSetBorderWidth: (width: number) => void
   onSetBorderMode: (mode: 'incremental' | 'full') => void
@@ -69,11 +100,22 @@ type BorderTabProps = {
   onSetSkipRunOutsideHoliday: (value: boolean) => void
   onAddHolidaySchedule: (holiday: HolidaySchedule) => void
   onRemoveHolidaySchedule: (name: string) => void
-  onSetSeasonMode: (mode: 'inherit' | 'remove' | 'colors') => void
+  onSetSeasonMode: (mode: SeasonMode) => void
   onSetSeasonWidth: (width: number) => void
-  onSetNewSeasonColor: (color: string) => void
-  onAddSeasonBorderColor: () => void
-  onRemoveSeasonBorderColor: (color: string) => void
+  onSetSeasonColors: (colors: string[]) => void
+  onSetSeasonStyle: (updater: (prev: SeasonStyle) => SeasonStyle) => void
+  onSetBorderStyle: (style: BorderStyle) => void
+  onSetOverlayImage: (name: string) => void
+  onSetOverlayRemoveExisting: (value: boolean) => void
+  onSetGradientDirection: (direction: GradientDirection) => void
+  onSetNewGradientColor: (color: string) => void
+  onAddGradientColor: () => void
+  onRemoveGradientColor: (color: string) => void
+  onSetInnerEffect: (effect: InnerEffect) => void
+  onSetInnerColor: (color: string) => void
+  onSetInnerOpacity: (value: number) => void
+  onSetInnerWidth: (value: number) => void
+  onSetFadeWidth: (value: number) => void
 }
 
 function BorderTab({
@@ -90,8 +132,26 @@ function BorderTab({
   seasonMode,
   seasonColors,
   seasonWidth,
-  newSeasonColor,
+  seasonStyle,
+  borderStyle,
+  overlayImage,
+  overlayRemoveExisting,
+  gradientColors,
+  gradientDirection,
+  newGradientColor,
+  innerEffect,
+  innerColor,
+  innerOpacity,
+  innerWidth,
+  fadeWidth,
+  plexRules,
+  ruleRunTypes,
+  ruleLibraries,
+  onSetPlexRules,
+  onToggleRuleRunType,
+  onToggleRuleLibrary,
   onSaveSettings,
+  onResetBorderSettings,
   onRunBorderReplacer,
   onSetBorderWidth,
   onSetBorderMode,
@@ -104,11 +164,83 @@ function BorderTab({
   onRemoveHolidaySchedule,
   onSetSeasonMode,
   onSetSeasonWidth,
-  onSetNewSeasonColor,
-  onAddSeasonBorderColor,
-  onRemoveSeasonBorderColor,
+  onSetSeasonColors,
+  onSetSeasonStyle,
+  onSetBorderStyle,
+  onSetOverlayImage,
+  onSetOverlayRemoveExisting,
+  onSetGradientDirection,
+  onSetNewGradientColor,
+  onAddGradientColor,
+  onRemoveGradientColor,
+  onSetInnerEffect,
+  onSetInnerColor,
+  onSetInnerOpacity,
+  onSetInnerWidth,
+  onSetFadeWidth,
 }: BorderTabProps) {
   const navigate = useNavigate()
+
+  const [overlays, setOverlays] = useState<BorderOverlay[]>([])
+  const [overlayError, setOverlayError] = useState('')
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const refreshOverlays = useCallback(async () => {
+    try {
+      const result = await listBorderOverlays()
+      setOverlays(result.overlays || [])
+    } catch {
+      setOverlays([])
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshOverlays()
+  }, [refreshOverlays])
+
+  const handleUploadOverlay = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setOverlayError('')
+    try {
+      const result = await uploadBorderOverlay(file)
+      await refreshOverlays()
+      onSetOverlayImage(result.name)
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setOverlayError(detail || 'Failed to upload overlay. Must be a 1000x1500 PNG with transparency.')
+    }
+  }
+
+  const handleDeleteOverlay = async (name: string) => {
+    setOverlayError('')
+    try {
+      await deleteBorderOverlay(name)
+      if (overlayImage === name) onSetOverlayImage('')
+      await refreshOverlays()
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setOverlayError(detail || 'Failed to delete overlay.')
+    }
+  }
+
+  // Live preview: render the sample poster with the current border settings.
+  // The main border style assembled into the shared BorderStyleValue shape (for the preview).
+  const mainStyleValue: BorderStyleValue = {
+    style: borderStyle,
+    colors: borderColors,
+    gradientColors,
+    gradientDirection,
+    overlayImage,
+    removeExisting: overlayRemoveExisting,
+    innerEffect,
+    innerColor,
+    innerOpacity,
+    innerWidth,
+    fadeWidth,
+  }
 
   const openSchedulingSettings = () => {
     localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
@@ -127,14 +259,31 @@ function BorderTab({
   const [editToMonth, setEditToMonth] = useState('01')
   const [editToDay, setEditToDay] = useState('01')
   const [editHolidayColors, setEditHolidayColors] = useState<string[]>([])
-  const [editNewColor, setEditNewColor] = useState('#000000')
+  const [editHolidayStyle, setEditHolidayStyle] = useState<SeasonStyle>(DEFAULT_SEASON_STYLE)
   const [customHolidayName, setCustomHolidayName] = useState('')
   const [customFromMonth, setCustomFromMonth] = useState('01')
   const [customFromDay, setCustomFromDay] = useState('01')
   const [customToMonth, setCustomToMonth] = useState('01')
   const [customToDay, setCustomToDay] = useState('01')
   const [customHolidayColors, setCustomHolidayColors] = useState<string[]>([])
-  const [customNewColor, setCustomNewColor] = useState('#000000')
+  const [customHolidayStyle, setCustomHolidayStyle] = useState<SeasonStyle>(DEFAULT_SEASON_STYLE)
+
+  // Route a BorderStyleControls patch into a (colors, style) state pair.
+  const applyStylePatch = (
+    patch: Partial<BorderStyleValue>,
+    setColors: (c: string[]) => void,
+    setStyle: (updater: (prev: SeasonStyle) => SeasonStyle) => void,
+  ) => {
+    if (patch.colors !== undefined) setColors(patch.colors)
+    const { colors, ...rest } = patch
+    void colors
+    if (Object.keys(rest).length > 0) setStyle((prev) => ({ ...prev, ...rest }))
+  }
+
+  const holidayStyleHasRenderable = (colors: string[], style: SeasonStyle) =>
+    colors.length > 0 ||
+    (style.style === 'image' && style.overlayImage.trim().length > 0) ||
+    (style.style === 'gradient' && style.gradientColors.length > 0)
 
   const editFromDayOptions = useMemo(() => {
     const month = MONTHS.find((item) => item.value === editFromMonth)
@@ -179,7 +328,7 @@ function BorderTab({
   const handleAddHolidayPreset = () => {
     const preset = HOLIDAY_PRESETS.find((item) => item.name === selectedPresetName)
     if (!preset) return
-    onAddHolidaySchedule(preset)
+    onAddHolidaySchedule({ ...preset, style: { ...DEFAULT_SEASON_STYLE } })
   }
 
   const handleStartEditHoliday = (holiday: HolidaySchedule) => {
@@ -189,34 +338,30 @@ function BorderTab({
     setEditToMonth(parsed.toMonth)
     setEditToDay(parsed.toDay)
     setEditHolidayColors(holiday.colors.length > 0 ? [...holiday.colors] : [...borderColors])
-    setEditNewColor('#000000')
+    setEditHolidayStyle({ ...holiday.style })
     setEditingHolidayName(holiday.name)
   }
 
   const handleSaveEditHoliday = (holiday: HolidaySchedule) => {
-    const colorsToSave = editHolidayColors.length > 0 ? editHolidayColors : holiday.colors
-    if (colorsToSave.length === 0) {
-      return
-    }
+    if (!holidayStyleHasRenderable(editHolidayColors, editHolidayStyle)) return
 
     onAddHolidaySchedule({
       ...holiday,
       schedule: buildScheduleRange(editFromMonth, editFromDay, editToMonth, editToDay),
-      colors: colorsToSave,
+      colors: editHolidayColors,
+      style: editHolidayStyle,
     })
     setEditingHolidayName(null)
   }
 
-  const handleAddEditHolidayColor = () => {
-    if (!editNewColor || editHolidayColors.includes(editNewColor)) {
-      return
-    }
-    setEditHolidayColors((prev) => [...prev, editNewColor])
-    setEditNewColor('#000000')
-  }
-
-  const handleRemoveEditHolidayColor = (color: string) => {
-    setEditHolidayColors((prev) => prev.filter((item) => item !== color))
+  // True when the in-progress edit differs from the saved holiday (drives the red Save button).
+  const editHolidayHasChanges = (holiday: HolidaySchedule) => {
+    const initialColors = holiday.colors.length > 0 ? holiday.colors : borderColors
+    return (
+      buildScheduleRange(editFromMonth, editFromDay, editToMonth, editToDay) !== holiday.schedule ||
+      JSON.stringify(editHolidayColors) !== JSON.stringify(initialColors) ||
+      JSON.stringify(editHolidayStyle) !== JSON.stringify(holiday.style)
+    )
   }
 
   const handleAddCustomHoliday = () => {
@@ -224,34 +369,42 @@ function BorderTab({
     if (!name) return
 
     const effectiveColors = customHolidayColors.length > 0 ? customHolidayColors : borderColors
-    if (effectiveColors.length === 0) return
+    if (!holidayStyleHasRenderable(effectiveColors, customHolidayStyle)) return
 
     onAddHolidaySchedule({
       name,
       schedule: buildScheduleRange(customFromMonth, customFromDay, customToMonth, customToDay),
       colors: effectiveColors,
+      style: customHolidayStyle,
     })
 
     setCustomHolidayName('')
     setCustomHolidayColors([])
-    setCustomNewColor('#000000')
+    setCustomHolidayStyle({ ...DEFAULT_SEASON_STYLE })
     setCustomFromMonth('01')
     setCustomFromDay('01')
     setCustomToMonth('01')
     setCustomToDay('01')
   }
 
-  const handleAddCustomHolidayColor = () => {
-    if (!customNewColor || customHolidayColors.includes(customNewColor)) {
-      return
-    }
-    setCustomHolidayColors((prev) => [...prev, customNewColor])
-    setCustomNewColor('#000000')
+  const confirmResetToDefaults = () => {
+    onResetBorderSettings()
+    setEditingHolidayName(null)
+    setShowResetConfirm(false)
   }
 
-  const handleRemoveCustomHolidayColor = (color: string) => {
-    setCustomHolidayColors((prev) => prev.filter((item) => item !== color))
-  }
+  // Reused in each section header so users can save without scrolling to the toolbar.
+  const sectionSaveButton = (
+    <button
+      className={`btn-toolbar section-save-btn ${hasUnsavedBorderChanges ? 'btn-unsaved' : ''}`}
+      onClick={onSaveSettings}
+      disabled={!hasUnsavedBorderChanges || saving}
+      title={hasUnsavedBorderChanges ? 'Save changes' : 'No changes to save'}
+    >
+      <Save size={16} />
+      {saving ? 'Saving...' : 'Save Settings'}
+    </button>
+  )
 
   return (
     <>
@@ -283,13 +436,30 @@ function BorderTab({
         </button>
       </Toolbar>
 
-      <div className="settings-section">
-        <h2>Border Configuration</h2>
-        <p className="section-description">Configure border colors and dimensions. Leave colors empty to remove borders instead of adding them.</p>
+      <div className="settings-section border-settings-card">
+        <div className="section-header-row">
+          <h2>Border Settings</h2>
+          <button
+            className="btn-secondary"
+            onClick={() => setShowResetConfirm(true)}
+            title="Reset all border settings on this page to their defaults"
+          >
+            <RotateCcw size={16} /> Reset to Defaults
+          </button>
+        </div>
 
-        <div className="settings-grid">
+        <div className="settings-grid border-basic-row">
           <div className="field-group">
-            <label>Incremental Mode</label>
+            <div className="field-label-row">
+              <label>Incremental Mode</label>
+              <span className="toolbar-info" tabIndex={0}>
+                <Info size={14} />
+                <div className="toolbar-tooltip">
+                  When enabled, only processes items changed since the last run (faster); when disabled, processes all items regardless of changes.
+                  Applies to all execution paths: workflow, auto-run after Poster Renamer, and standalone runs.
+                </div>
+              </span>
+            </div>
             <div className="toggle-field">
               <label className="toggle-switch">
                 <input type="checkbox" checked={borderMode === 'incremental'} onChange={(e) => onSetBorderMode(e.target.checked ? 'incremental' : 'full')} />
@@ -297,29 +467,27 @@ function BorderTab({
               </label>
               <span className="toggle-label">{borderMode === 'incremental' ? 'Incremental (Changed Items Only)' : 'Full (All Items)'}</span>
             </div>
-            <small>
-              When enabled, only processes items that have changed since last run (faster).
-              When disabled, processes all items regardless of changes.
-              <br />
-              <em>Applies to all execution paths: workflow, auto-run after Poster Renamer, and standalone runs.</em>
-            </small>
           </div>
 
           <div className="field-group">
-            <label>Border Width (pixels)</label>
-            <input
-              type="number"
-              value={borderWidth}
-              onChange={(e) => onSetBorderWidth(parseInt(e.target.value) || 26)}
-              min="1"
-              max="200"
-              style={{ maxWidth: '120px' }}
-            />
-            <small>Recommended: 26px (DAPS standard)</small>
+            <div className="field-label-row">
+              <label>Border Width (pixels)</label>
+              <span className="toolbar-info" tabIndex={0}>
+                <Info size={14} />
+                <div className="toolbar-tooltip">Recommended: 26px (DAPS standard).</div>
+              </span>
+            </div>
+            <NumberField value={borderWidth} onChange={onSetBorderWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
           </div>
 
           <div className="field-group">
-            <label>Remove Borders</label>
+            <div className="field-label-row">
+              <label>Remove Borders</label>
+              <span className="toolbar-info" tabIndex={0}>
+                <Info size={14} />
+                <div className="toolbar-tooltip">When enabled, posters are processed in remove-borders mode. Color and holiday color settings are hidden.</div>
+              </span>
+            </div>
             <div className="toggle-field">
               <label className="toggle-switch">
                 <input
@@ -335,17 +503,116 @@ function BorderTab({
                   : 'Disabled (border replacement mode)'}
               </span>
             </div>
-            <small>
-              When enabled, posters are processed in remove-borders mode. Color and holiday color settings are hidden.
-            </small>
           </div>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-header-row">
+          <h2>Border Style &amp; Preview</h2>
+          {sectionSaveButton}
+        </div>
+        {removeBorders ? (
+          <p className="section-description">Border style options are unavailable in remove-borders mode.</p>
+        ) : (
+          <div className="border-style-layout">
+            <div className="border-style-preview-col">
+              <div className="border-style-preview-wrap">
+                <span className="border-style-preview-label">Preview — click to enlarge</span>
+                <StyleValuePreview value={mainStyleValue} borderWidth={borderWidth} />
+              </div>
+            </div>
+            <div className="border-style-settings-col">
+              <div className="settings-grid">
 
           {!removeBorders && (
+          <div className="field-group">
+            <label>Border Style</label>
+            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+              How the replaced border is rendered. <strong>Solid</strong> uses the Border Colors below;
+              <strong> Gradient</strong> blends colors across the band; <strong>Image overlay</strong> composites a PNG frame you design.
+            </small>
+            <select
+              value={borderStyle}
+              onChange={(e) => onSetBorderStyle(e.target.value as BorderStyle)}
+              style={{ maxWidth: '240px' }}
+            >
+              <option value="solid">Solid color</option>
+              <option value="gradient">Gradient band</option>
+              <option value="image">Image overlay (frame)</option>
+            </select>
+
+            {borderStyle === 'gradient' && (
+              <div style={{ marginTop: '1rem' }}>
+                <label>Gradient Colors</label>
+                <small style={{ marginBottom: '0.5rem', display: 'block' }}>Two or more colors, blended in order across the border.</small>
+                <div className="color-input-row">
+                  <input type="color" value={newGradientColor} onChange={(e) => onSetNewGradientColor(e.target.value)} className="color-picker" />
+                  <input type="text" value={newGradientColor} onChange={(e) => onSetNewGradientColor(e.target.value)} placeholder="#000000" />
+                  <button className="btn-secondary" onClick={onAddGradientColor} disabled={!newGradientColor || gradientColors.includes(newGradientColor)}>
+                    Add Color
+                  </button>
+                </div>
+                {gradientColors.length > 0 ? (
+                  <div className="color-list">
+                    {gradientColors.map((color, index) => (
+                      <div key={index} className="color-item">
+                        <div className="color-preview" style={{ background: color }} />
+                        <span className="color-value">{color}</span>
+                        <button className="btn-remove-color" onClick={() => onRemoveGradientColor(color)} title="Remove color">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-config"><p>Add at least two colors for a gradient.</p></div>
+                )}
+                <div style={{ marginTop: '0.75rem' }}>
+                  <label>Direction</label>
+                  <select
+                    value={gradientDirection}
+                    onChange={(e) => onSetGradientDirection(e.target.value as GradientDirection)}
+                    style={{ maxWidth: '200px', display: 'block' }}
+                  >
+                    <option value="vertical">Vertical</option>
+                    <option value="horizontal">Horizontal</option>
+                    <option value="diagonal">Diagonal</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {borderStyle === 'image' && (
+              <div style={{ marginTop: '1rem' }}>
+                <label>Border Frame Image</label>
+                <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+                  Choose a 1000×1500 PNG frame (transparent center). Bundled presets and your uploads are listed.
+                </small>
+                <div className="border-overlay-row">
+                  <OverlaySelect overlays={overlays} value={overlayImage} onChange={onSetOverlayImage} />
+                  <input ref={fileInputRef} type="file" accept="image/png" style={{ display: 'none' }} onChange={handleUploadOverlay} />
+                  <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={16} /> Upload
+                  </button>
+                  {overlayImage && overlays.find((o) => o.name === overlayImage)?.source === 'user' && (
+                    <button className="btn-remove-color" onClick={() => handleDeleteOverlay(overlayImage)} title="Delete uploaded overlay">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+                {overlayError && <small style={{ color: 'var(--error, #e55)', display: 'block' }}>{overlayError}</small>}
+              </div>
+            )}
+
+          </div>
+          )}
+
+          {!removeBorders && borderStyle === 'solid' && (
           <div className="field-group">
             <label>Border Colors</label>
             <small style={{ marginBottom: '1rem', display: 'block' }}>
               Add one or more hex colors. Colors will cycle through posters.
-              Leave empty to remove borders instead.
             </small>
 
             <div className="color-input-row">
@@ -376,9 +643,96 @@ function BorderTab({
           </div>
           )}
 
+          {!removeBorders && (
           <div className="field-group">
-            <label>Season Poster Borders</label>
-            <small style={{ marginBottom: '1rem', display: 'block' }}>
+            <div className="toggle-field">
+              <label className="toggle-switch">
+                <input type="checkbox" checked={overlayRemoveExisting} onChange={(e) => onSetOverlayRemoveExisting(e.target.checked)} />
+                <span className="toggle-slider"></span>
+              </label>
+              <span className="toggle-label">Remove existing border first</span>
+            </div>
+            <small style={{ display: 'block' }}>
+              Strip the existing border first — exactly like Remove Borders mode (top/left/right cropped, black title bar) — before applying the new border.
+            </small>
+          </div>
+          )}
+              </div>
+            </div>
+            <div className="border-style-settings-col">
+              <div className="settings-grid">
+
+          {!removeBorders && (
+          <div className="field-group">
+            <label>Inner Edge Effect</label>
+            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+              Adds a soft transition just inside the border. Source posters already carry some baked-in inner glow,
+              so keep these subtle. Applies on top of image-overlay frames too.
+            </small>
+
+            <div className="season-mode-options">
+              <label className="radio-label">
+                <input type="radio" name="innerEffect" checked={innerEffect === 'none'} onChange={() => onSetInnerEffect('none')} />
+                <span>None</span>
+              </label>
+              <label className="radio-label">
+                <input type="radio" name="innerEffect" checked={innerEffect === 'glow'} onChange={() => onSetInnerEffect('glow')} />
+                <span>Dark inner glow</span>
+              </label>
+              <label className="radio-label">
+                <input type="radio" name="innerEffect" checked={innerEffect === 'fade'} onChange={() => onSetInnerEffect('fade')} />
+                <span>Border-color fade</span>
+              </label>
+            </div>
+
+            {innerEffect === 'glow' && (
+              <div style={{ marginTop: '1rem' }}>
+                <label>Glow Color</label>
+                <div className="color-input-row">
+                  <input type="color" value={innerColor} onChange={(e) => onSetInnerColor(e.target.value)} className="color-picker" />
+                  <input type="text" value={innerColor} onChange={(e) => onSetInnerColor(e.target.value)} placeholder="#000000" />
+                </div>
+                <div style={{ marginTop: '0.75rem' }}>
+                  <label>Opacity: {innerOpacity}%</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={innerOpacity}
+                    onChange={(e) => onSetInnerOpacity(parseInt(e.target.value) || 0)}
+                    style={{ display: 'block', maxWidth: '240px' }}
+                  />
+                  <small>Lower = lighter glow, higher = darker.</small>
+                </div>
+                <div style={{ marginTop: '0.5rem' }}>
+                  <label>Glow Width (pixels)</label>
+                  <NumberField value={innerWidth} onChange={onSetInnerWidth} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
+                </div>
+              </div>
+            )}
+
+            {innerEffect === 'fade' && (
+              <div style={{ marginTop: '1rem' }}>
+                <label>Fade Width (pixels)</label>
+                <NumberField value={fadeWidth} onChange={onSetFadeWidth} fallback={1} min={1} max={200} style={{ maxWidth: '120px' }} />
+                <small style={{ display: 'block' }}>The border color fades into the poster over this many pixels.</small>
+              </div>
+            )}
+          </div>
+          )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <div className="section-header-row">
+          <h2>Season Poster Borders</h2>
+          {sectionSaveButton}
+        </div>
+          <div className="field-group">
+            <small style={{ marginBottom: '0.5rem', display: 'block' }}>
               Control how borders are applied to TV season posters (files named like <code>Season01.jpg</code>).
               Overrides the main poster setting for season files only.
             </small>
@@ -408,184 +762,52 @@ function BorderTab({
                 <input
                   type="radio"
                   name="seasonMode"
-                  value="colors"
-                  checked={seasonMode === 'colors'}
-                  onChange={() => onSetSeasonMode('colors')}
+                  value="custom"
+                  checked={seasonMode === 'custom'}
+                  onChange={() => onSetSeasonMode('custom')}
                 />
-                <span>Custom colors</span>
+                <span>Custom style</span>
               </label>
             </div>
 
             {seasonMode !== 'inherit' && (
-              <div style={{ marginTop: '1rem' }}>
+              <div style={{ marginTop: '0.5rem' }}>
                 <label>Season Border Width (pixels)</label>
-                <input
-                  type="number"
-                  value={seasonWidth}
-                  onChange={(e) => onSetSeasonWidth(parseInt(e.target.value) || 26)}
-                  min="1"
-                  max="200"
-                  style={{ maxWidth: '120px' }}
-                />
+                <NumberField value={seasonWidth} onChange={onSetSeasonWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
                 <small style={{ display: 'block' }}>
                   Border width applied to season posters. Independent of the main poster width above.
                 </small>
               </div>
             )}
 
-            {seasonMode === 'colors' && (
+            {seasonMode === 'custom' && (
               <div style={{ marginTop: '1rem' }}>
-                <div className="color-input-row">
-                  <input
-                    type="color"
-                    value={newSeasonColor}
-                    onChange={(e) => onSetNewSeasonColor(e.target.value)}
-                    className="color-picker"
-                  />
-                  <input
-                    type="text"
-                    value={newSeasonColor}
-                    onChange={(e) => onSetNewSeasonColor(e.target.value)}
-                    placeholder="#000000"
-                  />
-                  <button
-                    className="btn-secondary"
-                    onClick={onAddSeasonBorderColor}
-                    disabled={!newSeasonColor || seasonColors.includes(newSeasonColor)}
-                  >
-                    Add Color
-                  </button>
-                </div>
-
-                {seasonColors.length > 0 ? (
-                  <div className="color-list">
-                    {seasonColors.map((color, index) => (
-                      <div key={index} className="color-item">
-                        <div className="color-preview" style={{ background: color }} />
-                        <span className="color-value">{color}</span>
-                        <button
-                          className="btn-remove-color"
-                          onClick={() => onRemoveSeasonBorderColor(color)}
-                          title="Remove color"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="empty-config">
-                    <p>No season colors added. Add at least one color for season posters.</p>
-                  </div>
-                )}
+                <BorderStyleControls
+                  verbose
+                  value={{ ...seasonStyle, colors: seasonColors }}
+                  onChange={(patch) => applyStylePatch(patch, onSetSeasonColors, onSetSeasonStyle)}
+                  overlays={overlays}
+                  refreshOverlays={refreshOverlays}
+                  idPrefix="season"
+                  label="Season Border Style"
+                  preview={<StyleValuePreview value={{ ...seasonStyle, colors: seasonColors }} borderWidth={seasonWidth} />}
+                />
               </div>
             )}
           </div>
+      </div>
+
+      {!removeBorders && (
+      <div className="settings-section">
+        <div className="section-header-row">
+          <h2>Holiday Schedules</h2>
+          {sectionSaveButton}
+        </div>
+        <div className="settings-grid">
 
           {!removeBorders && (
           <div className="field-group">
-            <label>Holiday Preset Schedules</label>
-            <small style={{ marginBottom: '1rem', display: 'block' }}>
-              Add preset holiday date ranges and color palettes. If a holiday is active, these colors override the default border colors.
-            </small>
-
-            <div className="holiday-preset-row">
-              <select
-                value={selectedPresetName}
-                onChange={(e) => setSelectedPresetName(e.target.value)}
-              >
-                <option value="">Select holiday preset...</option>
-                {HOLIDAY_PRESETS.map((preset) => (
-                  <option key={preset.name} value={preset.name}>{preset.name}</option>
-                ))}
-              </select>
-              <button
-                className="btn-secondary"
-                onClick={handleAddHolidayPreset}
-                disabled={!selectedPresetName}
-              >
-                Add Preset
-              </button>
-            </div>
-
-            <div className="custom-holiday-form">
-              <label>Custom Holiday/Schedule</label>
-              <input
-                type="text"
-                value={customHolidayName}
-                onChange={(e) => setCustomHolidayName(e.target.value)}
-                placeholder="Holiday name"
-              />
-
-              <div className="custom-holiday-range">
-                <span>From</span>
-                <select value={customFromMonth} onChange={(e) => setCustomFromMonth(e.target.value)}>
-                  {MONTHS.map((month) => (
-                    <option key={`custom-from-month-${month.value}`} value={month.value}>{month.label}</option>
-                  ))}
-                </select>
-                <select value={customFromDay} onChange={(e) => setCustomFromDay(e.target.value)}>
-                  {customFromDayOptions.map((day) => (
-                    <option key={`custom-from-day-${day}`} value={day}>{day}</option>
-                  ))}
-                </select>
-
-                <span>To</span>
-                <select value={customToMonth} onChange={(e) => setCustomToMonth(e.target.value)}>
-                  {MONTHS.map((month) => (
-                    <option key={`custom-to-month-${month.value}`} value={month.value}>{month.label}</option>
-                  ))}
-                </select>
-                <select value={customToDay} onChange={(e) => setCustomToDay(e.target.value)}>
-                  {customToDayOptions.map((day) => (
-                    <option key={`custom-to-day-${day}`} value={day}>{day}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="custom-holiday-colors">
-                <div className="custom-holiday-colors-input">
-                  <input type="color" value={customNewColor} onChange={(e) => setCustomNewColor(e.target.value)} />
-                  <input type="text" value={customNewColor} onChange={(e) => setCustomNewColor(e.target.value)} placeholder="#000000" />
-                  <button
-                    className="btn-secondary holiday-action-btn"
-                    onClick={handleAddCustomHolidayColor}
-                    disabled={!customNewColor || customHolidayColors.includes(customNewColor)}
-                  >
-                    Add Color
-                  </button>
-                </div>
-
-                {customHolidayColors.length > 0 ? (
-                  <div className="custom-holiday-color-list">
-                    {customHolidayColors.map((color) => (
-                      <div key={`custom-color-${color}`} className="custom-holiday-color-item">
-                        <span className="holiday-color-swatch" style={{ background: color }} />
-                        <span className="holiday-edit-color-value">{color}</span>
-                        <button
-                          className="btn-remove-color"
-                          onClick={() => handleRemoveCustomHolidayColor(color)}
-                          title="Remove color"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <small className="holiday-edit-empty">No custom colors set. Border Colors will be used.</small>
-                )}
-              </div>
-
-              <button
-                className="btn-secondary"
-                onClick={handleAddCustomHoliday}
-                disabled={!customHolidayName.trim() || (borderColors.length === 0 && customHolidayColors.length === 0)}
-              >
-                Add Custom Holiday
-              </button>
-            </div>
-
+            <label>Configured Holidays</label>
             {holidaySchedules.length > 0 ? (
               <div className="holiday-schedule-list">
                 {holidaySchedules.map((holiday) => (
@@ -596,13 +818,28 @@ function BorderTab({
                         <div className="holiday-range">{holiday.schedule}</div>
                       </div>
                       <div className="holiday-actions">
-                        <button
-                          className="btn-secondary holiday-action-btn"
-                          onClick={() => handleStartEditHoliday(holiday)}
-                          title="Edit holiday date range"
-                        >
-                          Edit
-                        </button>
+                        {editingHolidayName === holiday.name ? (
+                          <>
+                            <button
+                              className={`btn-secondary holiday-action-btn ${editHolidayHasChanges(holiday) ? 'btn-unsaved' : ''}`}
+                              onClick={() => handleSaveEditHoliday(holiday)}
+                              disabled={!holidayStyleHasRenderable(editHolidayColors, editHolidayStyle) || !editHolidayHasChanges(holiday)}
+                            >
+                              Save
+                            </button>
+                            <button className="btn-secondary holiday-action-btn" onClick={() => setEditingHolidayName(null)}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn-secondary holiday-action-btn"
+                            onClick={() => handleStartEditHoliday(holiday)}
+                            title="Edit holiday date range"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <button
                           className="btn-remove-color"
                           onClick={() => onRemoveHolidaySchedule(holiday.name)}
@@ -640,59 +877,27 @@ function BorderTab({
                           </select>
                         </div>
 
-                        <div className="holiday-edit-colors">
-                          <div className="holiday-edit-colors-input">
-                            <input type="color" value={editNewColor} onChange={(e) => setEditNewColor(e.target.value)} />
-                            <input type="text" value={editNewColor} onChange={(e) => setEditNewColor(e.target.value)} placeholder="#000000" />
-                            <button
-                              className="btn-secondary holiday-action-btn"
-                              onClick={handleAddEditHolidayColor}
-                              disabled={!editNewColor || editHolidayColors.includes(editNewColor)}
-                            >
-                              Add Color
-                            </button>
-                          </div>
-
-                          {editHolidayColors.length > 0 ? (
-                            <div className="holiday-edit-color-list">
-                              {editHolidayColors.map((color) => (
-                                <div key={`${holiday.name}-edit-${color}`} className="holiday-edit-color-item">
-                                  <span className="holiday-color-swatch" style={{ background: color }} />
-                                  <span className="holiday-edit-color-value">{color}</span>
-                                  <button
-                                    className="btn-remove-color"
-                                    onClick={() => handleRemoveEditHolidayColor(color)}
-                                    title="Remove color"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <small className="holiday-edit-empty">Add at least one color before saving.</small>
-                          )}
-                        </div>
-
-                        <div className="holiday-edit-actions">
-                          <button
-                            className="btn-secondary holiday-action-btn"
-                            onClick={() => handleSaveEditHoliday(holiday)}
-                            disabled={editHolidayColors.length === 0}
-                          >
-                            Save
-                          </button>
-                          <button className="btn-secondary holiday-action-btn" onClick={() => setEditingHolidayName(null)}>
-                            Cancel
-                          </button>
-                        </div>
+                        <BorderStyleControls
+                          value={{ ...editHolidayStyle, colors: editHolidayColors }}
+                          onChange={(patch) => applyStylePatch(patch, setEditHolidayColors, setEditHolidayStyle)}
+                          overlays={overlays}
+                          refreshOverlays={refreshOverlays}
+                          idPrefix={`holiday-edit-${holiday.name}`}
+                          label="Holiday Border Style"
+                          preview={<StyleValuePreview value={{ ...editHolidayStyle, colors: editHolidayColors }} borderWidth={borderWidth} />}
+                        />
                       </div>
                     )}
 
                     <div className="holiday-color-row">
-                      {holiday.colors.map((color, index) => (
+                      {holiday.style.style !== 'image' && holiday.colors.map((color, index) => (
                         <span key={`${holiday.name}-${index}`} className="holiday-color-swatch" style={{ background: color }} />
                       ))}
+                      {holiday.style.style !== 'solid' && (
+                        <span className="holiday-frame-badge" title={`Style: ${holiday.style.style}`}>
+                          {holiday.style.style === 'image' ? `🖼 ${holiday.style.overlayImage || 'frame'}` : '🎨 gradient'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -729,8 +934,116 @@ function BorderTab({
             </small>
           </div>
           )}
+
+          {!removeBorders && (
+          <div className="field-group">
+            <label>Holiday Preset Schedules</label>
+            <small style={{ marginBottom: '1rem', display: 'block' }}>
+              Add preset holiday date ranges and color palettes. If a holiday is active, these colors override the default border colors.
+            </small>
+
+            <div className="holiday-preset-row">
+              <select
+                value={selectedPresetName}
+                onChange={(e) => setSelectedPresetName(e.target.value)}
+              >
+                <option value="">Select holiday preset...</option>
+                {HOLIDAY_PRESETS.map((preset) => (
+                  <option key={preset.name} value={preset.name}>{preset.name}</option>
+                ))}
+              </select>
+              <button
+                className="btn-secondary"
+                onClick={handleAddHolidayPreset}
+                disabled={!selectedPresetName}
+              >
+                Add Preset
+              </button>
+            </div>
+
+            <div className="custom-holiday-form">
+              <label>Custom Holiday/Schedule</label>
+              <div className="custom-holiday-name-row">
+                <input
+                  type="text"
+                  value={customHolidayName}
+                  onChange={(e) => setCustomHolidayName(e.target.value)}
+                  placeholder="Holiday name"
+                />
+                <button
+                  className="btn-secondary btn-add-holiday"
+                  onClick={handleAddCustomHoliday}
+                  disabled={!customHolidayName.trim() || !holidayStyleHasRenderable(customHolidayColors.length > 0 ? customHolidayColors : borderColors, customHolidayStyle)}
+                >
+                  Add Custom Holiday
+                </button>
+              </div>
+
+              <div className="custom-holiday-range">
+                <span>From</span>
+                <select value={customFromMonth} onChange={(e) => setCustomFromMonth(e.target.value)}>
+                  {MONTHS.map((month) => (
+                    <option key={`custom-from-month-${month.value}`} value={month.value}>{month.label}</option>
+                  ))}
+                </select>
+                <select value={customFromDay} onChange={(e) => setCustomFromDay(e.target.value)}>
+                  {customFromDayOptions.map((day) => (
+                    <option key={`custom-from-day-${day}`} value={day}>{day}</option>
+                  ))}
+                </select>
+
+                <span>To</span>
+                <select value={customToMonth} onChange={(e) => setCustomToMonth(e.target.value)}>
+                  {MONTHS.map((month) => (
+                    <option key={`custom-to-month-${month.value}`} value={month.value}>{month.label}</option>
+                  ))}
+                </select>
+                <select value={customToDay} onChange={(e) => setCustomToDay(e.target.value)}>
+                  {customToDayOptions.map((day) => (
+                    <option key={`custom-to-day-${day}`} value={day}>{day}</option>
+                  ))}
+                </select>
+              </div>
+
+              <BorderStyleControls
+                value={{ ...customHolidayStyle, colors: customHolidayColors }}
+                onChange={(patch) => applyStylePatch(patch, setCustomHolidayColors, setCustomHolidayStyle)}
+                overlays={overlays}
+                refreshOverlays={refreshOverlays}
+                idPrefix="holiday-custom"
+                label="Holiday Border Style"
+                preview={<StyleValuePreview value={{ ...customHolidayStyle, colors: customHolidayColors }} borderWidth={borderWidth} />}
+              />
+            </div>
+          </div>
+          )}
         </div>
       </div>
+      )}
+
+      <PlexRulesSection
+        rules={plexRules}
+        runTypes={ruleRunTypes}
+        libraries={ruleLibraries}
+        borderWidth={borderWidth}
+        overlays={overlays}
+        refreshOverlays={refreshOverlays}
+        sectionSaveButton={sectionSaveButton}
+        onSetRules={onSetPlexRules}
+        onToggleRunType={onToggleRuleRunType}
+        onToggleLibrary={onToggleRuleLibrary}
+      />
+
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        title="Reset to Defaults"
+        message="Reset all Border Replacer settings on this page to their defaults? This clears border colors, styles, inner effects, season settings, and holiday schedules. Nothing is saved until you click Save Settings."
+        confirmText="Reset to Defaults"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={confirmResetToDefaults}
+        onCancel={() => setShowResetConfirm(false)}
+      />
     </>
   )
 }

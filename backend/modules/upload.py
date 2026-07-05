@@ -575,62 +575,21 @@ def _run_webhook_preupload_rename_pass(
 
         summary["border"]["attempted"] = True
 
-        _colors_s = get_setting(db, "border_replacer_colors")
-        try:
-            colors = json.loads(_colors_s.value) if _colors_s and _colors_s.value else []
-        except json.JSONDecodeError:
-            colors = []
-
-        _exclusions_s = get_setting(db, "border_replacer_exclusions")
-        try:
-            exclusions = json.loads(_exclusions_s.value) if _exclusions_s and _exclusions_s.value else []
-        except json.JSONDecodeError:
-            exclusions = []
-
-        width_setting = get_setting(db, "border_replacer_width")
-        try:
-            border_width = int(width_setting.value) if width_setting and width_setting.value else 26
-        except ValueError:
-            border_width = 26
-
-        remove_setting = get_setting(db, "border_replacer_remove_borders")
-        remove_borders = bool(
-            remove_setting
-            and remove_setting.value
-            and remove_setting.value.strip().lower() == "true"
-        )
-
         mode_setting = get_setting(db, "border_replacer_mode")
         mode = mode_setting.value if mode_setting and mode_setting.value in {"full", "incremental"} else "incremental"
 
-        season_mode_setting = get_setting(db, "border_replacer_season_mode")
-        season_mode = season_mode_setting.value if season_mode_setting and season_mode_setting.value in {"inherit", "remove", "colors"} else "inherit"
-
-        _season_colors_s = get_setting(db, "border_replacer_season_colors")
-        try:
-            season_colors = json.loads(_season_colors_s.value) if _season_colors_s and _season_colors_s.value else []
-        except json.JSONDecodeError:
-            season_colors = []
-
-        season_width_setting = get_setting(db, "border_replacer_season_width")
-        try:
-            season_width = int(season_width_setting.value) if season_width_setting and season_width_setting.value else None
-        except ValueError:
-            season_width = None
+        # Load ALL border settings the same way the standalone/workflow job does, so the
+        # webhook pre-upload pass follows the identical style + season config (no drift).
+        from services.border_replacer import build_border_run_settings
+        run_settings = build_border_run_settings(db, run_type="webhook")
 
         border_service = BorderReplacerService(db)
         border_result = border_service.process_posters(
             source_dir=tmp_source_dir,
             destination_dir=destination_dir,
-            border_colors=colors if isinstance(colors, list) and colors else None,
-            remove_borders=remove_borders,
-            border_width=border_width,
-            exclusion_list=exclusions if isinstance(exclusions, list) else [],
             dry_run=dry_run,
             mode=mode,
-            season_mode=season_mode,
-            season_border_colors=season_colors if isinstance(season_colors, list) and season_colors else None,
-            season_border_width=season_width,
+            **run_settings,
         )
 
         if border_result.get("success", False):

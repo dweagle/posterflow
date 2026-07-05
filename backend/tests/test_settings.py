@@ -22,6 +22,42 @@ def test_save_bulk_settings(client, test_db):
     assert saved_setting is not None
     assert saved_setting.value == "remote:posters"
 
+def test_save_bulk_border_style_settings_persist(client, test_db):
+    """Border style / gradient / inner-effect / season-style keys must be allowlisted
+    so the Border tab actually saves (regression: they were silently dropped)."""
+    border_settings = {
+        "border_replacer_style": "gradient",
+        "border_replacer_gradient_colors": json.dumps(["#ffffff", "#000000"]),
+        "border_replacer_gradient_direction": "diagonal",
+        "border_replacer_overlay_image": "frame.png",
+        "border_replacer_overlay_remove_existing": "true",
+        "border_replacer_inner_effect": "glow",
+        "border_replacer_inner_color": "#123456",
+        "border_replacer_inner_opacity": "80",
+        "border_replacer_inner_width": "10",
+        "border_replacer_fade_width": "12",
+        "border_replacer_season_style": "gradient",
+        "border_replacer_season_gradient_colors": json.dumps(["#abcdef"]),
+        "border_replacer_season_gradient_direction": "horizontal",
+        "border_replacer_season_overlay_image": "season.png",
+        "border_replacer_season_overlay_remove_existing": "true",
+        "border_replacer_season_inner_effect": "fade",
+        "border_replacer_season_inner_color": "#654321",
+        "border_replacer_season_inner_opacity": "60",
+        "border_replacer_season_inner_width": "9",
+        "border_replacer_season_fade_width": "7",
+    }
+
+    response = client.post("/api/settings/bulk", json=border_settings)
+    assert response.status_code == 200
+    assert response.json()["count"] == len(border_settings)
+
+    for key, expected in border_settings.items():
+        saved = test_db.query(Setting).filter(Setting.key == key).first()
+        assert saved is not None, f"{key} was dropped instead of saved"
+        assert saved.value == expected
+
+
 def test_update_existing_setting(client, test_db):
     """Test updating an existing setting"""
     # Create initial setting with an allowlisted key

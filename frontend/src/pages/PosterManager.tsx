@@ -22,7 +22,7 @@ import { usePosterManagerUnmatchedReports } from '../hooks/usePosterManagerUnmat
 import { usePosterManagerTabGuard } from '../hooks/usePosterManagerTabGuard'
 import { usePosterManagerPriority } from '../hooks/usePosterManagerPriority'
 import { usePosterManagerFlow } from '../hooks/usePosterManagerFlow'
-import { BorderHolidaySchedule, usePosterManagerBorder } from '../hooks/usePosterManagerBorder'
+import { OriginalBorderSettings, usePosterManagerBorder } from '../hooks/usePosterManagerBorder'
 import { usePosterManagerLibraries } from '../hooks/usePosterManagerLibraries'
 import { usePosterManagerJobMonitoring } from '../hooks/usePosterManagerJobMonitoring'
 import { usePosterManagerSettings } from '../hooks/usePosterManagerSettings'
@@ -74,20 +74,7 @@ function PosterManager() {
   // Original values for smart comparison (stored in refs to avoid re-renders)
   const originalConfigRef = useRef<PosterConfig | null>(null)
   const originalPriorityRef = useRef<{ drive_ids: number[], enabled_styles: string[] } | null>(null)
-  const originalBorderSettingsRef = useRef<{
-    colors: string[]
-    width: number
-    mode: 'incremental' | 'full'
-    autoRunBorder: boolean
-    autoRunCleanup: boolean
-    cleanupDeleteUnknown: boolean
-    holidaySchedules: BorderHolidaySchedule[]
-    skipRunOutsideHoliday: boolean
-    removeBorders: boolean
-    seasonMode: 'inherit' | 'remove' | 'colors'
-    seasonColors: string[]
-    seasonWidth: number
-  } | null>(null)
+  const originalBorderSettingsRef = useRef<OriginalBorderSettings | null>(null)
   const originalLibrarySelectionRef = useRef<Set<string> | null>(null)
   
   const { showToast } = useToast()
@@ -148,19 +135,48 @@ function PosterManager() {
     fetchBorderSettings,
     saveBorderSettings,
     resetBorderSettingsToOriginal,
+    resetBorderSettingsToDefaults,
     addBorderColor,
     removeBorderColor,
-    addSeasonBorderColor,
-    removeSeasonBorderColor,
     addHolidaySchedule,
     removeHolidaySchedule,
     seasonMode,
     seasonColors,
     seasonWidth,
-    newSeasonColor,
+    seasonStyle,
     setSeasonMode,
     setSeasonWidth,
-    setNewSeasonColor,
+    setSeasonColors,
+    setSeasonStyle,
+    borderStyle,
+    overlayImage,
+    overlayRemoveExisting,
+    gradientColors,
+    gradientDirection,
+    newGradientColor,
+    innerEffect,
+    innerColor,
+    innerOpacity,
+    innerWidth,
+    fadeWidth,
+    setBorderStyle,
+    setOverlayImage,
+    setOverlayRemoveExisting,
+    setGradientDirection,
+    setNewGradientColor,
+    setInnerEffect,
+    setInnerColor,
+    setInnerOpacity,
+    setInnerWidth,
+    setFadeWidth,
+    addGradientColor,
+    removeGradientColor,
+    plexRules,
+    ruleRunTypes,
+    ruleLibraries,
+    setPlexRules,
+    toggleRuleRunType,
+    toggleRuleLibrary,
   } = usePosterManagerBorder({
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
@@ -171,9 +187,15 @@ function PosterManager() {
   const borderReplacerConfigured =
     removeBorders ||
     borderColors.length > 0 ||
-    holidaySchedules.some(
-      (holiday) => Array.isArray(holiday.colors) && holiday.colors.some((color) => color.trim().length > 0)
-    )
+    (borderStyle === 'image' && overlayImage.trim().length > 0) ||
+    (borderStyle === 'gradient' && gradientColors.length > 0) ||
+    holidaySchedules.some((holiday) => {
+      const hasColors = Array.isArray(holiday.colors) && holiday.colors.some((color) => color.trim().length > 0)
+      const style = holiday.style
+      const hasImage = style?.style === 'image' && style.overlayImage.trim().length > 0
+      const hasGradient = style?.style === 'gradient' && style.gradientColors.length > 0
+      return hasColors || hasImage || hasGradient
+    })
 
   const {
     flowConfig,
@@ -373,6 +395,20 @@ function PosterManager() {
     seasonMode,
     seasonColors,
     seasonWidth,
+    seasonStyle,
+    borderStyle,
+    overlayImage,
+    overlayRemoveExisting,
+    gradientColors,
+    gradientDirection,
+    innerEffect,
+    innerColor,
+    innerOpacity,
+    innerWidth,
+    fadeWidth,
+    plexRules,
+    ruleRunTypes,
+    ruleLibraries,
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
     selectedLibraries,
@@ -539,8 +575,9 @@ function PosterManager() {
           seasonMode={seasonMode}
           seasonColors={seasonColors}
           seasonWidth={seasonWidth}
-          newSeasonColor={newSeasonColor}
+          seasonStyle={seasonStyle}
           onSaveSettings={saveBorderSettings}
+          onResetBorderSettings={resetBorderSettingsToDefaults}
           onRunBorderReplacer={handleRunBorderReplacer}
           onSetBorderWidth={setBorderWidth}
           onSetBorderMode={setBorderMode}
@@ -553,9 +590,37 @@ function PosterManager() {
           onRemoveHolidaySchedule={removeHolidaySchedule}
           onSetSeasonMode={setSeasonMode}
           onSetSeasonWidth={setSeasonWidth}
-          onSetNewSeasonColor={setNewSeasonColor}
-          onAddSeasonBorderColor={addSeasonBorderColor}
-          onRemoveSeasonBorderColor={removeSeasonBorderColor}
+          onSetSeasonColors={setSeasonColors}
+          onSetSeasonStyle={setSeasonStyle}
+          borderStyle={borderStyle}
+          overlayImage={overlayImage}
+          overlayRemoveExisting={overlayRemoveExisting}
+          gradientColors={gradientColors}
+          gradientDirection={gradientDirection}
+          newGradientColor={newGradientColor}
+          innerEffect={innerEffect}
+          innerColor={innerColor}
+          innerOpacity={innerOpacity}
+          innerWidth={innerWidth}
+          fadeWidth={fadeWidth}
+          onSetBorderStyle={setBorderStyle}
+          onSetOverlayImage={setOverlayImage}
+          onSetOverlayRemoveExisting={setOverlayRemoveExisting}
+          onSetGradientDirection={setGradientDirection}
+          onSetNewGradientColor={setNewGradientColor}
+          onAddGradientColor={addGradientColor}
+          onRemoveGradientColor={removeGradientColor}
+          onSetInnerEffect={setInnerEffect}
+          onSetInnerColor={setInnerColor}
+          onSetInnerOpacity={setInnerOpacity}
+          onSetInnerWidth={setInnerWidth}
+          onSetFadeWidth={setFadeWidth}
+          plexRules={plexRules}
+          ruleRunTypes={ruleRunTypes}
+          ruleLibraries={ruleLibraries}
+          onSetPlexRules={setPlexRules}
+          onToggleRuleRunType={toggleRuleRunType}
+          onToggleRuleLibrary={toggleRuleLibrary}
         />
       )}
 

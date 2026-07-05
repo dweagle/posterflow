@@ -1,4 +1,4 @@
-import { getData, postData, deleteData } from './http'
+import client, { getData, postData, deleteData } from './http'
 
 // Poster types and functions
 export interface PosterConfig {
@@ -96,6 +96,71 @@ export const runBorderReplacer = async (options?: BorderReplacerRunOptions): Pro
 }> => {
   const payload = options?.dry_run ? { dry_run: true } : undefined
   return postData('/api/posterflow/border-replacer/run', payload)
+}
+
+// --- Border overlay frames (bundled presets + user uploads) ---
+
+export interface BorderOverlay {
+  name: string
+  source: 'preset' | 'user'
+}
+
+export const listBorderOverlays = async (): Promise<{ overlays: BorderOverlay[] }> => {
+  return getData('/api/posterflow/border-replacer/overlays')
+}
+
+export const uploadBorderOverlay = async (
+  file: File,
+): Promise<{ success: boolean; name: string; source: string }> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return postData('/api/posterflow/border-replacer/overlays/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+export const deleteBorderOverlay = async (name: string): Promise<{ success: boolean; deleted: string }> => {
+  return deleteData(`/api/posterflow/border-replacer/overlays/${encodeURIComponent(name)}`)
+}
+
+export interface BorderPreviewParams {
+  style: string
+  color?: string
+  border_width?: number
+  gradient_colors?: string[]
+  gradient_direction?: string
+  overlay?: string
+  remove_existing?: boolean
+  inner_effect?: string
+  inner_color?: string
+  inner_opacity?: number
+  inner_width?: number
+  fade_width?: number
+  passthrough?: boolean
+}
+
+// Render a sample drive poster with the given border options; returns a PNG blob
+// the caller turns into an object URL (preview images need the auth header).
+export const fetchBorderPreview = async (params: BorderPreviewParams): Promise<Blob> => {
+  const query = new URLSearchParams()
+  query.set('style', params.style)
+  if (params.color) query.set('color', params.color)
+  if (params.border_width != null) query.set('border_width', String(params.border_width))
+  if (params.gradient_colors?.length) query.set('gradient_colors', params.gradient_colors.join(','))
+  if (params.gradient_direction) query.set('gradient_direction', params.gradient_direction)
+  if (params.overlay) query.set('overlay', params.overlay)
+  if (params.remove_existing) query.set('remove_existing', 'true')
+  if (params.inner_effect) query.set('inner_effect', params.inner_effect)
+  if (params.inner_color) query.set('inner_color', params.inner_color)
+  if (params.inner_opacity != null) query.set('inner_opacity', String(params.inner_opacity))
+  if (params.inner_width != null) query.set('inner_width', String(params.inner_width))
+  if (params.fade_width != null) query.set('fade_width', String(params.fade_width))
+  if (params.passthrough) query.set('passthrough', 'true')
+  const resp = await client.get(
+    `/api/posterflow/border-replacer/preview?${query.toString()}`,
+    { responseType: 'blob' },
+  )
+  return resp.data as Blob
 }
 
 export const getDrivePriority = async (): Promise<DrivePriority> => {

@@ -4,11 +4,15 @@ import os
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from models.setting import Setting
 from models.poster import Poster
-from services.border_replacer import BorderReplacerService
+from services.border_replacer import (
+    BorderReplacerService,
+    build_border_run_settings,
+    _render_bordered_image,
+)
 
 
 def _create_source_image(path: Path, color: tuple[int, int, int] = (255, 255, 255)) -> None:
@@ -39,11 +43,12 @@ def test_resolve_effective_colors_uses_active_holiday(test_db):
     test_db.commit()
 
     service = BorderReplacerService(test_db)
-    is_holiday, holiday_name, colors = service._resolve_effective_border_colors(["#0000FF"])
+    is_holiday, holiday_name, colors, style_opts = service._resolve_effective_border_colors(["#0000FF"])
 
     assert is_holiday is True
     assert holiday_name == "Always On"
     assert colors == ["#FF0000", "#00FF00"]
+    assert style_opts["style"] == "solid"  # no style object → solid
 
 
 def test_process_posters_skips_outside_holiday_and_copies_unchanged(test_db, tmp_path):
@@ -263,7 +268,7 @@ def test_incremental_mode_reprocesses_when_profile_switches_to_holiday(test_db, 
     assert second_hash_setting.value != first_hash
 
 
-def test_process_posters_fails_when_no_colors_and_remove_disabled(test_db, tmp_path):
+def test_process_posters_leaves_unchanged_when_no_colors_and_remove_disabled(test_db, tmp_path):
     source_dir = tmp_path / "source"
     destination_dir = tmp_path / "destination"
     source_file = source_dir / "Movie Five" / "poster.png"
@@ -282,8 +287,72 @@ def test_process_posters_fails_when_no_colors_and_remove_disabled(test_db, tmp_p
         mode="full",
     )
 
-    assert result["success"] is False
-    assert "No border colors configured" in result["error"]
+    dest_file = destination_dir / "Movie Five" / "poster.png"
+    # An empty config leaves posters untouched — copied through, borders intact.
+    assert result["success"] is True
+    assert dest_file.exists()
+    assert dest_file.read_bytes() == source_file.read_bytes()
+
+
+def _poster_with_border(border=(0, 150, 0)) -> "Image.Image":
+    """A 1000x1500 poster with a distinct existing border and a vertical-gradient interior."""
+    img = Image.new("RGB", (1000, 1500), border)
+    draw = ImageDraw.Draw(img)
+    for y in range(26, 1474):
+        t = (y - 26) / (1474 - 26)
+        draw.line([(26, y), (973, y)], fill=(int(30 + 200 * t), 60, 255))
+    return img
+
+
+def test_solid_style_remove_existing_trims_glow_behind_border():
+    """Solid/gradient with remove_existing trims a few px PAST the border (to tuck the
+    baked-in edge glow behind the new band) then stretches to fill — a clean 1000x1500
+    with a crisp border and a different interior than the plain crop. A larger glow_trim
+    trims more."""
+    src = _poster_with_border()
+
+    plain = _render_bordered_image(src, 26, (255, 0, 0), {"style": "solid"})
+    removed = _render_bordered_image(src, 26, (255, 0, 0), {"style": "solid", "remove_existing": True})
+    removed_more = _render_bordered_image(src, 26, (255, 0, 0), {"style": "solid", "remove_existing": True, "glow_trim": 60})
+
+    assert plain.size == removed.size == removed_more.size == (1000, 1500)
+    # The new border band is crisp red on all outer edges (not squished/shifted).
+    assert removed.getpixel((500, 2)) == (255, 0, 0)      # top edge
+    assert removed.getpixel((2, 750)) == (255, 0, 0)      # left edge
+    assert removed.getpixel((500, 1497)) == (255, 0, 0)   # bottom edge
+    # Trimming past the border produces a different, more zoomed interior than a plain crop.
+    assert plain.tobytes() != removed.tobytes()
+    assert removed.tobytes() != removed_more.tobytes()
+
+
+def test_process_posters_honors_remove_existing_during_run(test_db, tmp_path):
+    """remove_existing takes effect during an actual replacer run (via style_opts),
+    not only in the live preview."""
+    source_dir = tmp_path / "source"
+    (source_dir / "Movie").mkdir(parents=True, exist_ok=True)
+    _poster_with_border().save(source_dir / "Movie" / "poster.png")
+
+    service = BorderReplacerService(test_db)
+
+    plain_dir = tmp_path / "plain"
+    r1 = service.process_posters(
+        source_dir=str(source_dir), destination_dir=str(plain_dir),
+        border_colors=["#FF0000"], border_width=26, exclusion_list=[], dry_run=False,
+        mode="full", style_opts={"style": "solid"},
+    )
+    assert r1["success"] is True
+
+    removed_dir = tmp_path / "removed"
+    r2 = service.process_posters(
+        source_dir=str(source_dir), destination_dir=str(removed_dir),
+        border_colors=["#FF0000"], border_width=26, exclusion_list=[], dry_run=False,
+        mode="full", style_opts={"style": "solid", "remove_existing": True},
+    )
+    assert r2["success"] is True
+
+    plain_out = (plain_dir / "Movie" / "poster.png").read_bytes()
+    removed_out = (removed_dir / "Movie" / "poster.png").read_bytes()
+    assert plain_out != removed_out
 
 
 def test_incremental_updates_tracking_when_no_change_needed(test_db, tmp_path):
@@ -444,6 +513,50 @@ def test_season_mode_remove_strips_borders_from_season_files_only(test_db, tmp_p
     assert _get_corner_color(dest_season) != (255, 0, 0)
 
 
+def _bordered_poster(path: Path, border=(0, 200, 0), interior=(0, 0, 255), bw=26) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (1000, 1500), border)
+    img.paste(Image.new("RGB", (1000 - 2 * bw, 1500 - 2 * bw), interior), (bw, bw))
+    img.save(path)
+
+
+def _bottom_center_color(path: Path) -> tuple[int, int, int]:
+    with Image.open(path) as img:
+        w, h = img.size
+        return img.convert("RGB").getpixel((w // 2, h - 1))
+
+
+def test_excluded_season_poster_under_global_remove_strips_all_four_borders(test_db, tmp_path):
+    """Regression: with global remove-borders on and season_mode='inherit', a season poster
+    whose folder is in the exclusion list must get ALL FOUR borders stripped (exclude=True,
+    no black bottom bar), not the top/left/right + black-bar geometry. Guards the exclusion
+    predicate against dropping the inherit-season removal case (protected DAPS geometry)."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    _bordered_poster(source_dir / "Excluded Show (2020)" / "Season01.png")
+    _bordered_poster(source_dir / "Normal Show (2021)" / "Season01.png")
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=None,
+        remove_borders=True,          # global remove-borders on
+        border_width=26,
+        exclusion_list=["Excluded Show (2020)"],
+        dry_run=False,
+        mode="full",
+        season_mode="inherit",        # seasons follow the main (removal) path
+    )
+    assert result["success"] is True
+
+    # Excluded → all four borders removed → bottom is interior (no black bar).
+    assert _bottom_center_color(destination_dir / "Excluded Show (2020)" / "Season01.png") == (0, 0, 255)
+    # Not excluded → top/left/right removed + black bottom bar convention.
+    assert _bottom_center_color(destination_dir / "Normal Show (2021)" / "Season01.png") == (0, 0, 0)
+
+
 def test_season_mode_colors_applies_different_colors_to_seasons(test_db, tmp_path):
     """season_mode='colors' applies season-specific colors to Season files."""
     source_dir = tmp_path / "source"
@@ -478,6 +591,62 @@ def test_season_mode_colors_applies_different_colors_to_seasons(test_db, tmp_pat
 
     assert _get_corner_color(dest_main) == (255, 0, 0)    # red main border
     assert _get_corner_color(dest_season) == (0, 0, 255)  # blue season border
+
+
+def test_season_mode_custom_style_renders_independently(test_db, tmp_path):
+    """season_mode='custom' gives seasons their own full style (gradient here) while
+    main posters keep the main solid style."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+
+    _create_source_image(source_dir / "Show" / "poster.png", (255, 255, 255))
+    _create_source_image(source_dir / "Show" / "Season01.png", (255, 255, 255))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#FF0000"],          # main solid red
+        border_width=50,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        season_mode="custom",
+        season_border_colors=[],
+        season_border_width=50,
+        style_opts={"style": "solid"},
+        season_style_opts={"style": "gradient", "gradient_colors": ["#00FF00", "#0000FF"], "gradient_direction": "vertical"},
+    )
+    assert result["success"] is True
+
+    # Main poster: solid red border.
+    main_corner = _get_corner_color(destination_dir / "Show" / "poster.png")
+    assert main_corner[0] > 150 and main_corner[1] < 100 and main_corner[2] < 100
+
+    # Season poster: independent gradient (green<->blue), non-uniform top vs bottom.
+    with Image.open(destination_dir / "Show" / "Season01.png") as out:
+        season = out.convert("RGB")
+        top = season.getpixel((500, 2))
+        bottom = season.getpixel((500, 1497))
+    assert top != bottom
+    ends = (top, bottom)
+    assert any(px[1] > 120 and px[0] < 120 for px in ends)  # a greenish end
+    assert any(px[2] > 120 and px[0] < 120 for px in ends)  # a bluish end
+
+
+def test_settings_hash_differs_when_season_style_changes(test_db):
+    """Changing the custom season style changes the settings hash (drives reprocessing)."""
+    service = BorderReplacerService(test_db)
+
+    base = service.calculate_settings_hash(
+        ["#FF0000"], 26, [], season_mode="custom",
+        season_style_opts={"style": "solid", "inner_effect": "none"},
+    )
+    changed = service.calculate_settings_hash(
+        ["#FF0000"], 26, [], season_mode="custom",
+        season_style_opts={"style": "gradient", "gradient_colors": ["#00FF00", "#0000FF"]},
+    )
+    assert base != changed
 
 
 def test_season_mode_inherit_treats_seasons_same_as_main(test_db, tmp_path):
@@ -578,3 +747,329 @@ def test_settings_hash_differs_when_season_params_change(test_db):
     assert hash_inherit != hash_remove
     assert hash_inherit != hash_colors
     assert hash_remove != hash_colors
+
+
+# --- Border style + inner-edge effect rendering ---
+
+def _crop_for(image: Image.Image, border_width: int) -> Image.Image:
+    width, height = image.size
+    return image.crop((border_width, border_width, width - border_width, height - border_width))
+
+
+def test_solid_none_matches_legacy_render():
+    """Solid style with no inner effect must be byte-identical to the legacy render path."""
+    source = Image.new("RGB", (1000, 1500), (10, 20, 30))
+    bw = 26
+    cropped = _crop_for(source, bw)
+
+    # Legacy path: new canvas filled with border color, paste art, resize, convert.
+    legacy = Image.new("RGB", (cropped.width + 2 * bw, cropped.height + 2 * bw), (200, 100, 50))
+    legacy.paste(cropped, (bw, bw))
+    legacy = legacy.resize((1000, 1500)).convert("RGB")
+
+    rendered_default = _render_bordered_image(source, bw, (200, 100, 50), None)
+    rendered_explicit = _render_bordered_image(source, bw, (200, 100, 50), {"style": "solid", "inner_effect": "none"})
+
+    assert rendered_default.tobytes() == legacy.tobytes()
+    assert rendered_explicit.tobytes() == legacy.tobytes()
+
+
+def test_gradient_style_produces_non_uniform_band():
+    """A vertical gradient border varies from top to bottom (red -> blue)."""
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 50
+
+    out = _render_bordered_image(
+        source,
+        bw,
+        (0, 0, 0),
+        {"style": "gradient", "gradient_colors": ["#FF0000", "#0000FF"], "gradient_direction": "vertical"},
+    )
+
+    top = out.getpixel((500, 2))
+    bottom = out.getpixel((500, 1497))
+    # The FIRST color stop (red) sits at the top, the last (blue) at the bottom — matching
+    # horizontal's first-at-start convention and the top-to-bottom order of the color list.
+    assert top[0] > top[2] + 50     # top is reddish (first stop)
+    assert bottom[2] > bottom[0] + 50  # bottom is bluish (last stop)
+
+
+def test_inner_glow_darkens_edge_not_center():
+    """A dark inner glow darkens the inner border edge but leaves the art center untouched."""
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 30
+
+    out = _render_bordered_image(
+        source,
+        bw,
+        (255, 255, 255),  # white border so only the glow changes pixels
+        {"style": "solid", "inner_effect": "glow", "inner_color": "#000000", "inner_opacity": 100, "inner_width": 20},
+    )
+
+    edge = out.getpixel((500, bw))       # first glow ring, fully opaque black
+    center = out.getpixel((500, 750))
+    assert sum(edge) < sum(center)
+    assert center == (255, 255, 255)
+
+
+def test_border_fade_bleeds_border_color_inward():
+    """Border-color fade pushes the border color into the art at the inner edge."""
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 30
+
+    out = _render_bordered_image(
+        source,
+        bw,
+        (255, 0, 0),  # red border
+        {"style": "solid", "inner_effect": "fade", "fade_width": 20},
+    )
+
+    edge = out.getpixel((500, bw))  # i=0 → full border color
+    center = out.getpixel((500, 750))
+    assert edge[0] > edge[1] and edge[0] > edge[2]  # reddish
+    assert center == (255, 255, 255)                 # untouched art
+
+
+def test_image_overlay_composites_frame_and_keeps_center(tmp_path):
+    """An image-overlay frame replaces the border while the transparent center shows the art."""
+    frame = Image.new("RGBA", (1000, 1500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rectangle([0, 0, 999, 1499], outline=(255, 0, 255, 255), width=40)
+    frame_path = tmp_path / "frame.png"
+    frame.save(frame_path)
+
+    # White poster with a distinct marker pixel inside the transparent-center region.
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    source.putpixel((500, 750), (10, 200, 30))
+    bw = 26
+
+    out = _render_bordered_image(source, bw, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path)})
+
+    assert out.getpixel((5, 5)) == (255, 0, 255)        # opaque frame
+    # Image overlays do NOT crop/expand the poster: the marker stays at the same spot.
+    assert out.getpixel((500, 750)) == (10, 200, 30)
+    assert out.getpixel((600, 750)) == (255, 255, 255)  # surrounding art untouched
+
+
+def test_image_overlay_missing_path_falls_back_to_solid():
+    """A missing overlay path falls back to a solid border instead of erroring."""
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 26
+
+    out = _render_bordered_image(source, bw, (12, 34, 56), {"style": "image", "overlay_path": "/does/not/exist.png"})
+    assert out.getpixel((2, 2)) == (12, 34, 56)  # solid border color
+
+
+def test_image_overlay_remove_existing_trims_edge(tmp_path):
+    """remove_existing DAPS-strips a few px off the edge (glow_trim) and resizes UP before
+    compositing the frame — the same 'trim less' approach as the solid/gradient band — so
+    it differs from keeping the full poster, and a larger glow_trim trims more."""
+    frame = Image.new("RGBA", (1000, 1500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rectangle([0, 0, 999, 1499], outline=(255, 255, 255, 255), width=40)
+    frame_path = tmp_path / "frame.png"
+    frame.save(frame_path)
+
+    source = _poster_with_border()  # green edge + gradient interior
+    bw = 26
+
+    keep = _render_bordered_image(source, bw, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path)})
+    trimmed = _render_bordered_image(source, bw, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path), "remove_existing": True})
+    trimmed_less = _render_bordered_image(source, bw, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path), "remove_existing": True, "glow_trim": 4})
+
+    assert keep.size == trimmed.size == (1000, 1500)
+    assert keep.tobytes() != trimmed.tobytes()          # the edge glow was trimmed
+    assert trimmed.tobytes() != trimmed_less.tobytes()  # glow_trim controls how much
+
+
+def test_inner_glow_applies_over_image_overlay(tmp_path):
+    """An inner-edge effect is applied on top of an image-overlay frame when set."""
+    frame = Image.new("RGBA", (1000, 1500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rectangle([0, 0, 999, 1499], outline=(255, 0, 255, 255), width=12)  # thin frame
+    frame_path = tmp_path / "frame.png"
+    frame.save(frame_path)
+
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 26
+    out = _render_bordered_image(
+        source,
+        bw,
+        (0, 0, 0),
+        {"style": "image", "overlay_path": str(frame_path), "inner_effect": "glow", "inner_color": "#000000", "inner_opacity": 100, "inner_width": 20},
+    )
+
+    edge = out.getpixel((500, bw))      # just inside the border, in the transparent center
+    center = out.getpixel((500, 750))
+    assert sum(edge) < sum(center)       # glow darkened the inner edge
+    assert center == (255, 255, 255)     # art center untouched
+
+
+def test_settings_hash_changes_with_style_effect_and_overlay(test_db):
+    """Changing border style, inner-effect params, or overlay image changes the settings hash."""
+    service = BorderReplacerService(test_db)
+
+    base = service.calculate_settings_hash(["#000000"], 26, [])
+    gradient = service.calculate_settings_hash(
+        ["#000000"], 26, [], style_opts={"style": "gradient", "gradient_colors": ["#FF0000", "#0000FF"]}
+    )
+    assert base != gradient
+
+    glow_70 = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"inner_effect": "glow", "inner_opacity": 70})
+    glow_40 = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"inner_effect": "glow", "inner_opacity": 40})
+    assert glow_70 != glow_40
+
+    img_a = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"style": "image", "overlay_path": "/x/a.png"})
+    img_b = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"style": "image", "overlay_path": "/y/b.png"})
+    assert img_a != img_b  # overlay name participates in the hash
+
+
+def test_holiday_border_image_overrides_with_overlay(test_db, tmp_path, monkeypatch):
+    """An active holiday with a border_image composites that frame over posters."""
+    import services.border_replacer as br
+
+    overlay_dir = tmp_path / "overlays"
+    overlay_dir.mkdir()
+    frame = Image.new("RGBA", (1000, 1500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rectangle([0, 0, 999, 1499], outline=(0, 255, 0, 255), width=40)
+    frame.save(overlay_dir / "xmas.png")
+    monkeypatch.setattr(br, "USER_OVERLAY_DIR", overlay_dir)
+
+    test_db.add(
+        Setting(
+            key="border_replacer_holidays",
+            value=json.dumps([
+                {"name": "Always", "schedule": "range(01/01-12/31)", "colors": ["#FF0000"], "border_image": "xmas.png"}
+            ]),
+        )
+    )
+    test_db.commit()
+
+    source_dir = tmp_path / "source"
+    dest_dir = tmp_path / "dest"
+    _create_source_image(source_dir / "Movie" / "poster.jpg", (255, 255, 255))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(dest_dir),
+        border_colors=["#0000FF"],
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+    )
+
+    assert result["success"] is True
+    with Image.open(dest_dir / "Movie" / "poster.jpg") as out_img:
+        out = out_img.convert("RGB")
+        frame_px = out.getpixel((5, 5))
+        center_px = out.getpixel((500, 750))
+    # JPEG compression shifts values, so assert dominant channels rather than equality.
+    assert frame_px[1] > 150 and frame_px[0] < 100 and frame_px[2] < 100  # green frame
+    assert center_px[0] > 200 and center_px[1] > 200 and center_px[2] > 200  # white art center
+
+
+def test_build_border_run_settings_includes_style_and_custom_season(test_db):
+    """The shared settings helper (used by the workflow, Plex-webhook pre-upload, and
+    post-rename runs) carries the main style AND the custom season style, and keeps the
+    'custom' season mode — the settings the webhook path used to drop."""
+    test_db.add(Setting(key="border_replacer_style", value="gradient"))
+    test_db.add(Setting(key="border_replacer_gradient_colors", value=json.dumps(["#FF0000", "#0000FF"])))
+    test_db.add(Setting(key="border_replacer_season_mode", value="custom"))
+    test_db.add(Setting(key="border_replacer_season_style", value="image"))
+    test_db.add(Setting(key="border_replacer_season_inner_effect", value="glow"))
+    test_db.commit()
+
+    kwargs = build_border_run_settings(test_db)
+
+    assert kwargs["season_mode"] == "custom"                     # not downgraded to inherit
+    assert kwargs["style_opts"]["style"] == "gradient"           # main style carried
+    assert kwargs["season_style_opts"] is not None
+    assert kwargs["season_style_opts"]["style"] == "image"       # season style carried
+    assert kwargs["season_style_opts"]["inner_effect"] == "glow"
+
+
+def test_build_border_run_settings_no_season_style_when_not_custom(test_db):
+    """season_style_opts is only built for custom season mode."""
+    test_db.add(Setting(key="border_replacer_season_mode", value="remove"))
+    test_db.commit()
+
+    kwargs = build_border_run_settings(test_db)
+    assert kwargs["season_mode"] == "remove"
+    assert kwargs["season_style_opts"] is None
+
+
+def test_holiday_custom_style_applies_gradient(test_db, tmp_path):
+    """A holiday carrying a full `style` object (gradient) renders that style."""
+    test_db.add(
+        Setting(
+            key="border_replacer_holidays",
+            value=json.dumps([
+                {
+                    "name": "Always",
+                    "schedule": "range(01/01-12/31)",
+                    "colors": ["#FF0000"],
+                    "style": {
+                        "style": "gradient",
+                        "gradient_colors": ["#00FF00", "#0000FF"],
+                        "gradient_direction": "vertical",
+                    },
+                }
+            ]),
+        )
+    )
+    test_db.commit()
+
+    source_dir = tmp_path / "source"
+    dest_dir = tmp_path / "dest"
+    _create_source_image(source_dir / "Movie" / "poster.png", (255, 255, 255))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(dest_dir),
+        border_colors=["#0000FF"],
+        border_width=50,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        style_opts={"style": "solid"},
+    )
+
+    assert result["success"] is True
+    with Image.open(dest_dir / "Movie" / "poster.png") as out_img:
+        out = out_img.convert("RGB")
+        top = out.getpixel((500, 2))
+        bottom = out.getpixel((500, 1497))
+    assert top != bottom  # holiday gradient applied, not the main solid blue
+    ends = (top, bottom)
+    assert any(px[1] > 120 and px[0] < 120 for px in ends)  # green end
+    assert any(px[2] > 120 and px[0] < 120 for px in ends)  # blue end
+
+
+def test_gradient_style_without_solid_colors_applies_gradient(test_db, tmp_path):
+    """Gradient style is self-sufficient: no solid colors needed, and it must not
+    fall through to border removal."""
+    source_dir = tmp_path / "source"
+    dest_dir = tmp_path / "dest"
+    _create_source_image(source_dir / "Movie" / "poster.png", (255, 255, 255))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(dest_dir),
+        border_colors=None,
+        border_width=50,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        style_opts={"style": "gradient", "gradient_colors": ["#FF0000", "#0000FF"], "gradient_direction": "vertical"},
+    )
+
+    assert result["success"] is True
+    with Image.open(dest_dir / "Movie" / "poster.png") as out_img:
+        out = out_img.convert("RGB")
+        top = out.getpixel((500, 2))
+        bottom = out.getpixel((500, 1497))
+    assert top != bottom
+    ends = (top, bottom)
+    assert any(px[0] > px[2] + 50 for px in ends)  # a reddish end
+    assert any(px[2] > px[0] + 50 for px in ends)  # a bluish end

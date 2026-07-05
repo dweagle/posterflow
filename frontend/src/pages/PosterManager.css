@@ -3919,12 +3919,18 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 /* Library Selection within Settings Section - matches Settings tab dark style */
 .empty-config {
-  text-align: center;
-  padding: 2rem;
-  color: #888;
-  background: #2a2a2a;
-  border: 1px solid #333;
-  border-radius: 8px;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  max-width: 480px;
+  color: #ffb74d;
+  background: rgba(255, 183, 77, 0.08);
+  border: 1px solid rgba(255, 183, 77, 0.35);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.empty-config p {
+  margin: 0;
 }
 
 .library-configs {
@@ -4114,7 +4120,8 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 .color-input-row {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
+  max-width: 480px;
 }
 
 .color-input-row input[type="color"] {
@@ -4133,34 +4140,38 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 .color-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 1rem;
+  margin-top: 0;
 }
 
+/* Compact color chips that sit next to each other and wrap by width */
 .color-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
   background: #2a2a2a;
   border: 1px solid #333;
   border-radius: 4px;
 }
 
 .color-preview {
-  width: 40px;
-  height: 40px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
   flex-shrink: 0;
 }
 
 .color-value {
   font-family: monospace;
   color: #E8ECEF;
-  flex: 1;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+}
+
+.poster-manager .color-item .btn-remove-color {
+  padding: 0.2rem 0.3rem;
 }
 
 .poster-manager .btn-remove-color {
@@ -4184,7 +4195,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 .season-mode-options {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .radio-label {
@@ -4259,37 +4270,28 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   border-color: #64b5f6;
 }
 
-.custom-holiday-colors {
+/* Holiday name + Add button on one row */
+.custom-holiday-name-row {
   display: flex;
-  flex-direction: column;
   gap: 0.5rem;
+  align-items: stretch;
 }
 
-.custom-holiday-colors-input {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
+.custom-holiday-name-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
 }
 
-.custom-holiday-colors-input input[type="color"] {
-  width: 44px;
-  height: 34px;
-  border: 1px solid #444;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.custom-holiday-colors-input input[type="text"] {
-  min-width: 120px;
-  padding: 0.45rem 0.6rem;
-  background: #1a1a1a;
-  border: 1px solid #444;
-  border-radius: 4px;
+/* Colorized "Add Custom Holiday" action */
+.poster-manager .btn-add-holiday {
+  background: #5B89C4;
+  border-color: #5B89C4;
   color: #fff;
-  font-size: 0.82rem;
-  font-family: monospace;
+}
+
+.poster-manager .btn-add-holiday:hover:not(:disabled) {
+  background: #6c9bd4;
+  border-color: #6c9bd4;
 }
 
 .custom-holiday-color-list {
@@ -4321,6 +4323,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 
 .custom-holiday-range select {
+  width: auto;
   padding: 0.45rem 0.6rem;
   background: #1a1a1a;
   border: 1px solid #444;
@@ -4331,15 +4334,23 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 .holiday-schedule-list {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 
 .holiday-schedule-item {
+  flex: 0 0 320px;
+  max-width: 100%;
   padding: 0.75rem;
   background: #2a2a2a;
   border: 1px solid #333;
   border-radius: 6px;
+}
+
+/* While editing, a card needs full width for the 3-column style controls */
+.holiday-schedule-item:has(.holiday-edit-panel) {
+  flex-basis: 100%;
 }
 
 .holiday-schedule-header {
@@ -4360,6 +4371,18 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   font-size: 0.8rem;
 }
 
+/* Per-holiday Save lights up red when the edit has unsaved changes */
+.poster-manager .holiday-action-btn.btn-unsaved {
+  background: #ef5350;
+  border-color: #ef5350;
+  color: #fff;
+}
+
+.poster-manager .holiday-action-btn.btn-unsaved:hover:not(:disabled) {
+  background: #e53935;
+  border-color: #e53935;
+}
+
 .holiday-edit-row {
   margin-top: 0.65rem;
   display: flex;
@@ -4374,6 +4397,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 
 .holiday-edit-row select {
+  width: auto;
   padding: 0.4rem 0.5rem;
   background: #1a1a1a;
   border: 1px solid #444;
@@ -4391,39 +4415,6 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
-}
-
-.holiday-edit-colors {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.holiday-edit-colors-input {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-}
-
-.holiday-edit-colors-input input[type="color"] {
-  width: 44px;
-  height: 34px;
-  border: 1px solid #444;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.holiday-edit-colors-input input[type="text"] {
-  min-width: 120px;
-  padding: 0.45rem 0.6rem;
-  background: #1a1a1a;
-  border: 1px solid #444;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 0.82rem;
-  font-family: monospace;
 }
 
 .holiday-edit-color-list {
@@ -4454,11 +4445,6 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   font-size: 0.78rem;
 }
 
-.holiday-edit-actions {
-  display: flex;
-  gap: 0.45rem;
-}
-
 .holiday-name {
   color: #E8ECEF;
   font-weight: 600;
@@ -4474,16 +4460,245 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 .holiday-color-row {
   display: flex;
+  align-items: center;
   gap: 0.4rem;
   margin-top: 0.75rem;
   flex-wrap: wrap;
 }
 
 .holiday-color-swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  width: 26px;
+  height: 14px;
+  border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* ── Plex Border Rules ─────────────────────────────────────────────────── */
+
+/* Three columns: rules (widest) · run-type toggles · library selection. */
+.rule-layout {
+  display: flex;
+  gap: 1.75rem;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.rule-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 240px;
+}
+
+.rule-runtype-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Rule cards — compact. */
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rule-card {
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #202020;
+  padding: 0.4rem 0.55rem;
+}
+
+.rule-card-open {
+  background: #242424;
+  border-color: #3d3d3d;
+}
+
+.rule-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.rule-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.rule-card-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #E8ECEF;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.rule-badge {
+  font-size: 0.7rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.rule-badge-match {
+  background: #2d3748;
+  color: #9ecbff;
+}
+
+.rule-badge-value {
+  background: #1a1a1a;
+  color: #ddd;
+  font-family: monospace;
+  font-weight: 500;
+  border: 1px solid #3a3a3a;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rule-badge-mode.mode-include {
+  background: rgba(46, 160, 67, 0.2);
+  color: #5dd57a;
+}
+
+.rule-badge-mode.mode-except {
+  background: rgba(56, 139, 253, 0.2);
+  color: #79b8ff;
+}
+
+.rule-badge-mode.mode-skip {
+  background: rgba(139, 148, 158, 0.22);
+  color: #b7bdc6;
+}
+
+.rule-badge-warn {
+  background: rgba(224, 160, 48, 0.2);
+  color: #e0a030;
+}
+
+.rule-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.rule-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rule-arrow {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rule-arrow:hover:not(:disabled) {
+  color: #fff;
+}
+
+.rule-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.rule-btn {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.rule-btn-active {
+  border-color: #5B89C4;
+  color: #9ecbff;
+}
+
+/* Full-width editor panel below the three columns. */
+.rule-editor {
+  margin-top: 1.1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #3d3d3d;
+  border-radius: 8px;
+  background: #232323;
+  display: flex;
+  flex-direction: column;
+}
+
+.rule-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.rule-editor-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #E8ECEF;
+}
+
+.rule-editor-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.rule-fields-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 170px;
+}
+
+.rule-field label {
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+.rule-field input[type="text"],
+.rule-field select {
+  padding: 0.4rem 0.6rem;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.rule-count {
+  color: #888;
+  font-weight: 400;
+}
+
+.rule-add-btn {
+  margin-top: 0.6rem;
+  align-self: flex-start;
 }
 
 /* ── Request Poster Confirmation Modal ─────────────────────────────────── */
@@ -5141,4 +5356,178 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   text-align: center;
   color: #888;
   font-size: 0.85rem;
+}
+
+/* Border style + overlay frame controls */
+.border-overlay-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.border-overlay-row select {
+  min-width: 220px;
+}
+
+.border-style-preview-wrap {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.border-style-preview-label {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.border-style-preview {
+  width: 140px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.authed-image-loading {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.authed-image-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.holiday-frame-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.35rem;
+  height: 14px;
+  border-radius: 3px;
+  background: rgba(100, 181, 246, 0.15);
+  border: 1px solid rgba(100, 181, 246, 0.4);
+  color: #90caf9;
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+.authed-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: 2rem;
+}
+
+.authed-image-lightbox-img {
+  max-width: min(90vw, 700px);
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Border page: basic settings in a single row, items packed close together */
+.border-basic-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: flex-start;
+}
+
+.border-basic-row .field-group {
+  flex: 0 0 auto;
+}
+
+/* Compact the basic settings card so it isn't mostly empty space */
+.poster-manager .settings-section.border-settings-card {
+  padding: 1.25rem 1.5rem;
+}
+
+/* Section header: title on the left, action buttons (Save / Reset) on the right */
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.poster-manager .section-header-row h2 {
+  margin-bottom: 0;
+}
+
+.border-settings-card .field-group {
+  gap: 0.5rem;
+}
+
+/* Label paired with an info-tooltip icon */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Preview card: preview on the left, style settings next to it */
+.border-style-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+/* Each settings column in the (preview / style / sub-settings) layout */
+.border-style-layout .border-style-settings-col {
+  flex: 1 1 280px;
+}
+
+.border-style-preview-col {
+  flex: 0 0 auto;
+}
+
+.border-style-settings-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.border-style-preview-col .border-style-preview {
+  width: 170px;
+}
+
+/* Toggle text is not interactive (only the switch toggles) */
+.poster-manager .settings-section .toggle-label {
+  cursor: default;
+}
+
+/* Radio options: clickable on the dot AND the words (plus a little area around
+   them), but only as wide as their content — never the whole row. */
+.poster-manager .settings-section .radio-label {
+  align-self: flex-start;
+  padding: 0.2rem 0.4rem;
+  margin: -0.2rem -0.4rem;
+  border-radius: 4px;
+}
+
+.poster-manager .settings-section .radio-label:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 900px) {
+  .border-style-layout {
+    flex-direction: column;
+  }
 }

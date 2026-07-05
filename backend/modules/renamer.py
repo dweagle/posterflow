@@ -287,64 +287,23 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                 log_section_start(LogTags.BORDER_REPLACER, "Auto-Running Border Replacer")
                 update_job_state(db, job, message="Running border replacer...")
 
-                border_colors_value = get_setting_value(db, "border_replacer_colors")
-                border_width_value = get_setting_value(db, "border_replacer_width")
-                remove_borders_value = get_setting_value(db, "border_replacer_remove_borders", "false")
-
-                border_colors = []
-                if border_colors_value:
-                    try:
-                        border_colors = json.loads(border_colors_value)
-                    except json.JSONDecodeError:
-                        log_warning(LogTags.BORDER_REPLACER, "Failed to parse border colors, using empty list")
-                        border_colors = []
-
-                border_width = 26
-                if border_width_value:
-                    try:
-                        border_width = int(border_width_value)
-                    except ValueError:
-                        log_warning(LogTags.BORDER_REPLACER, f"Invalid border width '{border_width_value}', using default 26")
-
-                remove_borders = str(remove_borders_value).lower() == "true"
-
                 border_mode = get_setting_value(db, "border_replacer_mode", "incremental")
 
-                exclusions_value = get_setting_value(db, "border_replacer_exclusions")
-                exclusions = []
-                if exclusions_value:
-                    try:
-                        exclusions = json.loads(exclusions_value)
-                    except json.JSONDecodeError:
-                        log_warning(LogTags.BORDER_REPLACER, "Failed to parse exclusions, using empty list")
+                # Load ALL border settings identically to the standalone/workflow job so
+                # the post-rename auto-run follows the same style + season config.
+                from services.border_replacer import build_border_run_settings
+                border_run_settings = build_border_run_settings(db, run_type="autorun")
 
-                season_mode = get_setting_value(db, "border_replacer_season_mode", "inherit")
-                if season_mode not in ("inherit", "remove", "colors"):
-                    season_mode = "inherit"
-
-                season_colors = []
-                season_colors_value = get_setting_value(db, "border_replacer_season_colors")
-                if season_colors_value:
-                    try:
-                        season_colors = json.loads(season_colors_value)
-                    except json.JSONDecodeError:
-                        log_warning(LogTags.BORDER_REPLACER, "Failed to parse season border colors, using empty list")
-                        season_colors = []
-
-                season_width = None
-                season_width_value = get_setting_value(db, "border_replacer_season_width")
-                if season_width_value:
-                    try:
-                        season_width = int(season_width_value)
-                    except ValueError:
-                        log_warning(LogTags.BORDER_REPLACER, f"Invalid season border width '{season_width_value}', falling back to main width")
-                        season_width = None
+                remove_borders = border_run_settings["remove_borders"]
+                border_width = border_run_settings["border_width"]
+                exclusions = border_run_settings["exclusion_list"]
+                border_colors = border_run_settings["border_colors"] or []
 
                 action = "Removing borders" if remove_borders else "Adding borders"
                 log_info(
                     LogTags.BORDER_REPLACER,
                     f"{action}, mode: {border_mode}, width: {border_width}px, exclusions: {len(exclusions)}",
-                    colors=len(border_colors) if border_colors else 0,
+                    colors=len(border_colors),
                     width=border_width,
                     mode=border_mode,
                     exclusions=len(exclusions)
@@ -360,15 +319,9 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
                     border_result = border_service.process_posters(
                         source_dir=source_dir,
                         destination_dir=destination_dir,
-                        border_colors=border_colors if border_colors else None,
-                        remove_borders=remove_borders,
-                        border_width=border_width,
-                        exclusion_list=exclusions,
                         dry_run=config_data.get("dry_run", False),
                         mode=border_mode,
-                        season_mode=season_mode,
-                        season_border_colors=season_colors if season_colors else None,
-                        season_border_width=season_width,
+                        **border_run_settings,
                     )
 
                     if border_result.get("success"):

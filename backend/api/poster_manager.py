@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import Any, Callable, Dict, Optional, List
 from pydantic import BaseModel, Field
+import io
 import traceback
 import os
 import json
+from PIL import Image, UnidentifiedImageError
 import re
 import unicodedata
 import requests as http_requests
@@ -36,6 +40,13 @@ from modules.border import run_border_replacer_background_job
 from modules.unmatched import run_unmatched_detection_background_job
 from modules.flow import run_flow_background_job
 from services.unmatched_assets import UnmatchedAssetsService
+from services.border_replacer import (
+    BUNDLED_OVERLAY_DIR,
+    USER_OVERLAY_DIR,
+    resolve_overlay_path,
+    _render_bordered_image,
+    _hex_to_rgb,
+)
 
 router = APIRouter(prefix="/api/posterflow", tags=["poster-manager"])
 
@@ -286,6 +297,205 @@ def run_border_replacer(
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Failed to start border replacer: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to start border replacer")
+
+
+# --- Border overlay frames (bundled presets + user uploads) ---
+
+OVERLAY_SIZE = (1000, 1500)
+# Bundled default poster used for border previews, shipped in backend/assets/ as
+# border_preview_poster.<ext>. Developer-provided; not user-uploadable.
+ASSETS_DIR = BUNDLED_OVERLAY_DIR.parent
+
+
+def _default_preview_poster_path() -> Optional[str]:
+    """Locate the bundled default preview poster (border_preview_poster.<ext>) if present."""
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        candidate = ASSETS_DIR / f"border_preview_poster.{ext}"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _load_preview_base(db: Session) -> Image.Image:
+    """Return a 1000x1500 RGB poster for previews: the bundled default preview poster if
+    present, otherwise a CL2K-style drive poster, otherwise any drive poster, otherwise a
+    neutral placeholder."""
+    # 1. Bundled default preview poster (developer-provided) wins.
+    default_path = _default_preview_poster_path()
+    if default_path:
+        try:
+            with Image.open(default_path) as src:
+                return src.convert("RGB").resize(OVERLAY_SIZE)
+        except Exception:
+            pass
+
+    # 2. Prefer a CL2K-style drive poster.
+    sample = (
+        db.query(Poster)
+        .join(Drive, Drive.drive_id == Poster.drive_id)
+        .filter(Drive.style_type == "CL2K")
+        .order_by(Poster.id)
+        .first()
+    )
+    # 3. Fall back to any indexed drive poster.
+    if not sample:
+        sample = (
+            db.query(Poster)
+            .filter(Poster.drive_id != "border_processed")
+            .order_by(Poster.id)
+            .first()
+        )
+
+    sample_path = sample.file_path if sample and sample.file_path else None
+    try:
+        if sample_path and os.path.isfile(sample_path):
+            with Image.open(sample_path) as src:
+                return src.convert("RGB").resize(OVERLAY_SIZE)
+    except Exception:
+        pass
+
+    return Image.new("RGB", OVERLAY_SIZE, (40, 40, 40))
+
+
+@router.get("/border-replacer/overlays")
+def list_border_overlays() -> Dict[str, Any]:
+    """List available border-frame overlays from bundled presets and user uploads."""
+    overlays: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    # User dir first so user uploads shadow presets of the same name.
+    for base, source in ((USER_OVERLAY_DIR, "user"), (BUNDLED_OVERLAY_DIR, "preset")):
+        try:
+            if not os.path.isdir(base):
+                continue
+            for fname in sorted(os.listdir(base)):
+                if not fname.lower().endswith(".png") or fname in seen:
+                    continue
+                seen.add(fname)
+                overlays.append({"name": fname, "source": source})
+        except OSError:
+            continue
+    return {"overlays": overlays}
+
+
+@router.get("/border-replacer/overlays/{name}/image")
+def get_border_overlay_image(name: str) -> Response:
+    """Serve a border-overlay PNG (for thumbnails/previews)."""
+    path = resolve_overlay_path(name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Overlay not found")
+    with open(path, "rb") as f:
+        return Response(content=f.read(), media_type="image/png")
+
+
+def _validate_and_store_overlay(raw: bytes, filename: str) -> None:
+    """Decode/validate a PNG overlay and write it to the user dir. Blocking — run
+    off the event loop. Raises HTTPException on invalid input."""
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img.load()
+            size = img.size
+            # Real transparency: an alpha band (RGBA/LA/PA) or a palette/grayscale
+            # `transparency` entry. An opaque palette ("P") image has neither.
+            has_alpha = "A" in img.getbands() or img.info.get("transparency") is not None
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(status_code=400, detail="File is not a valid PNG image")
+
+    if size != OVERLAY_SIZE:
+        raise HTTPException(status_code=400, detail=f"Overlay must be {OVERLAY_SIZE[0]}x{OVERLAY_SIZE[1]} (got {size[0]}x{size[1]})")
+    if not has_alpha:
+        raise HTTPException(status_code=400, detail="Overlay PNG must have transparency (a see-through center)")
+
+    USER_OVERLAY_DIR.mkdir(parents=True, exist_ok=True)
+    dest = USER_OVERLAY_DIR / filename
+    with open(dest, "wb") as f:
+        f.write(raw)
+
+
+@router.post("/border-replacer/overlays/upload")
+async def upload_border_overlay(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Save a user border-frame overlay. Requires a 1000x1500 PNG with transparency."""
+    filename = os.path.basename(file.filename or "")
+    if not filename.lower().endswith(".png"):
+        raise HTTPException(status_code=400, detail="Overlay must be a .png file")
+
+    raw = await file.read()
+    # Image decode + disk write are blocking; keep them off the single-worker loop.
+    await run_in_threadpool(_validate_and_store_overlay, raw, filename)
+    log_user_action(f"Uploaded border overlay: {filename}")
+    return {"success": True, "name": filename, "source": "user"}
+
+
+@router.delete("/border-replacer/overlays/{name}")
+def delete_border_overlay(name: str) -> Dict[str, Any]:
+    """Delete a user-uploaded overlay. Bundled presets are immutable."""
+    safe = os.path.basename(name)
+    user_path = USER_OVERLAY_DIR / safe
+    if not user_path.is_file():
+        if resolve_overlay_path(safe):
+            raise HTTPException(status_code=403, detail="Preset overlays cannot be deleted")
+        raise HTTPException(status_code=404, detail="Overlay not found")
+    try:
+        user_path.unlink()
+    except OSError:
+        raise HTTPException(status_code=500, detail="Failed to delete overlay")
+    log_user_action(f"Deleted border overlay: {safe}")
+    return {"success": True, "deleted": safe}
+
+
+@router.get("/border-replacer/preview")
+def border_replacer_preview(
+    style: str = "solid",
+    color: str = "#000000",
+    border_width: int = 26,
+    gradient_colors: str = "",
+    gradient_direction: str = "vertical",
+    overlay: str = "",
+    inner_effect: str = "none",
+    inner_color: str = "#000000",
+    inner_opacity: int = 70,
+    inner_width: int = 8,
+    fade_width: int = 8,
+    remove_existing: bool = False,
+    passthrough: bool = False,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Render a sample poster with the given border style/effect for live preview."""
+    base = _load_preview_base(db)
+
+    if passthrough:
+        # Nothing configured — show the original poster unchanged (matches the
+        # runtime behavior where an empty config leaves posters untouched).
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        return Response(
+            content=buf.getvalue(),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    bw = max(1, min(int(border_width or 26), 200))
+
+    style_opts = {
+        "style": style,
+        "gradient_colors": [c.strip() for c in gradient_colors.split(",") if c.strip()],
+        "gradient_direction": gradient_direction,
+        "overlay_path": resolve_overlay_path(overlay) if overlay else None,
+        "remove_existing": remove_existing,
+        "inner_effect": inner_effect,
+        "inner_color": inner_color,
+        "inner_opacity": inner_opacity,
+        "inner_width": inner_width,
+        "fade_width": fade_width,
+    }
+
+    rendered = _render_bordered_image(base, bw, _hex_to_rgb(color), style_opts)
+    buf = io.BytesIO()
+    rendered.save(buf, format="PNG")
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/config")

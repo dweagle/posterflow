@@ -1,6 +1,16 @@
 import { useEffect } from 'react'
 import { Drive, PosterConfig } from '../api/client'
 import { PosterManagerTab } from '../components/poster-manager/PosterManagerTabs'
+import {
+  BorderHolidaySchedule,
+  BorderStyle,
+  GradientDirection,
+  InnerEffect,
+  OriginalBorderSettings,
+  PlexBorderRule,
+  RuleRunType,
+  SeasonStyle,
+} from './usePosterManagerBorder'
 
 interface UsePosterManagerLifecycleOptions {
   locationState: unknown
@@ -19,26 +29,27 @@ interface UsePosterManagerLifecycleOptions {
   autoRunBorder: boolean
   autoRunCleanup: boolean
   cleanupDeleteUnknown: boolean
-  holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
+  holidaySchedules: BorderHolidaySchedule[]
   skipRunOutsideHoliday: boolean
   removeBorders: boolean
-  seasonMode: 'inherit' | 'remove' | 'colors'
+  seasonMode: 'inherit' | 'remove' | 'custom'
   seasonColors: string[]
   seasonWidth: number
-  originalBorderSettingsRef: React.MutableRefObject<{
-    colors: string[]
-    width: number
-    mode: 'incremental' | 'full'
-    autoRunBorder: boolean
-    autoRunCleanup: boolean
-    cleanupDeleteUnknown: boolean
-    holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
-    skipRunOutsideHoliday: boolean
-    removeBorders: boolean
-    seasonMode: 'inherit' | 'remove' | 'colors'
-    seasonColors: string[]
-    seasonWidth: number
-  } | null>
+  seasonStyle: SeasonStyle
+  borderStyle: BorderStyle
+  overlayImage: string
+  overlayRemoveExisting: boolean
+  gradientColors: string[]
+  gradientDirection: GradientDirection
+  innerEffect: InnerEffect
+  innerColor: string
+  innerOpacity: number
+  innerWidth: number
+  fadeWidth: number
+  plexRules: PlexBorderRule[]
+  ruleRunTypes: RuleRunType[]
+  ruleLibraries: Set<string>
+  originalBorderSettingsRef: React.MutableRefObject<OriginalBorderSettings | null>
   setHasUnsavedBorderChanges: React.Dispatch<React.SetStateAction<boolean>>
   selectedLibraries: Set<string>
   originalLibrarySelectionRef: React.MutableRefObject<Set<string> | null>
@@ -83,6 +94,20 @@ export function usePosterManagerLifecycle({
   seasonMode,
   seasonColors,
   seasonWidth,
+  seasonStyle,
+  borderStyle,
+  overlayImage,
+  overlayRemoveExisting,
+  gradientColors,
+  gradientDirection,
+  innerEffect,
+  innerColor,
+  innerOpacity,
+  innerWidth,
+  fadeWidth,
+  plexRules,
+  ruleRunTypes,
+  ruleLibraries,
   originalBorderSettingsRef,
   setHasUnsavedBorderChanges,
   selectedLibraries,
@@ -140,8 +165,24 @@ export function usePosterManagerLifecycle({
     const seasonModeChanged = seasonMode !== originalBorderSettingsRef.current.seasonMode
     const seasonColorsChanged = JSON.stringify(seasonColors) !== JSON.stringify(originalBorderSettingsRef.current.seasonColors)
     const seasonWidthChanged = seasonWidth !== originalBorderSettingsRef.current.seasonWidth
+    const seasonStyleChanged = JSON.stringify(seasonStyle) !== JSON.stringify(originalBorderSettingsRef.current.seasonStyle)
+    const borderStyleChanged = borderStyle !== originalBorderSettingsRef.current.borderStyle
+    const overlayImageChanged = overlayImage !== originalBorderSettingsRef.current.overlayImage
+    const overlayRemoveExistingChanged = overlayRemoveExisting !== originalBorderSettingsRef.current.overlayRemoveExisting
+    const gradientColorsChanged = JSON.stringify(gradientColors) !== JSON.stringify(originalBorderSettingsRef.current.gradientColors)
+    const gradientDirectionChanged = gradientDirection !== originalBorderSettingsRef.current.gradientDirection
+    const innerEffectChanged = innerEffect !== originalBorderSettingsRef.current.innerEffect
+    const innerColorChanged = innerColor !== originalBorderSettingsRef.current.innerColor
+    const innerOpacityChanged = innerOpacity !== originalBorderSettingsRef.current.innerOpacity
+    const innerWidthChanged = innerWidth !== originalBorderSettingsRef.current.innerWidth
+    const fadeWidthChanged = fadeWidth !== originalBorderSettingsRef.current.fadeWidth
+    const plexRulesChanged = JSON.stringify(plexRules) !== JSON.stringify(originalBorderSettingsRef.current.plexRules)
+    const ruleRunTypesChanged =
+      JSON.stringify([...ruleRunTypes].sort()) !== JSON.stringify([...originalBorderSettingsRef.current.ruleRunTypes].sort())
+    const ruleLibrariesChanged =
+      JSON.stringify(Array.from(ruleLibraries).sort()) !== JSON.stringify([...originalBorderSettingsRef.current.ruleLibraries].sort())
 
-    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || autoRunCleanupChanged || cleanupDeleteUnknownChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged)
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || autoRunCleanupChanged || cleanupDeleteUnknownChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged || seasonStyleChanged || borderStyleChanged || overlayImageChanged || overlayRemoveExistingChanged || gradientColorsChanged || gradientDirectionChanged || innerEffectChanged || innerColorChanged || innerOpacityChanged || innerWidthChanged || fadeWidthChanged || plexRulesChanged || ruleRunTypesChanged || ruleLibrariesChanged)
   }, [
     autoRunBorder,
     autoRunCleanup,
@@ -155,6 +196,20 @@ export function usePosterManagerLifecycle({
     seasonMode,
     seasonColors,
     seasonWidth,
+    seasonStyle,
+    borderStyle,
+    overlayImage,
+    overlayRemoveExisting,
+    gradientColors,
+    gradientDirection,
+    innerEffect,
+    innerColor,
+    innerOpacity,
+    innerWidth,
+    fadeWidth,
+    plexRules,
+    ruleRunTypes,
+    ruleLibraries,
     originalBorderSettingsRef,
     setHasUnsavedBorderChanges,
   ])

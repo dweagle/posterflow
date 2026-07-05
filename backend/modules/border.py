@@ -1,4 +1,3 @@
-import json
 import os
 import traceback
 from datetime import datetime, timezone
@@ -80,56 +79,15 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
 
         log_section_start(LogTags.BORDER_REPLACER, f"Background Border Replacer Job {job_id}")
 
-        border_colors_value = get_setting_value(db, "border_replacer_colors")
-        border_width_value = get_setting_value(db, "border_replacer_width")
-        remove_borders_value = get_setting_value(db, "border_replacer_remove_borders", "false")
-
-        border_colors = []
-        if border_colors_value:
-            try:
-                border_colors = json.loads(border_colors_value)
-            except json.JSONDecodeError:
-                log_warning(LogTags.BORDER_REPLACER, "Failed to parse border colors, using empty list")
-                border_colors = []
-
-        border_width = 26
-        if border_width_value:
-            try:
-                border_width = int(border_width_value)
-            except ValueError:
-                log_warning(LogTags.BORDER_REPLACER, f"Invalid border width '{border_width_value}', using default 26")
-
-        remove_borders = str(remove_borders_value).lower() == "true"
-
-        season_mode = get_setting_value(db, "border_replacer_season_mode", "inherit")
-        if season_mode not in ("inherit", "remove", "colors"):
-            season_mode = "inherit"
-
-        season_colors = []
-        season_colors_value = get_setting_value(db, "border_replacer_season_colors")
-        if season_colors_value:
-            try:
-                season_colors = json.loads(season_colors_value)
-            except json.JSONDecodeError:
-                log_warning(LogTags.BORDER_REPLACER, "Failed to parse season border colors, using empty list")
-                season_colors = []
-
-        season_width = None
-        season_width_value = get_setting_value(db, "border_replacer_season_width")
-        if season_width_value:
-            try:
-                season_width = int(season_width_value)
-            except ValueError:
-                log_warning(LogTags.BORDER_REPLACER, f"Invalid season border width '{season_width_value}', falling back to main width")
-                season_width = None
-
-        exclusions_value = get_setting_value(db, "border_replacer_exclusions")
-        exclusions = []
-        if exclusions_value:
-            try:
-                exclusions = json.loads(exclusions_value)
-            except json.JSONDecodeError:
-                log_warning(LogTags.BORDER_REPLACER, "Failed to parse exclusions, using empty list")
+        from services.border_replacer import build_border_run_settings
+        run_settings = build_border_run_settings(db, run_type=triggered_by)
+        border_colors = run_settings["border_colors"] or []
+        border_width = run_settings["border_width"]
+        remove_borders = run_settings["remove_borders"]
+        season_mode = run_settings["season_mode"]
+        season_colors = run_settings["season_border_colors"] or []
+        season_width = run_settings["season_border_width"]
+        exclusions = run_settings["exclusion_list"]
 
         poster_dest = get_setting_value(db, "poster_destination")
         if not poster_dest:
@@ -165,20 +123,20 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
         if exclusions:
             log_info(LogTags.BORDER_REPLACER, f"Exclusions: {len(exclusions)} title(s)")
 
+        style_opts = run_settings["style_opts"]
+        if not remove_borders and style_opts.get("style") != "solid":
+            log_info(LogTags.BORDER_REPLACER, f"Border style: {style_opts['style']}")
+        if style_opts.get("inner_effect") not in (None, "none"):
+            log_info(LogTags.BORDER_REPLACER, f"Inner edge effect: {style_opts['inner_effect']}")
+
         service = BorderReplacerService(db)
         result = service.process_posters(
             source_dir=source_dir,
             destination_dir=destination_dir,
-            border_colors=border_colors if border_colors else None,
-            remove_borders=remove_borders,
-            border_width=border_width,
-            exclusion_list=exclusions,
             dry_run=dry_run,
             progress_callback=_build_progress_callback(db, job),
             mode=mode,
-            season_mode=season_mode,
-            season_border_colors=season_colors if season_colors else None,
-            season_border_width=season_width,
+            **run_settings,
         )
 
         if not result["success"]:

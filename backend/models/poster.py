@@ -19,6 +19,7 @@ class Poster(Base):
     file_mtime = Column(Float, nullable=True)  # Filesystem modification time for change detection
     dest_file_mtime = Column(Float, nullable=True)  # Destination file mtime after last write (for external-change detection)
     last_processed = Column(DateTime(timezone=True), nullable=True)  # When last renamed/organized
+    border_rule_sig = Column(String, nullable=True)  # Fingerprint of the Plex border rule applied last run (incremental per-item reprocessing)
 
     __table_args__ = (
         # Makes the per-drive "unprocessed" count (drive_id + last_processed IS NULL) index-only.

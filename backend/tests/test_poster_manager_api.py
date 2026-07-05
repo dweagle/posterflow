@@ -660,3 +660,69 @@ def test_flow_run_returns_500_and_releases_lock_when_create_job_fails(client, mo
 
     assert poster_manager_module._flow_running is False
     assert poster_manager_module._flow_started_at is None
+
+
+# ---------------------------------------------------------------------------
+# Border preview endpoint test
+# ---------------------------------------------------------------------------
+
+def test_border_preview_renders_png(client):
+    """The preview endpoint renders a PNG (placeholder base when no default/drive poster)."""
+    preview = client.get(
+        "/api/posterflow/border-replacer/preview",
+        params={"style": "solid", "color": "#112233", "border_width": 26},
+    )
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+
+
+def test_border_preview_passthrough_returns_original(client):
+    """With passthrough=true the preview returns the untouched sample poster (no border)."""
+    preview = client.get(
+        "/api/posterflow/border-replacer/preview",
+        params={"style": "solid", "border_width": 26, "passthrough": "true"},
+    )
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+
+
+def _overlay_png_bytes(mode: str, size=(1000, 1500), transparent: bool = True) -> bytes:
+    import io as _io
+    from PIL import Image
+
+    if mode == "RGBA":
+        img = Image.new("RGBA", size, (255, 0, 0, 0 if transparent else 255))
+    elif mode == "P":
+        img = Image.new("P", size, 0)  # opaque palette, no transparency info
+    else:
+        img = Image.new(mode, size, (255, 0, 0))
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_upload_overlay_accepts_transparent_png(client):
+    resp = client.post(
+        "/api/posterflow/border-replacer/overlays/upload",
+        files={"file": ("test_frame_rgba.png", _overlay_png_bytes("RGBA"), "image/png")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["source"] == "user"
+
+
+def test_upload_overlay_rejects_opaque_palette_png(client):
+    # An opaque palette PNG has no real transparency and must be rejected.
+    resp = client.post(
+        "/api/posterflow/border-replacer/overlays/upload",
+        files={"file": ("test_frame_opaque.png", _overlay_png_bytes("P"), "image/png")},
+    )
+    assert resp.status_code == 400
+    assert "transparency" in resp.json()["detail"].lower()
+
+
+def test_upload_overlay_rejects_wrong_size(client):
+    resp = client.post(
+        "/api/posterflow/border-replacer/overlays/upload",
+        files={"file": ("test_frame_small.png", _overlay_png_bytes("RGBA", size=(500, 500)), "image/png")},
+    )
+    assert resp.status_code == 400
