@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-05
+### Fixed
+- Discord Auth: token decoding now falls back to Latin1 for older tokens
+
 ## [0.10.0] - 2026-07-05
 ### Added
 - Border Replacer: Plex-based border rules — target posters by Plex label, genre, or collection, with per-item include/except/skip overrides.
