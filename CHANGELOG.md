@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-05
+### Added
+- Border Replacer: Plex-based border rules — target posters by Plex label, genre, or collection, with per-item include/except/skip overrides.
+- Border Replacer: new border styles — gradient bands, image-overlay frames, a dark inner glow / border-color fade, and holiday frames.
+- Border Replacer: new border rules receive incremental tracking and reprocesses only the items whose applicable rule changed, instead of resetting every poster when Plex metadata shifts.
+
+### Fixed
+- Discord Auth: token decoding now correctly handles UTF-8 characters (e.g. non-ASCII usernames).
+
 ## [0.9.8] - 2026-07-03
 ### Changed
 - Community Requests: the maker "Claimed" filter now also includes open (unclaimed) requests and persists across navigation and page reloads.
