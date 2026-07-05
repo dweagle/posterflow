@@ -2,6 +2,7 @@ import { Eye, Play, Save, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig } from '../../api/client'
 import { ManualMediaEntry } from '../../api/posterManager'
+import LibrarySelectGrid from './LibrarySelectGrid'
 import Toolbar from './Toolbar'
 
 type RenamerTabProps = {
@@ -171,29 +172,11 @@ function RenamerTab({
                 <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>
               </div>
             ) : (
-              <div className="library-compact-grid">
-                {libraryConfigs.map((config) => (
-                  <div key={config.instance_name} className="library-instance-group">
-                    <div className="instance-header">{config.instance_name}</div>
-                    {config.libraries.filter((lib) => lib.enabled).map((library) => {
-                      const fullKey = `${config.instance_name}:${library.key}`
-                      const isSelected = selectedLibraries.has(fullKey)
-                      return (
-                        <label key={library.key} className="library-checkbox">
-                          <input type="checkbox" checked={isSelected} onChange={() => onToggleLibrarySelection(config.instance_name, library.key)} />
-                          <span className="library-checkbox-label">
-                            {library.title}
-                            <span className="library-badge">{library.type}</span>
-                          </span>
-                        </label>
-                      )
-                    })}
-                    {config.libraries.filter((lib) => lib.enabled).length === 0 && (
-                      <p style={{ color: '#888', fontSize: '0.85rem', fontStyle: 'italic', margin: '0.25rem 0' }}>No libraries enabled</p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <LibrarySelectGrid
+                libraryConfigs={libraryConfigs}
+                selected={selectedLibraries}
+                onToggle={(instance, key) => onToggleLibrarySelection(instance, key)}
+              />
             )}
             <small>Only media from selected libraries will be processed during rename</small>
           </div>

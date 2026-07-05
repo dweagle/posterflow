@@ -4,6 +4,7 @@ import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
+import LibrarySelectGrid from './LibrarySelectGrid'
 import Toolbar from './Toolbar'
 
 type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null }
@@ -398,29 +399,11 @@ function UnmatchedTab({
                 <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>
               </div>
             ) : (
-              <div className="library-compact-grid">
-                {libraryConfigs.map((config) => (
-                  <div key={config.instance_name} className="library-instance-group">
-                    <div className="instance-header">{config.instance_name}</div>
-                    {config.libraries.filter((lib) => lib.enabled).map((library) => {
-                      const fullKey = `${config.instance_name}:${library.key}`
-                      const isSelected = selectedLibraries.has(fullKey)
-                      return (
-                        <label key={library.key} className="library-checkbox">
-                          <input type="checkbox" checked={isSelected} onChange={() => onToggleLibrarySelection(config.instance_name, library.key)} />
-                          <span className="library-checkbox-label">
-                            {library.title}
-                            <span className="library-badge">{library.type}</span>
-                          </span>
-                        </label>
-                      )
-                    })}
-                    {config.libraries.filter((lib) => lib.enabled).length === 0 && (
-                      <p style={{ color: '#888', fontSize: '0.85rem', fontStyle: 'italic', margin: '0.25rem 0' }}>No libraries enabled</p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <LibrarySelectGrid
+                libraryConfigs={libraryConfigs}
+                selected={selectedLibraries}
+                onToggle={(instance, key) => onToggleLibrarySelection(instance, key)}
+              />
             )}
             <small>Only media from selected libraries will be scanned for missing posters</small>
           </div>
