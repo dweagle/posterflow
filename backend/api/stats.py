@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import Float, func
-from typing import Any, Dict
+from sqlalchemy import Float, func, and_
+from typing import Any, Dict, List
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, time as dt_time
+import html
 import re
+from unidecode import unidecode
 from database import get_db
+from util.constants import common_words, illegal_chars_regex, remove_special_chars
 from models.job import (
     JOB_STATUS_COMPLETED,
     JOB_TYPE_POSTER_RENAMER,
@@ -29,6 +32,45 @@ def _is_path_within(parent: Path, child: Path) -> bool:
         return False
 
 
+def _normalize_for_search(text: str) -> str:
+    """Fold a title or filename to a comparable key so accents, colons, apostrophes
+    and ampersands don't block a match (e.g. "Pokémon: The Movie" -> "pokemonthemovie").
+    Per-character only (no word/year stripping) so it preserves substring containment."""
+    cleaned = unidecode(html.unescape(text)).replace("&", " and ")
+    cleaned = illegal_chars_regex.sub("", cleaned)
+    cleaned = remove_special_chars.sub("", cleaned)
+    return cleaned.replace(" ", "").lower().strip()
+
+
+def _like_pattern(anchor: str) -> str:
+    """Escape LIKE wildcards so a title's %/_ don't act as wildcards."""
+    escaped = anchor.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _search_anchors(query: str) -> List[str]:
+    """Distinctive words the filename must ALL contain, taken as the query's raw
+    alphanumeric runs. AND-ed in SQL so the prefilter stays tight — a broad OR
+    would match more rows than the row cap and starve alphabetically-later true
+    matches before the precise Python pass runs. Runs are matched literally, so we
+    split the RAW query (not the unidecoded form): a symbol/accent unidecode drops
+    or changes mid-word (e.g. "YUME∞MITA", "Amélie") stays in the stored filename,
+    and the surrounding ASCII runs match whichever way either side keeps it.
+    Falls back to every word when none are distinctive."""
+    words = re.findall(r"[A-Za-z0-9]+", query)
+    common = {w.lower() for w in common_words}
+    anchors: List[str] = []
+    seen = set()
+    for word in words:
+        lowered = word.lower()
+        if len(word) < 2 or lowered in common or lowered in seen:
+            continue
+        seen.add(lowered)
+        anchors.append(word)
+    fallback = words or [_normalize_for_search(query)]
+    return (anchors or fallback)[:8]
+
+
 @router.get("/poster-search")
 def search_posters(
     q: str,
@@ -43,13 +85,22 @@ def search_posters(
     if not query:
         return {"query": "", "count": 0, "items": []}
 
+    normalized_query = _normalize_for_search(query)
+    if not normalized_query:
+        return {"query": query, "count": 0, "items": []}
+
     safe_limit = max(1, min(limit, 500))
     raw_limit = min(safe_limit * 8, 4000)
 
+    # Tight SQL prefilter: filename must contain every distinctive query word.
+    # The precise, accent-insensitive match happens in Python via _normalize_for_search below.
+    prefilter = and_(
+        *[Poster.file_name.ilike(_like_pattern(a), escape="\\") for a in _search_anchors(query)]
+    )
     rows = (
         db.query(Poster, Drive)
         .join(Drive, Poster.drive_id == Drive.drive_id)
-        .filter(Poster.file_name.ilike(f"%{query}%"))
+        .filter(prefilter)
         .order_by(Poster.file_name.asc(), Drive.name.asc())
         .limit(raw_limit)
         .all()
@@ -58,6 +109,11 @@ def search_posters(
     grouped: Dict[str, Dict[str, Any]] = {}
 
     for poster, drive in rows:
+        poster_name = Path(poster.file_name).stem
+        # Precise, accent/punctuation-insensitive match (the SQL prefilter is loose).
+        if normalized_query not in _normalize_for_search(poster_name):
+            continue
+
         drive_root: Path | None = None
         poster_path: Path | None = None
         try:
@@ -79,7 +135,6 @@ def search_posters(
         if "assets" in path_parts or "tmp" in path_parts or "temp" in path_parts:
             continue
 
-        poster_name = Path(poster.file_name).stem
         group_key = poster_name.casefold()
 
         if group_key not in grouped:
