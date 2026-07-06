@@ -70,6 +70,7 @@ export const DEFAULT_SEASON_STYLE: SeasonStyle = DEFAULT_BORDER_STYLE
 export interface OriginalBorderSettings {
   colors: string[]
   width: number
+  bandWidth: number
   mode: 'incremental' | 'full'
   autoRunBorder: boolean
   autoRunCleanup: boolean
@@ -193,6 +194,8 @@ export const usePosterManagerBorder = ({
 }: UsePosterManagerBorderParams) => {
   const [borderColors, setBorderColors] = useState<string[]>([])
   const [borderWidth, setBorderWidth] = useState(26)
+  // Separate width for the ADDED band (Remove Borders off); the top width is removal-only.
+  const [bandWidth, setBandWidth] = useState(26)
   const [borderMode, setBorderMode] = useState<'incremental' | 'full'>('incremental')
   const [newColor, setNewColor] = useState('#ffffff')
   const [autoRunBorder, setAutoRunBorder] = useState(false)
@@ -237,6 +240,9 @@ export const usePosterManagerBorder = ({
       const widthStr = settings['border_replacer_width'] || '26'
       const width = parseInt(widthStr) || 26
       setBorderWidth(width)
+      // Band width falls back to the (removal) width when unset, preserving old configs.
+      const loadedBandWidth = parseIntOr(settings['border_replacer_band_width'], width)
+      setBandWidth(loadedBandWidth)
 
       const modeStr = settings['border_replacer_mode'] || 'incremental'
       const mode = modeStr === 'full' ? 'full' : 'incremental'
@@ -336,7 +342,7 @@ export const usePosterManagerBorder = ({
       setSeasonStyle(loadedSeasonStyle)
 
       const styleStr = settings['border_replacer_style'] || 'solid'
-      const resolvedStyle = (['solid', 'gradient', 'image'].includes(styleStr) ? styleStr : 'solid') as BorderStyle
+      const resolvedStyle = (['solid', 'gradient', 'image', 'remove'].includes(styleStr) ? styleStr : 'solid') as BorderStyle
       setBorderStyle(resolvedStyle)
 
       const loadedOverlayImage = settings['border_replacer_overlay_image'] || ''
@@ -403,6 +409,7 @@ export const usePosterManagerBorder = ({
       originalBorderSettingsRef.current = {
         colors: [...colors],
         width,
+        bandWidth: loadedBandWidth,
         mode,
         autoRunBorder: autoRun,
         autoRunCleanup: autoRunCleanupVal,
@@ -441,6 +448,7 @@ export const usePosterManagerBorder = ({
       await saveBulkSettings({
         border_replacer_colors: JSON.stringify(borderColors),
         border_replacer_width: borderWidth.toString(),
+        border_replacer_band_width: bandWidth.toString(),
         border_replacer_mode: borderMode,
         auto_run_border: autoRunBorder ? 'true' : 'false',
         auto_run_cleanup: autoRunCleanup ? 'true' : 'false',
@@ -479,6 +487,7 @@ export const usePosterManagerBorder = ({
       originalBorderSettingsRef.current = {
         colors: [...borderColors],
         width: borderWidth,
+        bandWidth,
         mode: borderMode,
         autoRunBorder,
         autoRunCleanup,
@@ -578,6 +587,7 @@ export const usePosterManagerBorder = ({
     const original = originalBorderSettingsRef.current
     setBorderColors([...original.colors])
     setBorderWidth(original.width)
+    setBandWidth(original.bandWidth)
     setBorderMode(original.mode)
     setAutoRunBorder(original.autoRunBorder)
     setAutoRunCleanup(original.autoRunCleanup)
@@ -611,6 +621,7 @@ export const usePosterManagerBorder = ({
   const resetBorderSettingsToDefaults = () => {
     setBorderColors([])
     setBorderWidth(26)
+    setBandWidth(26)
     setBorderMode('incremental')
     setNewColor('#ffffff')
     setHolidaySchedules([])
@@ -639,6 +650,7 @@ export const usePosterManagerBorder = ({
   return {
     borderColors,
     borderWidth,
+    bandWidth,
     borderMode,
     newColor,
     autoRunBorder,
@@ -666,6 +678,7 @@ export const usePosterManagerBorder = ({
     ruleRunTypes,
     ruleLibraries,
     setBorderWidth,
+    setBandWidth,
     setBorderMode,
     setNewColor,
     setAutoRunBorder,

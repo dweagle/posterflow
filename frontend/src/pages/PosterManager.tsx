@@ -116,6 +116,7 @@ function PosterManager() {
   const {
     borderColors,
     borderWidth,
+    bandWidth,
     borderMode,
     newColor,
     autoRunBorder,
@@ -125,6 +126,7 @@ function PosterManager() {
     skipRunOutsideHoliday,
     removeBorders,
     setBorderWidth,
+    setBandWidth,
     setBorderMode,
     setNewColor,
     setAutoRunBorder,
@@ -385,6 +387,7 @@ function PosterManager() {
     setHasUnsavedPriorityChanges,
     borderColors,
     borderWidth,
+    bandWidth,
     borderMode,
     autoRunBorder,
     autoRunCleanup,
@@ -566,6 +569,7 @@ function PosterManager() {
           saving={saving}
           runningBorderReplacer={runningBorderReplacer}
           borderWidth={borderWidth}
+          bandWidth={bandWidth}
           borderMode={borderMode}
           newColor={newColor}
           borderColors={borderColors}
@@ -580,6 +584,7 @@ function PosterManager() {
           onResetBorderSettings={resetBorderSettingsToDefaults}
           onRunBorderReplacer={handleRunBorderReplacer}
           onSetBorderWidth={setBorderWidth}
+          onSetBandWidth={setBandWidth}
           onSetBorderMode={setBorderMode}
           onSetNewColor={setNewColor}
           onAddBorderColor={addBorderColor}

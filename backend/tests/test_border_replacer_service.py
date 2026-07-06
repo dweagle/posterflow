@@ -51,6 +51,67 @@ def test_resolve_effective_colors_uses_active_holiday(test_db):
     assert style_opts["style"] == "solid"  # no style object → solid
 
 
+def test_main_style_remove_strips_border(test_db, tmp_path):
+    """A main border style of 'remove' strips the border (no colors needed) instead of leaving
+    the poster unchanged — the STYLE way to remove, distinct from the global toggle."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    bordered = Image.new("RGB", (1000, 1500), (0, 255, 0))  # green border
+    bordered.paste(Image.new("RGB", (1000 - 52, 1500 - 52), (0, 0, 255)), (26, 26))  # blue interior
+    (source_dir / "Movie (2020)").mkdir(parents=True)
+    bordered.save(source_dir / "Movie (2020)" / "poster.png")
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=None,       # no colors: 'remove' is a complete config on its own
+        remove_borders=False,     # the STYLE removes, not the global toggle
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        style_opts={"style": "remove"},
+    )
+    assert result["success"] is True
+    # Border stripped: the top-left corner is now the blue interior, not green.
+    assert _get_corner_color(destination_dir / "Movie (2020)" / "poster.png") == (0, 0, 255)
+
+
+def test_active_holiday_overrides_main_remove_style(test_db, tmp_path):
+    """With main style='remove', an active holiday still applies its border — the whole point
+    of using the style instead of the global remove-borders toggle."""
+    test_db.add(
+        Setting(
+            key="border_replacer_holidays",
+            value=json.dumps([
+                {"name": "Always On", "schedule": "range(01/01-12/31)", "colors": ["#FF0000"]}
+            ]),
+        )
+    )
+    test_db.commit()
+
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    _create_source_image(source_dir / "Movie (2020)" / "poster.png", (0, 255, 0))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=None,
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        style_opts={"style": "remove"},
+    )
+    assert result["success"] is True
+    # The holiday's red border wins over the main 'remove' style.
+    assert _get_corner_color(destination_dir / "Movie (2020)" / "poster.png") == (255, 0, 0)
+
+
 def test_process_posters_skips_outside_holiday_and_copies_unchanged(test_db, tmp_path):
     test_db.add(Setting(key="border_replacer_skip_non_holiday", value="true"))
     test_db.add(
@@ -1029,6 +1090,29 @@ def test_build_border_run_settings_no_season_style_when_not_custom(test_db):
     kwargs = build_border_run_settings(test_db)
     assert kwargs["season_mode"] == "remove"
     assert kwargs["season_style_opts"] is None
+
+
+def test_build_border_run_settings_splits_removal_and_band_width(test_db):
+    """The top width is the removal width; a separate band width is used when adding. The
+    Remove Borders toggle selects which one process_posters receives."""
+    test_db.add(Setting(key="border_replacer_width", value="30"))        # removal width
+    test_db.add(Setting(key="border_replacer_band_width", value="50"))   # added-band width
+    test_db.commit()
+
+    # Adding borders (toggle off) → band width.
+    assert build_border_run_settings(test_db)["border_width"] == 50
+
+    # Removing borders (toggle on) → removal width.
+    test_db.add(Setting(key="border_replacer_remove_borders", value="true"))
+    test_db.commit()
+    assert build_border_run_settings(test_db)["border_width"] == 30
+
+
+def test_build_border_run_settings_band_width_falls_back_to_removal_width(test_db):
+    """Configs saved before the split (no band width) keep using the single width for adding."""
+    test_db.add(Setting(key="border_replacer_width", value="40"))
+    test_db.commit()
+    assert build_border_run_settings(test_db)["border_width"] == 40
 
 
 def test_holiday_custom_style_applies_gradient(test_db, tmp_path):

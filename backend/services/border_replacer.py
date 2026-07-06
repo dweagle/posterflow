@@ -357,7 +357,9 @@ def build_style_opts(db: Session, prefix: str = "") -> Dict[str, Any]:
         return f"border_replacer_{prefix}{name}"
 
     style = (get_setting_value(db, k("style"), "solid") or "solid").strip().lower()
-    if style not in ("solid", "gradient", "image"):
+    # "remove" strips the border like Remove Borders mode, but as a STYLE — so an active
+    # holiday still overrides it (unlike the global remove_borders toggle).
+    if style not in ("solid", "gradient", "image", "remove"):
         style = "solid"
 
     gradient_colors: List[str] = []
@@ -483,6 +485,18 @@ def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str
 
     remove_borders = str(get_setting_value(db, "border_replacer_remove_borders", "false")).strip().lower() == "true"
 
+    # The top "Border Width" is the REMOVAL width (how much to strip). When adding a border
+    # instead, the Border Style box has its own width. It falls back to the removal width for
+    # configs saved before this split, so existing setups are unchanged. Which one applies is
+    # chosen here by the Remove Borders toggle, so process_posters still takes a single width.
+    band_width_raw = get_setting_value(db, "border_replacer_band_width")
+    try:
+        band_width = int(band_width_raw) if band_width_raw not in (None, "") else border_width
+    except (TypeError, ValueError):
+        band_width = border_width
+    band_width = max(1, min(band_width, 400))
+    effective_border_width = border_width if remove_borders else band_width
+
     season_mode = get_setting_value(db, "border_replacer_season_mode", "inherit")
     if season_mode not in ("inherit", "remove", "colors", "custom"):
         season_mode = "inherit"
@@ -500,7 +514,7 @@ def build_border_run_settings(db: Session, run_type: str = "manual") -> Dict[str
     return {
         "border_colors": border_colors if border_colors else None,
         "remove_borders": remove_borders,
-        "border_width": border_width,
+        "border_width": effective_border_width,
         "exclusion_list": exclusions,
         "season_mode": season_mode,
         "season_border_colors": season_colors if season_colors else None,
@@ -1247,13 +1261,16 @@ class BorderReplacerService:
 
                 return copy_result
 
-            # An image-overlay frame or a gradient band is a complete configuration on
-            # its own — neither needs the solid border colors.
+            # An image-overlay frame, a gradient band, or the "remove" style is a complete
+            # configuration on its own — none needs the solid border colors. (The "remove"
+            # style strips the border via the replace path, so an active holiday can still
+            # override it, unlike the global remove_borders toggle.)
             has_image_style = run_style_opts.get("style") == "image" and bool(run_style_opts.get("overlay_path"))
             has_gradient_style = run_style_opts.get("style") == "gradient" and bool(
                 [c for c in (run_style_opts.get("gradient_colors") or []) if str(c).strip()]
             )
-            has_renderable_style = has_image_style or has_gradient_style
+            has_remove_style = run_style_opts.get("style") == "remove"
+            has_renderable_style = has_image_style or has_gradient_style or has_remove_style
 
             # Nothing configured for main posters: leave them unchanged (per-file
             # passthrough in the loop below) instead of stripping borders. Seasons and

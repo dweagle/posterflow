@@ -77,6 +77,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",
+    "border_replacer_band_width",
     "border_replacer_mode",
     "border_replacer_holidays",
     "border_replacer_skip_non_holiday",

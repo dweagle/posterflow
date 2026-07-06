@@ -25,6 +25,7 @@ interface UsePosterManagerLifecycleOptions {
   setHasUnsavedPriorityChanges: React.Dispatch<React.SetStateAction<boolean>>
   borderColors: string[]
   borderWidth: number
+  bandWidth: number
   borderMode: 'incremental' | 'full'
   autoRunBorder: boolean
   autoRunCleanup: boolean
@@ -84,6 +85,7 @@ export function usePosterManagerLifecycle({
   setHasUnsavedPriorityChanges,
   borderColors,
   borderWidth,
+  bandWidth,
   borderMode,
   autoRunBorder,
   autoRunCleanup,
@@ -155,6 +157,7 @@ export function usePosterManagerLifecycle({
 
     const colorsChanged = JSON.stringify(borderColors) !== JSON.stringify(originalBorderSettingsRef.current.colors)
     const widthChanged = borderWidth !== originalBorderSettingsRef.current.width
+    const bandWidthChanged = bandWidth !== originalBorderSettingsRef.current.bandWidth
     const modeChanged = borderMode !== originalBorderSettingsRef.current.mode
     const autoRunChanged = autoRunBorder !== originalBorderSettingsRef.current.autoRunBorder
     const autoRunCleanupChanged = autoRunCleanup !== originalBorderSettingsRef.current.autoRunCleanup
@@ -182,7 +185,7 @@ export function usePosterManagerLifecycle({
     const ruleLibrariesChanged =
       JSON.stringify(Array.from(ruleLibraries).sort()) !== JSON.stringify([...originalBorderSettingsRef.current.ruleLibraries].sort())
 
-    setHasUnsavedBorderChanges(colorsChanged || widthChanged || modeChanged || autoRunChanged || autoRunCleanupChanged || cleanupDeleteUnknownChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged || seasonStyleChanged || borderStyleChanged || overlayImageChanged || overlayRemoveExistingChanged || gradientColorsChanged || gradientDirectionChanged || innerEffectChanged || innerColorChanged || innerOpacityChanged || innerWidthChanged || fadeWidthChanged || plexRulesChanged || ruleRunTypesChanged || ruleLibrariesChanged)
+    setHasUnsavedBorderChanges(colorsChanged || widthChanged || bandWidthChanged || modeChanged || autoRunChanged || autoRunCleanupChanged || cleanupDeleteUnknownChanged || holidaysChanged || skipRunChanged || removeBordersChanged || seasonModeChanged || seasonColorsChanged || seasonWidthChanged || seasonStyleChanged || borderStyleChanged || overlayImageChanged || overlayRemoveExistingChanged || gradientColorsChanged || gradientDirectionChanged || innerEffectChanged || innerColorChanged || innerOpacityChanged || innerWidthChanged || fadeWidthChanged || plexRulesChanged || ruleRunTypesChanged || ruleLibrariesChanged)
   }, [
     autoRunBorder,
     autoRunCleanup,
@@ -190,6 +193,7 @@ export function usePosterManagerLifecycle({
     borderColors,
     borderMode,
     borderWidth,
+    bandWidth,
     holidaySchedules,
     skipRunOutsideHoliday,
     removeBorders,

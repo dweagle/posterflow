@@ -61,6 +61,7 @@ type BorderTabProps = {
   saving: boolean
   runningBorderReplacer: boolean
   borderWidth: number
+  bandWidth: number
   borderMode: 'incremental' | 'full'
   newColor: string
   borderColors: string[]
@@ -92,6 +93,7 @@ type BorderTabProps = {
   onResetBorderSettings: () => void
   onRunBorderReplacer: (dryRun: boolean) => void
   onSetBorderWidth: (width: number) => void
+  onSetBandWidth: (width: number) => void
   onSetBorderMode: (mode: 'incremental' | 'full') => void
   onSetNewColor: (color: string) => void
   onAddBorderColor: () => void
@@ -123,6 +125,7 @@ function BorderTab({
   saving,
   runningBorderReplacer,
   borderWidth,
+  bandWidth,
   borderMode,
   newColor,
   borderColors,
@@ -154,6 +157,7 @@ function BorderTab({
   onResetBorderSettings,
   onRunBorderReplacer,
   onSetBorderWidth,
+  onSetBandWidth,
   onSetBorderMode,
   onSetNewColor,
   onAddBorderColor,
@@ -471,10 +475,10 @@ function BorderTab({
 
           <div className="field-group">
             <div className="field-label-row">
-              <label>Border Width (pixels)</label>
+              <label>Border Removal Width (pixels)</label>
               <span className="toolbar-info" tabIndex={0}>
                 <Info size={14} />
-                <div className="toolbar-tooltip">Recommended: 26px (DAPS standard).</div>
+                <div className="toolbar-tooltip">How many pixels to strip when removing borders (the Remove Borders toggle). The width of an ADDED border is set separately in the Border Style section below. Recommended: 26px (DAPS standard).</div>
               </span>
             </div>
             <NumberField value={borderWidth} onChange={onSetBorderWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
@@ -519,7 +523,7 @@ function BorderTab({
             <div className="border-style-preview-col">
               <div className="border-style-preview-wrap">
                 <span className="border-style-preview-label">Preview — click to enlarge</span>
-                <StyleValuePreview value={mainStyleValue} borderWidth={borderWidth} />
+                <StyleValuePreview value={mainStyleValue} borderWidth={bandWidth} />
               </div>
             </div>
             <div className="border-style-settings-col">
@@ -527,10 +531,24 @@ function BorderTab({
 
           {!removeBorders && (
           <div className="field-group">
+            <div className="field-label-row">
+              <label>Border Width</label>
+              <span className="toolbar-info" tabIndex={0}>
+                <Info size={14} />
+                <div className="toolbar-tooltip">How thick the added border is (band, gradient, or frame edge). The width at the top of the page applies only to border removal.</div>
+              </span>
+            </div>
+            <NumberField value={bandWidth} onChange={onSetBandWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
+          </div>
+          )}
+
+          {!removeBorders && (
+          <div className="field-group">
             <label>Border Style</label>
             <small style={{ marginBottom: '0.75rem', display: 'block' }}>
               How the replaced border is rendered. <strong>Solid</strong> uses the Border Colors below;
-              <strong> Gradient</strong> blends colors across the band; <strong>Image overlay</strong> composites a PNG frame you design.
+              <strong> Gradient</strong> blends colors across the band; <strong>Image overlay</strong> composites a PNG frame you design;
+              <strong> Remove borders</strong> strips the border — but unlike the Remove Borders toggle above, an active holiday still applies its border.
             </small>
             <select
               value={borderStyle}
@@ -540,6 +558,7 @@ function BorderTab({
               <option value="solid">Solid color</option>
               <option value="gradient">Gradient band</option>
               <option value="image">Image overlay (frame)</option>
+              <option value="remove">Remove borders</option>
             </select>
 
             {borderStyle === 'gradient' && (
@@ -643,7 +662,7 @@ function BorderTab({
           </div>
           )}
 
-          {!removeBorders && (
+          {!removeBorders && borderStyle !== 'remove' && (
           <div className="field-group">
             <div className="toggle-field">
               <label className="toggle-switch">
@@ -662,7 +681,7 @@ function BorderTab({
             <div className="border-style-settings-col">
               <div className="settings-grid">
 
-          {!removeBorders && (
+          {!removeBorders && borderStyle !== 'remove' && (
           <div className="field-group">
             <label>Inner Edge Effect</label>
             <small style={{ marginBottom: '0.75rem', display: 'block' }}>
@@ -884,7 +903,7 @@ function BorderTab({
                           refreshOverlays={refreshOverlays}
                           idPrefix={`holiday-edit-${holiday.name}`}
                           label="Holiday Border Style"
-                          preview={<StyleValuePreview value={{ ...editHolidayStyle, colors: editHolidayColors }} borderWidth={borderWidth} />}
+                          preview={<StyleValuePreview value={{ ...editHolidayStyle, colors: editHolidayColors }} borderWidth={bandWidth} />}
                         />
                       </div>
                     )}
@@ -1012,7 +1031,7 @@ function BorderTab({
                 refreshOverlays={refreshOverlays}
                 idPrefix="holiday-custom"
                 label="Holiday Border Style"
-                preview={<StyleValuePreview value={{ ...customHolidayStyle, colors: customHolidayColors }} borderWidth={borderWidth} />}
+                preview={<StyleValuePreview value={{ ...customHolidayStyle, colors: customHolidayColors }} borderWidth={bandWidth} />}
               />
             </div>
           </div>
@@ -1025,7 +1044,7 @@ function BorderTab({
         rules={plexRules}
         runTypes={ruleRunTypes}
         libraries={ruleLibraries}
-        borderWidth={borderWidth}
+        borderWidth={bandWidth}
         overlays={overlays}
         refreshOverlays={refreshOverlays}
         sectionSaveButton={sectionSaveButton}
