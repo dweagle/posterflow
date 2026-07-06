@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-06
+### Changed
+- Border Replacer: reworked the Plex Rules UI to be more user-friendly.
+- Border Replacer: border removal now adjusts trimming to better handle narrower borders.
+- Poster Search: improved query normalization and filtering for more accurate results.
+- Poster availability: posters now track a TMDB ID (extracted from filenames) for faster/more reliable availability checks on maker cards.
+
 ## [0.10.1] - 2026-07-05
 ### Fixed
 - Discord Auth: token decoding now falls back to Latin1 for older tokens
