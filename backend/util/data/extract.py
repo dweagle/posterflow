@@ -1,6 +1,12 @@
+import re
 from typing import Optional, Tuple
 
 from util.constants import imdb_id_regex, tmdb_id_regex, tvdb_id_regex, year_regex
+
+# Strict "{tmdb-<digits>}" tag, matching how the poster-check lookup identifies a file
+# (equivalent to the old `file_name ILIKE '%{tmdb-<id>}%'`). A malformed tag such as
+# "{tmdb-422-8}" is intentionally not matched, so it falls through to the title fallback.
+_TMDB_TAG_RE = re.compile(r"\{tmdb-(\d+)\}", re.IGNORECASE)
 
 
 def extract_year(text: str) -> Optional[int]:
@@ -16,6 +22,12 @@ def extract_year(text: str) -> Optional[int]:
         return int(year_regex.search(text).group(1))
     except Exception:
         return None
+
+
+def extract_tmdb_id(text: str) -> Optional[int]:
+    """Extract the TMDB ID from a poster filename's "{tmdb-<id>}" tag, or None."""
+    m = _TMDB_TAG_RE.search(text)
+    return int(m.group(1)) if m else None
 
 
 def extract_ids(text: str) -> Tuple[Optional[int], Optional[int], Optional[str]]:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from services.rclone import RcloneService
+from util.data.extract import extract_tmdb_id
 from models.drive import Drive
 from models.poster import Poster
 from models.job import (
@@ -483,6 +484,7 @@ class PosterSyncService:
                         pending_inserts.append(Poster(
                             drive_id=drive.drive_id,
                             file_name=file_name,
+                            tmdb_id=extract_tmdb_id(file_name),
                             file_path=str(file_path),
                             file_size=file_size,
                             file_mtime=file_mtime,
@@ -1059,6 +1061,7 @@ class PosterSyncService:
                         pending_inserts.append(Poster(
                             drive_id=drive_id,
                             file_name=file_name,
+                            tmdb_id=extract_tmdb_id(file_name),
                             file_path=str(file_path),
                             file_size=file_size,
                             file_mtime=file_mtime,

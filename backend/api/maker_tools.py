@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from core.auth import mint_psd_access_token, verify_psd_access_token
@@ -1280,57 +1281,63 @@ def tmdb_poster_check(
 ) -> dict[int, list[dict[str, Any]]]:
     """Check the local poster database for matching files for a list of TMDB items.
 
-    Primary match: filename contains {tmdb-<id>} (exact, collision-safe via media type guard).
-    Fallback match: filename contains title + year (for files without embedded TMDB IDs).
+    Primary match: indexed lookup on the extracted tmdb_id column (collision-safe via
+    the media type guard). Fallback match: filename starts with title + year, for legacy
+    files synced before tmdb_id existed or files with no embedded TMDB ID.
 
     Returns a mapping of tmdb_id -> list of {style, seasons} objects, one per drive style found.
     """
     from models.poster import Poster
 
     result: dict[int, list[dict[str, Any]]] = {}
+    items = [it for it in payload.items if it.title.strip()]
+    if not items:
+        return result
 
-    for item in payload.items:
-        title = item.title.strip()
-        if not title:
-            continue
-
-        # ── Primary: match by embedded TMDB ID ──────────────────────────────
-        tmdb_rows = (
-            db.query(Poster, Drive)
-            .join(Drive, Poster.drive_id == Drive.drive_id)
-            .filter(
-                Poster.file_name.ilike(f"%{{tmdb-{item.tmdb_id}}}%"),
-                Drive.last_synced.isnot(None),
-            )
-            .order_by(Drive.name.asc(), Poster.file_name.asc())
-            .limit(100)
-            .all()
-        )
-
-        style_seasons = _collect_style_seasons(tmdb_rows, item.media_type, item.year)
-
-        # ── Fallback: title + year for files without TMDB ID tags ───────────
-        safe_title = " ".join(_LIKE_UNSAFE_RE.sub("", title).split()).strip()
-        sql_title = safe_title.replace("_", r"\_")
-        if not style_seasons and sql_title:
-            fallback_rows = (
-                db.query(Poster, Drive)
-                .join(Drive, Poster.drive_id == Drive.drive_id)
-                .filter(
-                    Poster.file_name.ilike(f"{sql_title} (%", escape="\\"),
-                    Drive.last_synced.isnot(None),
-                )
-                .order_by(Drive.name.asc(), Poster.file_name.asc())
-                .limit(100)
-                .all()
-            )
-            style_seasons = _collect_style_seasons(fallback_rows, item.media_type, item.year, expected_tmdb_id=item.tmdb_id)
-
+    def _emit(item: PosterCheckItem, style_seasons: dict[str, set[int]]) -> None:
         if style_seasons:
             result[item.tmdb_id] = [
                 {"style": style, "seasons": sorted(style_seasons[style])}
                 for style in sorted(style_seasons.keys())
             ]
+
+    # ── Primary: one indexed lookup for every TMDB ID in the batch ──────────
+    ids = list({it.tmdb_id for it in items})
+    rows_by_id: dict[int, list[tuple]] = {}
+    for poster, drive in (
+        db.query(Poster, Drive)
+        .join(Drive, Poster.drive_id == Drive.drive_id)
+        .filter(Poster.tmdb_id.in_(ids), Drive.last_synced.isnot(None))
+        .all()
+    ):
+        rows_by_id.setdefault(poster.tmdb_id, []).append((poster, drive))
+
+    # ── Fallback: title + year for untagged files, batched into one scan ────
+    unmatched: list[tuple[PosterCheckItem, str]] = []
+    for item in items:
+        style_seasons = _collect_style_seasons(rows_by_id.get(item.tmdb_id, []), item.media_type, item.year)
+        if style_seasons:
+            _emit(item, style_seasons)
+            continue
+        safe_title = " ".join(_LIKE_UNSAFE_RE.sub("", item.title.strip()).split()).strip()
+        if safe_title:
+            unmatched.append((item, safe_title))
+
+    if unmatched:
+        clauses = [
+            Poster.file_name.ilike(safe_title.replace("_", r"\_") + " (%", escape="\\")
+            for _, safe_title in unmatched
+        ]
+        fallback_rows = (
+            db.query(Poster, Drive)
+            .join(Drive, Poster.drive_id == Drive.drive_id)
+            .filter(or_(*clauses), Drive.last_synced.isnot(None))
+            .all()
+        )
+        for item, safe_title in unmatched:
+            prefix = f"{safe_title} (".lower()
+            item_rows = [(p, d) for (p, d) in fallback_rows if p.file_name.lower().startswith(prefix)]
+            _emit(item, _collect_style_seasons(item_rows, item.media_type, item.year, expected_tmdb_id=item.tmdb_id))
 
     return result
 

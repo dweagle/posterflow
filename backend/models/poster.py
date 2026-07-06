@@ -12,6 +12,7 @@ class Poster(Base):
     id = Column(Integer, primary_key=True, index=True)
     drive_id = Column(String, nullable=False)  # Which drive it came from (indexed via ix_posters_drive_last_processed)
     file_name = Column(String, nullable=False)
+    tmdb_id = Column(Integer, nullable=True, index=True)  # Extracted from {tmdb-<id>} tag; indexed for fast poster-availability checks
     file_path = Column(String, nullable=False, unique=True)  # Full path on disk
     file_size = Column(BigInteger, nullable=True)  # Size in bytes
     gdrive_file_id = Column(String, nullable=True)  # Google Drive file ID
