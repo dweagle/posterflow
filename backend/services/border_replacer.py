@@ -192,22 +192,38 @@ def _strip_existing_border(image: "Image.Image", border_width: int, exclude: boo
 # Remove Borders mode. Tunable per-collection via style_opts["glow_trim"].
 _GLOW_TRIM_DEFAULT_PX = 16
 
+# The poster's baked-in border thickness (DAPS default). "Remove existing border first" has to
+# cover this whole border: the new band covers `border_width` of it, so when the band is
+# narrower the trim/black-bar must make up the rest, up to this width. See _remove_existing_base.
+_REMOVE_EXISTING_REF_WIDTH = 26
+
 
 def _remove_existing_base(source_image: "Image.Image", style_opts: Dict[str, Any], border_width: int) -> "Image.Image":
     """Prepare the poster for 'remove existing border first' using the DAPS Remove Borders
-    geometry — but crop only `glow_trim` px off left/top/right (just the edge glow that
-    survives the normal crop, far LESS than the full border width), keep the black bottom
-    bar, and resize UP to 1000x1500 (never scaled down). The caller then lays its border
-    (solid/gradient band or image frame) over the outer edge, so the poster stays full size
-    and only the glow tucks behind the border."""
+    geometry — crop the edge (the baked-in glow that survives the normal crop) off
+    left/top/right, keep the black bottom bar, and resize UP to 1000x1500 (never scaled
+    down). The caller then lays its border (solid/gradient band or image frame) over the
+    outer edge, so the poster stays full size and only the trimmed edge tucks behind it.
+
+    Trim vs border width: the new band covers `border_width` of the poster's ~reference-px
+    baked-in border. At/above the reference the band covers the whole border, so we trim only
+    the glow. Below it the band leaves part of the border uncovered, so the trim (black bottom
+    bar + side crop) is extended to the FULL reference width to cover the rest — otherwise a
+    thin line of the old border leaks through just inside the new border. That extra trim may
+    exceed the border width (growing the black bottom bar to cover the leftover edge)."""
     try:
-        side_trim = max(0, int(style_opts.get("glow_trim", _GLOW_TRIM_DEFAULT_PX)))
+        base_trim = max(0, int(style_opts.get("glow_trim", _GLOW_TRIM_DEFAULT_PX)))
     except (TypeError, ValueError):
-        side_trim = _GLOW_TRIM_DEFAULT_PX
+        base_trim = _GLOW_TRIM_DEFAULT_PX
     width, height = source_image.size
-    # Stay below the border width so the DAPS black bottom bar stays hidden behind the
-    # new border, and so this always trims LESS than a full Remove Borders strip.
-    side_trim = min(side_trim, max(0, border_width - 1), min(width, height) // 2 - 1)
+    base_trim = min(base_trim, max(0, border_width - 1))  # glow stays tucked behind the band
+    # A band narrower than the baked-in border can't hide all of it, so extend the trim to the
+    # full reference width; the band covers the rest.
+    if border_width < _REMOVE_EXISTING_REF_WIDTH:
+        side_trim = max(base_trim, _REMOVE_EXISTING_REF_WIDTH)
+    else:
+        side_trim = base_trim
+    side_trim = min(side_trim, min(width, height) // 2 - 1)  # geometric safety
     if side_trim <= 0:
         return source_image.resize((1000, 1500))
     return _strip_existing_border(source_image, side_trim, exclude=False).resize((1000, 1500))

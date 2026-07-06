@@ -355,6 +355,40 @@ def test_process_posters_honors_remove_existing_during_run(test_db, tmp_path):
     assert plain_out != removed_out
 
 
+def test_remove_existing_trims_more_for_narrow_border():
+    """'Remove existing border first' compensates for a narrow band: at the reference width
+    (26) and above the trim is unchanged, but below it we trim 1px more per pixel so the
+    leftover baked-in border doesn't peek past the narrower band. The trimmed edge becomes
+    the black bottom bar (before the band is laid over it), so its height tracks the trim."""
+    from services.border_replacer import _remove_existing_base
+
+    src = _poster_with_border()  # green border + gradient interior, contains no black
+
+    def black_bottom(img):
+        w, h = img.size
+        px = img.convert("RGB")
+        n = 0
+        for y in range(h - 1, -1, -1):
+            if px.getpixel((w // 2, y)) == (0, 0, 0):
+                n += 1
+            else:
+                break
+        return n
+
+    at_ref = black_bottom(_remove_existing_base(src, {}, 26))
+    above = black_bottom(_remove_existing_base(src, {}, 40))
+    below1 = black_bottom(_remove_existing_base(src, {}, 20))
+    below2 = black_bottom(_remove_existing_base(src, {}, 12))
+
+    # At/above the reference width the trim is identical (wide band already covers the edge).
+    assert at_ref == above
+    # Below it, the trim jumps to the FULL reference width so nothing peeks -> a taller black
+    # bar, and it's the same no matter how much narrower the border is (full coverage, not a
+    # partial slope that would leave a residual line).
+    assert below1 > at_ref
+    assert below1 == below2
+
+
 def test_incremental_updates_tracking_when_no_change_needed(test_db, tmp_path):
     source_dir = tmp_path / "source"
     destination_dir = tmp_path / "destination"
