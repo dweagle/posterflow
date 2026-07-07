@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-07
+### Added
+- Border Replacer: main border style now has a remove borders option as well as a configurable border width setting for main border replacement.
+- Maker Tools: PSD exports now support the MM2K style, with a bundled default MM2K template. MM2K poster/PSD paths can be configured separately from CL2K style settings. The Photopea plugin supports the MM2K PSD's layer structure for easy export.
+- Community Requests: MM2K requests/lists can be filtered out by makers.
+
+### Changed
+- Community Requests: lists created through the Unmatched Assets path now require CL2K/MM2K style selection. Modals now have a style toggle that is stored in the browser's local storage so the preferred style can be autofilled on future requests and list creation.
+
+### Fixed
+- Settings: newly detected Plex libraries are no longer auto-selected — they appear unchecked in Settings → Media Servers and must be enabled and saved before they're used across the app.
+
 ## [0.10.2] - 2026-07-06
 ### Changed
 - Border Replacer: reworked the Plex Rules UI to be more user-friendly.
