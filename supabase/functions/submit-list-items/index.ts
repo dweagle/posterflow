@@ -107,6 +107,15 @@ const str = (v: unknown, max: number): string | null => {
 const int = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null
 
+// Community list items store the short style tag ('CL2K' / 'MM2K'). Requests keep
+// the 'CL2K Style' form (notify-discord maps that exact string to a Discord forum
+// tag), so a client may send either — strip a trailing " Style" so the list is
+// uniform regardless of which flow published the item.
+const styleTag = (v: unknown): string | null => {
+  const s = str(v, 40)
+  return s ? s.replace(/\s+Style$/i, '') : s
+}
+
 interface NormalizedItem {
   tmdb_id: number | null
   media_type: string
@@ -135,7 +144,7 @@ function normalizeItem(raw: Record<string, unknown>): NormalizedItem | null {
     poster_path: str(raw.poster_path, 500),
     imdb_id: str(raw.imdb_id, 20),
     tvdb_id: int(raw.tvdb_id),
-    style_tag: str(raw.style_tag, 40),
+    style_tag: styleTag(raw.style_tag),
     source,
     notes: str(raw.notes, 1000),
   }
