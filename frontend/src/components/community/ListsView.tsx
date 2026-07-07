@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, Search, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload } from 'lucide-react'
+import { RefreshCw, Globe, Search, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/makerTools'
@@ -9,6 +9,7 @@ import { useUnmatched } from '../../contexts/UnmatchedContext'
 import { useToast } from '../Toast'
 import { derivePsdConfig, EMPTY_PSD_CONFIG, type PsdConfig } from '../maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from './RequestItemCard'
+import MoveToRequestModal, { type MoveToRequestValues } from './MoveToRequestModal'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 
@@ -16,6 +17,17 @@ type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
 type SortOrder = 'newest' | 'oldest'
 
 const PAGE_SIZE = 50
+
+// "No MM2K" hides MM2K-style items. Persisted so the filter sticks across
+// navigation and reloads (mirrors the Requests tab's sticky Claimed filter).
+const NO_MM2K_STORAGE_KEY = 'posterflow.communityLists.noMm2k'
+function loadNoMm2kFilter(): boolean {
+  try {
+    return localStorage.getItem(NO_MM2K_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -40,11 +52,10 @@ function seasonLabels(item: CommunityListItem): string[] {
   return []
 }
 
-// Map a list item onto a full poster-request payload. The two share a field
-// shape (both were published from the same sources), so this is a straight
-// carry-over — season encoding ("Seasons: 1,2,3" in notes / a single
-// season_number) rides along unchanged, exactly as the request modal builds it.
-function toRequestPayload(item: CommunityListItem, token: string): SubmitRequestPayload {
+// Map a list item onto a full poster-request payload. The item's identity fields
+// carry over unchanged; style, notes and ping come from the Move-to-Request modal
+// (season encoding "Seasons: 1,2,3" is preserved inside the modal's notes value).
+function toRequestPayload(item: CommunityListItem, token: string, values: MoveToRequestValues): SubmitRequestPayload {
   return {
     tmdb_id: item.tmdb_id,
     media_type: item.media_type,
@@ -54,8 +65,9 @@ function toRequestPayload(item: CommunityListItem, token: string): SubmitRequest
     poster_path: item.poster_path,
     imdb_id: item.imdb_id,
     tvdb_id: item.tvdb_id,
-    notes: item.notes,
-    style_tags: item.style_tag ? [item.style_tag] : undefined,
+    notes: values.notes,
+    style_tags: values.styleTags.length ? values.styleTags : undefined,
+    ping_discord_id: values.pingDiscordId,
     // requested_by is left to the edge function (the connected user's Discord name).
     discord_token: token,
   }
@@ -79,6 +91,7 @@ export default function ListsView() {
   const [ownerLabel, setOwnerLabel] = useState('')                // remembered name of the selected wanter
   const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
   const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed items
+  const [noMm2k, setNoMm2k] = useState<boolean>(() => loadNoMm2kFilter())  // hide MM2K-style items; sticks across navigation
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   const [searchInput, setSearchInput] = useState('')   // raw input box value
   const [search, setSearch] = useState('')             // debounced value sent to the API
@@ -107,6 +120,14 @@ export default function ListsView() {
   useEffect(() => {
     getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => {})
   }, [])
+
+  // Persist the No MM2K filter so it stays set across navigation and reloads.
+  useEffect(() => {
+    try {
+      if (noMm2k) localStorage.setItem(NO_MM2K_STORAGE_KEY, '1')
+      else localStorage.removeItem(NO_MM2K_STORAGE_KEY)
+    } catch { /* storage unavailable; skip persistence */ }
+  }, [noMm2k])
 
   // Build the query for one page at `offset` from the current filters.
   const buildParams = useCallback((offset: number): Record<string, string> => {
@@ -314,7 +335,7 @@ export default function ListsView() {
   // Move a list item to a full community request: post it via the real request
   // route, then remove it from the list. The cross-sync (direction A) may have
   // already removed the publisher's copy server-side, so tolerate "already gone".
-  const handleMoveToRequest = useCallback(async () => {
+  const handleMoveToRequest = useCallback(async (values: MoveToRequestValues) => {
     if (!moveTarget) return
     if (!token) { login(); return }
     const item = moveTarget
@@ -326,7 +347,7 @@ export default function ListsView() {
       void refreshCommunityRequestCount()
     }
     try {
-      const result = await submitCommunityRequest(toRequestPayload(item, token))
+      const result = await submitCommunityRequest(toRequestPayload(item, token, values))
       try { await updateListItem(item.id, 'remove') } catch { /* may already be removed by cross-sync */ }
       drop()
       showToast(
@@ -414,12 +435,18 @@ export default function ListsView() {
     setOwnerLabel('')
     setStatusFilter('active')
     setClaimedByMe(false)
+    setNoMm2k(false)
   }, [])
 
   // A search or any non-default filter "narrows" the view. While narrowed we keep
   // the search/header mounted even at zero results, so the search box can't vanish
   // mid-search and the input keeps focus (no flashing on result changes).
-  const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe
+  const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe || noMm2k
+
+  // "No MM2K" hides MM2K-style items from the loaded page (client-side view filter).
+  const visibleItems = noMm2k
+    ? items.filter((i) => getStyleLabel(i.style_tag ? [i.style_tag] : null) !== 'MM2K')
+    : items
 
   return (
     <>
@@ -467,13 +494,14 @@ export default function ListsView() {
               ))}
             </select>
           </div>
-          <div className="community-filter-group">
-            <label>Sort</label>
-            <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-          </div>
+          <button
+            className="community-tab-btn community-sort-btn"
+            onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+            title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
+            aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+          >
+            {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+          </button>
           {isMaker && (
             <button
               className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
@@ -481,6 +509,15 @@ export default function ListsView() {
               title="Show only the items you've claimed"
             >
               Claimed
+            </button>
+          )}
+          {isMaker && (
+            <button
+              className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
+              onClick={() => setNoMm2k((v) => !v)}
+              title="Hide MM2K-style items — stays set when you navigate away and back"
+            >
+              No MM2K
             </button>
           )}
         </div>
@@ -582,7 +619,7 @@ export default function ListsView() {
               <span>Loading lists…</span>
             </div>
           )}
-          {!loading && items.length === 0 && (
+          {!loading && visibleItems.length === 0 && (
             <div className="community-empty">
               <Globe size={48} />
               <p>No items match your search or filters</p>
@@ -593,7 +630,7 @@ export default function ListsView() {
             </div>
           )}
 
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const showMakerTools = isMaker && isConnected && item.tmdb_id != null
             const as_ = actionStates.get(item.id)
             const actionLoading = as_ === 'loading'
@@ -827,26 +864,12 @@ export default function ListsView() {
       )}
 
       {moveTarget && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !moving) setMoveTarget(null) }}>
-          <div className="modal-content schedule-modal" style={{ maxWidth: '420px' }}>
-            <div className="modal-header">
-              <h2>Move to a Community Request?</h2>
-              <button className="modal-close" onClick={() => setMoveTarget(null)} disabled={moving}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ margin: 0 }}>
-                <strong>{moveTarget.title}{moveTarget.year ? ` (${moveTarget.year})` : ''}</strong> will be posted as a community poster request — with a Discord thread makers can claim — and removed from this list.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setMoveTarget(null)} disabled={moving}>Cancel</button>
-              <button className="btn-primary" onClick={handleMoveToRequest} disabled={moving}>
-                {moving ? <Loader2 size={13} className="spin-icon" /> : <Send size={13} />}
-                {' '}Move to Request
-              </button>
-            </div>
-          </div>
-        </div>
+        <MoveToRequestModal
+          item={moveTarget}
+          submitting={moving}
+          onCancel={() => setMoveTarget(null)}
+          onConfirm={handleMoveToRequest}
+        />
       )}
     </>
   )

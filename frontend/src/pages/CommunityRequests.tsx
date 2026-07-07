@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
@@ -26,6 +26,17 @@ const CLAIMED_STORAGE_KEY = 'posterflow.communityRequests.claimed'
 function loadClaimedFilter(): boolean {
   try {
     return localStorage.getItem(CLAIMED_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+// "No MM2K" hides MM2K-style requests. Persisted the same way as Claimed so the
+// filter stays set across navigation and reloads.
+const NO_MM2K_STORAGE_KEY = 'posterflow.communityRequests.noMm2k'
+function loadNoMm2kFilter(): boolean {
+  try {
+    return localStorage.getItem(NO_MM2K_STORAGE_KEY) === '1'
   } catch {
     return false
   }
@@ -73,6 +84,8 @@ export default function CommunityRequests() {
   // maker-only: my claims + open requests. Persists across navigation while on
   // (lazy-inits from storage; see loadClaimedFilter).
   const [claimedByMe, setClaimedByMe] = useState<boolean>(() => loadClaimedFilter())
+  // Hide MM2K-style requests. Persists across navigation like the Claimed filter.
+  const [noMm2k, setNoMm2k] = useState<boolean>(() => loadNoMm2kFilter())
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   // Separate from the status/sort filters: show all requests or only the connected user's own.
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
@@ -121,6 +134,14 @@ export default function CommunityRequests() {
       else localStorage.removeItem(CLAIMED_STORAGE_KEY)
     } catch { /* storage unavailable; skip persistence */ }
   }, [claimedByMe])
+
+  // Persist the No MM2K filter alongside Claimed so it survives navigation/reloads.
+  useEffect(() => {
+    try {
+      if (noMm2k) localStorage.setItem(NO_MM2K_STORAGE_KEY, '1')
+      else localStorage.removeItem(NO_MM2K_STORAGE_KEY)
+    } catch { /* storage unavailable; skip persistence */ }
+  }, [noMm2k])
 
   // Fetch poster availability whenever the visible request list changes
   useEffect(() => {
@@ -364,6 +385,10 @@ export default function CommunityRequests() {
   if (ownerFilter === 'mine' && discordUserId) {
     visibleRequests = visibleRequests.filter((req) => req.requested_by_discord_id === discordUserId)
   }
+  // "No MM2K" hides MM2K-style requests.
+  if (noMm2k) {
+    visibleRequests = visibleRequests.filter((req) => getStyleLabel(req.style_tags) !== 'MM2K')
+  }
 
   return (
     <>
@@ -492,13 +517,14 @@ export default function CommunityRequests() {
               <option value="rejected">Rejected</option>
             </select>
           </div>
-          <div className="community-filter-group">
-            <label>Sort</label>
-            <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-          </div>
+          <button
+            className="community-tab-btn community-sort-btn"
+            onClick={() => setSortOrder((o) => (o === 'newest' ? 'oldest' : 'newest'))}
+            title={sortOrder === 'newest' ? 'Newest first — click to show oldest first' : 'Oldest first — click to show newest first'}
+            aria-label={sortOrder === 'newest' ? 'Sorted newest first' : 'Sorted oldest first'}
+          >
+            {sortOrder === 'newest' ? <CalendarArrowDown size={16} /> : <CalendarArrowUp size={16} />}
+          </button>
           {isMaker && (
             <button
               className={`community-tab-btn community-claimed-btn${claimedByMe ? ' active' : ''}`}
@@ -506,6 +532,15 @@ export default function CommunityRequests() {
               title="Show your claims (on top) plus open requests — stays set when you navigate away and back"
             >
               Claimed
+            </button>
+          )}
+          {isMaker && (
+            <button
+              className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
+              onClick={() => setNoMm2k((v) => !v)}
+              title="Hide MM2K-style requests — stays set when you navigate away and back"
+            >
+              No MM2K
             </button>
           )}
         </div>

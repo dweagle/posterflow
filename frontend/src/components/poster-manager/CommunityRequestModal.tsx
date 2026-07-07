@@ -4,33 +4,15 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle } from '../community/posterStyles'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
-
-// Required, single-select community poster style. The stored tag values keep the
-// "… Style" suffix for consistency with existing requests; the card derives the badge from them.
-const POSTER_STYLES: { value: string; label: string }[] = [
-  { value: 'CL2K Style', label: 'CL2K' },
-  { value: 'MM2K Style', label: 'MM2K' },
-]
-
-// Optional extra style preferences (multi-select)
-const EXTRA_TAGS = [
-  'Anime Movie',
-  'Anime TV',
-]
 
 function getTmdbLink(candidate: TmdbCandidate): string {
   if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
   if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
   if (candidate.media_type === 'person') return `https://www.themoviedb.org/person/${candidate.tmdb_id}`
   return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
-}
-
-/** Validate that a string is a plausible Discord username (2–32 non-whitespace chars, no @everyone/@here) */
-function isValidDiscordUsername(value: string): boolean {
-  const v = value.trim()
-  return v.length >= 2 && v.length <= 32 && !/^@?(everyone|here)$/i.test(v)
 }
 
 type CommunityRequestModalProps = {
@@ -65,7 +47,8 @@ export default function CommunityRequestModal({
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<TmdbCandidate | null>(null)
   const [isCustomRequest, setIsCustomRequest] = useState(false)
-  const [posterStyle, setPosterStyle] = useState<string | null>(null)
+  // Seed from the remembered CL2K/MM2K choice so it sticks between requests.
+  const [posterStyle, setPosterStyle] = useState<string | null>(getStoredPosterStyle)
   const [extraTags, setExtraTags] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [pingDiscordId, setPingDiscordId] = useState('')
@@ -328,7 +311,11 @@ export default function CommunityRequestModal({
                 key={s.value}
                 type="button"
                 className={`request-style-tag${posterStyle === s.value ? ' selected' : ''}`}
-                onClick={() => setPosterStyle((prev) => (prev === s.value ? null : s.value))}
+                onClick={() => setPosterStyle((prev) => {
+                  const next = prev === s.value ? null : s.value
+                  if (next) setStoredPosterStyle(next)
+                  return next
+                })}
               >
                 {s.label}
               </button>

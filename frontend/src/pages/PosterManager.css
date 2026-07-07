@@ -5407,6 +5407,75 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   font-size: 0.85rem;
 }
 
+/* Required CL2K/MM2K style toggle shown beside the publish actions (Unmatched
+   footer + Create List picker). Keeps the publish buttons grouped to the right. */
+.publish-style-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: auto;
+}
+
+.publish-style-toggle-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.publish-style-toggle-options {
+  display: inline-flex;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.publish-style-toggle-btn {
+  padding: 0.4rem 0.75rem;
+  background: #2a2a2a;
+  border: none;
+  color: #ccc;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.publish-style-toggle-btn + .publish-style-toggle-btn {
+  border-left: 1px solid #424242;
+}
+
+.publish-style-toggle-btn:hover:not(.selected):not(:disabled) {
+  color: #64b5f6;
+}
+
+.publish-style-toggle-btn.selected {
+  background: #64b5f626;
+  color: #64b5f6;
+}
+
+.publish-style-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* These two footers hold the style toggle plus the action buttons. The toggle's
+   margin-right:auto pushes the buttons to the right; keep them at a fixed content
+   size, vertically centered and compact, so nothing stretches into tall blocks.
+   Buttons wrap individually on narrow widths. */
+.list-items-modal .modal-footer,
+.create-list-modal .modal-footer {
+  align-items: center;
+  gap: 0.6rem 0.75rem;
+}
+.list-items-modal .modal-footer button,
+.create-list-modal .modal-footer button {
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+  white-space: nowrap;
+}
+
 /* Border style + overlay frame controls */
 .border-overlay-row {
   display: flex;

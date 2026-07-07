@@ -183,6 +183,15 @@
   color: #64b5f6;
 }
 
+/* Sort direction toggle — a compact icon button that replaces the Newest/Oldest
+   dropdown to keep the toolbar uncluttered. */
+.community-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.5rem;
+}
+
 .community-filters {
   display: flex;
   flex-wrap: wrap;
@@ -202,6 +211,20 @@
   background: rgba(244, 67, 54, 0.22);
   border-color: rgba(244, 67, 54, 0.6);
   color: #ff8a80;
+}
+
+/* No MM2K on lights up orange (its own accent, distinct from the blue active
+   tint and the red Claimed cue). Also stays set across navigation while on. */
+.community-nomm2k-btn.active {
+  background: rgba(255, 152, 0, 0.15);
+  border-color: rgba(255, 152, 0, 0.45);
+  color: #ffb74d;
+}
+
+.community-nomm2k-btn.active:hover {
+  background: rgba(255, 152, 0, 0.22);
+  border-color: rgba(255, 152, 0, 0.6);
+  color: #ffa726;
 }
 
 .community-filter-group {

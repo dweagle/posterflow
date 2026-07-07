@@ -288,7 +288,7 @@ function PosterManager() {
     return percent.toFixed(1)
   }
 
-  const { downloadUnmatchedList, downloadCompleteReport } = usePosterManagerUnmatchedReports({
+  const { downloadCompleteReport } = usePosterManagerUnmatchedReports({
     unmatchedStats,
     showToast,
   })
@@ -517,7 +517,6 @@ function PosterManager() {
           modalDisplayLimit={MODAL_DISPLAY_LIMIT}
           tmdbApiKeyConfigured={tmdbApiKeyConfigured}
           onClose={() => setShowUnmatchedModal(null)}
-          onDownloadList={downloadUnmatchedList}
         />
       )}
 

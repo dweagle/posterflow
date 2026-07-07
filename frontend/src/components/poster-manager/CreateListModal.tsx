@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { MouseEvent } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { ListPlus, Loader2, Search, X, Check } from 'lucide-react'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
@@ -32,6 +32,10 @@ type CreateListModalProps = {
   // The parent maps the selected keys to ListItemInputs and publishes them.
   onAdd: (selectedKeys: string[]) => void
   onClose: () => void
+  // Optional footer control (the required-style toggle). When `canAdd` is false
+  // the publish button stays disabled — the parent uses this to require a style.
+  styleControl?: ReactNode
+  canAdd?: boolean
 }
 
 /**
@@ -41,7 +45,7 @@ type CreateListModalProps = {
  * onAdd that turns the chosen keys into list items. Starts with nothing
  * selected so the user picks exactly what to publish.
  */
-export default function CreateListModal({ items, submitting, onAdd, onClose }: CreateListModalProps) {
+export default function CreateListModal({ items, submitting, onAdd, onClose, styleControl, canAdd = true }: CreateListModalProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [query, setQuery] = useState('')
   const [prefs, setPrefs] = useSortPrefs('createListSort')
@@ -167,8 +171,14 @@ export default function CreateListModal({ items, submitting, onAdd, onClose }: C
         </div>
 
         <div className="modal-footer">
+          {styleControl}
           <button className="btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button className="btn-primary" onClick={() => onAdd([...selected])} disabled={submitting || count === 0}>
+          <button
+            className="btn-primary"
+            onClick={() => onAdd([...selected])}
+            disabled={submitting || count === 0 || !canAdd}
+            title={!canAdd ? 'Select a poster style (CL2K or MM2K)' : undefined}
+          >
             {submitting ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
             {' '}Add {count} to Lists
           </button>

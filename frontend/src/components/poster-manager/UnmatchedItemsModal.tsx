@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, Download, ExternalLink, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
@@ -11,6 +11,8 @@ import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
 import CreateListModal, { type SelectableListItem } from './CreateListModal'
+import PublishStyleToggle from './PublishStyleToggle'
+import { usePersistedPosterStyle } from '../community/posterStyles'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 
@@ -41,7 +43,6 @@ type UnmatchedItemsModalProps = {
   modalDisplayLimit: number
   tmdbApiKeyConfigured: boolean
   onClose: () => void
-  onDownloadList: (type: Exclude<UnmatchedModalType, null | 'all'>) => void
 }
 
 function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
@@ -177,7 +178,6 @@ function UnmatchedItemsModal({
   modalDisplayLimit,
   tmdbApiKeyConfigured,
   onClose,
-  onDownloadList,
 }: UnmatchedItemsModalProps) {
   const { showToast } = useToast()
   const { isConnected, token, login } = useDiscordAuth()
@@ -194,6 +194,10 @@ function UnmatchedItemsModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [requestItem, setRequestItem] = useState<NormalizedItem | null>(null)
   const [createListOpen, setCreateListOpen] = useState(false)
+  // Required CL2K/MM2K style stamped on published items; shared by both publish
+  // paths (the footer's "Add All" and the Create List picker) and remembered in
+  // localStorage so the choice sticks across modal opens and reloads.
+  const [publishStyle, setPublishStyle] = usePersistedPosterStyle()
 
   const handleOverlayClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose()
@@ -348,18 +352,22 @@ function UnmatchedItemsModal({
     : searchedItems
   const sortedItems = sortItems(groupFilteredItems, prefs)
 
-  // Publish the current (filtered) list to the community Lists tab for makers to work from.
-  const handleAddToLists = async () => {
+  // Stamp the required style on the items and publish them to the community Lists tab.
+  const publishWithStyle = async (inputs: ListItemInput[], onDone?: () => void) => {
     if (!isConnected || !token) { login(); return }
-    const inputs = sortedItems.map(toListInput)
-    if (!inputs.length) return
+    if (!publishStyle || !inputs.length) return
+    const styled = inputs.map((i) => ({ ...i, style_tag: publishStyle }))
     setPublishing(true)
     try {
-      await publishToCommunityLists(inputs, token, showToast)
+      await publishToCommunityLists(styled, token, showToast)
+      onDone?.()
     } finally {
       setPublishing(false)
     }
   }
+
+  // Publish the current (filtered) list to the community Lists tab for makers to work from.
+  const handleAddToLists = () => publishWithStyle(sortedItems.map(toListInput))
 
   // Create List: rows for the picker (all items of this view), and a publish
   // handler that turns the chosen keys back into list inputs.
@@ -378,18 +386,11 @@ function UnmatchedItemsModal({
     available: item.available,
   }))
 
-  const handleCreateListAdd = async (keys: string[]) => {
-    if (!isConnected || !token) { login(); return }
+  const handleCreateListAdd = (keys: string[]) => {
     const set = new Set(keys)
     const inputs = allItems.filter((i) => set.has(itemKey(i))).map(toListInput)
-    if (!inputs.length) return
-    setPublishing(true)
-    try {
-      await publishToCommunityLists(inputs, token, showToast)
-      setCreateListOpen(false)
-    } finally {
-      setPublishing(false)
-    }
+    // The picker's Add button is gated on the required style; publish and close on success.
+    void publishWithStyle(inputs, () => setCreateListOpen(false))
   }
 
   // Only cap the rendered count when not searching (search results show in full).
@@ -618,12 +619,19 @@ function UnmatchedItemsModal({
         </div>
 
         <div className="modal-footer">
+          {isConnected && (
+            <PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />
+          )}
           <button className="btn-secondary" onClick={onClose}>Close</button>
           <button
             className="btn-secondary"
             onClick={handleAddToLists}
-            disabled={publishing || sortedItems.length === 0}
-            title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
+            disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
+            title={
+              !isConnected ? 'Connect Discord to publish to Community Lists'
+              : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
+              : 'Publish these items to the Community Lists tab for makers'
+            }
           >
             {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
             Add All to List
@@ -637,12 +645,6 @@ function UnmatchedItemsModal({
             <ListChecks size={16} />
             Create List
           </button>
-          {modalType !== 'all' && (
-            <button className="btn-primary" onClick={() => onDownloadList(modalType!)} title="Download full list as text file">
-              <Download size={16} />
-              Download List
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -679,6 +681,8 @@ function UnmatchedItemsModal({
         submitting={publishing}
         onAdd={handleCreateListAdd}
         onClose={() => setCreateListOpen(false)}
+        styleControl={<PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />}
+        canAdd={!!publishStyle}
       />
     )}
     </>
