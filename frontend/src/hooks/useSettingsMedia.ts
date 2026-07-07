@@ -174,10 +174,19 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
       const data = await getPlexLibraries(instance.url, instance.api_key)
       const existingConfig = libraryConfigs.find(c => c.instance_name === instance.name)
 
+      // Safety guard
+      if (data.libraries.length === 0 && existingConfig && existingConfig.libraries.length > 0) {
+        showToast('Plex returned no libraries — check the connection before updating. Your saved libraries were left unchanged.', 'error')
+        setShowLibraryModal(false)
+        return
+      }
+
       if (existingConfig) {
         const mergedLibraries = data.libraries.map(lib => {
           const existingLib = existingConfig.libraries.find(el => el.key === lib.key)
-          return existingLib ? existingLib : { ...lib, enabled: true }
+          // Newly-detected libraries (not in saved config) default to unchecked so the user
+          // can see they aren't saved as available yet until they enable them and Save.
+          return existingLib ? existingLib : { ...lib, enabled: false }
         })
         setLibraries(mergedLibraries)
       } else {
