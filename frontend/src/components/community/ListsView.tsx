@@ -7,7 +7,7 @@ import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 import { useUnmatched } from '../../contexts/UnmatchedContext'
 import { useToast } from '../Toast'
-import { derivePsdConfig, type PsdConfig } from '../maker-tools/TmdbItemCard'
+import { derivePsdConfig, EMPTY_PSD_CONFIG, type PsdConfig } from '../maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from './RequestItemCard'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
@@ -87,7 +87,7 @@ export default function ListsView() {
   // Per-card action state: itemId → 'loading' | error string
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)

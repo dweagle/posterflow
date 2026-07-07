@@ -1649,6 +1649,56 @@
   margin-left: auto;
 }
 
+/* Export style picker (CL2K / MM2K) — defaults to the request's style, overridable per export */
+.tmdb-psd-style-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.tmdb-psd-style-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  background: #252525;
+  border: none;
+  color: #888;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tmdb-psd-style-opt + .tmdb-psd-style-opt {
+  border-left: 1px solid #3a3a3a;
+}
+
+.tmdb-psd-style-opt:hover:not(:disabled) {
+  color: #ccc;
+}
+
+.tmdb-psd-style-opt.active {
+  background: rgba(100, 181, 246, 0.14);
+  color: #64b5f6;
+}
+
+.tmdb-psd-style-opt:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Small dot marking which style the request actually asked for (stays visible when overridden) */
+.tmdb-psd-style-req {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
 .tmdb-psd-export-btn {
   display: inline-flex;
   align-items: center;

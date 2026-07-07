@@ -26,8 +26,10 @@ from api.maker_tools import (
     _measure_logo_density,
     _parse_bool,
     _parse_iso_date,
+    _normalize_psd_style,
     _parse_non_negative_int,
     _parse_positive_int,
+    _resolve_new_export_template,
     _sanitize_drive_ids,
     _sanitize_monitor_config,
     compute_logo_geometry,
@@ -1073,6 +1075,126 @@ def test_psd_export_strips_leading_dots_so_file_isnt_hidden(client, test_db):
     filename = response.json()["filename"]
     assert not filename.startswith("."), f"Filename is hidden: {filename}"
     assert filename.startswith("And Then")
+
+
+# ---------------------------------------------------------------------------
+# Per-style (CL2K / MM2K) routing
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_psd_style_defaults_to_cl2k():
+    assert _normalize_psd_style("") == "CL2K"
+    assert _normalize_psd_style(None) == "CL2K"
+    assert _normalize_psd_style("CL2K") == "CL2K"
+    assert _normalize_psd_style("something else") == "CL2K"
+
+
+def test_normalize_psd_style_detects_mm2k():
+    # Accepts the bare style and the community "… Style" tag form, case-insensitively.
+    assert _normalize_psd_style("MM2K") == "MM2K"
+    assert _normalize_psd_style("mm2k") == "MM2K"
+    assert _normalize_psd_style("MM2K Style") == "MM2K"
+
+
+def test_resolve_new_export_template_uses_mm2k_setting(test_db):
+    """An MM2K export prefers the psd_template_path_mm2k setting over the CL2K one."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cl2k_tpl = Path(tmpdir) / "cl2k.psd"
+        mm2k_tpl = Path(tmpdir) / "mm2k.psd"
+        cl2k_tpl.write_bytes(b"CL2K")
+        mm2k_tpl.write_bytes(b"MM2K")
+        test_db.add(Setting(key="psd_template_path", value=str(cl2k_tpl)))
+        test_db.add(Setting(key="psd_template_path_mm2k", value=str(mm2k_tpl)))
+        test_db.commit()
+
+        assert _resolve_new_export_template(test_db, "CL2K") == cl2k_tpl
+        assert _resolve_new_export_template(test_db, "MM2K") == mm2k_tpl
+        # Blank/unknown style falls back to CL2K.
+        assert _resolve_new_export_template(test_db, "") == cl2k_tpl
+
+
+def test_psd_export_mm2k_saves_to_mm2k_folder(client, test_db):
+    """style=MM2K → the file lands in psd_export_folder_mm2k; the CL2K folder is untouched."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+
+    with tempfile.TemporaryDirectory() as cl2k_dir, tempfile.TemporaryDirectory() as mm2k_dir:
+        test_db.add(Setting(key="psd_export_folder", value=cl2k_dir))
+        test_db.add(Setting(key="psd_export_folder_mm2k", value=mm2k_dir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "style": "MM2K", "poster_paths": ["/p1.jpg"]},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["style"] == "MM2K"
+        assert "style=MM2K" in data["psd_url"]
+        filename = data["filename"]
+        assert (Path(mm2k_dir) / filename).is_file(), "PSD should be saved in the MM2K folder"
+        assert not (Path(cl2k_dir) / filename).exists(), "CL2K folder must be untouched"
+
+
+def test_psd_export_default_style_saves_to_cl2k_folder(client, test_db):
+    """No style (and style=CL2K) still uses the existing psd_export_folder — back-compat."""
+    _seed_tmdb_key(test_db)
+    poster_bytes = _make_jpeg_bytes(20, 30)
+
+    with tempfile.TemporaryDirectory() as cl2k_dir, tempfile.TemporaryDirectory() as mm2k_dir:
+        test_db.add(Setting(key="psd_export_folder", value=cl2k_dir))
+        test_db.add(Setting(key="psd_export_folder_mm2k", value=mm2k_dir))
+        test_db.commit()
+
+        with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
+             patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "poster_paths": ["/p1.jpg"]},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["style"] == "CL2K"
+        filename = data["filename"]
+        assert (Path(cl2k_dir) / filename).is_file(), "PSD should be saved in the CL2K folder"
+        assert not (Path(mm2k_dir) / filename).exists(), "MM2K folder must be untouched"
+
+
+def test_serve_psd_export_reads_from_style_folder(client, test_db):
+    """?style=MM2K serves from the MM2K folder even when a CL2K folder is also set."""
+    with tempfile.TemporaryDirectory() as cl2k_dir, tempfile.TemporaryDirectory() as mm2k_dir:
+        (Path(mm2k_dir) / "Show (2026).psd").write_bytes(b"MM2KPSD")
+        test_db.add(Setting(key="psd_export_folder", value=cl2k_dir))
+        test_db.add(Setting(key="psd_export_folder_mm2k", value=mm2k_dir))
+        test_db.commit()
+
+        response = client.get("/api/maker-tools/psd-exports/Show (2026).psd?style=MM2K")
+
+    assert response.status_code == 200
+    assert response.content == b"MM2KPSD"
+
+
+def test_save_image_export_mm2k_writes_to_mm2k_folder(client, test_db):
+    """PUT /image-exports/{name}?style=MM2K writes to psd_image_export_folder_mm2k."""
+    with tempfile.TemporaryDirectory() as cl2k_dir, tempfile.TemporaryDirectory() as mm2k_dir:
+        test_db.add(Setting(key="psd_image_export_folder", value=cl2k_dir))
+        test_db.add(Setting(key="psd_image_export_folder_mm2k", value=mm2k_dir))
+        test_db.commit()
+
+        response = client.put(
+            "/api/maker-tools/image-exports/Show (2026).jpg",
+            params={"style": "MM2K"},
+            content=b"JPGBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+        assert response.status_code == 200
+        assert (Path(mm2k_dir) / "Show (2026).jpg").is_file()
+        assert not (Path(cl2k_dir) / "Show (2026).jpg").exists()
 
 
 # ---------------------------------------------------------------------------

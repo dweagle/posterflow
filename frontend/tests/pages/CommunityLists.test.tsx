@@ -34,7 +34,16 @@ vi.mock('../../src/contexts/UnmatchedContext', () => ({
 // Heavy leaf — not needed for these behaviours.
 vi.mock('../../src/components/maker-tools/TmdbItemCard', () => ({
   default: () => null,
-  derivePsdConfig: () => ({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' }),
+  EMPTY_PSD_CONFIG: {
+    exportFolder: '', templatePath: '', imageExportFolder: '',
+    exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
+    openPhotopea: false,
+  },
+  derivePsdConfig: () => ({
+    exportFolder: '', templatePath: '', imageExportFolder: '',
+    exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
+    openPhotopea: false,
+  }),
 }))
 
 vi.mock('../../src/api/community', () => ({

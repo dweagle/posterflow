@@ -30,8 +30,9 @@
   .title { font-weight: 600; flex: 1; }
   .btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px; padding: 3px 7px; font-size: 12px; line-height: 1.4; }
   .btn:hover { background: #4a4a54; }
-  .singles { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
-  .singles.hidden { display: none; }
+  .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
+  .singles.hidden, .sequels.hidden { display: none; }
+  .rowlabel { color: #9aa; margin-right: 2px; }
   .tools { display: flex; gap: 5px; padding: 6px; border-bottom: 1px solid #3a3a42; }
   .tools .btn { flex: 1; }
   .list { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; overflow-y: auto; padding: 8px; flex: 1; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
@@ -60,6 +61,7 @@
     <button class="btn" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</button>
   </div>
   <div class="singles hidden"></div>
+  <div class="sequels hidden"></div>
   <div class="list"><div class="msg">Loading…</div></div>
 
 <script>
@@ -68,12 +70,13 @@
 
   const PP      = window.parent;                 // top-level Photopea hosts this panel
   const singles = document.querySelector('.singles');
+  const sequels = document.querySelector('.sequels');
   const list    = document.querySelector('.list');
   const saveBtn = document.querySelector('[data-act="save"]');
   const jpgBtn  = document.querySelector('[data-act="jpg"]');
   const logoBtn = document.querySelector('[data-act="logo"]');
   const fitBtn  = document.querySelector('[data-act="fit"]');
-  let model = { singles: [], seasons: [] };
+  let model = { singles: [], seasons: [], sequels: [] };
   let saving = false, jpgBusy = false;
   let placeBusy = false, pendingMode = '';  // Place Logo / Fit Poster state
   let placeBtn = null, placeLabel = '', placeWatch = null, pendingRes = null;  // in-flight button + watchdog + target geom
@@ -82,7 +85,8 @@
 
   // ---- config from this page's query string (set by openPhotopeaWithPsd) ----
   const q   = new URLSearchParams(location.search);
-  const cfg = { save: q.get('save') || '', name: q.get('name') || '' };
+  // style (CL2K/MM2K) routes the JPG export to the matching folder; cfg.save already carries it.
+  const cfg = { save: q.get('save') || '', name: q.get('name') || '', style: q.get('style') || '' };
 
   // Posterflow API auth: the panel is same-origin to Posterflow, so its token (if a
   // password is set) is in our localStorage.
@@ -121,8 +125,19 @@
       }
       var root=find(d.layers,[]);
       if(root){walk(root.L,root.p,'main',true);}
+
+      // SEQUEL group: a flat top-level group unique to the MM2K template (SEQUEL 1..N).
+      // Absent on CL2K → sequels stays empty. Each numbered leaf becomes a toggle chip.
+      var sequels=[];
+      function findSeq(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);
+        if(L.typename=='LayerSet'&&/^\\s*sequels?\\s*$/i.test(L.name))return {L:L,p:here};
+        if(L.typename=='LayerSet'){var f=findSeq(L.layers,here);if(f)return f;}}return null;}
+      var sq=findSeq(d.layers,[]);
+      if(sq){var gv=sq.L.visible;for(var i=0;i<sq.L.layers.length;i++){var c=sq.L.layers[i];
+        if(c.typename!='LayerSet'){sequels.push({n:c.name,p:sq.p.concat(i),v:(gv&&c.visible)});}}}
+
       app.echoToOE('PFLNAME:'+app.activeDocument.name);
-      app.echoToOE('PFL:'+JSON.stringify({singles:singles,seasons:seasons}));
+      app.echoToOE('PFL:'+JSON.stringify({singles:singles,seasons:seasons,sequels:sequels}));
     }
   }catch(e){app.echoToOE('PFLERR:'+e);}`;
 
@@ -142,9 +157,17 @@
     if (r.includes('-')) return 'S' + r.replace(/\s+/g, '');
     return r.replace(/\s+/g, '');
   };
+  // Sequel chip label: "SEQUEL 3" → "3" (the number is the whole point).
+  const seqLabel = (name) => { const m = name.match(/(\d+)/); return m ? m[1] : (name.replace(/sequels?/ig, '').trim() || 'S'); };
   const key = (p) => JSON.stringify(p);
-  const allNodes = () => model.singles.concat(model.seasons);
+  const seqs = () => model.sequels || [];
+  const allNodes = () => model.singles.concat(model.seasons).concat(seqs());
   const byRole = (r) => model.seasons.filter((n) => n.r === r);
+
+  // Hide every sequel leaf (+ the SEQUEL group) — used when a season/single is chosen so
+  // sequels stay mutually exclusive with everything else. No-ops on CL2K (no sequels).
+  const seqOff = () => seqs().map((sq) => ({ p: sq.p, v: false }));
+  const seqGroupOff = () => seqs().length ? [{ p: seqs()[0].p.slice(0, -1), v: false }] : [];
 
   const commit = (changes) => {
     setVis(changes);
@@ -163,6 +186,7 @@
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: key(dn.p) === parentKey }));
     byRole('season').forEach((sn) => { if (sn !== S) changes.push({ p: sn.p, v: false }); });
     model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    changes.push(...seqOff(), ...seqGroupOff());
     commit(changes);
   };
 
@@ -175,6 +199,20 @@
     model.singles.forEach((x) => { if (x !== SI) changes.push({ p: x.p, v: false }); });
     byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    changes.push(...seqOff(), ...seqGroupOff());
+    commit(changes);
+  };
+
+  // MM2K only: sequel badges (SEQUEL 1..N) — mutually exclusive with each other, seasons, and singles.
+  const clickSequel = (SQ) => {
+    if (SQ.v) { commit([{ p: SQ.p, v: false }, ...seqGroupOff()]); return; }
+    const changes = [{ p: SQ.p, v: true }];
+    for (let i = 1; i < SQ.p.length; i++) changes.push({ p: SQ.p.slice(0, i), v: true });  // reveal SEQUEL group
+    seqs().forEach((x) => { if (x !== SQ) changes.push({ p: x.p, v: false }); });
+    model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    if (main()) changes.push({ p: main().p, v: false });
+    byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
     commit(changes);
   };
 
@@ -185,6 +223,7 @@
     const changes = [];
     if (main()) changes.push({ p: main().p, v: true });
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: dn === D }));
+    changes.push(...seqOff(), ...seqGroupOff());
     commit(changes);
   };
 
@@ -206,8 +245,24 @@
     });
     singles.classList.toggle('hidden', model.singles.length === 0);
 
+    // Sequels (MM2K): a labelled row of numbered toggle chips, above the season list.
+    sequels.innerHTML = '';
+    if (seqs().length) {
+      const lbl = document.createElement('span');
+      lbl.className = 'rowlabel'; lbl.textContent = 'Sequel';
+      sequels.appendChild(lbl);
+      seqs().forEach((SQ) => {
+        const c = chip(seqLabel(SQ.n), SQ.v, false);
+        c.classList.add('num');
+        c.title = SQ.n;
+        c.addEventListener('click', () => clickSequel(SQ));
+        sequels.appendChild(c);
+      });
+    }
+    sequels.classList.toggle('hidden', seqs().length === 0);
+
     list.innerHTML = '';
-    if (!model.singles.length && !model.seasons.length) {
+    if (!model.singles.length && !model.seasons.length && !seqs().length) {
       list.innerHTML = '<div class="msg">No SEASONS / SPECIALS layers found. Press ⟳ once the PSD is open.</div>';
       return;
     }
@@ -298,8 +353,9 @@
       ? cfg.name
       : pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     const filename = base + activeSuffix() + '.jpg';
+    const styleQ = cfg.style ? '?style=' + encodeURIComponent(cfg.style) : '';
     try {
-      const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename), {
+      const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename) + styleQ, {
         method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -435,7 +491,7 @@
     const d = e.data;
     if (typeof d !== 'string') { onSaved(d); return; }   // ArrayBuffer = saveToOE result
     if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
-    else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); render(); } catch (_) {} }
+    else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
     else if (d.startsWith('PFLPLACED:')){ finishPlace(true); }
@@ -453,6 +509,9 @@
   window.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveDoc(); } });
 
   saveBtn.style.display = cfg.save ? '' : 'none';
+  // MM2K templates have no LOGO group (they use text titles), so Place Logo doesn't apply — hide it.
+  // Fit Poster stays (same 25px border, same 1000×1500 canvas).
+  if (cfg.style === 'MM2K') logoBtn.style.display = 'none';
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
 })();
 </script>

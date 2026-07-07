@@ -20,7 +20,7 @@ import {
   TmdbSearchResult,
   type TmdbSearchIds,
 } from '../api/client'
-import TmdbItemCard, { derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
+import TmdbItemCard, { derivePsdConfig, type PsdConfig } from '../components/maker-tools/TmdbItemCard'
 import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
 import { useToast } from '../components/Toast'
 import { useUnmatched } from '../contexts/UnmatchedContext'
@@ -89,12 +89,16 @@ function MakerTools() {
   const [tmdbHelpExpanded, setTmdbHelpExpanded] = useState(false)
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
-  // PSD export settings (used in config modal and passed to TmdbItemCard)
+  // PSD export settings (used in config modal and passed to TmdbItemCard).
+  // CL2K = the existing keys (default style); MM2K = the *_mm2k counterparts.
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
+  const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
+  const [psdExportFolderMm2k, setPsdExportFolderMm2k] = useState('')
+  const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
+  const [psdImageExportFolderMm2k, setPsdImageExportFolderMm2k] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
-  const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
 
@@ -170,8 +174,11 @@ function MakerTools() {
       const cfg = derivePsdConfig(settings)
       setPsdExportFolder(cfg.exportFolder)
       setPsdTemplatePath(cfg.templatePath)
-      setPsdOpenPhotopea(cfg.openPhotopea)
       setPsdImageExportFolder(cfg.imageExportFolder)
+      setPsdExportFolderMm2k(cfg.exportFolderMm2k)
+      setPsdTemplatePathMm2k(cfg.templatePathMm2k)
+      setPsdImageExportFolderMm2k(cfg.imageExportFolderMm2k)
+      setPsdOpenPhotopea(cfg.openPhotopea)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -222,9 +229,12 @@ function MakerTools() {
       await saveBulkSettings({
         psd_export_folder: psdExportFolder.trim(),
         psd_template_path: psdTemplatePath.trim(),
+        psd_image_export_folder: psdImageExportFolder.trim(),
+        psd_export_folder_mm2k: psdExportFolderMm2k.trim(),
+        psd_template_path_mm2k: psdTemplatePathMm2k.trim(),
+        psd_image_export_folder_mm2k: psdImageExportFolderMm2k.trim(),
         psd_open_photopea: String(psdOpenPhotopea),
         psd_poster_fit_border: String(psdPosterFitBorder),
-        psd_image_export_folder: psdImageExportFolder.trim(),
       })
       showToast('PSD settings saved', 'success')
       setShowPsdConfigModal(false)
@@ -320,6 +330,18 @@ function MakerTools() {
       .filter((drive) => !drive.is_deprecated)
       .sort((left, right) => left.name.localeCompare(right.name))
   }, [drives])
+
+  // Shared config passed to every maker card on this page (search / monitor / unmatched).
+  // These cards carry no style tag, so exports default to CL2K.
+  const psdConfig = useMemo<PsdConfig>(() => ({
+    exportFolder: psdExportFolder,
+    templatePath: psdTemplatePath,
+    imageExportFolder: psdImageExportFolder,
+    exportFolderMm2k: psdExportFolderMm2k,
+    templatePathMm2k: psdTemplatePathMm2k,
+    imageExportFolderMm2k: psdImageExportFolderMm2k,
+    openPhotopea: psdOpenPhotopea,
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))
@@ -630,7 +652,7 @@ function MakerTools() {
                           <div className="maker-card-panel">
                             <TmdbItemCard
                               item={{ tmdb_id: tmdbId, media_type: 'tv', title: show.name, year: show.first_air_year, overview: '', poster_url: show.poster_url || '', homepage: show.homepage, imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
-                              psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+                              psdConfig={psdConfig}
                               posterAvailability={posterAvailability[tmdbId]}
                               posterAvailabilityChecked={posterAvailabilityChecked}
                               hideTitle
@@ -714,7 +736,7 @@ function MakerTools() {
                           <div className="maker-card-panel">
                             <TmdbItemCard
                               item={{ tmdb_id: parsed.tmdb_id, media_type: parsed.media_type, title: item.name, year: item.date?.slice(0, 4) ?? '', overview: '', poster_url: item.poster_url || '', homepage: item.homepage, imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
-                              psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+                              psdConfig={psdConfig}
                               posterAvailability={posterAvailability[parsed.tmdb_id]}
                               posterAvailabilityChecked={posterAvailabilityChecked}
                               hideTitle
@@ -851,7 +873,7 @@ function MakerTools() {
                         item={item}
                         posterAvailability={posterAvailability[item.tmdb_id]}
                         posterAvailabilityChecked={posterAvailabilityChecked}
-                        psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+                        psdConfig={psdConfig}
                       />
                     ))}
                   </div>
@@ -864,7 +886,7 @@ function MakerTools() {
       {activeTab === 'unmatched' && (
         <UnmatchedMakerTab
           unmatchedStats={unmatchedStats}
-          psdConfig={{ exportFolder: psdExportFolder, templatePath: psdTemplatePath, openPhotopea: psdOpenPhotopea, imageExportFolder: psdImageExportFolder }}
+          psdConfig={psdConfig}
         />
       )}
 
@@ -877,11 +899,19 @@ function MakerTools() {
             </div>
             <div className="modal-body">
               <div className="maker-card">
+                <small className="muted" style={{ display: 'block', marginBottom: '0.75rem', lineHeight: 1.6 }}>
+                  Exports are routed by the request's poster style — a <strong>CL2K</strong> request uses the
+                  CL2K settings below, an <strong>MM2K</strong> request uses the MM2K settings. Plain TMDB
+                  searches (no style tag) default to <strong>CL2K</strong>. Any folder left blank falls back to
+                  a browser download for that style.
+                </small>
+
+                <div style={{ fontWeight: 600, margin: '0.25rem 0 0.5rem' }}>CL2K posters</div>
                 <label>
-                  PSD Export Folder
+                  CL2K PSD Export Folder
                   <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. When set, exported PSD files are saved here in addition to the browser download.
-                    Must be an absolute container-side path (e.g. <code>/config/psd_exports</code>).
+                    Optional. When set, exported CL2K PSD files are saved to this folder instead of downloading
+                    to your browser. Must be an absolute container-side path (e.g. <code>/config/psd_exports</code>).
                     Leave blank for download-only.
                   </small>
                   <input
@@ -892,12 +922,12 @@ function MakerTools() {
                   />
                 </label>
                 <label>
-                  Image Export Folder
+                  CL2K Image Export Folder
                   <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. Where images exported from Photopea land — the in-box JPG button and
-                    File→Export As / <code>Ctrl+Shift+Alt+S</code>. Set an absolute container-side path
-                    (e.g. <code>/config/poster_jpgs</code>) to save there, or leave blank to download
-                    images in your browser instead.
+                    Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button land.
+                    Set an absolute container-side path (e.g. <code>/config/poster_jpgs</code>) to save there, or
+                    leave blank to download images in your browser instead. Photopea's own Export As
+                    (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
                   </small>
                   <input
                     type="text"
@@ -907,10 +937,10 @@ function MakerTools() {
                   />
                 </label>
                 <label>
-                  PSD Template File
+                  CL2K PSD Template File
                   <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Override the bundled default PSD template with your own. Provide an absolute
-                    container-side path to a <code>.psd</code> file (e.g. <code>/config/my_template.psd</code>).
+                    Override the bundled CL2K default PSD template with your own. Provide an absolute
+                    container-side path to a <code>.psd</code> file (e.g. <code>/config/cl2k_template.psd</code>).
                     The poster image is injected into the <strong>POSTER</strong> group and the logo into the <strong>LOGO</strong> group.
                     Leave blank to use the built-in default template.
                   </small>
@@ -918,9 +948,56 @@ function MakerTools() {
                     type="text"
                     value={psdTemplatePath}
                     onChange={(e) => setPsdTemplatePath(e.target.value)}
-                    placeholder="/config/template.psd"
+                    placeholder="/config/cl2k_template.psd"
                   />
                 </label>
+
+                <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>MM2K posters</div>
+                <label>
+                  MM2K PSD Export Folder
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Optional. When set, exported MM2K PSD files are saved to this folder instead of downloading
+                    to your browser. Must be an absolute container-side path (e.g. <code>/config/psd_exports_mm2k</code>).
+                    Leave blank for download-only.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdExportFolderMm2k}
+                    onChange={(e) => setPsdExportFolderMm2k(e.target.value)}
+                    placeholder="/config/psd_exports_mm2k"
+                  />
+                </label>
+                <label>
+                  MM2K Image Export Folder
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button land.
+                    Set an absolute container-side path (e.g. <code>/config/poster_jpgs_mm2k</code>) to save there, or
+                    leave blank to download images in your browser instead. Photopea's own Export As
+                    (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdImageExportFolderMm2k}
+                    onChange={(e) => setPsdImageExportFolderMm2k(e.target.value)}
+                    placeholder="(leave blank to download)"
+                  />
+                </label>
+                <label>
+                  MM2K PSD Template File
+                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
+                    Override the bundled MM2K default PSD template with your own. Provide an absolute
+                    container-side path to a <code>.psd</code> file (e.g. <code>/config/mm2k_template.psd</code>).
+                    The poster image is injected into the <strong>POSTER</strong> group (MM2K templates use text titles, not a <strong>LOGO</strong> group).
+                    Leave blank to use the built-in MM2K default template.
+                  </small>
+                  <input
+                    type="text"
+                    value={psdTemplatePathMm2k}
+                    onChange={(e) => setPsdTemplatePathMm2k(e.target.value)}
+                    placeholder="/config/mm2k_template.psd"
+                  />
+                </label>
+
                 <div className="maker-setting-row">
                   <div>
                     <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>

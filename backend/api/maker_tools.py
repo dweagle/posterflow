@@ -1561,14 +1561,35 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
 
 # ── PSD Export ───────────────────────────────────────────────────────────────
 
-SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"
-SETTING_PSD_TEMPLATE_PATH = "psd_template_path"
+SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"                   # CL2K export folder
+SETTING_PSD_TEMPLATE_PATH = "psd_template_path"                   # CL2K template
 SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
 SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
-SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"
+SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"       # CL2K image export folder
+# MM2K counterparts — the CL2K keys above stay the default; these apply when the request is MM2K.
+SETTING_PSD_EXPORT_FOLDER_MM2K = "psd_export_folder_mm2k"
+SETTING_PSD_TEMPLATE_PATH_MM2K = "psd_template_path_mm2k"
+SETTING_PSD_IMAGE_EXPORT_FOLDER_MM2K = "psd_image_export_folder_mm2k"
 
-# Bundled default template — lives at backend/assets/default_template.psd
+# Bundled default templates — live under backend/assets/. CL2K is the fallback default.
 _DEFAULT_TEMPLATE_PATH = Path(__file__).parent.parent / "assets" / "default_template.psd"
+_DEFAULT_TEMPLATE_PATH_MM2K = Path(__file__).parent.parent / "assets" / "default_template_mm2k.psd"
+
+
+def _normalize_psd_style(style: str) -> str:
+    """Canonical export style: 'MM2K' when the tag names MM2K, else 'CL2K' (the default).
+
+    Accepts the community tag forms too ("MM2K Style" / "CL2K Style").
+    """
+    return "MM2K" if "MM2K" in str(style or "").upper() else "CL2K"
+
+
+def _psd_export_folder_key(style: str) -> str:
+    return SETTING_PSD_EXPORT_FOLDER_MM2K if _normalize_psd_style(style) == "MM2K" else SETTING_PSD_EXPORT_FOLDER
+
+
+def _psd_image_folder_key(style: str) -> str:
+    return SETTING_PSD_IMAGE_EXPORT_FOLDER_MM2K if _normalize_psd_style(style) == "MM2K" else SETTING_PSD_IMAGE_EXPORT_FOLDER
 
 
 def _validate_psd_filename(filename: str) -> None:
@@ -1583,10 +1604,10 @@ def _validate_psd_filename(filename: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
 
-def _psd_storage_dir(db: Session) -> Path:
-    """Directory where saved PSDs live: the configured export folder, else the
-    temp ``psd_cache`` under the config dir."""
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+def _psd_storage_dir(db: Session, style: str = "CL2K") -> Path:
+    """Directory where saved PSDs live for the given style: the style's configured
+    export folder, else the shared temp ``psd_cache`` under the config dir."""
+    export_folder = get_setting_value(db, _psd_export_folder_key(style))
     return Path(export_folder) if export_folder else app_settings.config_dir / "psd_cache"
 
 
@@ -1647,6 +1668,8 @@ class PsdExportRequest(BaseModel):
     tvdb_id: str = ""                # only tagged for shows (media_type == "tv"), matching IDarr
     imdb_id: str = ""                # only tagged when it starts with "tt", matching IDarr
     media_type: str = ""             # "movie" | "tv" | "collection"
+    style: str = ""                  # "CL2K" | "MM2K" (from the request's style tag) — picks the
+                                     # template + export/image folder; blank/unknown defaults to CL2K
     poster_paths: list[str] = []     # TMDB file_paths e.g. ["/abc.jpg"] — each becomes a separate pixel layer
     backdrop_paths: list[str] = []   # TMDB backdrop file_paths — fit-to-height, no crop, placed below posters
     logo_paths: list[str] = []       # TMDB file_paths — each becomes a separate logo layer
@@ -2054,17 +2077,21 @@ def _fetch_export_images(payload: PsdExportRequest, api_key: str) -> tuple[list[
     return poster_bytes_list, backdrop_bytes_list, logo_bytes_list
 
 
-def _resolve_new_export_template(db: Session) -> Path | None:
-    """Template for a New Export: user-configured PSD → bundled default → None (scratch)."""
-    template_setting = get_setting_value(db, SETTING_PSD_TEMPLATE_PATH)
+def _resolve_new_export_template(db: Session, style: str = "CL2K") -> Path | None:
+    """Template for a New Export of the given style: user-configured PSD → bundled
+    default for that style → None (scratch)."""
+    is_mm2k = _normalize_psd_style(style) == "MM2K"
+    template_key = SETTING_PSD_TEMPLATE_PATH_MM2K if is_mm2k else SETTING_PSD_TEMPLATE_PATH
+    default_path = _DEFAULT_TEMPLATE_PATH_MM2K if is_mm2k else _DEFAULT_TEMPLATE_PATH
+    template_setting = get_setting_value(db, template_key)
     if template_setting:
         candidate = Path(template_setting)
         if candidate.is_file():
             return candidate
         log_warning(LogTags.API, f"PSD template not found at configured path: {template_setting}; falling back to default")
-    if _DEFAULT_TEMPLATE_PATH.is_file():
-        log_info(LogTags.API, "Using bundled default PSD template")
-        return _DEFAULT_TEMPLATE_PATH
+    if default_path.is_file():
+        log_info(LogTags.API, f"Using bundled default PSD template ({'MM2K' if is_mm2k else 'CL2K'})")
+        return default_path
     return None
 
 
@@ -2087,9 +2114,11 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     filename = f"{base_stem}.psd"
     output_filename = f"{base_stem}{_build_idarr_id_suffix(payload)}.psd"
 
-    export_folder = get_setting_value(db, SETTING_PSD_EXPORT_FOLDER)
+    # Style (CL2K/MM2K) selects the template + export/image folders; blank/unknown → CL2K.
+    style = _normalize_psd_style(payload.style)
+    export_folder = get_setting_value(db, _psd_export_folder_key(style))
     open_photopea = (get_setting_value(db, SETTING_PSD_OPEN_PHOTOPEA) or "").lower() == "true"
-    save_dir: Path | None = _psd_storage_dir(db) if (export_folder or open_photopea) else None
+    save_dir: Path | None = _psd_storage_dir(db, style) if (export_folder or open_photopea) else None
 
     # ── Resolve template + handle conflicts BEFORE fetching any images ──
     #   use_existing=True  → reuse the existing PSD (404 not-found if none)
@@ -2126,7 +2155,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
                 # successful write so the export replaces it instead of leaving a duplicate.
                 if existing.name != output_filename:
                     overwrite_target = existing
-        template_path = _resolve_new_export_template(db)
+        template_path = _resolve_new_export_template(db, style)
 
     # ── Commit: require the TMDB key only when images need fetching, then fetch them ──
     api_key = _get_monitor_tmdb_key(db)
@@ -2174,15 +2203,19 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
         # When a password is set, Photopea fetches the PSD via files:[url] and can't send the
         # Bearer header — append a signed, file-scoped, expiring token it can use instead.
+        # style rides along so the serve/save/JPG round-trip resolves the same style's folder.
         psd_url = f"/api/maker-tools/psd-exports/{output_filename}"
         token_pair = mint_psd_access_token(db, output_filename)
         if token_pair is not None:
             sig, exp = token_pair
-            psd_url = f"{psd_url}?token={sig}&exp={exp}"
+            psd_url = f"{psd_url}?token={sig}&exp={exp}&style={style}"
+        else:
+            psd_url = f"{psd_url}?style={style}"
         return JSONResponse({
             "filename": output_filename,
             "psd_url": psd_url,
             "open_photopea": open_photopea,
+            "style": style,
         })
 
     log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
@@ -2194,18 +2227,19 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
 
 
 @router.get("/psd-exports/{filename}")
-def serve_psd_export(filename: str, token: str = "", exp: str = "", db: Session = Depends(get_db)) -> Response:
-    """Serve a previously-saved PSD file from the configured export folder.
+def serve_psd_export(filename: str, token: str = "", exp: str = "", style: str = "", db: Session = Depends(get_db)) -> Response:
+    """Serve a previously-saved PSD file from the style's configured export folder.
 
     Used by the Photopea integration to load the file directly from the server. This route is
     exempt from the password middleware (Photopea can't send the Bearer header); instead, when
     a password is set it requires a signed, file-scoped ?token=&exp= minted at export time.
+    ``style`` (CL2K/MM2K) picks the folder the PSD was saved to; blank/unknown defaults to CL2K.
     Security: filename is validated (no slashes, no traversal, must end in .psd).
     """
     _validate_psd_filename(filename)
     if not verify_psd_access_token(db, filename, token, exp):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    file_path = _psd_storage_dir(db) / filename
+    file_path = _psd_storage_dir(db, style) / filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
 
@@ -2220,15 +2254,17 @@ def serve_psd_export(filename: str, token: str = "", exp: str = "", db: Session 
 
 
 @router.put("/psd-exports/{filename}")
-async def upload_psd_to_export_folder(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
-    """Accept a PSD file upload and save it to the configured export folder.
+async def upload_psd_to_export_folder(filename: str, request: Request, style: str = "", db: Session = Depends(get_db)) -> Response:
+    """Accept a PSD file upload and save it to the style's configured export folder.
 
     Used when 'Use Existing PSD' detects no file at the expected path — the user
-    can select their local PSD and upload it here so the next export can reuse it.
+    can select their local PSD and upload it here so the next export can reuse it —
+    and when Photopea saves the edited PSD back. ``style`` (CL2K/MM2K) picks the folder;
+    blank/unknown defaults to CL2K.
     Security: filename is validated (no slashes, no traversal, must end in .psd).
     """
     _validate_psd_filename(filename)
-    save_dir = _psd_storage_dir(db)
+    save_dir = _psd_storage_dir(db, style)
 
     try:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -2247,15 +2283,16 @@ async def upload_psd_to_export_folder(filename: str, request: Request, db: Sessi
 
 
 @router.put("/image-exports/{filename}")
-async def save_image_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
-    """Write an exported image (JPG/PNG/…) to the configured image export folder.
+async def save_image_export(filename: str, request: Request, style: str = "", db: Session = Depends(get_db)) -> Response:
+    """Write an exported image (JPG/PNG/…) to the style's configured image export folder.
 
     Used by the Photopea wrapper's Export-As / JPG button when an image export
     folder is configured (otherwise the wrapper downloads the image in-browser).
+    ``style`` (CL2K/MM2K) picks the folder; blank/unknown defaults to CL2K.
     Security: filename is validated (no traversal, must be an image extension).
     """
     _validate_image_filename(filename)
-    folder = (get_setting_value(db, SETTING_PSD_IMAGE_EXPORT_FOLDER) or "").strip()
+    folder = (get_setting_value(db, _psd_image_folder_key(style)) or "").strip()
     if not folder:
         raise HTTPException(status_code=400, detail="No image export folder configured.")
     save_dir = Path(folder)

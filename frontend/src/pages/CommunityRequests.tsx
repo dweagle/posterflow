@@ -6,7 +6,7 @@ import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useUnmatched } from '../contexts/UnmatchedContext'
-import { type PsdConfig, derivePsdConfig } from '../components/maker-tools/TmdbItemCard'
+import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
 import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
@@ -89,7 +89,7 @@ export default function CommunityRequests() {
   const [archiveConfirm, setArchiveConfirm] = useState<{ requestId: string; message: string } | null>(null)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)   // message shown when a claim fails (already claimed)
 
-  const [psdConfig, setPsdConfig] = useState<PsdConfig>({ exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)

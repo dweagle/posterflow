@@ -199,6 +199,7 @@ export default function RequestItemCard({
                   tvdb_id: tvdbId ?? null,
                 }}
                 psdConfig={psdConfig}
+                posterStyle={styleLabel ?? undefined}
                 posterAvailability={posterAvailability}
                 posterAvailabilityChecked={posterAvailabilityChecked}
                 collapseSignal={collapseSignal}

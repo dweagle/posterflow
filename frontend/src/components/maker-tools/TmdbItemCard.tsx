@@ -218,10 +218,22 @@ const TMDB_IMAGE_LANGUAGES = [
 // ---------------------------------------------------------------------------
 
 export type PsdConfig = {
+  // CL2K (the default style). Existing keys.
   exportFolder: string
   templatePath: string
-  openPhotopea: boolean
   imageExportFolder: string   // blank = download image exports in-browser; set = save to this server folder
+  // MM2K counterparts. Blank = that style downloads in-browser (no CL2K fallback).
+  exportFolderMm2k: string
+  templatePathMm2k: string
+  imageExportFolderMm2k: string
+  openPhotopea: boolean        // shared toggle across both styles
+}
+
+/** Empty config used before settings load (shared by every consumer). */
+export const EMPTY_PSD_CONFIG: PsdConfig = {
+  exportFolder: '', templatePath: '', imageExportFolder: '',
+  exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
+  openPhotopea: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -229,8 +241,11 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
   return {
     exportFolder: (s.psd_export_folder || '').trim(),
     templatePath: (s.psd_template_path || '').trim(),
-    openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
     imageExportFolder: (s.psd_image_export_folder || '').trim(),
+    exportFolderMm2k: (s.psd_export_folder_mm2k || '').trim(),
+    templatePathMm2k: (s.psd_template_path_mm2k || '').trim(),
+    imageExportFolderMm2k: (s.psd_image_export_folder_mm2k || '').trim(),
+    openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
   }
 }
 
@@ -240,6 +255,8 @@ export type TmdbItemCardProps = {
   /** True once the drive availability check has run, so "none found" can show a red X. */
   posterAvailabilityChecked?: boolean
   psdConfig?: PsdConfig
+  /** Poster style from the request's tag — picks the template + export/image folder. Undefined → CL2K. */
+  posterStyle?: 'CL2K' | 'MM2K'
   hidePoster?: boolean
   hideTitle?: boolean
   galleryPortalId?: string
@@ -251,7 +268,7 @@ export type TmdbItemCardProps = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, hidePoster, hideTitle, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
   // Gallery state
@@ -270,8 +287,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [psdOverwriteConfirm, setPsdOverwriteConfirm] = useState<{ filename: string } | null>(null)
   const [psdUploading, setPsdUploading] = useState(false)
 
+  // Export style: defaults to the request's style, but the toolbar toggle can override it so an
+  // MM2K request can also be built in CL2K (and vice-versa). Each style has its own template +
+  // export/image folder, so the two versions coexist as separate files. Re-syncs if the prop changes.
+  const [exportStyle, setExportStyle] = useState<'CL2K' | 'MM2K'>(posterStyle ?? 'CL2K')
+  useEffect(() => { setExportStyle(posterStyle ?? 'CL2K') }, [posterStyle])
+
   // PSD settings: use prop if provided, else fetch once
-  const [psdConfig, setPsdConfig] = useState<PsdConfig>(psdConfigProp ?? { exportFolder: '', templatePath: '', openPhotopea: false, imageExportFolder: '' })
+  const [psdConfig, setPsdConfig] = useState<PsdConfig>(psdConfigProp ?? EMPTY_PSD_CONFIG)
   useEffect(() => {
     if (psdConfigProp !== undefined) {
       setPsdConfig(psdConfigProp)
@@ -481,6 +504,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           tvdb_id: item.tvdb_id != null ? String(item.tvdb_id) : '',
           imdb_id: item.imdb_id ?? '',
           media_type: item.media_type ?? '',
+          style: exportStyle,
           poster_paths: psdSelection.posters,
           backdrop_paths: psdSelection.backdrops,
           logo_paths: psdSelection.logos,
@@ -503,7 +527,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           // Photopea fetches the exported PSD itself (files:[url]) and the plugin panel adds the
           // seasons / save / JPG buttons. Works on http LAN once the user allows Photopea's
           // one-time "local network access" prompt.
-          openPhotopeaWithPsd(result.psdUrl, result.filename)
+          openPhotopeaWithPsd(result.psdUrl, result.filename, result.style)
           showToast(`Opening ${result.filename} in Photopea…`, 'success')
         } else {
           showToast(`PSD saved: ${result.filename}`, 'success')
@@ -525,7 +549,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, psdSelection, psdConfig.imageExportFolder, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, showToast])
 
   const handlePsdNotFoundUpload = useCallback(async (file: File) => {
     if (!psdNotFound) return
@@ -547,6 +571,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // -------------------------------------------------------------------------
   // Derived values
   // -------------------------------------------------------------------------
+
+  // Export folder shown in the conflict/not-found hints — the one for the selected export style.
+  const activeExportFolder = exportStyle === 'MM2K' ? psdConfig.exportFolderMm2k : psdConfig.exportFolder
 
   // A TMDB "Miniseries" replaces the generic "Series" badge rather than adding a second one.
   const isMiniseries = item.media_type === 'tv' && tvDetails?.series_type === 'Miniseries'
@@ -775,6 +802,21 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               </select>
             </div>
             <div className="tmdb-psd-export-group">
+              <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
+                {(['CL2K', 'MM2K'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`tmdb-psd-style-opt${exportStyle === s ? ' active' : ''}`}
+                    onClick={() => setExportStyle(s)}
+                    disabled={psdExporting}
+                    title={posterStyle === s ? `${s} — the requested style` : `Export as ${s}`}
+                  >
+                    {s}
+                    {posterStyle === s && <span className="tmdb-psd-style-req" title="Requested style" />}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
@@ -997,10 +1039,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               <div className="psd-not-found-filename">
                 <code>{psdOverwriteConfirm.filename}</code>
               </div>
-              {psdConfig.exportFolder && (
+              {activeExportFolder && (
                 <div className="psd-not-found-folder">
                   <span className="psd-not-found-folder-label">Export folder:</span>
-                  <code>{psdConfig.exportFolder}</code>
+                  <code>{activeExportFolder}</code>
                 </div>
               )}
               <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
@@ -1039,14 +1081,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               <div className="psd-not-found-filename">
                 <code>{psdNotFound.expectedFilename}</code>
               </div>
-              {psdConfig.exportFolder && (
+              {activeExportFolder && (
                 <div className="psd-not-found-folder">
                   <span className="psd-not-found-folder-label">Export folder:</span>
-                  <code>{psdConfig.exportFolder}</code>
+                  <code>{activeExportFolder}</code>
                 </div>
               )}
               <p style={{ marginTop: '1rem', color: '#aaa', fontSize: '0.85rem', lineHeight: 1.6 }}>
-                Place the file in your export folder{psdConfig.exportFolder ? ' shown above' : ''}, or use the button below to upload it directly from your computer.
+                Place the file in your export folder{activeExportFolder ? ' shown above' : ''}, or use the button below to upload it directly from your computer.
                 After uploading, the export will run automatically.
               </p>
             </div>

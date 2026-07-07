@@ -212,6 +212,7 @@ export interface PsdExportRequest {
   tvdb_id?: string
   imdb_id?: string
   media_type?: string
+  style?: string   // "CL2K" | "MM2K" — picks the template + export/image folder; blank → CL2K
   poster_paths: string[]
   backdrop_paths: string[]
   logo_paths: string[]
@@ -223,8 +224,9 @@ export interface PsdExportRequest {
 export interface PsdExportSaved {
   mode: 'photopea'
   filename: string
-  psdUrl: string   // absolute HTTPS URL, ready to pass to Photopea
+  psdUrl: string   // absolute HTTPS URL, ready to pass to Photopea (carries ?style=)
   openPhotopea: boolean
+  style: string    // resolved "CL2K" | "MM2K" — used to build the save / JPG-export URLs
 }
 
 /** Returned when no export folder is configured — trigger a browser download. */
@@ -277,9 +279,9 @@ export const exportToPsd = async (
     if (contentType.includes('application/json')) {
       // Server saved to export folder — parse the JSON blob
       const text = await (resp.data as Blob).text()
-      const json = JSON.parse(text) as { filename: string; psd_url: string; open_photopea: boolean }
+      const json = JSON.parse(text) as { filename: string; psd_url: string; open_photopea: boolean; style?: string }
       const absoluteUrl = `${window.location.origin}${json.psd_url}`
-      return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false }
+      return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false, style: json.style || 'CL2K' }
     }
 
     // Blob download path. Prefer the server's Content-Disposition filename so the download is
@@ -329,9 +331,11 @@ export const exportToPsd = async (
  * Needs the user to allow Photopea's "local network access" prompt (public photopea.com reaching
  * the LAN/localhost server) + CORS on the PSD GET. Photopea API: https://www.photopea.com/api/
  */
-export const openPhotopeaWithPsd = (psdUrl: string, filename: string): void => {
-  const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`
-  const params = new URLSearchParams({ save: saveUrl, name: filename.replace(/\.psd$/i, '') })
+export const openPhotopeaWithPsd = (psdUrl: string, filename: string, style = 'CL2K'): void => {
+  // style rides on the save URL and the plugin query so the 💾 save-back and JPG export land in
+  // the SAME style's folder the PSD was exported to.
+  const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}?style=${encodeURIComponent(style)}`
+  const params = new URLSearchParams({ save: saveUrl, name: filename.replace(/\.psd$/i, ''), style })
   const pluginUrl = `${window.location.origin}/photopea-plugin.html?${params.toString()}`
   // icon: Posterflow's logo as an inlined data URI (a colored logo, so no "===" theme-recolor
   // prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
