@@ -12,7 +12,6 @@ interface OriginalBorderSettings {
   autoRunCleanup: boolean
   cleanupDeleteUnknown: boolean
   holidaySchedules: Array<{ name: string; schedule: string; colors: string[] }>
-  skipRunOutsideHoliday: boolean
   removeBorders: boolean
 }
 

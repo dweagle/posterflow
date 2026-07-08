@@ -76,7 +76,6 @@ export interface OriginalBorderSettings {
   autoRunCleanup: boolean
   cleanupDeleteUnknown: boolean
   holidaySchedules: BorderHolidaySchedule[]
-  skipRunOutsideHoliday: boolean
   removeBorders: boolean
   seasonMode: SeasonMode
   seasonColors: string[]
@@ -202,7 +201,6 @@ export const usePosterManagerBorder = ({
   const [autoRunCleanup, setAutoRunCleanup] = useState(true)
   const [cleanupDeleteUnknown, setCleanupDeleteUnknown] = useState(false)
   const [holidaySchedules, setHolidaySchedules] = useState<BorderHolidaySchedule[]>([])
-  const [skipRunOutsideHoliday, setSkipRunOutsideHoliday] = useState(false)
   const [removeBorders, setRemoveBorders] = useState(false)
   const [seasonMode, setSeasonMode] = useState<SeasonMode>('inherit')
   const [seasonColors, setSeasonColors] = useState<string[]>([])
@@ -284,9 +282,6 @@ export const usePosterManagerBorder = ({
       }
       setHolidaySchedules(holidays)
 
-      const skipRunStr = settings['border_replacer_skip_non_holiday'] || 'false'
-      const skipRun = skipRunStr.toLowerCase() === 'true'
-      setSkipRunOutsideHoliday(skipRun)
 
       const removeBordersStr = settings['border_replacer_remove_borders'] || 'false'
       const removeBordersEnabled = removeBordersStr.toLowerCase() === 'true'
@@ -415,7 +410,6 @@ export const usePosterManagerBorder = ({
         autoRunCleanup: autoRunCleanupVal,
         cleanupDeleteUnknown: cleanupDeleteUnknownVal,
         holidaySchedules: holidays,
-        skipRunOutsideHoliday: skipRun,
         removeBorders: removeBordersEnabled,
         seasonMode: resolvedSeasonMode,
         seasonColors: [...loadedSeasonColors],
@@ -454,7 +448,6 @@ export const usePosterManagerBorder = ({
         auto_run_cleanup: autoRunCleanup ? 'true' : 'false',
         cleanup_delete_unknown: cleanupDeleteUnknown ? 'true' : 'false',
         border_replacer_holidays: JSON.stringify(serializeHolidays(holidaySchedules)),
-        border_replacer_skip_non_holiday: skipRunOutsideHoliday ? 'true' : 'false',
         border_replacer_remove_borders: removeBorders ? 'true' : 'false',
         border_replacer_season_mode: seasonMode,
         border_replacer_season_colors: JSON.stringify(seasonColors),
@@ -493,7 +486,6 @@ export const usePosterManagerBorder = ({
         autoRunCleanup,
         cleanupDeleteUnknown,
         holidaySchedules,
-        skipRunOutsideHoliday,
         removeBorders,
         seasonMode,
         seasonColors: [...seasonColors],
@@ -593,7 +585,6 @@ export const usePosterManagerBorder = ({
     setAutoRunCleanup(original.autoRunCleanup)
     setCleanupDeleteUnknown(original.cleanupDeleteUnknown)
     setHolidaySchedules([...original.holidaySchedules])
-    setSkipRunOutsideHoliday(original.skipRunOutsideHoliday)
     setRemoveBorders(original.removeBorders)
     setSeasonMode(original.seasonMode)
     setSeasonColors([...original.seasonColors])
@@ -625,7 +616,6 @@ export const usePosterManagerBorder = ({
     setBorderMode('incremental')
     setNewColor('#ffffff')
     setHolidaySchedules([])
-    setSkipRunOutsideHoliday(false)
     setRemoveBorders(false)
     setSeasonMode('inherit')
     setSeasonColors([])
@@ -657,7 +647,6 @@ export const usePosterManagerBorder = ({
     autoRunCleanup,
     cleanupDeleteUnknown,
     holidaySchedules,
-    skipRunOutsideHoliday,
     removeBorders,
     seasonMode,
     seasonColors,
@@ -684,7 +673,6 @@ export const usePosterManagerBorder = ({
     setAutoRunBorder,
     setAutoRunCleanup,
     setCleanupDeleteUnknown,
-    setSkipRunOutsideHoliday,
     setRemoveBorders,
     setSeasonMode,
     setSeasonWidth,

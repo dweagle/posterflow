@@ -66,7 +66,6 @@ type BorderTabProps = {
   newColor: string
   borderColors: string[]
   holidaySchedules: HolidaySchedule[]
-  skipRunOutsideHoliday: boolean
   removeBorders: boolean
   seasonMode: SeasonMode
   seasonColors: string[]
@@ -99,7 +98,6 @@ type BorderTabProps = {
   onAddBorderColor: () => void
   onRemoveBorderColor: (color: string) => void
   onSetRemoveBorders: (value: boolean) => void
-  onSetSkipRunOutsideHoliday: (value: boolean) => void
   onAddHolidaySchedule: (holiday: HolidaySchedule) => void
   onRemoveHolidaySchedule: (name: string) => void
   onSetSeasonMode: (mode: SeasonMode) => void
@@ -130,7 +128,6 @@ function BorderTab({
   newColor,
   borderColors,
   holidaySchedules,
-  skipRunOutsideHoliday,
   removeBorders,
   seasonMode,
   seasonColors,
@@ -163,7 +160,6 @@ function BorderTab({
   onAddBorderColor,
   onRemoveBorderColor,
   onSetRemoveBorders,
-  onSetSkipRunOutsideHoliday,
   onAddHolidaySchedule,
   onRemoveHolidaySchedule,
   onSetSeasonMode,
@@ -926,31 +922,6 @@ function BorderTab({
                 <p>No holiday schedules configured yet</p>
               </div>
             )}
-          </div>
-          )}
-
-          {!removeBorders && (
-          <div className="field-group">
-            <label>Skip Outside Holiday Schedules</label>
-            <div className="toggle-field">
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={skipRunOutsideHoliday}
-                  onChange={(e) => onSetSkipRunOutsideHoliday(e.target.checked)}
-                />
-                <span className="toggle-slider"></span>
-              </label>
-              <span className="toggle-label">
-                {skipRunOutsideHoliday
-                  ? 'Enabled (Run only during configured holiday schedules)'
-                  : 'Disabled (Always run border replacement/removal)'}
-              </span>
-            </div>
-            <small>
-              Applies everywhere border replacer runs: Workflow, Border tab manual runs, and auto-run after Poster Renamer.
-              Outside holiday ranges, files are copied unchanged from tmp to final destination.
-            </small>
           </div>
           )}
 

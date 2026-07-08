@@ -123,7 +123,6 @@ function PosterManager() {
     autoRunCleanup,
     cleanupDeleteUnknown,
     holidaySchedules,
-    skipRunOutsideHoliday,
     removeBorders,
     setBorderWidth,
     setBandWidth,
@@ -132,7 +131,6 @@ function PosterManager() {
     setAutoRunBorder,
     setAutoRunCleanup,
     setCleanupDeleteUnknown,
-    setSkipRunOutsideHoliday,
     setRemoveBorders,
     fetchBorderSettings,
     saveBorderSettings,
@@ -393,7 +391,6 @@ function PosterManager() {
     autoRunCleanup,
     cleanupDeleteUnknown,
     holidaySchedules,
-    skipRunOutsideHoliday,
     removeBorders,
     seasonMode,
     seasonColors,
@@ -573,7 +570,6 @@ function PosterManager() {
           newColor={newColor}
           borderColors={borderColors}
           holidaySchedules={holidaySchedules}
-          skipRunOutsideHoliday={skipRunOutsideHoliday}
           removeBorders={removeBorders}
           seasonMode={seasonMode}
           seasonColors={seasonColors}
@@ -589,7 +585,6 @@ function PosterManager() {
           onAddBorderColor={addBorderColor}
           onRemoveBorderColor={removeBorderColor}
           onSetRemoveBorders={setRemoveBorders}
-          onSetSkipRunOutsideHoliday={setSkipRunOutsideHoliday}
           onAddHolidaySchedule={addHolidaySchedule}
           onRemoveHolidaySchedule={removeHolidaySchedule}
           onSetSeasonMode={setSeasonMode}

@@ -887,67 +887,6 @@ class BorderReplacerService:
 
         return False, None, default_colors, None
 
-    def _copy_images_without_border_changes(
-        self,
-        source_dir: str,
-        destination_dir: str,
-        dry_run: bool,
-        progress_callback: Optional[ProgressCallback] = None,
-    ) -> Dict[str, Any]:
-        """Copy images from source to destination without border transformations."""
-        image_entries: List[Tuple[str, str]] = []
-        for root, _, files in os.walk(source_dir):
-            rel_path = os.path.relpath(root, source_dir)
-            folder = None if rel_path == "." else rel_path
-            for file in files:
-                if not file.lower().endswith((".jpg", ".jpeg", ".png")):
-                    continue
-                src_file = os.path.join(root, file)
-                dest_file = (
-                    os.path.join(destination_dir, folder, file)
-                    if folder
-                    else os.path.join(destination_dir, file)
-                )
-                image_entries.append((src_file, dest_file))
-
-        total_items = len(image_entries)
-        if total_items == 0:
-            return {
-                "success": False,
-                "error": "No poster files found in source directory",
-            }
-
-        changed_count = 0
-        skipped_count = 0
-
-        for idx, (src_file, dest_file) in enumerate(image_entries, start=1):
-            if progress_callback:
-                progress_callback(
-                    "copying",
-                    idx,
-                    total_items,
-                    f"Copying: {os.path.basename(src_file)}",
-                )
-
-            if dry_run:
-                changed_count += 1
-                continue
-
-            if self._copy_file_if_changed(src_file, dest_file):
-                changed_count += 1
-            else:
-                skipped_count += 1
-
-        return {
-            "success": True,
-            "processed": total_items,
-            "changed": changed_count,
-            "skipped": skipped_count,
-            "changed_count": changed_count,
-            "skipped_count": skipped_count,
-            "dry_run": dry_run,
-        }
-
     @staticmethod
     def _copy_file_if_changed(src_file: str, dest_file: str) -> bool:
         """Copy src→dest verbatim. Returns True if written, False if already identical."""
@@ -1196,13 +1135,6 @@ class BorderReplacerService:
                 if not dry_run:
                     os.makedirs(destination_dir, exist_ok=True)
 
-            skip_non_holiday_setting = get_setting(self.db, "border_replacer_skip_non_holiday")
-            skip_non_holiday = (
-                skip_non_holiday_setting.value.lower() == "true"
-                if skip_non_holiday_setting and skip_non_holiday_setting.value
-                else False
-            )
-
             is_holiday_active, active_holiday_name, effective_border_colors, holiday_style_opts = self._resolve_effective_border_colors(border_colors)
 
             if remove_borders:
@@ -1225,41 +1157,6 @@ class BorderReplacerService:
                     holiday=active_holiday_name,
                     colors=len(effective_border_colors),
                 )
-            elif skip_non_holiday:
-                log_info(
-                    LogTags.BORDER_REPLACER,
-                    "Skip non-holiday runs is enabled and no holiday schedule is active - copying files without border replacement",
-                )
-
-                if mode == "incremental":
-                    self.detect_settings_change(
-                        border_colors=None,
-                        border_width=border_width,
-                        exclusion_list=exclusion_list,
-                        destination_dir=destination_dir,
-                        dry_run=dry_run,
-                        processing_profile="non_holiday_skip",
-                    )
-
-                copy_result = self._copy_images_without_border_changes(
-                    source_dir=source_dir,
-                    destination_dir=destination_dir,
-                    dry_run=dry_run,
-                    progress_callback=progress_callback,
-                )
-
-                if copy_result.get("success"):
-                    log_success(
-                        LogTags.BORDER_REPLACER,
-                        f"Holiday skip copy complete: {copy_result.get('changed', 0)} changed, {copy_result.get('skipped', 0)} skipped",
-                        changed=copy_result.get("changed", 0),
-                        skipped=copy_result.get("skipped", 0),
-                    )
-                    log_section_end(LogTags.BORDER_REPLACER, "Border Processing Complete")
-                else:
-                    log_section_end(LogTags.BORDER_REPLACER, "Border Processing Failed")
-
-                return copy_result
 
             # An image-overlay frame, a gradient band, or the "remove" style is a complete
             # configuration on its own — none needs the solid border colors. (The "remove"
