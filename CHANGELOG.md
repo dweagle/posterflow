@@ -6,6 +6,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-07-08
+### Added
+- Google Drives: added the füsen CL2K drive. Don't forget to add to your priority list after subscribing if you use it!
+
+### Changed
+- Border Replacer: removed the "skip run outside holiday" option.
+
+### Fixed
+- Community Lists: style tags on submitted list items are now normalized in Supabase for consistent CL2K/MM2K handling.
+- Poster matching: series now match correctly when the asset name has no TVDB ID and the Arr IMDb ID is incorrect.
+
 ## [0.10.3] - 2026-07-07
 ### Added
 - Border Replacer: main border style now has a remove borders option as well as a configurable border width setting for main border replacement.
