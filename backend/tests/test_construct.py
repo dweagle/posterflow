@@ -163,3 +163,17 @@ def test_create_series_stores_ids():
     assert result["tvdb_id"] == 99
     assert result["imdb_id"] == "tt123"
     assert result["year"] == 2020
+
+
+def test_create_series_stores_tmdb_id():
+    result = create_series(
+        "Show", 2020, 99, "tt123", "show", ["/Season 01.jpg"], tmdb_id=302228
+    )
+    assert result["tmdb_id"] == 302228
+
+
+def test_create_series_tmdb_id_defaults_none():
+    result = create_series(
+        "Show", 2020, 99, "tt123", "show", ["/Season 01.jpg"]
+    )
+    assert result["tmdb_id"] is None

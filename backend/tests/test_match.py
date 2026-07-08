@@ -140,6 +140,26 @@ class TestIsMatchByIds:
         assert matched is True
         assert "tvdb_id" in reason
 
+    def test_series_matches_by_tmdb_id_ref(self):
+        # Sonarr series carry tmdb on tmdb_id_ref (kept off search_matches). A
+        # tmdb-tagged series poster with no tvdb should still match on it, even
+        # when tvdb/imdb disagree.
+        asset = {"title": "A", "type": "series", "tmdb_id": 302228, "normalized_title": "a"}
+        media = {"title": "A", "type": "series", "tvdb_id": 479385,
+                 "tmdb_id_ref": 302228, "imdb_id": "tt42028933", "normalized_title": "a"}
+        matched, reason = is_match(asset, media)
+        assert matched is True
+        assert "tmdb_id" in reason
+
+    def test_collection_does_not_match_by_tmdb_id_ref(self):
+        # Collections also carry tmdb on tmdb_id_ref but must stay off the matcher,
+        # so a same-numbered movie poster must not match a collection.
+        asset = {"title": "A", "type": "movies", "tmdb_id": 302228, "normalized_title": "a"}
+        media = {"title": "A", "type": "collections", "tvdb_id": 999,
+                 "tmdb_id_ref": 302228, "normalized_title": "a"}
+        matched, _ = is_match(asset, media)
+        assert matched is False
+
     def test_matches_by_imdb_id(self):
         asset = {"title": "A", "imdb_id": "tt1234567", "normalized_title": "a"}
         media = {"title": "A", "imdb_id": "tt1234567", "normalized_title": "a"}

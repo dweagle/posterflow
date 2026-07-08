@@ -186,6 +186,12 @@ def is_match(
             or not _media_type
             or (_asset_type == "series") == (_media_type == "series")
         )
+        # Series keep tmdb on tmdb_id_ref (off search_matches so tvdb lookup wins);
+        # use it here so a tmdb-only series poster still matches. Series-only, so
+        # collections (which also use tmdb_id_ref) stay off the matcher.
+        _media_tmdb = media.get("tmdb_id") or (
+            media.get("tmdb_id_ref") if _media_type == "series" else None
+        )
         id_match_criteria = [
             (
                 media.get("tvdb_id")
@@ -194,9 +200,9 @@ def is_match(
                 "by tvdb_id",
             ),
             (
-                media.get("tmdb_id")
+                _media_tmdb
                 and asset.get("tmdb_id")
-                and media.get("tmdb_id") == asset.get("tmdb_id")
+                and _media_tmdb == asset.get("tmdb_id")
                 and tmdb_types_compatible,
                 "by tmdb_id",
             ),

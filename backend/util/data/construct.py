@@ -88,6 +88,7 @@ def create_series(
     files: List[str],
     parent_folder: Optional[str] = None,
     media_folder: Optional[str] = None,
+    tmdb_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Construct a standardized dictionary representing a series entry.
 
@@ -124,6 +125,7 @@ def create_series(
         "type": "series",
         "title": title,
         "year": year,
+        "tmdb_id": tmdb_id,
         "tvdb_id": tvdb_id,
         "imdb_id": imdb_id,
         "normalized_title": normalized_title,

@@ -7,6 +7,7 @@ from util.posters.scanner import (
     process_files,
     scan_files_in_flat_folder,
     scan_files_in_nested_folders,
+    warn_if_series_unmatchable,
 )
 
 
@@ -214,3 +215,35 @@ def test_process_files_nested_folder(tmp_path):
 def test_process_files_returns_none_for_empty_folder(tmp_path):
     results = process_files(str(tmp_path))
     assert results is None
+
+
+# ---------------------------------------------------------------------------
+# warn_if_series_unmatchable
+# ---------------------------------------------------------------------------
+
+
+def test_warn_series_unmatchable_imdb_only():
+    # imdb-only series poster (no tvdb/tmdb) is the residual silent-no-match case.
+    assert warn_if_series_unmatchable(
+        {"type": "series", "title": "X", "imdb_id": "tt37812919", "tvdb_id": None, "tmdb_id": None}
+    ) is True
+
+
+def test_warn_series_not_flagged_when_tvdb_present():
+    assert warn_if_series_unmatchable(
+        {"type": "series", "title": "X", "imdb_id": "tt1", "tvdb_id": 479385, "tmdb_id": None}
+    ) is False
+
+
+def test_warn_series_not_flagged_when_tmdb_present():
+    # tmdb now matches via tmdb_id_ref, so a tmdb+imdb poster should not warn.
+    assert warn_if_series_unmatchable(
+        {"type": "series", "title": "X", "imdb_id": "tt1", "tvdb_id": None, "tmdb_id": 302228}
+    ) is False
+
+
+def test_warn_series_not_flagged_when_no_ids():
+    # No ids at all → matches by title fallback, so no warning.
+    assert warn_if_series_unmatchable(
+        {"type": "series", "title": "X", "imdb_id": None, "tvdb_id": None, "tmdb_id": None}
+    ) is False
