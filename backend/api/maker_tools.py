@@ -1675,6 +1675,11 @@ class PsdExportRequest(BaseModel):
     logo_paths: list[str] = []       # TMDB file_paths — each becomes a separate logo layer
     use_existing: bool = False       # When True: open existing PSD in export folder and inject layers into it
     confirm_overwrite: bool = False  # When True: proceed with a New Export even if a PSD for this title exists
+    poster_layer_names: list[str] = []  # Per-poster layer names aligned to poster_paths — a tagged poster
+                                     # (e.g. "s1"/"s0"/"main"/"show"/"c") is named so the plugin's batch
+                                     # recognizes it as a variant; "" leaves the default title-based name
+    backdrop_layer_names: list[str] = []  # Same, aligned to backdrop_paths — a tagged backdrop keeps the
+                                     # backdrop fit (scaled to height, no crop) but gets a variant name
 
 
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
@@ -1813,6 +1818,8 @@ def _build_psd(
     template_path: Path | None = None,
     title: str = "",
     year: str = "",
+    poster_layer_names: list[str] | None = None,
+    backdrop_layer_names: list[str] | None = None,
 ) -> bytes:
     """
     Build a layered PSD in memory.
@@ -1851,8 +1858,13 @@ def _build_psd(
 
     # ── POSTER(S) ─────────────────────────────────────────────────────────────
     # Insert in reverse order so first-selected ends up on top of the group stack
+    _names = poster_layer_names or []
     for idx, poster_bytes in enumerate(reversed(poster_bytes_list)):
-        layer_name = base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}"
+        # A per-poster tag (poster_layer_names[i], aligned to the original order) names the layer for the
+        # plugin's batch convention; untagged posters fall back to the title-based name.
+        orig_idx = len(poster_bytes_list) - 1 - idx
+        tag = _names[orig_idx].strip() if orig_idx < len(_names) else ""
+        layer_name = tag if tag else (base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}")
         poster_pil = Image.open(BytesIO(poster_bytes)).convert("RGB")
 
         if fit_within_border:
@@ -1891,9 +1903,13 @@ def _build_psd(
     # ── BACKDROP(S) ───────────────────────────────────────────────────────────
     # Fit to canvas height (no crop), centred horizontally.
     # Placed below all poster layers inside the POSTER group (or at root bottom).
+    _bd_names = backdrop_layer_names or []
     for idx, backdrop_bytes in enumerate(reversed(backdrop_bytes_list or [])):
         bd_count = len(backdrop_bytes_list or [])
-        layer_name = f"{base_name} - Backdrop" if bd_count == 1 else f"{base_name} - Backdrop {bd_count - idx}"
+        # A tagged backdrop keeps the backdrop fit (this block) but gets a convention name for the batch.
+        orig_idx = bd_count - 1 - idx
+        tag = _bd_names[orig_idx].strip() if orig_idx < len(_bd_names) else ""
+        layer_name = tag if tag else (f"{base_name} - Backdrop" if bd_count == 1 else f"{base_name} - Backdrop {bd_count - idx}")
         bg_pil = Image.open(BytesIO(backdrop_bytes)).convert("RGB")
         # Scale so height == canvas_h, preserve aspect ratio — no crop
         scale = canvas_h / bg_pil.height
@@ -2178,6 +2194,8 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             template_path=template_path,
             title=payload.title,
             year=payload.year,
+            poster_layer_names=payload.poster_layer_names,
+            backdrop_layer_names=payload.backdrop_layer_names,
         )
     except Exception as exc:
         log_error(LogTags.API, f"PSD build failed: {exc}\n{traceback.format_exc()}")

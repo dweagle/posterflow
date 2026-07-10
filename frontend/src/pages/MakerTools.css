@@ -1429,6 +1429,40 @@
   outline: none;
 }
 
+/* Clear all P/B/L selections and tags — sits right of the language dropdown */
+.tmdb-gallery-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  color: #bbb;
+  border-radius: 6px;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+/* When there's something to clear, light up red to draw attention */
+.tmdb-gallery-clear-btn:not(:disabled) {
+  border-color: #e57373;
+  color: #e57373;
+  background: rgba(229, 115, 115, 0.12);
+}
+
+.tmdb-gallery-clear-btn:hover:not(:disabled) {
+  border-color: #ef5350;
+  color: #fff;
+  background: #e53935;
+}
+
+.tmdb-gallery-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .tmdb-gallery-tab {
   background: #252525;
   border: 1px solid #3a3a3a;
@@ -1605,24 +1639,30 @@
   line-height: 0;
 }
 
-.tmdb-psd-select-btn {
+/* Overlay action buttons (P/B/L select, T tag, trash) live in a flex row in the top-left corner. */
+.tmdb-thumb-actions {
   position: absolute;
   top: 4px;
   left: 4px;
-  width: 20px;
-  height: 20px;
+  display: flex;
+  gap: 4px;
+  z-index: 2;
+}
+
+.tmdb-psd-select-btn {
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   border: 1.5px solid rgba(255, 255, 255, 0.35);
   background: rgba(0, 0, 0, 0.55);
   color: #ccc;
-  font-size: 0.65rem;
+  font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
-  z-index: 2;
   opacity: 0;
 }
 
@@ -1640,6 +1680,61 @@
 .tmdb-psd-select-btn:hover:not(.selected) {
   border-color: #64b5f6;
   color: #fff;
+}
+
+/* T (tag) button — shows the tag when set */
+.tmdb-psd-tag-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  color: #ccc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  opacity: 0;
+}
+
+.tmdb-gallery-item:hover .tmdb-psd-tag-btn,
+.tmdb-psd-tag-btn.tagged {
+  opacity: 1;
+}
+
+.tmdb-psd-tag-btn.tagged {
+  background: #7e57c2;
+  border-color: #7e57c2;
+  color: #fff;
+}
+
+.tmdb-psd-tag-btn:hover:not(.tagged) {
+  border-color: #7e57c2;
+  color: #fff;
+}
+
+/* Trash — one-click untag, rendered only when a tag is set (so always visible then) */
+.tmdb-psd-untag-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  color: #ccc;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.tmdb-psd-untag-btn:hover {
+  border-color: #e57373;
+  color: #e57373;
 }
 
 .tmdb-psd-export-group {
@@ -1733,6 +1828,143 @@
 .tmdb-psd-export-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Per-poster tag popup — chip layout mirroring the Photopea plugin */
+.tmdb-tag-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tmdb-tag-popup {
+  width: 320px;
+  max-width: 92vw;
+  background: #23232a;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #e6e6e6;
+}
+
+.tmdb-tag-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+}
+
+.tmdb-tag-head em {
+  color: #64b5f6;
+  font-style: normal;
+}
+
+.tmdb-tag-close {
+  background: none;
+  border: none;
+  color: #9aa;
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.tmdb-tag-close:hover {
+  color: #e6e6e6;
+  background: #3a3a42;
+}
+
+.tmdb-tag-sub {
+  color: #9aa;
+  font-size: 0.72rem;
+  margin: 12px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Even, aligned rows: fixed-column grids so buttons fill each cell equally (no ragged wrapping). */
+.tmdb-tag-roles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.tmdb-tag-decades {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #3a3a42;   /* divider between season groups and the individual seasons */
+}
+
+.tmdb-tag-seasons {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.tmdb-tag-chip {
+  background: #2a2a31;
+  border: 1px solid #3a3a42;
+  color: #cfcfcf;
+  border-radius: 6px;
+  padding: 7px 4px;
+  font-size: 0.8rem;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: filter 0.12s, background 0.12s;
+}
+
+.tmdb-tag-chip:hover {
+  filter: brightness(1.3);
+}
+
+.tmdb-tag-chip.role {
+  font-weight: 600;
+}
+
+.tmdb-tag-chip.decade {
+  font-size: 0.74rem;
+  color: #9aa;
+}
+
+.tmdb-tag-chip.decade.active {
+  background: #3b6bd6;
+  border-color: #5a86f0;
+  color: #fff;
+}
+
+.tmdb-tag-chip.role.active,
+.tmdb-tag-chip.num.active {
+  background: #7e57c2;
+  border-color: #9575cd;
+  color: #fff;
+}
+
+.tmdb-tag-untag {
+  margin-top: 12px;
+  width: 100%;
+  background: none;
+  border: 1px solid #5a3a3a;
+  color: #e08a8a;
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.tmdb-tag-untag:hover {
+  background: rgba(224, 138, 138, 0.12);
 }
 
 /* PSD not-found modal */

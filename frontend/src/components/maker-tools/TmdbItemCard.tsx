@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Copy,
   Download,
+  Eraser,
   ExternalLink,
   FileDown,
   FolderOpen,
@@ -14,6 +15,8 @@ import {
   Layers,
   Clapperboard as MovieIcon,
   Search,
+  Tag,
+  Trash2,
   Tv,
   X,
 } from 'lucide-react'
@@ -25,6 +28,7 @@ import {
   type PosterAvailability,
   openPhotopeaWithPsd,
   exportToPsd,
+  posterLayerNames,
   uploadPsdToExportFolder,
   getSeasonImages,
   getTmdbImages,
@@ -227,13 +231,14 @@ export type PsdConfig = {
   templatePathMm2k: string
   imageExportFolderMm2k: string
   openPhotopea: boolean        // shared toggle across both styles
+  sameTab: boolean             // reuse one Photopea tab (separate docs) instead of a new tab each export
 }
 
 /** Empty config used before settings load (shared by every consumer). */
 export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
-  openPhotopea: false,
+  openPhotopea: false, sameTab: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -246,6 +251,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     templatePathMm2k: (s.psd_template_path_mm2k || '').trim(),
     imageExportFolderMm2k: (s.psd_image_export_folder_mm2k || '').trim(),
     openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
+    sameTab: (s.psd_photopea_same_tab || '').trim().toLowerCase() === 'true',
   }
 }
 
@@ -286,6 +292,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [psdNotFound, setPsdNotFound] = useState<{ expectedFilename: string } | null>(null)
   const [psdOverwriteConfirm, setPsdOverwriteConfirm] = useState<{ filename: string } | null>(null)
   const [psdUploading, setPsdUploading] = useState(false)
+  const [posterTags, setPosterTags] = useState<Record<string, string>>({})   // file_path → convention name (poster OR backdrop images)
+  const [tagTarget, setTagTarget] = useState<{ path: string; backdrop: boolean } | null>(null)   // image whose tag popup is open
+  const [tagDecade, setTagDecade] = useState(1)   // Tag popup: which season decade (1, 11, 21…) is expanded
 
   // Export style: defaults to the request's style, but the toolbar toggle can override it so an
   // MM2K request can also be built in CL2K (and vice-versa). Each style has its own template +
@@ -508,6 +517,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           poster_paths: psdSelection.posters,
           backdrop_paths: psdSelection.backdrops,
           logo_paths: psdSelection.logos,
+          // Per-image tag names, aligned to poster_paths / backdrop_paths ('' = untagged → default name).
+          poster_layer_names: posterLayerNames(psdSelection.posters, posterTags),
+          backdrop_layer_names: posterLayerNames(psdSelection.backdrops, posterTags),
           use_existing: useExisting,
           confirm_overwrite: confirmOverwrite,
         },
@@ -526,9 +538,16 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         if (result.openPhotopea) {
           // Photopea fetches the exported PSD itself (files:[url]) and the plugin panel adds the
           // seasons / save / JPG buttons. Works on http LAN once the user allows Photopea's
-          // one-time "local network access" prompt.
-          openPhotopeaWithPsd(result.psdUrl, result.filename, result.style)
-          showToast(`Opening ${result.filename} in Photopea…`, 'success')
+          // one-time "local network access" prompt. In same-tab mode later exports are added as
+          // separate documents in the one open Photopea tab (onError surfaces a failed app.open).
+          openPhotopeaWithPsd(result.psdUrl, result.filename, result.style, psdConfig.sameTab,
+            (msg) => showToast(`Photopea couldn't open the PSD: ${msg}`, 'error'))
+          showToast(
+            psdConfig.sameTab
+              ? `Adding ${result.filename} to Photopea…`
+              : `Opening ${result.filename} in Photopea…`,
+            'success',
+          )
         } else {
           showToast(`PSD saved: ${result.filename}`, 'success')
         }
@@ -549,7 +568,39 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, posterTags, psdConfig.sameTab, showToast])
+
+  // Tag a specific poster with a plugin-convention name (s1/s0/main/show/c). Tagging just STORES the
+  // name (and selects the poster); it's applied when the user later hits New/Use-Existing Export,
+  // which names that poster's injected layer so the plugin's ⚡ batch recognizes it.
+  const handleTag = useCallback((filePath: string, name: string, backdrop: boolean) => {
+    setPosterTags((prev) => ({ ...prev, [filePath]: name }))
+    // A tagged poster is injected as a poster layer (cover-fill); a tagged backdrop stays a backdrop
+    // layer (scaled to canvas height, no crop) — so route it into the matching selection.
+    setPsdSelection((prev) => {
+      const key = backdrop ? 'backdrops' : 'posters'
+      return prev[key].includes(filePath) ? prev : { ...prev, [key]: [...prev[key], filePath] }
+    })
+    setTagTarget(null)
+  }, [])
+
+  // Removing a tag also drops the image from its selection — tagging is what put it there (important
+  // for backdrops, whose thumbnail has no separate select button to remove it).
+  const handleUntag = useCallback((filePath: string, backdrop: boolean) => {
+    setPosterTags((prev) => { const next = { ...prev }; delete next[filePath]; return next })
+    setPsdSelection((prev) => {
+      const key = backdrop ? 'backdrops' : 'posters'
+      return { ...prev, [key]: prev[key].filter((p) => p !== filePath) }
+    })
+    setTagTarget(null)
+  }, [])
+
+  // Reset the whole PSD picker: every P/B/L selection and every tag.
+  const handleClearPsdSelection = useCallback(() => {
+    setPsdSelection({ posters: [], backdrops: [], logos: [] })
+    setPosterTags({})
+    setTagTarget(null)
+  }, [])
 
   const handlePsdNotFoundUpload = useCallback(async (file: File) => {
     if (!psdNotFound) return
@@ -801,6 +852,23 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 ))}
               </select>
             </div>
+            {(() => {
+              const hasSelection =
+                psdSelection.posters.length + psdSelection.backdrops.length + psdSelection.logos.length > 0 ||
+                Object.keys(posterTags).length > 0
+              return (
+                <button
+                  type="button"
+                  className="tmdb-gallery-clear-btn"
+                  onClick={handleClearPsdSelection}
+                  disabled={!hasSelection}
+                  title="Clear all selected posters and tags"
+                >
+                  <Eraser size={13} />
+                  Clear
+                </button>
+              )
+            })()}
             <div className="tmdb-psd-export-group">
               <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
                 {(['CL2K', 'MM2K'] as const).map((s) => (
@@ -839,6 +907,39 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               </button>
             </div>
           </div>
+
+          {tagTarget && (() => {
+            const cur = posterTags[tagTarget.path]
+            return (
+              <div className="tmdb-tag-overlay" onClick={() => setTagTarget(null)}>
+                <div className="tmdb-tag-popup" onClick={(e) => e.stopPropagation()}>
+                  <div className="tmdb-tag-head">
+                    <span>Tag {tagTarget.backdrop ? 'background' : 'poster'} as…</span>
+                    <button type="button" className="tmdb-tag-close" onClick={() => setTagTarget(null)} aria-label="Close"><X size={15} /></button>
+                  </div>
+                  <div className="tmdb-tag-roles">
+                    {([['main', 'Movie'], ['show', 'Show'], ['s0', 'Specials'], ['c', 'Collection']] as const).map(([val, label]) => (
+                      <button key={val} type="button" className={`tmdb-tag-chip role${cur === val ? ' active' : ''}`} onClick={() => handleTag(tagTarget.path, val, tagTarget.backdrop)}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="tmdb-tag-sub">Season</div>
+                  <div className="tmdb-tag-decades">
+                    {[1, 11, 21, 31, 41, 51].map((d) => (
+                      <button key={d} type="button" className={`tmdb-tag-chip decade${tagDecade === d ? ' active' : ''}`} onClick={() => setTagDecade(d)}>{d}–{d + 9}</button>
+                    ))}
+                  </div>
+                  <div className="tmdb-tag-seasons">
+                    {Array.from({ length: 10 }, (_, i) => tagDecade + i).map((n) => (
+                      <button key={n} type="button" className={`tmdb-tag-chip num${cur === `s${n}` ? ' active' : ''}`} onClick={() => handleTag(tagTarget.path, `s${n}`, tagTarget.backdrop)}>{n}</button>
+                    ))}
+                  </div>
+                  {cur && (
+                    <button type="button" className="tmdb-tag-untag" onClick={() => handleUntag(tagTarget.path, tagTarget.backdrop)}>Remove tag “{cur}”</button>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
 
           {activeGalleryTab === 'season-posters'
             ? (
@@ -883,14 +984,34 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                       >
                                         <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
                                       </button>
-                                      <button
-                                        type="button"
-                                        className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
-                                        onClick={() => togglePsdSelection('poster', img.file_path)}
-                                        title={isSelected ? 'Deselect poster' : 'Select as Poster'}
-                                      >
-                                        {isSelected ? <span>{selIdx + 1}</span> : <span>P</span>}
-                                      </button>
+                                      <div className="tmdb-thumb-actions">
+                                        <button
+                                          type="button"
+                                          className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
+                                          onClick={() => togglePsdSelection('poster', img.file_path)}
+                                          title={isSelected ? 'Deselect poster' : 'Select as Poster'}
+                                        >
+                                          {isSelected ? <span>{selIdx + 1}</span> : <span>P</span>}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={`tmdb-psd-tag-btn${posterTags[img.file_path] ? ' tagged' : ''}`}
+                                          onClick={() => { setTagTarget({ path: img.file_path, backdrop: false }); setTagDecade(1) }}
+                                          title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/collection) for the plugin batch'}
+                                        >
+                                          {posterTags[img.file_path] ?? <Tag size={11} />}
+                                        </button>
+                                        {posterTags[img.file_path] && (
+                                          <button
+                                            type="button"
+                                            className="tmdb-psd-untag-btn"
+                                            onClick={() => handleUntag(img.file_path, false)}
+                                            title="Remove tag"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="tmdb-gallery-item-meta">
                                       <div className="tmdb-gallery-meta-row">
@@ -945,17 +1066,39 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                           >
                             <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
                           </button>
-                          <button
-                            type="button"
-                            className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
-                            onClick={() => togglePsdSelection(role, img.file_path)}
-                            title={isSelected ? `Deselect ${role}` : role === 'poster' ? 'Select as Poster' : role === 'backdrop' ? 'Select as Background' : 'Select as Logo'}
-                          >
-                            {isSelected
-                              ? <span>{selIdx + 1}</span>
-                              : <span>{role === 'poster' ? 'P' : role === 'backdrop' ? 'B' : 'L'}</span>
-                            }
-                          </button>
+                          <div className="tmdb-thumb-actions">
+                            <button
+                              type="button"
+                              className={`tmdb-psd-select-btn${isSelected ? ' selected' : ''}`}
+                              onClick={() => togglePsdSelection(role, img.file_path)}
+                              title={isSelected ? `Deselect ${role}` : role === 'poster' ? 'Select as Poster' : role === 'backdrop' ? 'Select as Background' : 'Select as Logo'}
+                            >
+                              {isSelected
+                                ? <span>{selIdx + 1}</span>
+                                : <span>{role === 'poster' ? 'P' : role === 'backdrop' ? 'B' : 'L'}</span>
+                              }
+                            </button>
+                            {(role === 'poster' || role === 'backdrop') && (
+                              <button
+                                type="button"
+                                className={`tmdb-psd-tag-btn${posterTags[img.file_path] ? ' tagged' : ''}`}
+                                onClick={() => { setTagTarget({ path: img.file_path, backdrop: role === 'backdrop' }); setTagDecade(1) }}
+                                title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/collection) for the plugin batch'}
+                              >
+                                {posterTags[img.file_path] ?? <Tag size={11} />}
+                              </button>
+                            )}
+                            {(role === 'poster' || role === 'backdrop') && posterTags[img.file_path] && (
+                              <button
+                                type="button"
+                                className="tmdb-psd-untag-btn"
+                                onClick={() => handleUntag(img.file_path, role === 'backdrop')}
+                                title="Remove tag"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="tmdb-gallery-item-meta">
                           <div className="tmdb-gallery-meta-row">

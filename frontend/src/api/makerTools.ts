@@ -218,6 +218,8 @@ export interface PsdExportRequest {
   logo_paths: string[]
   use_existing?: boolean
   confirm_overwrite?: boolean
+  poster_layer_names?: string[]   // per-poster convention names aligned to poster_paths (s1/s0/main/show/c; '' = untagged)
+  backdrop_layer_names?: string[]  // same, aligned to backdrop_paths — a tagged backdrop keeps backdrop fit but gets a variant name
 }
 
 /** Returned when the server saved the PSD to an export folder — open in Photopea. */
@@ -249,6 +251,16 @@ export interface PsdExportExists {
 }
 
 export type PsdExportResult = PsdExportSaved | PsdExportDownload | PsdExportNotFound | PsdExportExists
+
+/**
+ * Build the `poster_layer_names` list for an export, aligned 1:1 with `posterPaths`.
+ * A tagged poster contributes its convention name (s1/s0/main/show/c); an untagged one contributes
+ * '' so the backend keeps the default title-based layer name. Alignment is what lets the backend
+ * name each injected poster layer correctly.
+ */
+export function posterLayerNames(posterPaths: string[], tags: Record<string, string>): string[] {
+  return posterPaths.map((p) => tags[p] ?? '')
+}
 
 /**
  * Export selected TMDB images as a layered PSD. The server owns conflict detection,
@@ -322,39 +334,104 @@ export const exportToPsd = async (
   }
 }
 
+// Same-tab mode retains the launched Photopea window so later exports can add themselves as new
+// DOCUMENTS in that one tab instead of spawning a tab each. Lost if the Posterflow page reloads
+// (module state resets) — the next export then just launches a fresh tab.
+let ppWin: Window | null = null
+let ppOnError: ((msg: string) => void) | null = null
+let ppListenerAttached = false
+
+// Photopea echoes app.open failures back to us (the opener/OE) as "PFLOPENERR:<e>". Surface the
+// latest caller's handler so a blocked LAN fetch / CORS / expired token isn't silent.
+const ensurePpListener = (): void => {
+  if (ppListenerAttached) return
+  ppListenerAttached = true
+  window.addEventListener('message', (e) => {
+    if (typeof e.data === 'string' && e.data.indexOf('PFLOPENERR:') === 0 && ppOnError) {
+      ppOnError(e.data.slice('PFLOPENERR:'.length))
+    }
+  })
+}
+
+// Per-document save context, stashed on Photopea's writable Document.source. The plugin reads the
+// ACTIVE doc's source at click time, so 💾/JPG always target whatever doc is in front — that's what
+// makes same-tab (many docs, one plugin) route saves to the right PSD/style.
+const buildPflctx = (saveUrl: string, docName: string, style: string): string =>
+  'pflctx:' + JSON.stringify({ save: saveUrl, name: docName, style })
+
 /**
- * Open TOP-LEVEL Photopea with the exported PSD and the Posterflow "Seasons" plugin attached.
- * Photopea fetches the PSD itself (files:[url]) and opens it on startup; a launch `script`
- * renames the doc to the full filename, and the plugin panel (environment.plugins) provides the
- * season buttons, the PSD save, and the JPG export.
+ * Open the exported PSD in TOP-LEVEL Photopea with the Posterflow "Seasons" plugin attached.
+ *
+ * New-tab mode (sameTab=false, default): each export opens its own Photopea tab. Photopea fetches
+ * the PSD itself (files:[url]) and opens it on startup; a launch `script` renames the doc to the
+ * full filename and stamps its save context onto Document.source; the plugin panel
+ * (environment.plugins) provides the season buttons, the PSD save, and the JPG export.
+ *
+ * Same-tab mode (sameTab=true): the FIRST export launches Photopea exactly as above but the window
+ * handle is retained; every later export postMessages a script telling that live Photopea to
+ * `app.open(psdUrl)` as a NEW document in the same tab (de-duping if that exact poster is already
+ * open). This reuses the local-network permission granted at first launch — no new tab, no new
+ * prompt — so two styles of one title sit side by side as separate docs.
  *
  * Needs the user to allow Photopea's "local network access" prompt (public photopea.com reaching
  * the LAN/localhost server) + CORS on the PSD GET. Photopea API: https://www.photopea.com/api/
  */
-export const openPhotopeaWithPsd = (psdUrl: string, filename: string, style = 'CL2K'): void => {
-  // style rides on the save URL and the plugin query so the 💾 save-back and JPG export land in
-  // the SAME style's folder the PSD was exported to.
+export const openPhotopeaWithPsd = (
+  psdUrl: string,
+  filename: string,
+  style = 'CL2K',
+  sameTab = false,
+  onError?: (msg: string) => void,
+): void => {
+  const docName = filename.replace(/\.psd$/i, '')
+  // style rides on the save URL so the 💾 save-back and JPG export land in the SAME style's folder
+  // the PSD was exported to.
   const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}?style=${encodeURIComponent(style)}`
-  const params = new URLSearchParams({ save: saveUrl, name: filename.replace(/\.psd$/i, ''), style })
+  const pflctx = buildPflctx(saveUrl, docName, style)
+
+  // ── Same-tab reuse: add a document to the already-open Photopea ──
+  if (sameTab && ppWin && !ppWin.closed) {
+    ppOnError = onError ?? null
+    // Reuse the session's granted LNA + CORS: Photopea fetches the URL itself, just like files:[url]
+    // did for the first doc. Set name + source on the new doc so the plugin can route its save. If
+    // the exact poster (same source) is already open, just bring it to front instead of duplicating.
+    const openScript = `try{`
+      + `var want=${JSON.stringify(pflctx)};var found=null;`
+      + `for(var i=0;i<app.documents.length;i++){try{if((app.documents[i].source||'')==want){found=app.documents[i];break;}}catch(_e){}}`
+      + `if(found){app.activeDocument=found;app.echoToOE('PFLOPENED:dup');}`
+      + `else{var d=app.open(${JSON.stringify(psdUrl)},null,false);try{d.name=${JSON.stringify(docName)};}catch(_n){}try{d.source=want;}catch(_s){}app.echoToOE('PFLOPENED:new');}`
+      + `}catch(e){app.echoToOE('PFLOPENERR:'+e);}`
+    ppWin.postMessage(openScript, '*')
+    ppWin.focus()
+    return
+  }
+
+  // ── Fresh launch (new-tab mode, or the first doc of a same-tab session) ──
+  const params = new URLSearchParams({ save: saveUrl, name: docName, style })
   const pluginUrl = `${window.location.origin}/photopea-plugin.html?${params.toString()}`
   // icon: Posterflow's logo as an inlined data URI (a colored logo, so no "===" theme-recolor
   // prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
   // w/h: fix the panel to 184px wide — fits 5 season chips per row.
   const icon = pluginIcon
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
-  // editor boots. Photopea trims the doc name out of the URL (dropping the "(year) {ids}" part), so we pass a launch `script`
-  // (runs once after the file loads) that renames the doc to the full export filename — the tab,
-  // the JPG export, and the plugin's save guard all rely on that name. Requires the user to ALLOW
-  // Photopea's "local network access" prompt + CORS on the PSD GET (we send it). On a
-  // password-protected instance psd_url carries a signed, file-scoped ?token= the GET validates,
-  // since Photopea can't send the app Bearer header.
-  const docName = filename.replace(/\.psd$/i, '')
+  // editor boots. Photopea trims the doc name out of the URL (dropping the "(year) {ids}" part), so
+  // we pass a launch `script` (runs once after the file loads) that renames the doc to the full
+  // export filename AND stamps its save context onto Document.source — the tab, the JPG export, and
+  // the plugin's per-doc save all rely on these. Requires the user to ALLOW Photopea's "local
+  // network access" prompt + CORS on the PSD GET (we send it). On a password-protected instance
+  // psd_url carries a signed, file-scoped ?token= the GET validates, since Photopea can't send the
+  // app Bearer header.
   const config = {
     files: [psdUrl],
-    script: `try{if(app.documents.length>0)app.activeDocument.name=${JSON.stringify(docName)}}catch(e){}`,
-    environment: { plugins: [{ name: 'Posterflow Seasons', url: pluginUrl, icon, w: 184, h: 420 }] },
+    script: `try{if(app.documents.length>0){var d=app.activeDocument;try{d.name=${JSON.stringify(docName)};}catch(_n){}try{d.source=${JSON.stringify(pflctx)};}catch(_s){}}}catch(e){}`,
+    environment: { plugins: [{ name: 'PosterFlow', url: pluginUrl, icon, w: 184, h: 420 }] },
   }
-  window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
+  const w = window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
+  if (sameTab) {
+    ppWin = w
+    ppOnError = onError ?? null
+    ensurePpListener()
+  }
 }
 
 export interface PosterStyleEntry {

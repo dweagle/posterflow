@@ -177,6 +177,7 @@ export {
   type PosterAvailability,
   type PosterStyleEntry,
   exportToPsd,
+  posterLayerNames,
   openPhotopeaWithPsd,
   uploadPsdToExportFolder,
   checkTmdbPosterAvailability,

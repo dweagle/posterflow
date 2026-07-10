@@ -125,6 +125,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "psd_image_export_folder_mm2k",
     "psd_template_path_mm2k",
     "psd_open_photopea",
+    "psd_photopea_same_tab",
     "psd_poster_fit_border",
     # Sidebar layout
     "sidebar_config",

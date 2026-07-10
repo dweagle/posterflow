@@ -98,6 +98,7 @@ function MakerTools() {
   const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
   const [psdImageExportFolderMm2k, setPsdImageExportFolderMm2k] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
+  const [psdSameTab, setPsdSameTab] = useState(false)
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
@@ -179,6 +180,7 @@ function MakerTools() {
       setPsdTemplatePathMm2k(cfg.templatePathMm2k)
       setPsdImageExportFolderMm2k(cfg.imageExportFolderMm2k)
       setPsdOpenPhotopea(cfg.openPhotopea)
+      setPsdSameTab(cfg.sameTab)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -234,6 +236,7 @@ function MakerTools() {
         psd_template_path_mm2k: psdTemplatePathMm2k.trim(),
         psd_image_export_folder_mm2k: psdImageExportFolderMm2k.trim(),
         psd_open_photopea: String(psdOpenPhotopea),
+        psd_photopea_same_tab: String(psdSameTab),
         psd_poster_fit_border: String(psdPosterFitBorder),
       })
       showToast('PSD settings saved', 'success')
@@ -341,7 +344,8 @@ function MakerTools() {
     templatePathMm2k: psdTemplatePathMm2k,
     imageExportFolderMm2k: psdImageExportFolderMm2k,
     openPhotopea: psdOpenPhotopea,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea])
+    sameTab: psdSameTab,
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))
@@ -812,7 +816,7 @@ function MakerTools() {
                         <li><strong>Use Existing PSD</strong> — opens an already-saved PSD from your export folder and injects any selected poster/logo/backdrop layers into it, preserving all your existing work (borders, text, effects). With no images selected it simply opens the existing file. It must be named <code>{'{'}title{'}'} ({'{'}year{'}'}).psd</code> and placed in the configured export folder. If no matching file is found, a prompt will guide you to either place the file there manually or upload it directly from your computer.</li>
                       </ul>
                     </li>
-                    <li><strong>Open in Photopea</strong> — if the "Open in Photopea" toggle is enabled in Configure, the exported PSD will open directly in Photopea in a new tab instead of downloading</li>
+                    <li><strong>Open in Photopea</strong> — if the "Open in Photopea" toggle is enabled in Configure, the exported PSD opens directly in Photopea instead of downloading. By default each export opens its own tab; enable "Reuse one Photopea tab" to add exports as separate documents in a single tab (each still saves back to its own PSD)</li>
                     <li><strong>Multiple posters</strong> — you can add more than one poster; each becomes its own layer in the PSD</li>
                   </ul>
                 </div>
@@ -1031,6 +1035,26 @@ function MakerTools() {
                       type="checkbox"
                       checked={psdOpenPhotopea}
                       onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </div>
+                <div className="maker-setting-row" style={{ opacity: psdOpenPhotopea ? 1 : 0.5 }}>
+                  <div>
+                    <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
+                    <small className="muted" style={{ display: 'block', marginTop: '0.2rem' }}>
+                      When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
+                      {' '}instead of a new tab each time — handy for making one title in two styles side by side.
+                      The first export opens the tab; later exports are added to it (each still saves back to its
+                      own PSD). If you close that tab, the next export opens a fresh one.
+                    </small>
+                  </div>
+                  <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={psdSameTab}
+                      disabled={!psdOpenPhotopea}
+                      onChange={(e) => setPsdSameTab(e.target.checked)}
                     />
                     <span className="toggle-slider" />
                   </label>

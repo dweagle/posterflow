@@ -3,31 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Posterflow — Seasons</title>
+<title>Posterflow — Photopea plugin</title>
 <!--
-  Posterflow's Photopea PLUGIN panel. It runs as a panel INSIDE top-level Photopea
-  (attached via environment.plugins in the launch URL — no manual install), so Photopea
-  keeps all its native abilities: a file you DRAG IN gets a writable handle, and Ctrl+S
-  overwrites it on disk natively.
+  Standalone Photopea PLUGIN panel for CL2K / MM2K season posters. Fully self-contained:
+  it talks ONLY to Photopea (via window.parent) and never calls any external server, so it
+  works on any PSD you open manually. Saving is native — Ctrl+S overwrites the file you
+  opened on disk; the JPG button downloads a flattened copy in the browser.
 
-  For the POSTER itself: Photopea fetches the exported PSD straight from Posterflow via the
-  launch config (files:[url]) — this needs the user's one-time "allow local network access"
-  prompt for photopea.com plus CORS (Posterflow sends it). The panel reads the doc's
-  SEASONS/SPECIALS layers and toggles them; on Save it exports the PSD and PUTs it back to the
-  export folder same-origin. (A URL-opened doc has no local file handle, so Photopea's native
-  Ctrl+S can't overwrite the server file — hence the 💾 button.)
+  What it does with the ACTIVE document:
+   - reads the SEASONS / SPECIALS / SEQUEL layers and gives you toggle chips
+   - shows the template style (CL2K / MM2K), detected from the layer structure
+   - Place Logo / Fit Poster: resize + position the SELECTED layer with the poster formula
+   - JPG: download a flattened JPG (named after the doc + the visible season)
 
-  The save target + doc name are passed in THIS page's query string by openPhotopeaWithPsd()
-  (?save=<url>&name=<doc name>); Photopea names the loaded doc from the file URL.
-
+  Install: host this file at a stable HTTPS URL, then in Photopea do
+  Window ▸ Plugins ▸ Add Plugin and upload the manifest.json that points at it.
   Photopea API: https://www.photopea.com/api/
 -->
 <style>
   html, body { margin: 0; height: 100%; background: #1f1f24; color: #e6e6e6;
     font: 12px/1.4 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
   body { display: flex; flex-direction: column; }
-  /* Big style badge — which template (CL2K/MM2K) the ACTIVE doc is; matters most in same-tab mode
-     where several docs share one panel. Color matches the season/group chip accents. */
+  /* Big style badge — which template (CL2K/MM2K) the ACTIVE doc is, detected from its layers. */
   .style-head { padding: 7px 8px; background: #23232a; border-bottom: 1px solid #3a3a42; text-align: center; }
   .style-name { font-size: 17px; font-weight: 800; letter-spacing: 2px; color: #8a8a94; }
   .style-name.cl2k { color: #3fae62; }
@@ -41,13 +38,6 @@
   .rowlabel { color: #9aa; margin-right: 2px; }
   .tools { display: flex; gap: 5px; padding: 6px; border-bottom: 1px solid #3a3a42; }
   .tools .btn { flex: 1; }
-  .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
-  .batchbar.hidden { display: none; }
-  .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
-  .batchrow { display: flex; gap: 5px; }
-  .batchrow.hidden { display: none; }
-  .batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6;
-    border-radius: 4px; padding: 3px 6px; font-size: 12px; }
   .list { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; overflow-y: auto; padding: 8px; flex: 1; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
   .list::-webkit-scrollbar { width: 6px; }
   .list::-webkit-scrollbar-thumb { background: #3a3a42; border-radius: 3px; }
@@ -62,18 +52,24 @@
   .msg { padding: 8px; color: #9aa; }
   .trimbar { display: flex; justify-content: center; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
+  .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
+  .batchbar.hidden { display: none; }
+  .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
+  .batchrow { display: flex; gap: 5px; }
+  .batchrow.hidden { display: none; }
+  .batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6;
+    border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 </style>
 </head>
 <body>
   <div class="style-head"><span class="style-name" data-el="style">—</span></div>
   <div class="head">
-    <button class="btn" data-act="save" title="Save the poster PSD back to Posterflow">💾</button>
-    <button class="btn" data-act="jpg" title="Export flattened JPG to Posterflow">JPG</button>
+    <button class="btn" data-act="jpg" title="Download a flattened JPG of the poster">JPG</button>
     <button class="btn" data-act="batch" title="Batch-export JPGs: s0/s1…/main/show layers, or a season range from a single poster">⚡</button>
     <button class="btn" data-act="refresh" title="Reload layers from the active document">⟳</button>
   </div>
   <div class="tools">
-    <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo, using Maker Tools' formula (keeps the logo's colors)">Place Logo</button>
+    <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo (keeps the logo's colors)">Place Logo</button>
     <button class="btn" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</button>
   </div>
   <div class="batchbar hidden">
@@ -99,7 +95,6 @@
   const singles = document.querySelector('.singles');
   const sequels = document.querySelector('.sequels');
   const list    = document.querySelector('.list');
-  const saveBtn = document.querySelector('[data-act="save"]');
   const jpgBtn  = document.querySelector('[data-act="jpg"]');
   const logoBtn = document.querySelector('[data-act="logo"]');
   const fitBtn  = document.querySelector('[data-act="fit"]');
@@ -107,37 +102,20 @@
   let trimBusy = false;
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
-  let saving = false, jpgBusy = false;
+  let jpgBusy = false;
   let placeBusy = false, pendingMode = '';  // Place Logo / Fit Poster state
   let placeBtn = null, placeLabel = '', placeWatch = null, pendingRes = null;  // in-flight button + watchdog + target geom
-  let pendingDocName = 'poster';                  // active doc's (possibly mangled) name — JPG fallback naming
-  let posterDocName = '';                          // FIRST doc's name (captured once) — new-tab save fallback when no source ctx
-  let activeCtx = null;                            // active doc's Posterflow context {save,name,style} read from Document.source
-  let detectedStyle = '';                          // CL2K/MM2K read from the active doc's layer structure — authoritative per-doc
-  let pendingExport = null;                        // context captured at 💾/JPG click, consumed when Photopea returns the bytes
+  let pendingDocName = 'poster';                  // active doc's (possibly mangled) name — used for the JPG filename
+  let detectedStyle = '';                          // CL2K/MM2K guessed from the active doc's layer structure
   let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false;  // batch-export state
   let batchSeasonText = [], batchSpecialsText = [];  // "Season N" / "Specials" text layers found by the batch scan (to pair with s-layers)
   let lastActiveName = null;                        // active-doc watcher: last name we read layers for; a change re-reads the panel
-
-  // ---- config from this page's query string (set by openPhotopeaWithPsd) ----
-  // These describe the FIRST doc this plugin launched with. In same-tab mode the tab holds several
-  // docs, so per-doc context (save URL / name / style) rides on each Document.source instead; cfg is
-  // only the fallback for that first doc (and the sole source in new-tab mode).
-  const q   = new URLSearchParams(location.search);
-  const cfg = { save: q.get('save') || '', name: q.get('name') || '', style: q.get('style') || '' };
-
-  // Posterflow API auth: the panel is same-origin to Posterflow, so its token (if a
-  // password is set) is in our localStorage.
-  const authHeaders = () => {
-    const t = localStorage.getItem('posterflow.auth.token');
-    return t ? { 'Authorization': 'Bearer ' + t } : {};
-  };
 
   // ---- talk to Photopea ----------------------------------------------------
   const send = (script) => PP.postMessage(script, '*');
 
   const FETCH = `try{
-    if(app.documents.length===0){app.echoToOE('PFL:'+JSON.stringify({singles:[],seasons:[]}));}
+    if(app.documents.length===0){app.echoToOE('SZ:'+JSON.stringify({singles:[],seasons:[]}));}
     else{
       var d=app.activeDocument;
       var SING=[{re:/^specials$/i,lab:'SP'},{re:/^collection$/i,lab:'C'},{re:/^complete limited/i,lab:'CLS'}];
@@ -174,17 +152,15 @@
       if(sq){var gv=sq.L.visible;for(var i=0;i<sq.L.layers.length;i++){var c=sq.L.layers[i];
         if(c.typename!='LayerSet'){sequels.push({n:c.name,p:sq.p.concat(i),v:(gv&&c.visible)});}}}
 
-      // Per-doc style from the actual layers (authoritative for the badge): a LOGO group ⇒ CL2K;
-      // else a SEQUEL group ⇒ MM2K; else unknown. LOGO/SEQUEL are mutually exclusive across templates.
+      // Style guess: a LOGO group means CL2K; else a SEQUEL group means MM2K; else unknown.
       function findLogo(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=='LayerSet'){if(/^\\s*logos?\\s*$/i.test(L.name))return true;if(findLogo(L.layers))return true;}}return false;}
       var detStyle=findLogo(d.layers)?'CL2K':(sq?'MM2K':'');
 
-      app.echoToOE('PFLNAME:'+app.activeDocument.name);
-      var _s=(''+(d.source||''));app.echoToOE('PFLCTX:'+(_s.indexOf('pflctx:')==0?_s.slice(7):''));
-      app.echoToOE('PFLDET:'+detStyle);
-      app.echoToOE('PFL:'+JSON.stringify({singles:singles,seasons:seasons,sequels:sequels,seqGroup:(sq?sq.p:null)}));
+      app.echoToOE('SZNAME:'+app.activeDocument.name);
+      app.echoToOE('SZDET:'+detStyle);
+      app.echoToOE('SZ:'+JSON.stringify({singles:singles,seasons:seasons,sequels:sequels,seqGroup:(sq?sq.p:null)}));
     }
-  }catch(e){app.echoToOE('PFLERR:'+e);}`;
+  }catch(e){app.echoToOE('SZERR:'+e);}`;
 
   const fetchLayers = () => send(FETCH);
 
@@ -192,7 +168,7 @@
     `try{var dd=app.activeDocument;var ch=${JSON.stringify(changes)};` +
     `for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;` +
     `for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}` +
-    `app.echoToOE('PFLVIS:ok');}catch(e){app.echoToOE('PFLERR:'+e);}`
+    `app.echoToOE('SZVIS:ok');}catch(e){app.echoToOE('SZERR:'+e);}`
   );
 
   // ---- helpers -------------------------------------------------------------
@@ -358,35 +334,7 @@
     });
   };
 
-  // Photopea loads the PSD itself from the launch config (files:[url]), so by the time this
-  // panel opens a doc is already active. Here we just read the layers of whatever is active.
-
-  // ---- save the poster PSD back to Posterflow ------------------------------
-  const flashSave = (m) => { saving = false; saveBtn.textContent = m; setTimeout(() => { saveBtn.textContent = '💾'; }, 1400); };
-  // Save the ACTIVE doc back to ITS OWN PSD. Photopea doesn't retain a custom Document.source, so a
-  // later same-tab doc can't rely on that context — it's derived instead from what DOES survive: the
-  // doc name (the tagged filename) + the style read LIVE from its layers (LOGO⇒CL2K, SEQUEL⇒MM2K).
-  // Order: source ctx if it ever sticks → the first launched doc via cfg → live name+style → else a
-  // foreign doc (echoes PFLNOSAVE so it isn't PUT to a poster URL; use Ctrl+S for those).
-  const cfgCtxJson = JSON.stringify(JSON.stringify({ save: cfg.save, name: cfg.name, style: cfg.style }));
-  // In-script (Photopea) detector: sets `st` to the active doc's style from its groups. `d` must exist.
-  const DETECT = 'function hasGrp(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hasGrp(L.layers,re))return true;}}return false;}' +
-    'var st=hasGrp(d.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hasGrp(d.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");';
-  const saveDoc = () => {
-    if (saving || placeBusy) return;
-    saving = true; saveBtn.textContent = '…';
-    send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
-      'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));d.saveToOE("psd");}' +
-      // Photopea sets a URL-opened doc's source to the URL it came from — which carries the FULL
-      // (untrimmed) filename in its path + the style in its query. Use it: the doc NAME is trimmed.
-      'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);d.saveToOE("psd");}' +
-      'else if(' + JSON.stringify(cfg.save) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){' +
-        'app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');d.saveToOE("psd");}' +
-      'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));d.saveToOE("psd");}' +
-      'else{app.echoToOE("PFLNOSAVE:"+d.name);}}catch(e){app.echoToOE("PFLERR:"+e);}');
-  };
-
-  // ---- JPG export → Posterflow image folder --------------------------------
+  // ---- JPG export → browser download ---------------------------------------
   const activeSuffix = () => {
     const single = model.singles.find((s) => s.v);
     if (single) {
@@ -406,16 +354,7 @@
   const exportJpg = () => {
     if (jpgBusy || placeBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
-    // Capture the ACTIVE doc's context so the JPG is named/routed for whatever doc is in front:
-    // source ctx (if it sticks) → the first doc's cfg → live name+detected style → else a bare
-    // {raw:name} for a foreign doc (named after the doc, routed to the default folder).
-    send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
-      'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
-      'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);}' +
-      'else if(' + JSON.stringify(cfg.name) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');}' +
-      'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));}' +
-      'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}' +
-      'app.echoToOE("PFLNAME:"+d.name);d.saveToOE("jpg:0.90");}catch(e){app.echoToOE("PFLERR:"+e);}');
+    send('try{app.echoToOE("SZNAME:"+app.activeDocument.name);app.activeDocument.saveToOE("jpg:0.90")}catch(e){app.echoToOE("SZERR:"+e)}');
   };
 
   const download = (buf, filename) => {
@@ -426,79 +365,23 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
-  // Build save context from a URL-opened doc's Document.source (the URL it came from): the path
-  // holds the FULL untrimmed filename, the query holds the style. Yields the same-origin PUT URL.
-  const ctxFromUrl = (raw) => {
-    try {
-      const u = new URL(raw, location.origin);
-      const m = u.pathname.match(/\/psd-exports\/([^/?#]+)/);
-      if (!m) return null;
-      const filename = decodeURIComponent(m[1]);
-      const style = u.searchParams.get('style') || detectedStyle || '';
-      return {
-        save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(filename) + (style ? '?style=' + encodeURIComponent(style) : ''),
-        name: filename.replace(/\.psd$/i, ''),
-        style,
-      };
-    } catch (_) { return null; }
-  };
-
-  // Photopea hands bytes back here: PSD ("8BPS") from 💾 → PUT to the PSD save URL;
-  // anything else (JPG) → PUT to the image-export folder, else download. Both use the context
-  // captured at click time (pendingExport) so the right doc's PSD/style/name is used.
-  const onSaved = async (buf) => {
+  // Photopea hands the exported JPG bytes back here → download it, named after the doc + the
+  // visible season. (PSD saving is native: Ctrl+S overwrites the file you opened on disk.)
+  const onBytes = (buf) => {
     if (batchBusy) { onBatchBytes(buf); return; }   // batch JPGs route to the queue, one at a time
-    const ex = pendingExport || {}; pendingExport = null;
-    const u8 = new Uint8Array(buf);
-    const isPsd = u8[0] === 0x38 && u8[1] === 0x42 && u8[2] === 0x50 && u8[3] === 0x53;   // "8BPS"
-    if (isPsd) {
-      // Use ONLY the captured target — never fall back to cfg.save (that's the FIRST doc's URL and
-      // would write the active doc's bytes over the wrong PSD).
-      const target = ex.save;
-      if (!target) { flashSave('✗'); return; }
-      try {
-        const r = await fetch(target, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        flashSave('✓');
-      } catch (e) { flashSave('✗'); console.error('PSD save failed:', e); }
-      return;
-    }
-    // Name the JPG after the doc's authoritative full name (from its context) — Photopea mangles
-    // the doc name (truncating at a dot in the title, e.g. "S.H.I.E.L.D."), dropping the year +
-    // {tmdb/imdb/tvdb} tags. For a foreign doc (only {raw} captured), fall back to its name with
-    // only a real document extension stripped.
-    const base = ex.name
-      ? ex.name
-      : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
-    const filename = base + activeSuffix() + '.jpg';
-    const styleQ = ex.style ? '?style=' + encodeURIComponent(ex.style) : '';
-    try {
-      const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename) + styleQ, {
-        method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      flashJpg('✓');
-    } catch (e) {
-      console.warn('Image-folder PUT failed, downloading instead:', e);
-      download(buf, filename); flashJpg('✓');
-    }
+    const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    download(buf, base + activeSuffix() + '.jpg');
+    flashJpg('✓');
   };
 
   // ---- Place Logo / Fit Poster ---------------------------------------------
-  // Apply Maker Tools' auto-placement formula to the SELECTED layer, entirely CLIENT-SIDE.
-  // The panel runs over http inside HTTPS Photopea, so it CANNOT fetch Posterflow's http API
-  // (the browser blocks it as mixed content). So the formula is ported to JS below — it must
-  // stay in sync with compute_logo_geometry / compute_poster_fit_geometry in
-  // backend/api/maker_tools.py (the PSD export's path; the backend tests pin those values).
+  // Resize + position the SELECTED layer with the poster formula, entirely CLIENT-SIDE.
   // Flow: read the layer + canvas size from Photopea → compute geometry here → resize the
-  // layer and re-measure its bounds → translate it into place. Place Logo also needs the
-  // layer's pixels for the transparency ("density") term, so it first exports the layer to a
-  // throwaway doc as PNG and measures density in a local canvas.
+  // layer and re-measure its bounds → translate it into place.
   const note = (t) => list.insertAdjacentHTML('afterbegin', '<div class="msg">' + t + '</div>');
 
-  // --- the formula (mirror of backend/api/maker_tools.py) ---
-  // rnd = round-half-to-even, matching Python's round() so the JS result is pixel-identical
-  // to the PSD export (JS Math.round would differ by 1px on exact .5 cases).
+  // --- the formula ---
+  // rnd = round-half-to-even (matches Python's round()) so results are pixel-stable.
   const rnd = (x) => { const f = Math.floor(x); return (Math.abs(x - f - 0.5) < 1e-9) ? (f % 2 === 0 ? f : f + 1) : Math.round(x); };
   const computeLogoGeometry = (srcW, srcH, cw, ch, density) => {
     const logoBottom = rnd(ch * (1352.13 / 1500));
@@ -537,40 +420,39 @@
 
   // Coerce a Photopea bound/dimension to a PRIMITIVE px number. The trailing *1 matters:
   // Photopea bounds are UnitValue objects, and `number - UnitValue` arithmetic inside a script
-  // sign-flips (ExtendScript trap) — so we never do bounds math in-script; nv() is only used to
-  // echo clean numbers, and all deltas are computed in JS.
+  // sign-flips (ExtendScript trap) — so we never do bounds math in-script; nv() only echoes clean
+  // numbers, and all deltas are computed in JS.
   const NV = "function nv(x){if(x==null)return 0;if(typeof x=='number')return x;var v=x;if(x.as){try{v=x.as('px');}catch(e){v=(x.value!==undefined?x.value:x);}}else if(x.value!==undefined){v=x.value;}return v*1;}";
 
   // Photopea follows Adobe's DOM, where bounds / translate use the document's RULER unit — if the
   // PSD's ruler is points/inches, our pixel numbers are misread (the layer flies off-canvas). So
-  // every script that touches geometry runs inside px(): force the ruler to PIXELS, do the work,
-  // then restore the user's ruler. NV is included so nv() is available; the wrapper also provides
-  // the try/catch → PFLERR.
+  // every geometry script runs inside px(): force the ruler to PIXELS, do the work, then restore
+  // the user's ruler. NV is included so nv() is available; the wrapper also provides the try/catch.
   const px = (work) =>
     "var _ru=null;try{_ru=app.preferences.rulerUnits;app.preferences.rulerUnits=Units.PIXELS;}catch(e){}" +
-    "try{" + NV + work + "}catch(e){app.echoToOE('PFLERR:'+e);}" +
+    "try{" + NV + work + "}catch(e){app.echoToOE('SZERR:'+e);}" +
     "try{if(_ru!=null)app.preferences.rulerUnits=_ru;}catch(e){}";
 
-  // Read active-layer bounds + canvas size → echo PFLGEO. (Fit Poster uses just this.)
+  // Read active-layer bounds + canvas size → echo SZGEO. (Fit Poster uses just this.)
   const READ_GEO = px(
     "var d=app.activeDocument,L=d.activeLayer,b=L.bounds;" +
     "var ll=nv(b[0]),lt=nv(b[1]),lw=Math.round(nv(b[2])-ll),lh=Math.round(nv(b[3])-lt);" +
-    "app.echoToOE('PFLGEO:'+JSON.stringify({cw:nv(d.width),ch:nv(d.height),lw:lw,lh:lh,ll:ll,lt:lt}));");
+    "app.echoToOE('SZGEO:'+JSON.stringify({cw:nv(d.width),ch:nv(d.height),lw:lw,lh:lh,ll:ll,lt:lt}));");
 
   // Placement is two scripts: (1) resize the layer and echo its NEW top-left as plain numbers
-  // (PFLRSZ:left,top); (2) the plugin computes the move in JS (no in-script UnitValue math) and
+  // (SZRSZ:left,top); (2) the plugin computes the move in JS (no in-script UnitValue math) and
   // translates by literal numbers. Same path for Place Logo and Fit Poster — no extra documents.
   const applyPlacement = (geo, res) => {
     pendingRes = res;
     const sc = (res.width / geo.lw) * 100;
     send(px("var L=app.activeDocument.activeLayer;L.resize(" + sc + "," + sc + ");" +
-      "var b=L.bounds;app.echoToOE('PFLRSZ:'+nv(b[0])+','+nv(b[1]));"));
+      "var b=L.bounds;app.echoToOE('SZRSZ:'+nv(b[0])+','+nv(b[1]));"));
   };
   const placeTranslate = (curLeft, curTop) => {
     const res = pendingRes; pendingRes = null;
     if (!res || !isFinite(curLeft) || !isFinite(curTop)) { finishPlace(false); return; }
     const dx = res.left - curLeft, dy = res.top - curTop;   // computed in JS — no UnitValue math
-    send(px("app.activeDocument.activeLayer.translate(" + dx + "," + dy + ");app.echoToOE('PFLPLACED:ok');"));
+    send(px("app.activeDocument.activeLayer.translate(" + dx + "," + dy + ");app.echoToOE('SZPLACED:ok');"));
   };
 
   const finishPlace = (ok, msg) => {
@@ -580,11 +462,9 @@
     placeBusy = false; pendingMode = ''; placeBtn = null; pendingRes = null;
   };
 
-  // PFLGEO arrived → compute the target geometry from the layer's real bounds, then place it.
-  // The export's logo formula also has a transparency ("density") term for sparse/dense tweaks;
-  // measuring a single layer's transparency needs a throwaway document (too fragile in Photopea),
-  // so we use a neutral density here — aspect ratio + pixel area (the dominant factors) are exact.
-  const LOGO_DENSITY = 0.30;   // neutral: no sparse boost / dense shrink, just the base sizing
+  // SZGEO arrived → compute target geometry from the layer's real bounds, then place it. Place Logo
+  // uses a neutral transparency ("density") — aspect ratio + pixel area (the dominant factors) are exact.
+  const LOGO_DENSITY = 0.30;
   const onGeo = (json) => {
     let geo; try { geo = JSON.parse(json); } catch { finishPlace(false); return; }
     if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
@@ -594,9 +474,9 @@
     applyPlacement(geo, res);
   };
 
-  const startPlace = (mode, btn, label) => {
+  const startPlace = (mode, btn, lbl) => {
     if (placeBusy) return;
-    placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = label;
+    placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = lbl;
     btn.textContent = '…';
     placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 12000);
     send(READ_GEO);
@@ -605,22 +485,20 @@
   const startFit  = () => startPlace('fit', fitBtn, 'Fit Poster');
 
   // Trim: crop the doc to its own canvas → discards every layer's off-canvas pixels to shrink the
-  // saved PSD. Canvas size and all layers are preserved; there's no visible change (off-canvas
-  // pixels don't show anyway). Save afterwards to reclaim the space.
+  // saved PSD. Canvas size and all layers are preserved; no visible change. Save afterwards.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
     if (trimBusy || placeBusy || batchBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
-    send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('PFLTRIM:ok');"));
+    send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('SZTRIM:ok');"));
   };
 
   // ---- Batch export --------------------------------------------------------
   // The pure batch/convention/range logic below mirrors frontend/src/lib/photopeaBatch.ts (tested by
   // frontend/tests/lib/photopeaBatch.test.ts) — keep the two in sync when changing behavior.
-  // One JPG per poster variant, saved INDIVIDUALLY to the image folder (or downloaded) — no ZIP,
-  // no new subfolder. Two modes: (1) layers named s0/s1…/main/show → export each; (2) a single
-  // poster with a SEASONS group → ask which seasons (a count "8"=1–8, a range "3-6", or blank=all)
-  // plus any singles (Specials/…). Runs one export at a time (Photopea posts one JPG per saveToOE).
+  // One JPG per poster variant, downloaded INDIVIDUALLY — no ZIP. Two modes: (1) layers named
+  // s0/s1…/main/show → export each; (2) a single poster with a SEASONS group → ask how many seasons
+  // (a count "8"=1–8, a range "3-6", or blank=all) plus any singles. One export at a time.
   const batchBtn = document.querySelector('[data-act="batch"]');
   const batchBar = document.querySelector('.batchbar');
   const batchMsg = document.querySelector('.batchmsg');
@@ -629,15 +507,6 @@
 
   const batchNote = (t) => { batchMsg.textContent = t; };
   const closeBatch = () => { if (!batchBusy) batchBar.classList.add('hidden'); };
-
-  // Full base name + style for the active doc — same resolution the save/JPG paths use.
-  const resolveCtx = (source, name) => {
-    const s = source || '';
-    if (s.indexOf('pflctx:') === 0) { try { const o = JSON.parse(s.slice(7)); return { name: o.name, style: o.style }; } catch (_) {} }
-    if (s.indexOf('/psd-exports/') >= 0) { const c = ctxFromUrl(s); if (c) return { name: c.name, style: c.style }; }
-    if (cfg.name && name === posterDocName) return { name: cfg.name, style: cfg.style || detectedStyle };
-    return { name: (name || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, ''), style: detectedStyle || cfg.style };
-  };
 
   const seasonNumOf = (S) => { const m = (S.n || '').match(/(\d+)/); return m ? parseInt(m[1], 10) : NaN; };
   // Always-ON visibility for a season / single (mirror clickSeason/clickSingle without the toggle-off).
@@ -661,10 +530,8 @@
     return changes;
   };
   const singleSuffix = (SI) => SI.lab === 'SP' ? ' - Specials' : (SI.lab === 'CLS' ? ' - Season 1' : '');
-
-  // Convention variant → suffix + visibility: show the s-layer (+ ancestors), hide the other
-  // convention leaves, AND switch on the matching "Season N"/"Specials" text layer (hiding the rest)
-  // so each file has its season number. main/show hide all season/specials text (primary poster).
+  // Show the s-layer (+ ancestors), hide the other convention leaves, AND switch on the matching
+  // "Season N"/"Specials" text layer (hiding the rest) so each file has its season number.
   const conventionSuffix = (v) => v.t === 's' ? (v.n === 0 ? ' - Specials' : ' - Season ' + v.n) : '';
   const showText = (changes, t, on) => { changes.push({ p: t.p, v: on }); if (on) for (let i = 1; i < t.p.length; i++) changes.push({ p: t.p.slice(0, i), v: true }); };
   const buildConventionItems = (variants) => variants.map((v) => {
@@ -684,7 +551,6 @@
     }
     return { suffix: conventionSuffix(v), changes };
   });
-
   const parseRange = (str) => {
     const s = (str || '').trim();
     if (!s) return { start: null, end: null };
@@ -708,43 +574,29 @@
     return items;
   };
 
-  // One JPG → PUT to the image folder as base+suffix.jpg; on failure download it. Never a ZIP.
-  const putImage = async (buf, filename, style) => {
-    const styleQ = style ? '?style=' + encodeURIComponent(style) : '';
-    try {
-      const r = await fetch(location.origin + '/api/maker-tools/image-exports/' + encodeURIComponent(filename) + styleQ, {
-        method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-    } catch (e) { console.warn('Batch PUT failed, downloading:', e); download(buf, filename); }
-  };
-
   const batchItemScript = (changes) =>
     'try{var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
     'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
-    'dd.saveToOE("jpg:0.90");}catch(e){app.echoToOE("PFLERR:"+e);}';
+    'dd.saveToOE("jpg:0.90");}catch(e){app.echoToOE("SZERR:"+e);}';
 
   const batchNext = () => {
     if (batchIdx >= batchItems.length) { batchFinish(); return; }
     batchNote('Exporting ' + (batchIdx + 1) + '/' + batchItems.length + '…');
     send(batchItemScript(batchItems[batchIdx].changes));
   };
-  const onBatchBytes = async (buf) => {
-    await putImage(buf, batchBase + batchItems[batchIdx].suffix + '.jpg', batchStyle);
+  const onBatchBytes = (buf) => {
+    download(buf, batchBase + batchItems[batchIdx].suffix + '.jpg');
     batchOk++; batchIdx++;
     batchNext();
   };
   const batchFinish = () => {
     batchBusy = false; batchBtn.textContent = '⚡';
-    batchNote('Done — exported ' + batchOk + ' JPG' + (batchOk === 1 ? '' : 's') + '.');
+    batchNote('Done — downloaded ' + batchOk + ' JPG' + (batchOk === 1 ? '' : 's') + '.');
     fetchLayers();
     setTimeout(closeBatch, 2600);
   };
   const batchAbort = (msg) => { batchBusy = false; batchBtn.textContent = '⚡'; batchNote('Stopped: ' + msg); };
 
-  // Scan the doc for convention s-layers, the "Season N"/"Specials" text layers, and the doc's
-  // context — one round-trip. s{N}/main/show are the poster variants; season/specials text pairs
-  // with them so each file shows its number.
   const BATCH_SCAN = 'try{var d=app.activeDocument;var out=[],stx=[],spx=[];' +
     'function sc(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);' +
     'var nm=(""+L.name).replace(/^\\s+|\\s+$/g,"").toLowerCase();' +
@@ -752,7 +604,7 @@
     'if(m){out.push({t:"s",n:parseInt(m[1],10),p:here});}else if(nm=="main"){out.push({t:"main",p:here});}else if(nm=="show"){out.push({t:"show",p:here});}else if(nm=="c"){out.push({t:"c",p:here});}' +
     'if(sm){stx.push({n:parseInt(sm[1],10),p:here});}else if(nm=="special"||nm=="specials"){spx.push({p:here});}' +
     'if(L.typename=="LayerSet"){sc(L.layers,here);}}}sc(d.layers,[]);' +
-    'app.echoToOE("BATCHINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,source:(""+(d.source||"")),name:d.name}));}catch(e){app.echoToOE("PFLERR:"+e);}';
+    'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,name:d.name}));}catch(e){app.echoToOE("SZERR:"+e);}';
 
   const startBatch = () => {
     if (batchBusy) return;
@@ -763,8 +615,8 @@
   };
   const onBatchInit = (json) => {
     let init; try { init = JSON.parse(json); } catch (_) { batchNote('Scan failed.'); return; }
-    const ctx = resolveCtx(init.source, init.name);
-    batchBase = ctx.name; batchStyle = ctx.style;
+    batchBase = (init.name || pendingDocName || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    batchStyle = detectedStyle;
     batchSeasonText = init.seasonText || []; batchSpecialsText = init.specialsText || [];
     const variants = init.variants || [];
     if (variants.length) {
@@ -792,30 +644,32 @@
     batchNext();
   };
 
+  // ---- reflect the active doc ----------------------------------------------
+  // Show the detected style (CL2K/MM2K) and hide Place Logo for MM2K (text titles, no LOGO group).
+  const updateDocUI = () => {
+    logoBtn.style.display = (detectedStyle === 'MM2K') ? 'none' : '';   // Fit Poster stays
+    styleName.textContent = detectedStyle || '—';
+    styleName.className = 'style-name' + (detectedStyle === 'MM2K' ? ' mm2k' : detectedStyle === 'CL2K' ? ' cl2k' : '');
+  };
+
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { onSaved(d); return; }   // ArrayBuffer = saveToOE result
-    if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; lastActiveName = d.slice(8); if (!posterDocName) posterDocName = pendingDocName; }
-    else if (d.startsWith('PFLEXP:'))   { try { pendingExport = JSON.parse(d.slice(7)); } catch (_) { pendingExport = null; } }
-    else if (d.startsWith('PFLDOC:'))   { let o = null; try { o = JSON.parse(d.slice(7)); } catch (_) {} pendingExport = o ? { save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(o.name + '.psd') + '?style=' + encodeURIComponent(o.style), name: o.name, style: o.style } : null; }
-    else if (d.startsWith('PFLURL:'))   { pendingExport = ctxFromUrl(d.slice(7)); }
-    else if (d.startsWith('PFLCTX:'))   { const raw = d.slice(7); activeCtx = null; if (raw && raw.charAt(0) === '{') { try { activeCtx = JSON.parse(raw); } catch (_) {} } updateDocUI(); }
-    else if (d.startsWith('PFLDET:'))   { detectedStyle = d.slice(7); updateDocUI(); }
-    else if (d.startsWith('BATCHINIT:')){ onBatchInit(d.slice(10)); }
-    else if (d.startsWith('PFLACT:'))   { const nm = d.slice(7); if (nm !== lastActiveName && !saving && !jpgBusy && !placeBusy && !batchBusy) { lastActiveName = nm; fetchLayers(); } }
-    else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
-    else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
-    else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
-    else if (d.startsWith('PFLPLACED:')){ finishPlace(true); }
-    else if (d.startsWith('PFLTRIM:'))  { flashTrim('✓'); }
-    else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); list.insertAdjacentHTML('afterbegin', '<div class="msg">"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.</div>'); }
-    else if (d.startsWith('PFLERR:'))   { if (trimBusy) { flashTrim('✗'); list.insertAdjacentHTML('afterbegin', '<div class="msg">Trim failed: ' + d.slice(7) + '</div>'); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { list.innerHTML = '<div class="msg">Error: ' + d.slice(7) + '</div>'; flashSave('💾'); flashJpg('JPG'); } }
-    // PFLVIS: ack handled optimistically in commit().
+    if (typeof d !== 'string') { onBytes(d); return; }   // ArrayBuffer = saveToOE (JPG) result
+    if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; lastActiveName = d.slice(7); }
+    else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
+    else if (d.startsWith('SZBINIT:')) { onBatchInit(d.slice(8)); }
+    else if (d.startsWith('SZACT:'))   { const nm = d.slice(6); if (nm !== lastActiveName && !jpgBusy && !placeBusy && !batchBusy) { lastActiveName = nm; fetchLayers(); } }
+    else if (d.startsWith('SZGEO:'))   { onGeo(d.slice(6)); }
+    else if (d.startsWith('SZRSZ:'))   { const p = d.slice(6).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
+    else if (d.startsWith('SZPLACED:')){ finishPlace(true); }
+    else if (d.startsWith('SZTRIM:'))  { flashTrim('✓'); }
+    else if (d.startsWith('SZERR:'))   { if (trimBusy) { flashTrim('✗'); list.insertAdjacentHTML('afterbegin', '<div class="msg">Trim failed: ' + d.slice(6) + '</div>'); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); } else { list.innerHTML = '<div class="msg">Error: ' + d.slice(6) + '</div>'; flashJpg('JPG'); } }
+    else if (d.startsWith('SZ:'))      { try { model = JSON.parse(d.slice(3)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
+    // SZVIS: ack handled optimistically in commit().
   });
 
   // ---- controls ------------------------------------------------------------
-  saveBtn.addEventListener('click', saveDoc);
   jpgBtn.addEventListener('click', exportJpg);
   logoBtn.addEventListener('click', startLogo);
   fitBtn.addEventListener('click', startFit);
@@ -825,31 +679,15 @@
   document.querySelector('[data-act="batch-run"]').addEventListener('click', runBatch);
   document.querySelector('[data-act="batch-cancel"]').addEventListener('click', closeBatch);
   batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runBatch(); } });
-  window.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveDoc(); } });
 
-  // Reflect the ACTIVE doc: MM2K templates have no LOGO group (text titles), so hide Place Logo for
-  // them; show 💾 when the active doc (or the first doc's cfg) has a save target. Called whenever the
-  // active doc's context arrives (PFLCTX), so it tracks doc switches in same-tab mode.
-  const updateDocUI = () => {
-    // The doc's own layer structure is the authoritative PER-DOC signal (LOGO group ⇒ CL2K,
-    // SEQUEL ⇒ MM2K — mutually exclusive in both templates). Prefer it over cfg.style, which is
-    // frozen at the FIRST doc's launch query and goes stale for later same-tab documents.
-    const style = detectedStyle || (activeCtx && activeCtx.style) || cfg.style;
-    const canSave = (activeCtx && activeCtx.save) || cfg.save || detectedStyle;
-    logoBtn.style.display = (style === 'MM2K') ? 'none' : '';   // Fit Poster stays (same border/canvas)
-    saveBtn.style.display = canSave ? '' : 'none';
-    styleName.textContent = style || '—';
-    styleName.className = 'style-name' + (style === 'MM2K' ? ' mm2k' : style === 'CL2K' ? ' cl2k' : '');
-  };
   updateDocUI();
 
-  // Active-document watcher: the panel mirrors whatever doc is in front. In same-tab mode a new
-  // export becomes the active doc; switching docs by hand also counts. Poll the active name (cheap)
-  // and only re-read layers when it changes. Paused while a save/JPG/place op is mid-flight.
-  const POLL = 'try{app.echoToOE("PFLACT:"+(app.documents.length?app.activeDocument.name:""))}catch(e){}';
-  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
+  // Active-document watcher: the panel mirrors whatever doc is in front. Poll the active name
+  // (cheap) and only re-read layers when it changes. Paused while a JPG/place op is mid-flight.
+  const POLL = 'try{app.echoToOE("SZACT:"+(app.documents.length?app.activeDocument.name:""))}catch(e){}';
+  setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
 
-  fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
+  fetchLayers();   // read the active document (press ⟳ to reload)
 })();
 </script>
 </body>

@@ -842,6 +842,71 @@ def test_build_psd_no_poster_only_logo_returns_bytes():
     assert len(result) > 0
 
 
+@_psd_tools_missing
+def test_build_psd_poster_layer_names_tag_each_injected_layer():
+    """Per-poster tag names (aligned to poster order) name each injected layer for the plugin's batch
+    convention; an empty entry / no names fall back to the title-based name."""
+    from io import BytesIO
+    from pathlib import Path
+    from psd_tools import PSDImage
+    import api.maker_tools as _mt
+
+    template = Path(_mt.__file__).parent.parent / "assets" / "default_template.psd"
+    if not template.exists():
+        pytest.skip("bundled default template missing")
+    p1, p2 = _make_jpeg_bytes(20, 30), _make_jpeg_bytes(20, 30)
+
+    def poster_group_names(psd_bytes: bytes) -> list[str]:
+        grp = PSDImage.open(BytesIO(psd_bytes)).find("POSTER")
+        return [layer.name for layer in grp] if grp is not None else []
+
+    # Two tagged posters → each layer gets its own convention name.
+    both = poster_group_names(_build_psd([p1, p2], logo_bytes_list=[], template_path=template,
+                                         title="Test Show", year="2026", poster_layer_names=["s1", "s0"]))
+    assert "s1" in both and "s0" in both
+
+    # Mixed: tagged poster keeps its name; the untagged one falls back to the title-based name.
+    mixed = poster_group_names(_build_psd([p1, p2], logo_bytes_list=[], template_path=template,
+                                          title="Test Show", year="2026", poster_layer_names=["s1", ""]))
+    assert "s1" in mixed
+    assert any(n.startswith("Test Show (2026)") for n in mixed)
+
+    # No names → title-based, nothing tagged.
+    none = poster_group_names(_build_psd([p1], logo_bytes_list=[], template_path=template,
+                                         title="Test Show", year="2026"))
+    assert "s1" not in none
+    assert "Test Show (2026)" in none
+
+
+@_psd_tools_missing
+def test_build_psd_backdrop_layer_names_tag_the_backdrop_layer():
+    """A tagged backdrop keeps the backdrop fit but its layer is named per the convention (batch-visible);
+    untagged backdrops keep the '… - Backdrop' name."""
+    from io import BytesIO
+    from pathlib import Path
+    from psd_tools import PSDImage
+    import api.maker_tools as _mt
+
+    template = Path(_mt.__file__).parent.parent / "assets" / "default_template.psd"
+    if not template.exists():
+        pytest.skip("bundled default template missing")
+    backdrop = _make_jpeg_bytes(40, 20)  # landscape
+
+    def poster_group_names(psd_bytes: bytes) -> list[str]:
+        grp = PSDImage.open(BytesIO(psd_bytes)).find("POSTER")
+        return [layer.name for layer in grp] if grp is not None else []
+
+    tagged = poster_group_names(_build_psd([], logo_bytes_list=[], backdrop_bytes_list=[backdrop],
+                                           template_path=template, title="Test Show", year="2026",
+                                           backdrop_layer_names=["s1"]))
+    assert "s1" in tagged
+
+    untagged = poster_group_names(_build_psd([], logo_bytes_list=[], backdrop_bytes_list=[backdrop],
+                                             template_path=template, title="Test Show", year="2026"))
+    assert "s1" not in untagged
+    assert any(n.startswith("Test Show (2026) - Backdrop") for n in untagged)
+
+
 # ---------------------------------------------------------------------------
 # Shared placement formula: compute_logo_geometry / compute_poster_fit_geometry /
 # _measure_logo_density. These back both the PSD export and the plugin's
