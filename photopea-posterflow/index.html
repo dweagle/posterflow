@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PosterFlow — Photopea plugin</title>
+  <meta name="description" content="Install PosterFlow, a Photopea plugin for building CL2K / MM2K season posters." />
+  <link rel="icon" href="icon.png" />
+  <style>
+    :root {
+      --bg: #17171b;
+      --bg2: #1f1f24;
+      --card: #23232a;
+      --card2: #2a2a31;
+      --border: #3a3a42;
+      --text: #e6e6e6;
+      --muted: #9a9aa4;
+      --dim: #8a8a94;
+      --blue: #5a86f0;
+      --blue-dark: #3b6bd6;
+      --green: #3fae62;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background:
+        radial-gradient(1100px 500px at 50% -10%, rgba(90, 134, 240, 0.14), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 4rem;
+    }
+
+    /* Two-column body — stacks on narrow screens */
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem 2.5rem;
+      align-items: start;
+      margin-bottom: 2.5rem;
+    }
+    .col ol.steps,
+    .col ul.features { margin-bottom: 0; }
+    @media (max-width: 720px) {
+      .columns { grid-template-columns: 1fr; }
+    }
+
+    /* Hero */
+    .hero { text-align: center; margin-bottom: 2.25rem; }
+    .hero img {
+      width: 76px; height: 76px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      padding: 8px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    }
+    .hero h1 {
+      margin: 1rem 0 0.35rem;
+      font-size: 2rem;
+      letter-spacing: -0.02em;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    /* Primary CTA */
+    .cta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.7rem;
+      margin: 2rem 0 2.5rem;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: linear-gradient(180deg, var(--blue), var(--blue-dark));
+      color: #fff;
+      text-decoration: none;
+      font-size: 1.05rem;
+      font-weight: 600;
+      padding: 0.85rem 1.6rem;
+      border-radius: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 24px rgba(59, 107, 214, 0.35);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(59, 107, 214, 0.45); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary svg { width: 20px; height: 20px; }
+    .cta small { color: var(--dim); font-size: 0.85rem; }
+
+    /* Steps */
+    .section-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+      margin: 0 0 0.9rem;
+      font-weight: 700;
+    }
+    ol.steps { list-style: none; margin: 0 0 2.5rem; padding: 0; counter-reset: step; }
+    ol.steps li {
+      position: relative;
+      display: flex;
+      gap: 0.9rem;
+      align-items: flex-start;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.95rem 1.1rem;
+      margin-bottom: 0.65rem;
+    }
+    ol.steps li .num {
+      counter-increment: step;
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.9rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    ol.steps li .num::before { content: counter(step); }
+    ol.steps .body { flex: 1; padding-top: 0.15rem; }
+    ol.steps .body strong { font-weight: 600; }
+    kbd {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      padding: 0.05rem 0.4rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85em;
+      white-space: nowrap;
+      color: #eee;
+    }
+
+    /* Features */
+    ul.features { list-style: none; margin: 0 0 2.5rem; padding: 0; }
+    ul.features li {
+      display: flex;
+      gap: 0.7rem;
+      align-items: flex-start;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.95rem;
+    }
+    ul.features li:last-child { border-bottom: none; }
+    ul.features .tick { color: var(--green); flex-shrink: 0; margin-top: 0.15rem; }
+    ul.features .tick svg { width: 16px; height: 16px; display: block; }
+    ul.features b { font-weight: 600; }
+
+    /* Notes / footer */
+    .notes {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--blue);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .notes p { margin: 0 0 0.55rem; }
+    .notes p:last-child { margin-bottom: 0; }
+    .foot {
+      text-align: center;
+      color: var(--dim);
+      font-size: 0.8rem;
+      margin-top: 2.5rem;
+    }
+    .foot a { color: var(--blue); text-decoration: none; }
+    .foot a:hover { text-decoration: underline; }
+
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 1.7rem; }
+      .btn-primary { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <img src="icon.png" alt="PosterFlow logo" />
+      <h1>PosterFlow</h1>
+      <p>A Photopea plugin for building CL2K &amp; MM2K season posters.</p>
+    </div>
+
+    <div class="cta">
+      <a class="btn-primary" href="https://www.photopea.com" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Open Photopea
+      </a>
+      <small>Then add <b>PosterFlow</b> from the plugin gallery — steps below.</small>
+    </div>
+
+    <div class="columns">
+      <div class="col">
+        <p class="section-title">Add it — 3 steps</p>
+        <ol class="steps">
+          <li>
+            <span class="num"></span>
+            <div class="body">Open Photopea and go to <strong><kbd>Window</kbd> ▸ <kbd>Plugins</kbd></strong>.</div>
+          </li>
+          <li>
+            <span class="num"></span>
+            <div class="body">Search for <strong>PosterFlow</strong> in the plugin gallery and click it to add it to your account.</div>
+          </li>
+          <li>
+            <span class="num"></span>
+            <div class="body">The <strong>PosterFlow</strong> button appears on the right — click it to open the panel on any PSD you have open.</div>
+          </li>
+        </ol>
+      </div>
+
+      <div class="col">
+        <p class="section-title">What it does</p>
+        <ul class="features">
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>Season / Specials / Sequel chips</b> — toggle the matching poster layers on and off.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>Style badge</b> — auto-detects CL2K or MM2K from the layer structure.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>Place Logo / Fit Poster</b> — size and position the selected layer to the template.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>JPG export</b> — one flattened JPG, named after the document and visible season.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>⚡ Batch export</b> — one JPG per poster variant in a single click.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span><b>Trim</b> — crop off-canvas pixels to shrink the saved PSD before you save.</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="notes">
+      <p><b>Works on any PSD you open manually</b> — it talks only to Photopea, never to a server or the Posterflow app.</p>
+      <p><b>Save is native:</b> press <kbd>Ctrl</kbd>+<kbd>S</kbd> and Photopea overwrites the file you opened.</p>
+      <p><b>Auto-updates:</b> once added, you never re-add it — improvements ship to everyone automatically.</p>
+      <p>Sign in to Photopea so the plugin stays across sessions; anonymous use keeps it only in that browser.</p>
+    </div>
+
+    <p class="foot">
+      Hosted from <a href="https://github.com/dweagle/posterflow" target="_blank" rel="noopener">dweagle/posterflow</a>.
+    </p>
+  </div>
+</body>
+</html>

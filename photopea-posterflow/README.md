@@ -46,12 +46,35 @@ needed once Pages is live. Serving over HTTPS + `text/html` is why Pages works a
 
 ## Install (adds it to your own Photopea)
 
-1. In Photopea: **Window ▸ Plugins ▸ Add Plugin**, and upload this `manifest.json`.
-2. The **PosterFlow** button appears on the right; click it to open the panel. It stays in
+PosterFlow is published in **Photopea's plugin gallery**, so adding it is just:
+
+1. In Photopea, open **Window ▸ Plugins**.
+2. Search for **PosterFlow** in the gallery and click it to add it to your account.
+3. The **PosterFlow** button appears on the right; click it to open the panel. It stays in
    your Photopea across sessions (while you're signed in).
 
-> Changing the plugin later doesn't require re-adding it in Photopea, as long as the files
-> stay at the same URLs — just push updates and let Pages redeploy.
+> On the web, Photopea's **Add Plugin** dialog only installs plugins from the public gallery —
+> there's no private "load this JSON" install. That's why the plugin is published. The published
+> entry just points at the hosted `photopea-posterflow.html` + `icon.png` in this repo.
+
+### Sharing it with other poster makers
+
+They add it the same way — **Window ▸ Plugins**, search **PosterFlow**, click to add. Nothing to
+download or send; being in the gallery is what makes it findable. For a friendly walkthrough you
+can also point them at the install page:
+
+`https://dweagle.github.io/posterflow/photopea-posterflow/`  (served by `index.html`)
+
+> Changing the plugin later doesn't require anyone to re-add it, as long as the files stay at the
+> same URLs — just push updates and let Pages redeploy.
+
+### Panel size
+
+`manifest.json` sets `"w": 184, "h": 420` so the panel opens at the same narrow width as the
+in-app plugin (184px fits the 5-chip season rows). **Heads-up:** unlike the HTML (fetched live from
+`url`), Photopea copies `name` / `icon` / `w` / `h` into its gallery record **when you publish**.
+So changing the size means **re-publishing / updating the gallery entry** — editing `manifest.json`
+alone won't resize an already-published plugin.
 
 ### Icon
 
