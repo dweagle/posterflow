@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget } from '../../api/client'
+import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget, Workflow, listWorkflows } from '../../api/client'
 
 type EditingScheduleState = {
   schedule: Schedule
@@ -24,9 +24,11 @@ function ScheduleEditModal({
   onSave,
 }: ScheduleEditModalProps) {
   const [idarrTargets, setIdarrTargets] = useState<Array<{ index: number; target: MakerIdarrSyncTarget }>>([])
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
 
   const isSyncSchedule = editingSchedule?.schedule.job_type === 'gdrive_sync' || editingSchedule?.schedule.job_type === 'sync'
   const isIdarrSchedule = editingSchedule?.schedule.job_type === 'idarr'
+  const isPosterWorkflowSchedule = editingSchedule?.schedule.job_type === 'poster_workflow'
 
   useEffect(() => {
     let mounted = true
@@ -54,6 +56,56 @@ function ScheduleEditModal({
       mounted = false
     }
   }, [editingSchedule?.schedule.id])
+
+  useEffect(() => {
+    let mounted = true
+
+    const loadWorkflows = async () => {
+      try {
+        const list = await listWorkflows()
+        if (mounted) setWorkflows(list)
+      } catch {
+        if (mounted) setWorkflows([])
+      }
+    }
+
+    loadWorkflows()
+
+    return () => {
+      mounted = false
+    }
+  }, [editingSchedule?.schedule.id])
+
+  const selectedWorkflowId = useMemo(() => {
+    const raw = String(editingSchedule?.schedule.job_config || '').trim()
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed?.workflow_id != null) return Number(parsed.workflow_id)
+      } catch {
+        // ignore malformed
+      }
+    }
+    const fallback = workflows.find((w) => w.is_default) || workflows[0]
+    return fallback ? fallback.id : ''
+  }, [editingSchedule?.schedule.job_config, workflows])
+
+  const updateWorkflowSelection = (value: number) => {
+    const raw = String(editingSchedule?.schedule.job_config || '').trim()
+    let existing: Record<string, unknown> = {}
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+          existing = parsed as Record<string, unknown>
+        }
+      } catch {
+        // ignore malformed
+      }
+    }
+    existing.workflow_id = value
+    updateScheduleField('job_config', JSON.stringify(existing))
+  }
 
   const selectedIdarrScope = useMemo(() => {
     const group = String(editingSchedule?.schedule.drive_group || '').trim()
@@ -164,6 +216,27 @@ function ScheduleEditModal({
               <option value="maker_monitor">Maker Monitor</option>
             </select>
           </div>
+
+          {isPosterWorkflowSchedule && (
+            <div className="form-group">
+              <label>Workflow</label>
+              <select
+                value={selectedWorkflowId}
+                onChange={(e) => updateWorkflowSelection(Number(e.target.value))}
+              >
+                {workflows.length === 0 ? (
+                  <option value="">No workflows configured</option>
+                ) : (
+                  workflows.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}{w.is_default ? ' (default)' : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+              <p className="field-hint">Choose which saved workflow this schedule runs.</p>
+            </div>
+          )}
 
           {isIdarrSchedule && (
             <div className="form-group">

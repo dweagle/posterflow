@@ -22,6 +22,7 @@ from models.job import (
 from models.drive import Drive
 from models.idarr import resolve_idarr_scope_token
 from models.setting import get_setting_value
+from models.workflow import get_workflow_config
 from core.config import settings
 from core.job_queue import job_queue
 from core.logging import (
@@ -153,18 +154,23 @@ def sync_drive_group_for_schedule(drive_group: str) -> None:
     )
 
 
-def run_workflow_for_schedule() -> None:
-    """Wrapper for scheduled poster workflow runs."""
-    _run_scheduled_operation(
-        "Scheduled workflow failed",
-        lambda db: _queue_pending_job(
+def run_workflow_for_schedule(workflow_id: Optional[int] = None) -> None:
+    """Wrapper for scheduled poster workflow runs.
+
+    Resolves the named workflow's step config (falling back to the default
+    workflow when workflow_id is None or missing) and runs the flow with it.
+    """
+    def _submit(db: Session) -> None:
+        config_override = get_workflow_config(db, workflow_id)
+        _queue_pending_job(
             db,
             JOB_TYPE_POSTER_WORKFLOW,
             run_flow_background_job,
             args_builder=lambda job: (job.id, False),
-            runner_kwargs={"triggered_by": "scheduled"},
-        ),
-    )
+            runner_kwargs={"triggered_by": "scheduled", "config_override": config_override},
+        )
+
+    _run_scheduled_operation("Scheduled workflow failed", _submit)
 
 
 def run_poster_rename_for_schedule() -> None:
@@ -398,7 +404,16 @@ def update_schedules() -> None:
                     job_args = []
             elif schedule.job_type == 'poster_workflow':
                 job_func = run_workflow_for_schedule
-                job_args = []
+                workflow_id = None
+                if schedule.job_config:
+                    try:
+                        jc = json.loads(schedule.job_config)
+                        raw_id = jc.get("workflow_id")
+                        if raw_id is not None:
+                            workflow_id = int(raw_id)
+                    except (ValueError, TypeError) as e:
+                        log_warning(LogTags.SCHEDULER, f"Failed to parse workflow job_config; using default workflow: {e}", schedule_id=schedule.id)
+                job_args = [workflow_id]
             elif schedule.job_type == 'poster_renamer':
                 job_func = run_poster_rename_for_schedule
                 job_args = []

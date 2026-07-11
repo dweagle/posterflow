@@ -3487,6 +3487,72 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   gap: 0;
 }
 
+.workflow-selector-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  background: #1e1e1e;
+  border: 2px solid #5B89C4;
+  border-radius: 8px;
+}
+
+.workflow-selector-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.workflow-selector-field.grow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.workflow-selector-field label {
+  font-weight: 600;
+  color: #ccc;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.workflow-select,
+.workflow-name-input {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.workflow-select {
+  min-width: 180px;
+}
+
+.workflow-name-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.workflow-select:focus,
+.workflow-name-input:focus {
+  outline: none;
+  border-color: #5B89C4;
+}
+
+.poster-manager .btn-toolbar.btn-danger {
+  background: #3a2323;
+  border-color: #7c4a4a;
+  color: #e6b0b0;
+}
+
+.poster-manager .btn-toolbar.btn-danger:hover:not(:disabled) {
+  background: #4a2a2a;
+  border-color: #9c5a5a;
+}
+
 .run-flow-btn {
   background: linear-gradient(135deg, #5B89C4, #7ca4d6) !important;
 }

@@ -114,10 +114,14 @@ export {
   type PosterSearchItem,
   type TmdbCandidate,
   type UnmatchedStats,
+  type Workflow,
+  createWorkflow,
+  deleteWorkflow,
   getDrivePriority,
   getFlowConfig,
   getPosterConfig,
   getUnmatchedStats,
+  listWorkflows,
   runBorderReplacer,
   runFlow,
   saveDrivePriority,
@@ -127,6 +131,7 @@ export {
   searchUnmatchedTmdb,
   startPosterRename,
   startUnmatchedDetection,
+  updateWorkflow,
 } from './posterManager'
 
 export {

@@ -198,6 +198,9 @@ function PosterManager() {
     })
 
   const {
+    workflows,
+    selectedWorkflowId,
+    workflowName,
     flowConfig,
     flowRunning,
     flowResult,
@@ -212,7 +215,11 @@ function PosterManager() {
     handleFlowConfigChange,
     handleIdarrFlowConfigChange,
     handleIdarrScopeToggle,
+    handleWorkflowNameChange,
     handleSaveFlowConfig,
+    selectWorkflow,
+    createNewWorkflow,
+    deleteSelectedWorkflow,
     resetFlowConfigToOriginal,
     handleRunFlow,
   } = usePosterManagerFlow({
@@ -625,6 +632,9 @@ function PosterManager() {
 
       {activeTab === 'flow' && flowConfig && (
         <FlowTab
+          workflows={workflows}
+          selectedWorkflowId={selectedWorkflowId}
+          workflowName={workflowName}
           flowConfig={flowConfig}
           flowResult={flowResult}
           destination={config?.destination}
@@ -635,6 +645,10 @@ function PosterManager() {
           idarrShowInWorkflow={idarrShowInWorkflow}
           idarrScopeError={idarrScopeError}
           formatPercent={formatPercent}
+          onSelectWorkflow={selectWorkflow}
+          onChangeWorkflowName={handleWorkflowNameChange}
+          onCreateWorkflow={createNewWorkflow}
+          onDeleteWorkflow={deleteSelectedWorkflow}
           onSaveFlowConfig={handleSaveFlowConfig}
           onRunFlow={handleRunFlow}
           onChangeFlowConfig={handleFlowConfigChange}

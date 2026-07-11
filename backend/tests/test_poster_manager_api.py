@@ -476,7 +476,7 @@ def test_flow_run_recovers_stale_lock_and_starts(client, test_db, monkeypatch):
     """Flow run should recover a stale lock when no running jobs exist and start successfully."""
     import api.poster_manager as poster_manager_module
 
-    def _run_flow_now(job_id, dry_run, release_flow_lock):
+    def _run_flow_now(job_id, dry_run, release_flow_lock, config_override=None):
         release_flow_lock()
 
     monkeypatch.setattr("api.poster_manager.run_flow_background_job", _run_flow_now)
@@ -521,7 +521,7 @@ def test_flow_run_forces_release_after_long_lock_age(client, test_db, monkeypatc
     test_db.add(existing_job)
     test_db.commit()
 
-    def _run_flow_now(job_id, dry_run, release_flow_lock):
+    def _run_flow_now(job_id, dry_run, release_flow_lock, config_override=None):
         release_flow_lock()
 
     monkeypatch.setattr("api.poster_manager.run_flow_background_job", _run_flow_now)

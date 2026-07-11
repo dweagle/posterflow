@@ -1,9 +1,14 @@
-import { AlertCircle, CheckCircle, Eye, Info, Save, Waves, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Eye, Info, Plus, Save, Trash2, Waves, X } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget } from '../../api/client'
+import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget, Workflow } from '../../api/client'
+import ConfirmDialog from '../ConfirmDialog'
 import Toolbar from './Toolbar'
 
 type FlowTabProps = {
+  workflows: Workflow[]
+  selectedWorkflowId: number | null
+  workflowName: string
   flowConfig: FlowConfig
   flowResult: FlowResult | null
   destination?: string
@@ -14,6 +19,10 @@ type FlowTabProps = {
   idarrShowInWorkflow: boolean
   idarrScopeError: boolean
   formatPercent: (percent: number) => string
+  onSelectWorkflow: (id: number) => void
+  onChangeWorkflowName: (name: string) => void
+  onCreateWorkflow: () => Promise<void> | void
+  onDeleteWorkflow: () => void
   onSaveFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
   onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown', value: boolean) => void
@@ -22,6 +31,9 @@ type FlowTabProps = {
 }
 
 function FlowTab({
+  workflows,
+  selectedWorkflowId,
+  workflowName,
   flowConfig,
   flowResult,
   destination,
@@ -32,6 +44,10 @@ function FlowTab({
   idarrShowInWorkflow,
   idarrScopeError,
   formatPercent,
+  onSelectWorkflow,
+  onChangeWorkflowName,
+  onCreateWorkflow,
+  onDeleteWorkflow,
   onSaveFlowConfig,
   onRunFlow,
   onChangeFlowConfig,
@@ -39,6 +55,48 @@ function FlowTab({
   onToggleIdarrScope,
 }: FlowTabProps) {
   const navigate = useNavigate()
+
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const [pending, setPending] = useState<{ type: 'switch'; id: number } | { type: 'create' } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const selectedName = workflows.find((w) => w.id === selectedWorkflowId)?.name ?? workflowName
+
+  const runCreate = async () => {
+    await onCreateWorkflow()
+    // Focus and select the default name so the user can rename it immediately.
+    requestAnimationFrame(() => {
+      nameInputRef.current?.focus()
+      nameInputRef.current?.select()
+    })
+  }
+
+  const handleSelectWorkflow = (id: number) => {
+    if (id === selectedWorkflowId) return
+    if (hasUnsavedFlowChanges) {
+      setPending({ type: 'switch', id })
+    } else {
+      onSelectWorkflow(id)
+    }
+  }
+
+  const handleCreateWorkflow = () => {
+    if (hasUnsavedFlowChanges) {
+      setPending({ type: 'create' })
+    } else {
+      void runCreate()
+    }
+  }
+
+  const confirmPending = () => {
+    if (!pending) return
+    if (pending.type === 'switch') {
+      onSelectWorkflow(pending.id)
+    } else {
+      void runCreate()
+    }
+    setPending(null)
+  }
 
   const showIdarr = idarrShowInWorkflow
   const totalSteps = showIdarr ? 6 : 5
@@ -67,7 +125,7 @@ function FlowTab({
         </div>
         <button className={`btn-toolbar ${hasUnsavedFlowChanges ? 'btn-unsaved' : ''}`} onClick={onSaveFlowConfig} disabled={idarrScopeError || !hasUnsavedFlowChanges || saving} title={idarrScopeError ? 'Select at least one IDarr scope' : hasUnsavedFlowChanges ? undefined : 'No changes to save'}>
           <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
+          {saving ? 'Saving...' : 'Save Workflow'}
         </button>
         <button className="btn-toolbar" onClick={() => onRunFlow(true)} disabled={flowRunning} title="Dry run workflow">
           <Eye size={16} />
@@ -78,6 +136,49 @@ function FlowTab({
           {flowRunning ? 'Running...' : 'Run Workflow'}
         </button>
       </Toolbar>
+
+      <div className="workflow-selector-bar">
+        <div className="workflow-selector-field">
+          <label htmlFor="workflow-select">Workflow</label>
+          <select
+            id="workflow-select"
+            className="workflow-select"
+            value={selectedWorkflowId ?? ''}
+            onChange={(e) => handleSelectWorkflow(Number(e.target.value))}
+          >
+            {workflows.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}{w.is_default ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="workflow-selector-field grow">
+          <label htmlFor="workflow-name">Name</label>
+          <input
+            id="workflow-name"
+            ref={nameInputRef}
+            className="workflow-name-input"
+            type="text"
+            value={workflowName}
+            onChange={(e) => onChangeWorkflowName(e.target.value)}
+            placeholder="Workflow name"
+          />
+        </div>
+        <button className="btn-toolbar" onClick={handleCreateWorkflow} disabled={saving} title="Create a new workflow">
+          <Plus size={16} />
+          New
+        </button>
+        <button
+          className="btn-toolbar btn-danger"
+          onClick={() => setConfirmDelete(true)}
+          disabled={saving || workflows.length <= 1}
+          title={workflows.length <= 1 ? 'Cannot delete the only workflow' : 'Delete this workflow'}
+        >
+          <Trash2 size={16} />
+          Delete
+        </button>
+      </div>
 
       <div className="flow-jobs">
         {showIdarr && (
@@ -332,6 +433,35 @@ function FlowTab({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={pending !== null}
+        title="Unsaved changes"
+        message={
+          pending?.type === 'create'
+            ? 'You have unsaved changes to this workflow. Discard them and create a new workflow?'
+            : 'You have unsaved changes to this workflow. Discard them and switch?'
+        }
+        confirmText="Discard & continue"
+        cancelText="Keep editing"
+        variant="warning"
+        onConfirm={confirmPending}
+        onCancel={() => setPending(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmDelete}
+        title="Delete workflow"
+        message={`Delete workflow "${selectedName}"? This cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmDelete(false)
+          onDeleteWorkflow()
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   )
 }

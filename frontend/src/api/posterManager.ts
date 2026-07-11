@@ -1,4 +1,4 @@
-import client, { getData, postData, deleteData } from './http'
+import client, { getData, postData, putData, deleteData } from './http'
 
 // Poster types and functions
 export interface PosterConfig {
@@ -310,6 +310,7 @@ export interface FlowResult {
 
 export interface FlowRunOptions {
   dry_run?: boolean
+  workflow_id?: number | null
 }
 
 export const getFlowConfig = async (): Promise<FlowConfig> => {
@@ -321,8 +322,37 @@ export const saveFlowConfig = async (config: FlowConfig) => {
 }
 
 export const runFlow = async (options?: FlowRunOptions): Promise<FlowResult> => {
-  const payload = options?.dry_run ? { dry_run: true } : undefined
-  return postData('/api/posterflow/flow/run', payload)
+  const payload: Record<string, unknown> = {}
+  if (options?.dry_run) payload.dry_run = true
+  if (options?.workflow_id != null) payload.workflow_id = options.workflow_id
+  return postData('/api/posterflow/flow/run', Object.keys(payload).length > 0 ? payload : undefined)
+}
+
+// Saved workflows (named combinations of flow steps)
+export interface Workflow {
+  id: number
+  name: string
+  is_default: boolean
+  config: FlowConfig
+}
+
+export const listWorkflows = async (): Promise<Workflow[]> => {
+  return getData('/api/posterflow/workflows')
+}
+
+export const createWorkflow = async (name: string, config?: FlowConfig): Promise<Workflow> => {
+  return postData('/api/posterflow/workflows', config ? { name, config } : { name })
+}
+
+export const updateWorkflow = async (
+  id: number,
+  updates: { name?: string; config?: FlowConfig; is_default?: boolean }
+): Promise<Workflow> => {
+  return putData(`/api/posterflow/workflows/${id}`, updates)
+}
+
+export const deleteWorkflow = async (id: number): Promise<void> => {
+  await deleteData<void>(`/api/posterflow/workflows/${id}`)
 }
 
 export interface FallbackItem {

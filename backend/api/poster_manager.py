@@ -35,6 +35,13 @@ from models.drive import Drive
 from models.manual_media import ManualMediaEntry
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
+from models.workflow import (
+    Workflow,
+    list_workflows,
+    get_workflow,
+    get_workflow_config,
+    default_flow_config,
+)
 from modules.renamer import run_rename_background_job
 from modules.border import run_border_replacer_background_job
 from modules.unmatched import run_unmatched_detection_background_job
@@ -167,6 +174,25 @@ class FlowConfig(BaseModel):
 
 class FlowRunRequest(BaseModel):
     dry_run: bool = False
+    workflow_id: Optional[int] = None
+
+
+class WorkflowResponse(BaseModel):
+    id: int
+    name: str
+    is_default: bool
+    config: Dict[str, Any]
+
+
+class WorkflowCreateRequest(BaseModel):
+    name: str
+    config: Optional[FlowConfig] = None
+
+
+class WorkflowUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    config: Optional[FlowConfig] = None
+    is_default: Optional[bool] = None
 
 
 @router.post("/rename")
@@ -1315,58 +1341,66 @@ def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> Dict[st
     return {"success": True, "deleted_id": entry_id}
 
 
+def _normalize_flow_config(parsed: Any) -> Dict[str, Any]:
+    """Coerce a raw stored flow config into the full, well-shaped step config."""
+    default_step_config: Dict[str, Dict[str, bool]] = {
+        "sync_drives": {"enabled": True, "stop_on_error": True},
+        "rename_posters": {"enabled": True, "stop_on_error": True},
+        "detect_unmatched": {"enabled": True, "stop_on_error": True},
+        "border_replacer": {"enabled": False, "stop_on_error": True},
+        "plex_upload": {"enabled": False, "stop_on_error": False},
+    }
+    default_idarr_config: Dict[str, Any] = {
+        "enabled": False,
+        "stop_on_error": False,
+        "scope_indices": [],
+        "sync_after_run": False,
+    }
+    default_cleanup_config: Dict[str, bool] = {"enabled": True, "delete_unknown": False}
+
+    if not isinstance(parsed, dict):
+        return {
+            "idarr": dict(default_idarr_config),
+            "cleanup_assets": dict(default_cleanup_config),
+            **{k: dict(v) for k, v in default_step_config.items()},
+        }
+
+    normalized: Dict[str, Any] = {"idarr": dict(default_idarr_config)}
+    idarr_value = parsed.get("idarr")
+    if isinstance(idarr_value, dict):
+        raw_indices = idarr_value.get("scope_indices") or []
+        normalized["idarr"] = {
+            "enabled": bool(idarr_value.get("enabled", False)),
+            "stop_on_error": bool(idarr_value.get("stop_on_error", False)),
+            "scope_indices": [int(i) for i in raw_indices if isinstance(i, int)],
+            "sync_after_run": bool(idarr_value.get("sync_after_run", False)),
+        }
+    for key in default_step_config.keys():
+        value = parsed.get(key)
+        if isinstance(value, dict):
+            normalized[key] = {
+                "enabled": bool(value.get("enabled", default_step_config[key]["enabled"])),
+                "stop_on_error": bool(value.get("stop_on_error", default_step_config[key]["stop_on_error"])),
+            }
+        else:
+            normalized[key] = dict(default_step_config[key])
+    cleanup_value = parsed.get("cleanup_assets")
+    if isinstance(cleanup_value, dict):
+        normalized["cleanup_assets"] = {
+            "enabled": bool(cleanup_value.get("enabled", False)),
+            "delete_unknown": bool(cleanup_value.get("delete_unknown", False)),
+        }
+    else:
+        normalized["cleanup_assets"] = dict(default_cleanup_config)
+    return normalized
+
+
 @router.get("/flow/config")
 def get_flow_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
     try:
-        default_step_config: Dict[str, Dict[str, bool]] = {
-            "sync_drives": {"enabled": True, "stop_on_error": True},
-            "rename_posters": {"enabled": True, "stop_on_error": True},
-            "detect_unmatched": {"enabled": True, "stop_on_error": True},
-            "border_replacer": {"enabled": False, "stop_on_error": True},
-            "plex_upload": {"enabled": False, "stop_on_error": False},
-        }
-        default_idarr_config: Dict[str, Any] = {
-            "enabled": False,
-            "stop_on_error": False,
-            "scope_indices": [],
-            "sync_after_run": False,
-        }
-        default_cleanup_config: Dict[str, bool] = {"enabled": True, "delete_unknown": False}
         flow_setting = get_setting(db, SETTING_POSTER_FLOW_CONFIG)
-
-        if flow_setting:
-            parsed = json.loads(flow_setting.value)
-            if isinstance(parsed, dict):
-                normalized: Dict[str, Any] = {"idarr": dict(default_idarr_config)}
-                idarr_value = parsed.get("idarr")
-                if isinstance(idarr_value, dict):
-                    raw_indices = idarr_value.get("scope_indices") or []
-                    normalized["idarr"] = {
-                        "enabled": bool(idarr_value.get("enabled", False)),
-                        "stop_on_error": bool(idarr_value.get("stop_on_error", False)),
-                        "scope_indices": [int(i) for i in raw_indices if isinstance(i, int)],
-                        "sync_after_run": bool(idarr_value.get("sync_after_run", False)),
-                    }
-                for key in default_step_config.keys():
-                    value = parsed.get(key)
-                    if isinstance(value, dict):
-                        normalized[key] = {
-                            "enabled": bool(value.get("enabled", default_step_config[key]["enabled"])),
-                            "stop_on_error": bool(value.get("stop_on_error", default_step_config[key]["stop_on_error"])),
-                        }
-                    else:
-                        normalized[key] = dict(default_step_config[key])
-                cleanup_value = parsed.get("cleanup_assets")
-                if isinstance(cleanup_value, dict):
-                    normalized["cleanup_assets"] = {
-                        "enabled": bool(cleanup_value.get("enabled", False)),
-                        "delete_unknown": bool(cleanup_value.get("delete_unknown", False)),
-                    }
-                else:
-                    normalized["cleanup_assets"] = dict(default_cleanup_config)
-                return normalized
-
-        return {"idarr": default_idarr_config, "cleanup_assets": default_cleanup_config, **default_step_config}
+        parsed = json.loads(flow_setting.value) if flow_setting else {}
+        return _normalize_flow_config(parsed)
 
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Error getting flow config: {e}\n{traceback.format_exc()}")
@@ -1391,6 +1425,94 @@ def save_flow_config(
         db.rollback()
         log_error(LogTags.WORKFLOW, f"Error saving flow config: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error saving flow config")
+
+
+def _workflow_to_response(wf: Workflow) -> Dict[str, Any]:
+    try:
+        config = _normalize_flow_config(json.loads(wf.config))
+    except (ValueError, TypeError):
+        config = _normalize_flow_config({})
+    return {"id": wf.id, "name": wf.name, "is_default": bool(wf.is_default), "config": config}
+
+
+@router.get("/workflows", response_model=List[WorkflowResponse])
+def get_workflows(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    return [_workflow_to_response(wf) for wf in list_workflows(db)]
+
+
+@router.post("/workflows", response_model=WorkflowResponse)
+def create_workflow(payload: WorkflowCreateRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Workflow name is required")
+    try:
+        config_data = payload.config.model_dump() if payload.config is not None else default_flow_config()
+        is_first = db.query(Workflow).count() == 0
+        wf = Workflow(name=name, config=json.dumps(config_data), is_default=is_first)
+        db.add(wf)
+        db.commit()
+        db.refresh(wf)
+        log_user_action(f"Created workflow '{name}'")
+        return _workflow_to_response(wf)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.WORKFLOW, f"Error creating workflow: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error creating workflow")
+
+
+@router.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
+def update_workflow(workflow_id: int, payload: WorkflowUpdateRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    wf = get_workflow(db, workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    try:
+        if payload.name is not None:
+            name = payload.name.strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Workflow name cannot be empty")
+            wf.name = name
+        if payload.config is not None:
+            wf.config = json.dumps(payload.config.model_dump())
+        if payload.is_default is True:
+            db.query(Workflow).filter(Workflow.id != wf.id).update({Workflow.is_default: False})
+            wf.is_default = True
+        db.commit()
+        db.refresh(wf)
+        log_user_action(f"Saved workflow '{wf.name}'")
+        return _workflow_to_response(wf)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.WORKFLOW, f"Error updating workflow {workflow_id}: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error updating workflow")
+
+
+@router.delete("/workflows/{workflow_id}")
+def delete_workflow(workflow_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    wf = get_workflow(db, workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if db.query(Workflow).count() <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only workflow")
+    try:
+        was_default = bool(wf.is_default)
+        name = wf.name
+        db.delete(wf)
+        db.flush()
+        if was_default:
+            replacement = db.query(Workflow).order_by(Workflow.id.asc()).first()
+            if replacement:
+                replacement.is_default = True
+        db.commit()
+        log_user_action(f"Deleted workflow '{name}'")
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.WORKFLOW, f"Error deleting workflow {workflow_id}: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error deleting workflow")
 
 
 @router.post("/flow/run")
@@ -1430,6 +1552,8 @@ def run_flow(
 
     try:
         dry_run = payload.dry_run if payload else False
+        workflow_id = payload.workflow_id if payload else None
+        flow_config_override = get_workflow_config(db, workflow_id)
 
         job = create_job(
             db,
@@ -1447,7 +1571,7 @@ def run_flow(
                 _flow_running = False
                 _flow_started_at = None
 
-        job_queue.submit(run_flow_background_job, job_id, job_id, dry_run, release_flow_lock)
+        job_queue.submit(run_flow_background_job, job_id, job_id, dry_run, release_flow_lock, config_override=flow_config_override)
 
         return job_started_response(
             job_id,
