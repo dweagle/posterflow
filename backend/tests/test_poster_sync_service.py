@@ -281,3 +281,58 @@ def test_sync_pre_cleanup_removes_stale_db_records_before_rclone(test_db, monkey
     # because the stale record was deleted during pre-sync cleanup.
     assert result["added"] == 1
 
+
+def test_sync_local_only_drive_finds_new_files_without_rclone(test_db, monkeypatch, tmp_path):
+    """Regression: on a local-only drive (sync_enabled=False, rclone skipped so
+    files_transferred is always 0), a manually-added file must still be indexed.
+    The old 'no changes detected' shortcut only sampled existing DB records, so
+    new files were missed by the single-drive sync while the workflow found them."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    # Custom drives are stored under Custom/<name> (see Drive.get_local_path)
+    local_dir = tmp_path / "posters" / "Custom" / "LocalDrive"
+    local_dir.mkdir(parents=True)
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    drive = Drive(
+        name="LocalDrive",
+        drive_id="sync-local-1",
+        style_type="MM2K",
+        subscribed=True,
+        sync_enabled=False,
+        is_custom=True,
+    )
+    job = Job(job_type="Sync: LocalDrive", status="pending", progress=0, message="queued")
+    test_db.add(drive)
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(drive)
+    test_db.refresh(job)
+
+    # An already-indexed file with a matching mtime so the sample check sees "no change"
+    existing_path = local_dir / "existing.jpg"
+    existing_path.write_bytes(b"exists")
+    existing_stat = existing_path.stat()
+    test_db.add(Poster(
+        drive_id=drive.drive_id,
+        file_name="existing.jpg",
+        file_path=str(existing_path),
+        file_size=existing_stat.st_size,
+        file_mtime=existing_stat.st_mtime,
+    ))
+    test_db.commit()
+
+    # A brand-new file dropped into the folder manually (not in the DB, no rclone)
+    (local_dir / "brand_new.jpg").write_bytes(b"new")
+
+    service = PosterSyncService(test_db)
+    result = service.sync_drive(drive_id=drive.id, job_id=job.id)
+
+    assert result["success"] is True
+    assert result["added"] == 1
+
+    names = {
+        p.file_name
+        for p in test_db.query(Poster).filter(Poster.drive_id == drive.drive_id).all()
+    }
+    assert names == {"existing.jpg", "brand_new.jpg"}
+

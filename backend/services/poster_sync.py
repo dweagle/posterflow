@@ -250,11 +250,13 @@ class PosterSyncService:
             existing_poster_count = self.db.query(Poster).filter(Poster.drive_id == drive.drive_id).count()
             
             # Smart optimization: Skip full DB update only if:
+            # 0. Drive syncs via rclone (local-only folders always scan, since
+            #    files_transferred==0 there says nothing about new local files) AND
             # 1. No files transferred by rclone AND
             # 2. Database already has records AND
             # 3. No mtime changes detected AND
             # 4. All DB records point to files that actually exist on disk
-            if files_transferred == 0 and existing_poster_count > 0:
+            if drive.sync_enabled and files_transferred == 0 and existing_poster_count > 0:
                 # Quick validation: Check a sample of files
                 if progress_callback:
                     progress_callback("checking", 75, 100, "Checking for changes...")
