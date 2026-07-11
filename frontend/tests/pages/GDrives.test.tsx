@@ -21,6 +21,10 @@ vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
+vi.mock('../../src/contexts/AppEventsContext', () => ({
+  useAppEvents: () => ({ jobs: [] }),
+}))
+
 vi.mock('../../src/api/client', () => ({
   getDrives: (...args: unknown[]) => mockGetDrives(...args),
   subscribeDrive: (...args: unknown[]) => mockSubscribeDrive(...args),

@@ -11,7 +11,7 @@ interface JobMessage {
   jobs?: JobUpdate[]
 }
 
-interface UnmatchedContextType {
+interface AppEventsContextType {
   unmatchedStats: UnmatchedStats | null
   unmatchedCount: number
   idarrPendingCount: number
@@ -24,9 +24,9 @@ interface UnmatchedContextType {
   refreshCommunityRequestCount: () => Promise<void>
 }
 
-const UnmatchedContext = createContext<UnmatchedContextType | undefined>(undefined)
+const AppEventsContext = createContext<AppEventsContextType | undefined>(undefined)
 
-export function UnmatchedProvider({ children }: { children: ReactNode }) {
+export function AppEventsProvider({ children }: { children: ReactNode }) {
   const [unmatchedStats, setUnmatchedStats] = useState<UnmatchedStats | null>(null)
   const [unmatchedCount, setUnmatchedCount] = useState<number>(0)
   const [idarrPendingCount, setIdarrPendingCount] = useState<number>(0)
@@ -48,7 +48,7 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
       const newCount = data.summary.grand_total.unmatched
       setUnmatchedCount(newCount)
     } catch (error) {
-      console.error('[UnmatchedContext] Failed to refresh stats:', error)
+      console.error('[AppEventsContext] Failed to refresh stats:', error)
     }
   }
 
@@ -204,16 +204,16 @@ export function UnmatchedProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <UnmatchedContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs, refreshStats, refreshIdarrPendingCount, refreshMakerMonitorNeededCount, refreshCommunityRequestCount }}>
+    <AppEventsContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs, refreshStats, refreshIdarrPendingCount, refreshMakerMonitorNeededCount, refreshCommunityRequestCount }}>
       {children}
-    </UnmatchedContext.Provider>
+    </AppEventsContext.Provider>
   )
 }
 
-export function useUnmatched() {
-  const context = useContext(UnmatchedContext)
+export function useAppEvents() {
+  const context = useContext(AppEventsContext)
   if (context === undefined) {
-    throw new Error('useUnmatched must be used within an UnmatchedProvider')
+    throw new Error('useAppEvents must be used within an AppEventsProvider')
   }
   return context
 }

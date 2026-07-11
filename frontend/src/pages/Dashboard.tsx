@@ -3,7 +3,7 @@ import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, run
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import './Dashboard.css'
 
 // Drive-sync jobs use dynamic type strings (see backend models/job.py job_type_sync_* helpers)
@@ -17,7 +17,7 @@ const isDriveSyncJobType = (jobType: string): boolean =>
 function Dashboard() {
   const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
   const navigate = useNavigate()
-  const { jobs, unmatchedStats } = useUnmatched()
+  const { jobs, unmatchedStats } = useAppEvents()
   const [stats, setStats] = useState<Stats | null>(null)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [recentPosters, setRecentPosters] = useState<RecentSyncedPoster[]>([])

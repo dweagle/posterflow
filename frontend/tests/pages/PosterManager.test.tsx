@@ -19,8 +19,8 @@ vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))
 
-vi.mock('../../src/contexts/UnmatchedContext', () => ({
-  useUnmatched: () => ({
+vi.mock('../../src/contexts/AppEventsContext', () => ({
+  useAppEvents: () => ({
     unmatchedStats: { summary: { grand_total: { unmatched: 2 } } },
     refreshStats: vi.fn(),
   }),

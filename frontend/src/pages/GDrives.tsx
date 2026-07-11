@@ -7,6 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
 import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink } from 'lucide-react'
 import { useToast } from '../components/Toast'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import './GDrives.css'
 
 // Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
@@ -38,6 +39,9 @@ function GDrives() {
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
+  const { jobs } = useAppEvents()
+  const prevJobStatusRef = useRef<Record<number, string>>({})
+  const jobsInitializedRef = useRef(false)
   const [idTooltip, setIdTooltip] = useState<number | null>(null)
   const [tooltipAlign, setTooltipAlign] = useState<'left' | 'center' | 'right'>('center')
   const [copiedId, setCopiedId] = useState<number | null>(null)
@@ -64,6 +68,29 @@ function GDrives() {
   useEffect(() => {
     fetchDrives()
   }, [])
+
+  // Sync/workflow jobs run in the background and update poster/file counts
+  // server-side, so refresh the drive list whenever one finishes.
+  useEffect(() => {
+    let shouldRefresh = false
+    for (const job of jobs) {
+      const affectsDrives = job.job_type.startsWith('Sync') || job.job_type === 'Poster Workflow'
+      const prev = prevJobStatusRef.current[job.id]
+      if (
+        jobsInitializedRef.current &&
+        affectsDrives &&
+        (job.status === 'completed' || job.status === 'failed') &&
+        prev !== job.status
+      ) {
+        shouldRefresh = true
+      }
+      prevJobStatusRef.current[job.id] = job.status
+    }
+    jobsInitializedRef.current = true
+    if (shouldRefresh) {
+      fetchDrives()
+    }
+  }, [jobs])
 
   const runWithBooleanLoading = async (
     setLoadingState: (value: boolean) => void,

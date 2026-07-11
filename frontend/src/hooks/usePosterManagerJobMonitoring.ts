@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 
 interface UsePosterManagerJobMonitoringOptions {
   trackedWorkflowJobRef: React.MutableRefObject<number | null>
@@ -18,7 +18,7 @@ export function usePosterManagerJobMonitoring({
   refreshStats,
   showToast,
 }: UsePosterManagerJobMonitoringOptions) {
-  const { jobs } = useUnmatched()
+  const { jobs } = useAppEvents()
   const lastJobStatusRef = useRef<{ [key: string]: string }>({})
   const refreshStatsRef = useRef(refreshStats)
   const showToastRef = useRef(showToast)

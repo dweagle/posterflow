@@ -23,7 +23,7 @@ import {
 import TmdbItemCard, { derivePsdConfig, type PsdConfig } from '../components/maker-tools/TmdbItemCard'
 import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
 import { useToast } from '../components/Toast'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import './MakerTools.css'
 
 type ResultTab = string
@@ -103,7 +103,7 @@ function MakerTools() {
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
 
-  const { jobs, unmatchedStats } = useUnmatched()
+  const { jobs, unmatchedStats } = useAppEvents()
   const completionHandledRef = useRef(false)
   const prevIsMonitorJobActiveRef = useRef(false)
   const tmdbCacheRef = useRef<Map<string, TmdbSearchResult[]>>(new Map())

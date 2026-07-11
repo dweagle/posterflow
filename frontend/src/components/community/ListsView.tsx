@@ -5,7 +5,7 @@ import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, 
 import { getSettings } from '../../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/makerTools'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { useUnmatched } from '../../contexts/UnmatchedContext'
+import { useAppEvents } from '../../contexts/AppEventsContext'
 import { useToast } from '../Toast'
 import { derivePsdConfig, EMPTY_PSD_CONFIG, type PsdConfig } from '../maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from './RequestItemCard'
@@ -78,7 +78,7 @@ export default function ListsView() {
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
-  const { refreshCommunityRequestCount } = useUnmatched()
+  const { refreshCommunityRequestCount } = useAppEvents()
   const { enabled: idarrEnabled, setEnabled: setIdarrEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
   const [items, setItems] = useState<CommunityListItem[]>([])

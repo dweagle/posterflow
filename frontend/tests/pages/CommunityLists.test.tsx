@@ -27,8 +27,8 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }))
 
-vi.mock('../../src/contexts/UnmatchedContext', () => ({
-  useUnmatched: () => ({ refreshCommunityRequestCount: mockRefreshCount }),
+vi.mock('../../src/contexts/AppEventsContext', () => ({
+  useAppEvents: () => ({ refreshCommunityRequestCount: mockRefreshCount }),
 }))
 
 // Heavy leaf — not needed for these behaviours.

@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal } from 'lucide-react'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
@@ -69,7 +69,7 @@ function getNavIcon(id: string, color: string, size = 20) {
 
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
-  const { unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs } = useUnmatched()
+  const { unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs } = useAppEvents()
   const { isConnected, isMaker, discordUserId } = useDiscordAuth()
   const { showToast } = useToast()
   // Requester's own active-request counts (pending + in progress) for the sidebar badges.

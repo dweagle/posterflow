@@ -15,7 +15,7 @@ import CommunityRequests from './pages/CommunityRequests'
 import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
 import { ToastProvider } from './components/Toast'
-import { UnmatchedProvider } from './contexts/UnmatchedContext'
+import { AppEventsProvider } from './contexts/AppEventsContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LockScreen from './components/LockScreen'
 
@@ -130,7 +130,7 @@ function AppContent() {
 
   return (
     <ToastProvider>
-      <UnmatchedProvider>
+      <AppEventsProvider>
         <BrowserRouter>
           <RoutePersistence />
           <Routes>
@@ -159,7 +159,7 @@ function AppContent() {
           )}
           </Routes>
         </BrowserRouter>
-      </UnmatchedProvider>
+      </AppEventsProvider>
     </ToastProvider>
   )
 }

@@ -5,7 +5,7 @@ import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
 import ListsView from '../components/community/ListsView'
@@ -73,7 +73,7 @@ export default function CommunityRequests() {
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
-  const { refreshCommunityRequestCount } = useUnmatched()
+  const { refreshCommunityRequestCount } = useAppEvents()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
   const fetchRequestsRef = useRef<(() => void) | null>(null)
   const [requests, setRequests] = useState<CommunityRequest[]>([])

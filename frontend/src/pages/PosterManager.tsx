@@ -7,7 +7,7 @@ import {
 } from '../api/client'
 import { getPosterStats, PosterStyleStats } from '../api/posterManager'
 import { useToast } from '../components/Toast'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import PosterManagerTabs, { PosterManagerTab } from '../components/poster-manager/PosterManagerTabs'
 import UnmatchedItemsModal, { UnmatchedModalType } from '../components/poster-manager/UnmatchedItemsModal'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
@@ -42,7 +42,7 @@ const isPosterManagerTab = (value: string): value is PosterManagerTab => {
 
 function PosterManager() {
   const location = useLocation()
-  const { unmatchedStats, refreshStats } = useUnmatched()
+  const { unmatchedStats, refreshStats } = useAppEvents()
   const [activeTab, setActiveTab] = useState<PosterManagerTab>(() => {
     const savedTab = localStorage.getItem(POSTER_MANAGER_TAB_STORAGE_KEY)
     if (savedTab && isPosterManagerTab(savedTab)) {

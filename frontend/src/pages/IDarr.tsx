@@ -34,7 +34,7 @@ import {
 } from '../api/client'
 import { API_URL } from '../api/http'
 import { useToast } from '../components/Toast'
-import { useUnmatched } from '../contexts/UnmatchedContext'
+import { useAppEvents } from '../contexts/AppEventsContext'
 import './IDarr.css'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
@@ -229,7 +229,7 @@ function IDarr() {
   } | null
 
   const navigate = useNavigate()
-  const { jobs: wsJobs, refreshIdarrPendingCount } = useUnmatched()
+  const { jobs: wsJobs, refreshIdarrPendingCount } = useAppEvents()
   const [activeTab, setActiveTab] = useState<IDarrTab>(() => {
     const savedTab = localStorage.getItem(IDARR_TAB_STORAGE_KEY)
     if (savedTab && isIDarrTab(savedTab)) {
