@@ -25,7 +25,9 @@ from models.job import (
     format_complete_message,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled
 from services.poster_renamer import PosterRenameService
 from services.unmatched_assets import UnmatchedAssetsService
 from services.community_reconcile import reconcile_community_lists
@@ -39,6 +41,7 @@ def _build_progress_callback(
 ) -> Callable[[str, int, int, str], None]:
     """Create a standard progress callback for unmatched detection jobs."""
     def unmatched_progress(phase: str, current: int, total: int, message: str) -> None:
+        check_cancelled(job_id)
         try:
             job_obj = db.query(Job).filter(Job.id == job_id).first()
             if job_obj and total > 0:
@@ -198,6 +201,11 @@ def run_unmatched_detection_background_job(job_id: int, skip_discord: bool = Fal
                 color=0x64B5F6,
             )
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_info(LogTags.UNMATCHED, f"Unmatched detection stopped by user (job_id={job_id})")
+        raise
     except Exception as e:
         error_msg = str(e)
         log_error(

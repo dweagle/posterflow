@@ -38,7 +38,9 @@ from models.job import (
     format_workflow_step_complete,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled, is_cancel_requested, request_cancel
 from modules.sync import run_sync_all_job
 from modules.renamer import run_rename_background_job, _build_renamer_section
 from modules.border import run_border_replacer_background_job
@@ -90,7 +92,7 @@ def _promote_child_progress_to_parent(
     def _run_child() -> None:
         try:
             result_container["value"] = runner(child_job_id, *runner_args)
-        except Exception as exc:
+        except BaseException as exc:  # includes JobCancelled (BaseException) so cancels propagate
             error_container["error"] = exc
 
     span = max(1, parent_end - parent_start)
@@ -103,6 +105,10 @@ def _promote_child_progress_to_parent(
     thread.start()
 
     while thread.is_alive():
+        # If the parent workflow was stopped, propagate the stop into the running
+        # child so it unwinds at its next checkpoint.
+        if is_cancel_requested(parent_job.id):
+            request_cancel(child_job_id)
         db.expire_all()
         child = db.query(Job).filter(Job.id == child_job_id).first()
         if child:
@@ -134,6 +140,10 @@ def _promote_child_progress_to_parent(
             update_job_state(db, parent_job, progress=mapped_progress, message=mapped_message)
 
     if error_container["error"] is not None:
+        # On a stop, make sure the child record is finalized as cancelled (the child
+        # worker may only have re-raised) before propagating to the workflow handler.
+        if isinstance(error_container["error"], JobCancelled):
+            finalize_job_cancelled(db, child_job_id)
         raise error_container["error"]
 
     return result_container["value"]
@@ -172,6 +182,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         )
 
         log_section_start(LogTags.WORKFLOW, f"Starting poster workflow execution in background (Job ID: {job_id})")
+
+        check_cancelled(job_id)
 
         flow_setting = get_setting(db, "poster_flow_config")
 
@@ -870,6 +882,10 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
 
         return results
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id, message="Workflow stopped by user")
+        log_section_end(LogTags.WORKFLOW, f"Workflow stopped by user (Job ID: {job_id})")
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Workflow execution failed: {e}\n{traceback.format_exc()}")
         send_discord_notification(

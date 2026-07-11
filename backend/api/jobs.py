@@ -27,6 +27,7 @@ from models.job import (
     JOB_STATUSES_RECENT_TERMINAL,
     format_start_message,
     update_job_state,
+    finalize_job_cancelled,
 )
 from models.drive import Drive
 from models.setting import get_setting
@@ -35,6 +36,7 @@ from modules.idarr import run_idarr_background_job, run_idarr_sync_background_jo
 from models.idarr import resolve_idarr_scope_token
 from core.logging import LogTags, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
+from core.job_cancel import JobCancelled, request_cancel, clear_cancel
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -74,6 +76,13 @@ def _run_job_task(job_id: int, start_msg: str, run_fn: Callable[[], None]) -> No
             update_job_state(task_db, job_obj, status=JOB_STATUS_RUNNING, message=start_msg)
         task_db.close()
         run_fn()
+    except JobCancelled:
+        log_debug(LogTags.JOB, f"Job {job_id} stopped by user")
+        task_db = SessionLocal()
+        try:
+            finalize_job_cancelled(task_db, job_id)
+        finally:
+            task_db.close()
     except Exception as e:
         log_error(LogTags.JOB, f"Error in job {job_id}: {e}\n{traceback.format_exc()}")
         task_db = SessionLocal()
@@ -619,6 +628,41 @@ def start_idarr_sync_job(request: StartIdarrSyncRequest, db: Session = Depends(g
     )
     _log_job_queued(job.id, "idarr personal sync", personal_drive_id=personal_drive_id, mode=sync_mode)
     _warn_no_ws(job.id)
+
+    return job
+
+
+@router.post("/{job_id}/cancel", response_model=JobSchema)
+def cancel_job(job_id: int, db: Session = Depends(get_db)) -> JobSchema:
+    """Request cancellation of a running or queued job.
+
+    Queued jobs are cancelled immediately. A running job is flagged and stops at
+    its next checkpoint (progress callback / loop boundary), then finalizes as
+    'cancelled' from within its worker.
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status not in JOB_STATUSES_ACTIVE:
+        raise HTTPException(status_code=400, detail=f"Job is already {job.status}")
+
+    log_user_action(f"Stop requested for job {job_id} ({job.job_type})")
+
+    # Flag for cooperative cancellation (running jobs notice this at a checkpoint).
+    request_cancel(job_id)
+
+    # Try to drop it from the queue if it hasn't started yet.
+    hard_cancelled = job_queue.cancel(job_id)
+
+    if hard_cancelled or job.status == JOB_STATUS_PENDING:
+        # It will never run (removed from queue) or hasn't started — finalize now.
+        finalize_job_cancelled(db, job_id)
+        clear_cancel(job_id)
+        db.refresh(job)
+    else:
+        # Running — let the worker unwind and finalize. Reflect the intent now.
+        update_job_state(db, job, message="Stopping…")
 
     return job
 

@@ -25,7 +25,9 @@ from models.job import (
     format_start_message,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled
 from models.idarr import IdarrAssetCache, create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
 from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
@@ -170,6 +172,9 @@ def _sanitize_message(message: str, max_len: int = 220) -> str:
 
 def _build_progress_callback(db: Any, job: Job) -> Callable[[str, int, int, str], None]:
     def report_progress(_phase: str, current: int, total: int, message: str) -> None:
+        # Outside the try so a stop request propagates instead of being logged as
+        # a progress-update warning.
+        check_cancelled(job.id)
         try:
             normalized_total = total if total and total > 0 else 100
             percent = int((current / normalized_total) * 100)
@@ -485,6 +490,10 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
             else:
                 log_info(LogTags.IDARR, "sync_after_run: skipping personal sync — nothing changed since last sync", job_id=job_id)
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.IDARR, f"IDarr Job Stopped (job_id={job_id})")
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr background job failed: {exc}\n{traceback.format_exc()}")
         send_discord_notification(
@@ -574,6 +583,7 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
 
         def upload_progress_callback(current: int, total: int, phase: str, message: str) -> None:
             nonlocal last_progress_emit, last_uploaded_file_message
+            check_cancelled(job_id)
             try:
                 normalized_total = max(total, 1)
                 ratio = min(max(current / normalized_total, 0.0), 1.0)
@@ -669,6 +679,9 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
             log_warning(LogTags.IDARR, f"Failed to record last sync time: {ts_exc}")
 
         success = True
+    except JobCancelled:
+        finalize_job_cancelled(db, job_id)
+        log_info(LogTags.IDARR, f"IDarr personal sync stopped by user (job_id={job_id})")
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr personal sync job failed: {exc}\n{traceback.format_exc()}")
         mark_job_failed(db, job_id, exc)
@@ -737,6 +750,7 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
         total_renamed = 0
 
         for run_num, (scope_idx, target) in enumerate(selected):
+            check_cancelled(job_id)
             scope_start_progress = int((run_num / total_scopes) * 95) + 1
             scope_end_progress = int(((run_num + 1) / total_scopes) * 95)
             scope_label = str(target.get("label") or f"Target {scope_idx + 1}").strip()
@@ -771,6 +785,7 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
 
             def _make_progress_callback(s_start: int, s_span: int, label: str) -> Any:
                 def report_progress(_phase: str, current: int, total: int, message: str) -> None:
+                    check_cancelled(job_id)
                     try:
                         pct = int((current / max(total, 1)) * 100)
                         mapped = s_start + int((pct / 100) * s_span)
@@ -827,6 +842,10 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
         success = True
         log_section_end(LogTags.IDARR, f"IDarr workflow step completed (job_id={job_id}, renamed={total_renamed})")
 
+    except JobCancelled:
+        finalize_job_cancelled(db, job_id)
+        log_info(LogTags.IDARR, f"IDarr workflow step stopped by user (job_id={job_id})")
+        raise
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr workflow step failed: {exc}\n{traceback.format_exc()}", job_id=job_id)
         try:

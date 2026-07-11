@@ -10,7 +10,9 @@ from models.job import (
     JOB_STATUS_COMPLETED,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled
 from models.drive import Drive
 from services.poster_sync import PosterSyncService
 from core.logging import (
@@ -33,6 +35,9 @@ def _build_progress_callback(
 ) -> Callable[[str, int, int, str], None]:
     """Create a standard progress callback for sync jobs."""
     def sync_progress(phase: str, current: int, total: int, message: str) -> None:
+        # Outside the try so a JobCancelled request propagates instead of being
+        # swallowed as a progress-update warning.
+        check_cancelled(job_id)
         try:
             job = db.query(Job).filter(Job.id == job_id).first()
             if job and total > 0:
@@ -107,6 +112,10 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
             )
 
         return result
+    except JobCancelled:
+        # User stopped the job — re-raise so the task wrapper finalizes it as
+        # 'cancelled' (not failed) and no error notifications are sent.
+        raise
     except Exception as e:
         log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
         send_discord_notification(
@@ -206,6 +215,10 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str 
                 )
 
         return result
+    except JobCancelled:
+        # User stopped the job — re-raise so the caller finalizes it as
+        # 'cancelled' (the task wrapper for direct runs, or the workflow parent).
+        raise
     except Exception as e:
         log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
         if not skip_discord:
@@ -301,6 +314,10 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered
             success = True
         log_debug(LogTags.SCHEDULER, f"Sync completed: {result.get('message', 'Done')}")
 
+    except JobCancelled:
+        if job_id is not None:
+            finalize_job_cancelled(db, job_id)
+        raise
     except Exception as e:
         log_error(LogTags.SCHEDULER, f"Scheduled {drive_group} sync failed: {str(e)}\n{traceback.format_exc()}")
         if job_id is not None:

@@ -1,10 +1,11 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal } from 'lucide-react'
+import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop } from 'lucide-react'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
-import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
+import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
+import ConfirmDialog from './ConfirmDialog'
 import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
 import './Sidebar.css'
@@ -92,6 +93,8 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const [releaseNotes, setReleaseNotes] = useState<string | null>(null)
   const [showReleaseNotes, setShowReleaseNotes] = useState(false)
   const [displayProgress, setDisplayProgress] = useState<number>(0)
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false)
+  const [stoppingJobId, setStoppingJobId] = useState<number | null>(null)
   const lastDisplayedJobIdRef = useRef<number | null>(null)
   const releaseNotesWrapperRef = useRef<HTMLDivElement | null>(null)
 
@@ -109,6 +112,19 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const currentRunningJob = runningJobs[0] || null
   const isDashboardRoute = location.pathname === '/'
   const showMiniProgress = Boolean(currentRunningJob) && !isDashboardRoute
+
+  const handleStopCurrentJob = async () => {
+    if (!currentRunningJob) return
+    const job = currentRunningJob
+    setStoppingJobId(job.id)
+    try {
+      await cancelJob(job.id)
+      showToast(`Stopping ${formatJobType(job.job_type)}…`, 'success')
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to stop job'), 'error')
+      setStoppingJobId(null)
+    }
+  }
 
   const handleIdarrDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('Files')) {
@@ -228,6 +244,13 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
 
     setDisplayProgress(prev => Math.max(prev, incomingProgress))
   }, [currentRunningJob])
+
+  // Clear the "stopping" state once the stopped job is no longer the current one.
+  useEffect(() => {
+    if (stoppingJobId !== null && (!currentRunningJob || currentRunningJob.id !== stoppingJobId)) {
+      setStoppingJobId(null)
+    }
+  }, [currentRunningJob, stoppingJobId])
 
   useEffect(() => {
     let isMounted = true
@@ -587,10 +610,37 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
           <div className="sidebar-job-mini-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={displayProgress}>
             <div className="sidebar-job-mini-progress-fill" style={{ width: `${displayProgress}%` }} />
           </div>
-          <div className="sidebar-job-mini-meta">{displayProgress}%</div>
+          <div className="sidebar-job-mini-footer">
+            <span className="sidebar-job-mini-meta">{displayProgress}%</span>
+            <button
+              type="button"
+              className="sidebar-job-mini-stop"
+              onClick={() => setStopConfirmOpen(true)}
+              disabled={stoppingJobId === currentRunningJob.id}
+              title="Stop this job"
+              aria-label="Stop this job"
+            >
+              <CircleStop size={13} />
+              <span>{stoppingJobId === currentRunningJob.id ? 'Stopping…' : 'Stop'}</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      isOpen={stopConfirmOpen}
+      title="Stop Job"
+      message={currentRunningJob ? `Stop "${formatJobType(currentRunningJob.job_type)}"? Any work in progress will be halted.` : ''}
+      confirmText="Stop Job"
+      cancelText="Keep Running"
+      variant="danger"
+      onConfirm={() => {
+        setStopConfirmOpen(false)
+        void handleStopCurrentJob()
+      }}
+      onCancel={() => setStopConfirmOpen(false)}
+    />
 
       {idarrPickerFiles && idarrPickerConfig && (() => {
         const pickerConfig = idarrPickerConfig

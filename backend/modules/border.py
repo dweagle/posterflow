@@ -24,7 +24,9 @@ from models.job import (
     format_complete_message,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled
 from core.hooks import run_post_job_hook, HOOK_KEY_BORDER
 
 
@@ -34,6 +36,7 @@ def _build_progress_callback(
 ) -> Callable[[str, int, int, str], None]:
     """Create a standard progress callback for border processing jobs."""
     def border_progress(phase: str, current: int, total: int, message: str) -> None:
+        check_cancelled(job.id)
         if total > 0:
             progress = int((current / total) * 100)
             target_progress = min(max(progress, 0), 99)
@@ -159,6 +162,11 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
         success = True
         log_section_end(LogTags.BORDER_REPLACER, "Background Border Replacer Complete")
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.BORDER_REPLACER, "Background Border Replacer Stopped")
+        raise
     except Exception as e:
         log_error(LogTags.BORDER_REPLACER, f"Background border replacer failed: {e}\n{traceback.format_exc()}")
         try:

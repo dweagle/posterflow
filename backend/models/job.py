@@ -23,9 +23,10 @@ JOB_STATUS_PENDING = "pending"
 JOB_STATUS_RUNNING = "running"
 JOB_STATUS_COMPLETED = "completed"
 JOB_STATUS_FAILED = "failed"
+JOB_STATUS_CANCELLED = "cancelled"
 
 JOB_STATUSES_ACTIVE = [JOB_STATUS_RUNNING, JOB_STATUS_PENDING]
-JOB_STATUSES_RECENT_TERMINAL = [JOB_STATUS_COMPLETED, JOB_STATUS_FAILED]
+JOB_STATUSES_RECENT_TERMINAL = [JOB_STATUS_COMPLETED, JOB_STATUS_FAILED, JOB_STATUS_CANCELLED]
 
 JOB_HISTORY_KEEP_COMPLETED_DAYS = 30
 JOB_HISTORY_KEEP_FAILED_DAYS = 14
@@ -125,6 +126,13 @@ def prune_job_history(
         Job.completed_at < failed_cutoff,
     ).delete(synchronize_session=False)
 
+    # Cancelled jobs follow the same short retention as failed jobs.
+    deleted_total += db.query(Job).filter(
+        Job.status == JOB_STATUS_CANCELLED,
+        Job.completed_at.isnot(None),
+        Job.completed_at < failed_cutoff,
+    ).delete(synchronize_session=False)
+
     # Also prune legacy failed jobs where completed_at was never set
     deleted_total += db.query(Job).filter(
         Job.status == JOB_STATUS_FAILED,
@@ -208,6 +216,19 @@ def mark_job_failed(db: Session, job_id: int, error: Exception | str) -> None:
             job,
             status=JOB_STATUS_FAILED,
             error=str(error),
+            completed_at=datetime.now(timezone.utc),
+        )
+
+
+def finalize_job_cancelled(db: Session, job_id: int, message: str = "Stopped by user") -> None:
+    """Mark a job as cancelled (user-requested stop) and set completion timestamp."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if job:
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_CANCELLED,
+            message=message,
             completed_at=datetime.now(timezone.utc),
         )
 

@@ -35,7 +35,9 @@ from models.job import (
     format_start_message,
     format_complete_message,
     update_job_state,
+    finalize_job_cancelled,
 )
+from core.job_cancel import JobCancelled, check_cancelled
 from models.poster import Poster
 from services.border_replacer import BorderReplacerService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
@@ -1600,6 +1602,7 @@ def run_plex_upload_background_job(
 
         def progress_callback(processed: int, total: int, stats: Dict[str, int], message: str) -> None:
             nonlocal last_progress, last_emit_time
+            check_cancelled(job_id)
             normalized_total, next_progress = _calculate_scaled_progress(
                 processed=processed,
                 total=total,
@@ -1758,6 +1761,11 @@ def run_plex_upload_background_job(
         log_section_end(LogTags.UPLOADER, "Plex Upload Complete")
         success = True
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.UPLOADER, "Plex Upload Stopped")
+        raise
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Plex upload job failed: {e}\n{traceback.format_exc()}")
         if not skip_discord:
@@ -2361,6 +2369,7 @@ def run_plex_webhook_background_job(
 
             def progress_callback(processed: int, total: int, stats: Dict[str, int], _message: str) -> None:
                 nonlocal last_progress
+                check_cancelled(job_id)
                 normalized_total, next_progress = _calculate_scaled_progress(
                     processed=processed,
                     total=total,
@@ -2690,6 +2699,11 @@ def run_plex_webhook_background_job(
         log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Complete")
         success = True
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Stopped")
+        raise
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Plex webhook upload failed: {e}\n{traceback.format_exc()}")
         send_discord_notification(
@@ -2807,6 +2821,7 @@ def run_plex_single_manual_background_job(
 
         def progress_callback(processed: int, total: int, stats: Dict[str, int], _message: str) -> None:
             nonlocal last_progress
+            check_cancelled(job_id)
             normalized_total, next_progress = _calculate_scaled_progress(
                 processed=processed,
                 total=total,
@@ -2902,6 +2917,11 @@ def run_plex_single_manual_background_job(
         log_section_end(LogTags.UPLOADER, "Plex Single Upload Complete")
         success = True
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.UPLOADER, "Plex Single Upload Stopped")
+        raise
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Plex single upload failed: {e}\n{traceback.format_exc()}")
         _mark_job_failed(

@@ -20,6 +20,12 @@ export const getJob = async (jobId: number): Promise<Job> => {
   return getData(`/api/jobs/${jobId}`)
 }
 
+// Request cancellation of a running or queued job. Queued jobs stop immediately;
+// running jobs stop at their next checkpoint and finalize as 'cancelled'.
+export const cancelJob = async (jobId: number): Promise<Job> => {
+  return postData(`/api/jobs/${jobId}/cancel`)
+}
+
 export const startSync = async (driveId: number): Promise<Job> => {
   return postData('/api/jobs/sync', { drive_id: driveId })
 }

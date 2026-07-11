@@ -659,6 +659,7 @@ class PosterSyncService:
                 'local_folder': local_folder,
                 'is_local_only': is_local_only,
                 'result_key': result_key,
+                'job_id': job_id,  # lets rclone abort before starting a drive on a stopped batch
             })
         
         if not sync_tasks:

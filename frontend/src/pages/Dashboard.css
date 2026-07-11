@@ -899,6 +899,41 @@
   white-space: nowrap;
 }
 
+.job-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.job-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f87171;
+  background-color: transparent;
+  border: 1px solid #7f2c2c;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.job-stop-btn:hover:not(:disabled) {
+  background-color: #f44336;
+  border-color: #f44336;
+  color: #fff;
+}
+
+.job-stop-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .job-message {
   color: #ccc;
   font-size: 0.875rem;

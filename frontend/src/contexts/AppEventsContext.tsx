@@ -104,26 +104,27 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
             const jobKey = `${job.job_type}_${job.id}`
             const previousStatus = lastJobStatusRef.current[jobKey]
             
-            // Detect transition to completed status
+            // Detect transition to a terminal status
             // Watch for both standalone "Unmatched Detection" and "Poster Workflow" (which may include unmatched detection)
-            if ((job.job_type === 'Unmatched Detection' || job.job_type === 'Poster Workflow') && 
-                (job.status === 'completed' || job.status === 'failed') && 
+            const isTerminal = job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+            if ((job.job_type === 'Unmatched Detection' || job.job_type === 'Poster Workflow') &&
+                isTerminal &&
                 previousStatus !== job.status) {
-              // Refresh stats when unmatched detection finishes (success or failure)
-              // so the UI never shows stale cached data after a failed run
+              // Refresh stats when unmatched detection finishes (success, failure, or stop)
+              // so the UI never shows stale cached data after a run ends
               refreshStats()
             }
 
-            // Refresh IDarr pending count when an IDarr job completes
+            // Refresh IDarr pending count when an IDarr job ends
             if (job.job_type === 'idarr' &&
-                (job.status === 'completed' || job.status === 'failed') &&
+                isTerminal &&
                 previousStatus !== job.status) {
               void refreshIdarrPendingCount()
             }
 
-            // Refresh maker monitor needed count when a monitor scan completes
+            // Refresh maker monitor needed count when a monitor scan ends
             if (job.job_type === 'maker_monitor' &&
-                (job.status === 'completed' || job.status === 'failed') &&
+                isTerminal &&
                 previousStatus !== job.status) {
               void refreshMakerMonitorNeededCount()
             }

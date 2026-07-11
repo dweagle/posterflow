@@ -6,9 +6,10 @@ import gc
 import ctypes
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 from core.logging import log_debug
 from core.config import settings
+from core.job_cancel import is_cancel_requested, clear_cancel
 
 
 def _trim_process_memory() -> None:
@@ -31,6 +32,8 @@ class JobQueueManager:
         self.active_jobs = 0
         self.pending_jobs = 0
         self._is_shutdown = False
+        # Track submitted futures by job id so queued jobs can be cancelled.
+        self._futures: Dict[int, Future[Any]] = {}
 
     def _create_executor(self) -> ThreadPoolExecutor:
         return ThreadPoolExecutor(max_workers=self.max_concurrent, thread_name_prefix="job_")
@@ -50,13 +53,24 @@ class JobQueueManager:
             with self.lock:
                 self.pending_jobs -= 1
                 self.active_jobs += 1
+            # If a cancel was requested while queued, skip the work entirely — the
+            # cancel endpoint has already marked the DB record cancelled.
+            if is_cancel_requested(job_id):
+                with self.lock:
+                    self.active_jobs -= 1
+                    self._futures.pop(job_id, None)
+                clear_cancel(job_id)
+                log_debug("QUEUE", f"Job {job_id} skipped (cancelled before start)")
+                return None
             log_debug("QUEUE", f"Job {job_id} started ({self.active_jobs}/{self.max_concurrent} slots active)")
-            
+
             try:
                 return job_func(*args, **kwargs)
             finally:
                 with self.lock:
                     self.active_jobs -= 1
+                    self._futures.pop(job_id, None)
+                clear_cancel(job_id)
                 log_debug("QUEUE", f"Job {job_id} completed ({self.active_jobs}/{self.max_concurrent} slots active)")
                 _trim_process_memory()
 
@@ -68,8 +82,27 @@ class JobQueueManager:
             if queue_position > 1:
                 log_debug("QUEUE", f"Job {job_id} waiting (position {queue_position} in queue, {self.active_jobs}/{self.max_concurrent} slots active)")
             future = self.executor.submit(wrapped_job)
+            self._futures[job_id] = future
 
         return future
+
+    def cancel(self, job_id: int) -> bool:
+        """Try to cancel a not-yet-started job's future.
+
+        Returns True only if the job was still queued and was removed before
+        running. A running job cannot be cancelled this way — cooperative
+        cancellation (the JobCancelled checkpoints) handles that case.
+        """
+        with self.lock:
+            future = self._futures.get(job_id)
+        if future is None:
+            return False
+        cancelled = future.cancel()
+        if cancelled:
+            with self.lock:
+                self.pending_jobs = max(0, self.pending_jobs - 1)
+                self._futures.pop(job_id, None)
+        return cancelled
         
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         """Shutdown the executor."""

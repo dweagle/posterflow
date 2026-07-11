@@ -7,7 +7,21 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.logging import LogTags, log_success, log_error, log_warning, log_info, log_debug
 from core.config import settings
+from core.job_cancel import JobCancelled, check_cancelled
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+
+
+def _terminate_process(process: Any) -> None:
+    """Best-effort terminate (then kill) a still-running rclone subprocess."""
+    try:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+    except Exception:  # nosec B110
+        pass
 
 SyncProgressCallback = Callable[[str, int, int, str, int], None]
 BatchProgressCallback = Callable[[int, str, str, int, int, str, int], None]
@@ -445,7 +459,13 @@ scope = drive.readonly
                 error_output = ''.join(recent_lines)  # Last 50 lines (capped by deque)
                 log_error(LogTags.RCLONE, f"Failed: '{display_name}' - {error_output}")
                 return {"success": False, "files_transferred": 0}
-                
+
+        except JobCancelled:
+            # User stopped the sync — kill rclone so it doesn't run orphaned, then
+            # propagate so the job finalizes as 'cancelled' rather than failed.
+            _terminate_process(locals().get('process'))
+            log_info(LogTags.RCLONE, f"Sync of '{display_name}' stopped by user")
+            raise
         except Exception as e:
             import traceback
             log_error(LogTags.RCLONE, f"Error in sync_folder: {str(e)}\n{traceback.format_exc()}")
@@ -659,6 +679,10 @@ scope = drive.readonly
             error_output = ''.join(recent_lines).strip()
             log_error(LogTags.RCLONE, f"Upload failed to '{display_name}': {error_output}")
             return {"success": False, "mode": sync_mode, "error": error_output}
+        except JobCancelled:
+            _terminate_process(locals().get('process'))
+            log_info(LogTags.RCLONE, f"Upload of '{display_name}' stopped by user")
+            raise
         except Exception as e:
             import traceback
             log_error(LogTags.RCLONE, f"Error in upload_folder: {str(e)}\n{traceback.format_exc()}")
@@ -728,6 +752,12 @@ scope = drive.readonly
             drive_name = task['drive_name']
             local_folder = task['local_folder']
             task_index = task.get('task_index', 0)
+
+            # If the batch was stopped, abort before starting this drive's rclone
+            # process so a cancelled Sync All doesn't briefly spin up the next drive.
+            batch_job_id = task.get('job_id')
+            if batch_job_id is not None:
+                check_cancelled(batch_job_id)
             
             # Create a callback that includes the task index
             # sync_folder calls with: (filename, files_checked, files_transferred, phase)
@@ -738,20 +768,30 @@ scope = drive.readonly
             try:
                 success = self.sync_folder(drive_id, local_folder, drive_name=drive_name, progress_callback=file_callback)
                 return drive_id, {'success': success, 'drive_name': drive_name}
+            except JobCancelled:
+                # Propagate so the whole batch aborts instead of marking this
+                # drive failed and moving on to the next one.
+                raise
             except Exception as e:
                 log_error(LogTags.RCLONE, f"Exception syncing {drive_name}: {str(e)}")
                 return drive_id, {'success': False, 'drive_name': drive_name, 'error': str(e)}
-        
+
         # Execute syncs using ThreadPoolExecutor (max_workers=1 means sequential)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_task = {executor.submit(sync_single_drive, task): task for task in sync_tasks}
-            
+
             # Collect results as they complete
             for future in as_completed(future_to_task):
                 try:
                     drive_id, result = future.result()
                     results[drive_id] = result
+                except JobCancelled:
+                    # Stop requested — drop any drives that haven't started yet and
+                    # abort the batch so the job finalizes as cancelled.
+                    for pending_future in future_to_task:
+                        pending_future.cancel()
+                    raise
                 except Exception as e:
                     task = future_to_task[future]
                     log_error(LogTags.RCLONE, f"Exception for {task['drive_name']}: {str(e)}")

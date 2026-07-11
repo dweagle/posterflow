@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType } from '../api/client'
+import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, type Job } from '../api/client'
 import { useNavigate } from 'react-router-dom'
-import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X } from 'lucide-react'
+import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X, CircleStop } from 'lucide-react'
 import { useToast } from '../components/Toast'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './Dashboard.css'
 
@@ -34,6 +35,8 @@ function Dashboard() {
   const [renameRunning, setRenameRunning] = useState(false)
   const [queuePopoverOpen, setQueuePopoverOpen] = useState(false)
   const [displayJobProgress, setDisplayJobProgress] = useState(0)
+  const [jobToStop, setJobToStop] = useState<Job | null>(null)
+  const [stoppingJobId, setStoppingJobId] = useState<number | null>(null)
   const [hoveredSchedule, setHoveredSchedule] = useState<{ data: Schedule; rect: DOMRect } | null>(null)
   const scheduleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastDisplayJobIdRef = useRef<number | null>(null)
@@ -364,7 +367,19 @@ function Dashboard() {
       case 'pending': return '#ff9800'
       case 'completed': return '#4caf50'
       case 'failed': return '#f44336'
+      case 'cancelled': return '#9e9e9e'
       default: return '#ccc'
+    }
+  }
+
+  const handleStopJob = async (job: Job) => {
+    setStoppingJobId(job.id)
+    try {
+      await cancelJob(job.id)
+      showToast(`Stopping ${formatJobType(job.job_type)}…`, 'success')
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to stop job'), 'error')
+      setStoppingJobId(null)
     }
   }
 
@@ -437,6 +452,13 @@ function Dashboard() {
 
     setDisplayJobProgress(prev => Math.max(prev, incomingProgress))
   }, [displayJob?.id, displayJob?.status, displayJob?.progress])
+
+  // Clear the "stopping" state once the stopped job has left the active view.
+  useEffect(() => {
+    if (stoppingJobId !== null && (!displayJob || displayJob.id !== stoppingJobId)) {
+      setStoppingJobId(null)
+    }
+  }, [displayJob?.id, stoppingJobId])
 
   const driveCountsByType = drives.reduce(
     (acc, drive) => {
@@ -721,7 +743,20 @@ function Dashboard() {
             <div className="jobs-list">
               <div key={displayJob.id} className={`job-item ${displayJob.status === 'pending' ? 'queued' : 'running'}`}>
                 <div className="job-header">
-                  <span className="job-type">{formatJobType(displayJob.job_type).toUpperCase()}</span>
+                  <div className="job-header-left">
+                    <button
+                      type="button"
+                      className="job-stop-btn"
+                      onClick={() => setJobToStop(displayJob)}
+                      disabled={stoppingJobId === displayJob.id}
+                      title="Stop this job"
+                      aria-label="Stop this job"
+                    >
+                      <CircleStop size={14} />
+                      <span>{stoppingJobId === displayJob.id ? 'Stopping…' : 'Stop'}</span>
+                    </button>
+                    <span className="job-type">{formatJobType(displayJob.job_type).toUpperCase()}</span>
+                  </div>
                   <span className="job-status" style={{ color: getStatusColor(displayJob.status) }}>
                     {displayJob.status === 'pending' ? 'queued' : displayJob.status}
                   </span>
@@ -747,6 +782,20 @@ function Dashboard() {
             </div>
           )}
         </div>
+
+        <ConfirmDialog
+          isOpen={jobToStop !== null}
+          title="Stop Job"
+          message={jobToStop ? `Stop "${formatJobType(jobToStop.job_type)}"? Any work in progress will be halted.` : ''}
+          confirmText="Stop Job"
+          cancelText="Keep Running"
+          variant="danger"
+          onConfirm={() => {
+            if (jobToStop) void handleStopJob(jobToStop)
+            setJobToStop(null)
+          }}
+          onCancel={() => setJobToStop(null)}
+        />
 
         {/* Poster Stats – drives & counts */}
         <div className="stat-card poster-drives-card">

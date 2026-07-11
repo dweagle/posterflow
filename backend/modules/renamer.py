@@ -22,6 +22,7 @@ from core.logging import (
 from models.setting import get_setting, get_setting_value, upsert_setting
 from models.drive import Drive
 from models.poster import Poster
+from core.job_cancel import JobCancelled, check_cancelled
 from models.job import (
     Job,
     JOB_STATUS_RUNNING,
@@ -30,6 +31,7 @@ from models.job import (
     format_complete_message,
     mark_job_failed,
     update_job_state,
+    finalize_job_cancelled,
 )
 from services.poster_renamer import PosterRenameService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
@@ -110,6 +112,7 @@ def _build_progress_callback(
 ) -> Callable[[str, int, int, str], None]:
     """Create a standard progress callback for rename jobs."""
     def rename_progress(phase: str, current: int, total: int, message: str) -> None:
+        check_cancelled(job.id)
         if total > 0:
             progress = int((current / total) * 100)
             target_progress = min(max(progress, 0), 99)
@@ -530,6 +533,11 @@ def run_rename_background_job(job_id: int, config_data: dict[str, Any], skip_dis
             )
         log_section_end(LogTags.POSTER_RENAMER, "Background Poster Renamer Complete")
 
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.POSTER_RENAMER, "Background Poster Renamer Stopped")
+        raise
     except Exception as e:
         log_error(LogTags.POSTER_RENAMER, f"Background Poster Renamer failed: {e}\n{traceback.format_exc()}")
         if not skip_discord:

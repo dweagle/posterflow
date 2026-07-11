@@ -136,6 +136,62 @@ def test_start_sync_all_creates_pending_job(client, test_db, monkeypatch):
     assert queued_calls == [data["id"]]
 
 
+def test_cancel_pending_job_marks_cancelled(client, test_db):
+    """Cancelling a queued job should finalize it as 'cancelled' immediately."""
+    job = Job(job_type="Sync All", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    response = client.post(f"/api/jobs/{job.id}/cancel")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "cancelled"
+
+    test_db.expire_all()
+    refreshed = test_db.query(Job).filter(Job.id == job.id).first()
+    assert refreshed.status == "cancelled"
+    assert refreshed.completed_at is not None
+
+
+def test_cancel_running_job_flags_for_stop(client, test_db):
+    """Cancelling a running job should flag it for cooperative stop, not finalize it here."""
+    from core.job_cancel import is_cancel_requested, clear_cancel
+
+    job = Job(job_type="Poster Workflow", status="running", progress=42, message="working")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    try:
+        response = client.post(f"/api/jobs/{job.id}/cancel")
+        assert response.status_code == 200
+        data = response.json()
+        # Still running from the API's perspective — the worker finalizes it.
+        assert data["status"] == "running"
+        assert is_cancel_requested(job.id)
+    finally:
+        clear_cancel(job.id)
+
+
+def test_cancel_terminal_job_rejected(client, test_db):
+    """Cancelling an already-finished job should return 400."""
+    job = Job(job_type="Sync All", status="completed", progress=100, message="done")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    response = client.post(f"/api/jobs/{job.id}/cancel")
+    assert response.status_code == 400
+
+
+def test_cancel_missing_job_returns_404(client):
+    """Cancelling a non-existent job should return 404."""
+    response = client.post("/api/jobs/999999/cancel")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Job not found"
+
+
 def test_delete_job_success(client, test_db):
     """Deleting an existing job should return success message."""
     job = Job(job_type="Delete Me", status="completed", progress=100, message="done")
