@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-11
+### Added
+- Workflow: create, save, and schedule multiple workflows.
+- Dashboard & Sidebar: stop or cancel a running job.
+- Maker Tools: posters can be tagged for PSD export with season and main poster titles.
+- Photopea Plugin: added batch processing tools in the plugin. Uses tags from Maker Tools PSD export to ease poster creation.
+- Maker Tools: Photopea standalone plugin for outside app poster creation tools. Install at <https://dweagle.github.io/posterflow/photopea-posterflow/index.html>
+
+### Fixed
+- Drives: local-only drive sync now correctly detects new files.
+- Maker Tools: fixed the "use existing PSD" modal button layout.
+
 ## [0.10.4] - 2026-07-08
 ### Added
 - Google Drives: added the füsen CL2K drive. Don't forget to add to your priority list after subscribing if you use it!
