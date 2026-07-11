@@ -2,7 +2,7 @@ import { getData, postData } from './http'
 // Inlined as a data URI (Vite ?inline) so Photopea renders it without a network fetch.
 // A remote-URL icon at our origin is passive mixed content on an http LAN instance — Chrome
 // auto-upgrades it to https, the upgrade fails (no TLS), and the button shows with no image.
-import pluginIcon from '../assets/photopea-plugin-icon-app.png?inline'
+import pluginIcon from '../assets/photopea-plugin-icon.png?inline'
 
 export interface MakerMonitorConfig {
   tmdb_api_key: string
@@ -409,10 +409,10 @@ export const openPhotopeaWithPsd = (
   // ── Fresh launch (new-tab mode, or the first doc of a same-tab session) ──
   const params = new URLSearchParams({ save: saveUrl, name: docName, style })
   const pluginUrl = `${window.location.origin}/photopea-plugin.html?${params.toString()}`
-  // icon: Posterflow's logo as an inlined data URI (a colored logo, so no "===" theme-recolor
-  // prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
-  // This variant has a RED outline so it's distinguishable from the published gallery "PosterFlow"
-  // (plain icon) — both can appear when launched from the app if the gallery one is installed.
+  // icon: Posterflow's gradient logo as an inlined data URI (a colored logo, so no "===" theme-
+  // recolor prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
+  // The published gallery "PosterFlow" uses a SOLID-color version of the same mark, so the two are
+  // easy to tell apart (gradient = in-app "PosterFlow (App)"; solid = installed gallery one).
   // w/h: fix the panel to 184px wide — fits 5 season chips per row.
   const icon = pluginIcon
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the

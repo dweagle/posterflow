@@ -78,7 +78,9 @@ alone won't resize an already-published plugin.
 
 ### Icon
 
-The button logo is `icon.png` — the same PosterFlow logo the app uses. Host it **next to**
+The button logo is `icon.png` — a **solid-color** (`#5a86f0`) version of the PosterFlow mark, on
+purpose: the in-app plugin ("PosterFlow (App)") uses the **gradient** logo, so the solid one makes
+the installed gallery plugin easy to tell apart if both show up. Host it **next to**
 `photopea-posterflow.html` (same folder/host) so the manifest's `"icon"` URL resolves. It's a
 full-color logo, so there is **no** `===` theme-recolor prefix.
 
