@@ -33,6 +33,11 @@
   .title { font-weight: 600; flex: 1; }
   .btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px; padding: 3px 7px; font-size: 12px; line-height: 1.4; }
   .btn:hover { background: #4a4a54; }
+  /* Two batch bolts, distinguished by color: amber = name-tag batch, blue = seasons-from-one-poster. */
+  .btn.bolt-tags { background: #8a5a1c; }
+  .btn.bolt-tags:hover { background: #a06a24; }
+  .btn.bolt-seasons { background: #2b5c9e; }
+  .btn.bolt-seasons:hover { background: #356ec0; }
   .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
@@ -65,7 +70,8 @@
   <div class="style-head"><span class="style-name" data-el="style">—</span></div>
   <div class="head">
     <button class="btn" data-act="jpg" title="Download a flattened JPG of the poster">JPG</button>
-    <button class="btn" data-act="batch" title="Batch-export JPGs: s0/s1…/main/show layers, or a season range from a single poster">⚡</button>
+    <button class="btn bolt-tags" data-act="batch" title="Name-tag batch — one JPG per tagged layer (s0/s1…/main/show/c)">⚡</button>
+    <button class="btn bolt-seasons" data-act="batch-seasons" title="Seasons from one poster — pick a range and export Season 1…N (+ Specials) from a single poster">⚡</button>
     <button class="btn" data-act="refresh" title="Reload layers from the active document">⟳</button>
   </div>
   <div class="tools">
@@ -107,7 +113,7 @@
   let placeBtn = null, placeLabel = '', placeWatch = null, pendingRes = null;  // in-flight button + watchdog + target geom
   let pendingDocName = 'poster';                  // active doc's (possibly mangled) name — used for the JPG filename
   let detectedStyle = '';                          // CL2K/MM2K guessed from the active doc's layer structure
-  let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false;  // batch-export state
+  let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false, batchMode = 'tags';  // batch-export state ('tags' = name-tag convention, 'seasons' = season range from one poster)
   let batchSeasonText = [], batchSpecialsText = [];  // "Season N" / "Specials" text layers found by the batch scan (to pair with s-layers)
   let lastActiveName = null;                        // active-doc watcher: last name we read layers for; a change re-reads the panel
 
@@ -362,8 +368,10 @@
     const a = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);   // keep the blob alive well past the write so a slow/large download can't be truncated
   };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const DL_GAP = 500;   // ms between browser downloads — browsers drop rapid downloads; raise if some still skip
 
   // Photopea hands the exported JPG bytes back here → download it, named after the doc + the
   // visible season. (PSD saving is native: Ctrl+S overwrites the file you opened on disk.)
@@ -499,11 +507,14 @@
   // One JPG per poster variant, downloaded INDIVIDUALLY — no ZIP. Two modes: (1) layers named
   // s0/s1…/main/show → export each; (2) a single poster with a SEASONS group → ask how many seasons
   // (a count "8"=1–8, a range "3-6", or blank=all) plus any singles. One export at a time.
-  const batchBtn = document.querySelector('[data-act="batch"]');
+  const batchBtn = document.querySelector('[data-act="batch"]');            // amber ⚡ — name-tag batch
+  const seasonsBtn = document.querySelector('[data-act="batch-seasons"]');  // blue ⚡ — seasons from one poster
   const batchBar = document.querySelector('.batchbar');
   const batchMsg = document.querySelector('.batchmsg');
   const batchRow = document.querySelector('.batchrow');
   const batchInput = document.querySelector('.batchinput');
+  const modeBtn = () => batchMode === 'seasons' ? seasonsBtn : batchBtn;    // the bolt driving the current run
+  const resetBolts = () => { batchBtn.textContent = '⚡'; seasonsBtn.textContent = '⚡'; };
 
   const batchNote = (t) => { batchMsg.textContent = t; };
   const closeBatch = () => { if (!batchBusy) batchBar.classList.add('hidden'); };
@@ -516,6 +527,21 @@
     if (main()) changes.push({ p: main().p, v: true });
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: key(dn.p) === parentKey }));
     byRole('season').forEach((sn) => { if (sn !== S) changes.push({ p: sn.p, v: false }); });
+    model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    changes.push(...seqOff(), ...seqGroupOff());
+    return changes;
+  };
+  // Always-ON visibility for a "Season YYYY" year leaf: show it + the SEASONS group and its own
+  // years group, and hide every decade, numbered season, other year, and single (its counterpart to
+  // seasonChanges — the year layers live in the "SEASON YEARS TEXT" group, not under a decade).
+  const yearChanges = (Y) => {
+    const parentKey = key(Y.p.slice(0, -1));
+    const changes = [{ p: Y.p, v: true }];
+    if (main()) changes.push({ p: main().p, v: true });
+    byRole('years').forEach((yg) => changes.push({ p: yg.p, v: key(yg.p) === parentKey }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+    byRole('year').forEach((yn) => { if (yn !== Y) changes.push({ p: yn.p, v: false }); });
     model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
     changes.push(...seqOff(), ...seqGroupOff());
     return changes;
@@ -573,6 +599,19 @@
     }
     return items;
   };
+  // "Season YYYY" batch: same range filter as seasonItems but over the year layers. Files still use
+  // the " - Season <n>" convention (so "Season 2015" lands as a normal season poster). No Specials.
+  const isYearRange = (r) => (r.start != null && r.start >= 1900) || (r.end != null && r.end >= 1900);
+  const yearItems = (start, end) => {
+    const items = [];
+    byRole('year').slice().sort((a, b) => (seasonNumOf(a) || 0) - (seasonNumOf(b) || 0)).forEach((Y) => {
+      const n = seasonNumOf(Y);
+      if (isNaN(n)) return;
+      if ((start != null && n < start) || (end != null && n > end)) return;
+      items.push({ suffix: ' - Season ' + n, changes: yearChanges(Y) });
+    });
+    return items;
+  };
 
   const batchItemScript = (changes) =>
     'try{var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
@@ -584,18 +623,19 @@
     batchNote('Exporting ' + (batchIdx + 1) + '/' + batchItems.length + '…');
     send(batchItemScript(batchItems[batchIdx].changes));
   };
-  const onBatchBytes = (buf) => {
+  const onBatchBytes = async (buf) => {
     download(buf, batchBase + batchItems[batchIdx].suffix + '.jpg');
     batchOk++; batchIdx++;
+    await sleep(DL_GAP);   // browsers silently drop rapid back-to-back downloads — space them out
     batchNext();
   };
   const batchFinish = () => {
-    batchBusy = false; batchBtn.textContent = '⚡';
+    batchBusy = false; resetBolts();
     batchNote('Done — downloaded ' + batchOk + ' JPG' + (batchOk === 1 ? '' : 's') + '.');
     fetchLayers();
     setTimeout(closeBatch, 2600);
   };
-  const batchAbort = (msg) => { batchBusy = false; batchBtn.textContent = '⚡'; batchNote('Stopped: ' + msg); };
+  const batchAbort = (msg) => { batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg); };
 
   const BATCH_SCAN = 'try{var d=app.activeDocument;var out=[],stx=[],spx=[];' +
     'function sc(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);' +
@@ -606,40 +646,44 @@
     'if(L.typename=="LayerSet"){sc(L.layers,here);}}}sc(d.layers,[]);' +
     'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,name:d.name}));}catch(e){app.echoToOE("SZERR:"+e);}';
 
-  const startBatch = () => {
+  const startBatch = (mode) => {
     if (batchBusy) return;
+    batchMode = mode;   // 'tags' (amber) or 'seasons' (blue) — the button picks the mode, no auto-detect
     batchOk = 0; batchIdx = 0;
     batchBar.classList.remove('hidden'); batchRow.classList.add('hidden');
     batchNote('Scanning…');
     send(BATCH_SCAN);
   };
+  // The scan is shared; the active button (batchMode) forces which branch we take, so the two modes
+  // never fight over auto-detection. 'tags' = one JPG per s0/s1…/main/show/c layer; 'seasons' = a
+  // season range from a single poster's SEASONS group.
   const onBatchInit = (json) => {
     let init; try { init = JSON.parse(json); } catch (_) { batchNote('Scan failed.'); return; }
     batchBase = (init.name || pendingDocName || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     batchStyle = detectedStyle;
     batchSeasonText = init.seasonText || []; batchSpecialsText = init.specialsText || [];
     const variants = init.variants || [];
-    if (variants.length) {
+    if (batchMode === 'tags') {
+      if (!variants.length) { batchNote('No name-tag layers (s0/s1…/main/show/c) in this document. For a single poster with a SEASONS group, use the blue ⚡ instead.'); return; }
       batchConvention = true;
       batchItems = buildConventionItems(variants);
       batchRow.classList.remove('hidden'); batchInput.style.display = 'none';
-      batchNote('Found ' + batchItems.length + ' labeled poster(s). Export all?');
-    } else if (byRole('season').length || model.singles.length) {
+      batchNote('Found ' + batchItems.length + ' tagged poster(s). Export all?');
+    } else {
+      if (!(byRole('season').length || model.singles.length)) { batchNote('No SEASONS group or season layers found. For layers tagged s0/s1…/main/show, use the amber ⚡ instead.'); return; }
       batchConvention = false;
       batchRow.classList.remove('hidden'); batchInput.style.display = ''; batchInput.value = ''; batchInput.focus();
-      batchNote('Single poster — which seasons? e.g. "8" (=1–8), "0-5" (0 = Specials), or blank = all.');
-    } else {
-      batchNote('No s0/s1/main/show layers or SEASONS group found.');
+      batchNote('Which seasons? e.g. "8" (=1–8), "0-5" (0 = Specials), "2015-2020" (years), or blank = all.');
     }
   };
   const runBatch = () => {
     if (batchBusy) return;
     if (!batchConvention) {
       const r = parseRange(batchInput.value);
-      batchItems = seasonItems(r.start, r.end);
+      batchItems = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
     }
     if (!batchItems.length) { batchNote('Nothing matched — nothing to export.'); return; }
-    batchBusy = true; batchBtn.textContent = '…'; batchRow.classList.add('hidden');
+    batchBusy = true; modeBtn().textContent = '…'; batchRow.classList.add('hidden');
     batchIdx = 0; batchOk = 0;
     batchNext();
   };
@@ -675,7 +719,14 @@
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
-  batchBtn.addEventListener('click', () => { if (batchBar.classList.contains('hidden')) startBatch(); else closeBatch(); });
+  // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
+  const boltClick = (mode) => {
+    if (batchBusy) return;
+    if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
+    startBatch(mode);
+  };
+  batchBtn.addEventListener('click', () => boltClick('tags'));
+  seasonsBtn.addEventListener('click', () => boltClick('seasons'));
   document.querySelector('[data-act="batch-run"]').addEventListener('click', runBatch);
   document.querySelector('[data-act="batch-cancel"]').addEventListener('click', closeBatch);
   batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runBatch(); } });

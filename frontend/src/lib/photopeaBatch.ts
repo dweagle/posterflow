@@ -50,6 +50,25 @@ export function seasonSuffixes(
   return out
 }
 
+/** A batch range targets the year layers (Season YYYY) when its bounds look like 4-digit years. */
+export function isYearRange(start: number | null, end: number | null): boolean {
+  return (start != null && start >= 1900) || (end != null && end >= 1900)
+}
+
+/**
+ * Season-YYYY mode: the suffixes for the year layers (Season 2015…) within [start,end]. Same range
+ * filter as numbered seasons, so files match the "Season N" convention; never Specials/Collection.
+ */
+export function yearSuffixes(years: number[], start: number | null, end: number | null): string[] {
+  const out: string[] = []
+  years.slice().sort((a, b) => a - b).forEach((n) => {
+    if (isNaN(n)) return
+    if ((start != null && n < start) || (end != null && n > end)) return
+    out.push(' - Season ' + n)
+  })
+  return out
+}
+
 const showText = (changes: Change[], t: TextLayer, on: boolean) => {
   changes.push({ p: t.p, v: on })
   if (on) for (let i = 1; i < t.p.length; i++) changes.push({ p: t.p.slice(0, i), v: true })

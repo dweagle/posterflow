@@ -3,6 +3,8 @@ import {
   parseRange,
   conventionSuffix,
   seasonSuffixes,
+  isYearRange,
+  yearSuffixes,
   buildConventionItems,
   type Variant,
 } from '../../src/lib/photopeaBatch'
@@ -64,6 +66,38 @@ describe('seasonSuffixes (count/range mode)', () => {
     expect(all).not.toContain('Collection')
     // the only ' - Season 1' present is the real season 1, and there is exactly one
     expect(seasonSuffixes(seasons, withSpecials, null, null).filter((s) => s === ' - Season 1')).toHaveLength(1)
+  })
+})
+
+describe('isYearRange', () => {
+  it('treats 4-digit bounds as years', () => {
+    expect(isYearRange(2015, 2020)).toBe(true)   // 2015-2020
+    expect(isYearRange(1, 2020)).toBe(true)       // bare "2020" → start:1,end:2020
+  })
+  it('treats small counts/ranges as numbered seasons', () => {
+    expect(isYearRange(1, 8)).toBe(false)         // "8"
+    expect(isYearRange(2, 11)).toBe(false)        // "2-11"
+    expect(isYearRange(0, 5)).toBe(false)         // "0-5"
+    expect(isYearRange(null, null)).toBe(false)   // blank
+  })
+})
+
+describe('yearSuffixes (Season YYYY mode)', () => {
+  const years = [2015, 2016, 2017, 2018, 2019, 2020]
+
+  it('a year range emits one "Season YYYY" per year, sorted', () => {
+    expect(yearSuffixes(years, 2016, 2018)).toEqual([
+      ' - Season 2016', ' - Season 2017', ' - Season 2018',
+    ])
+  })
+  it('bare "2020" (start:1) yields every available year up to 2020', () => {
+    expect(yearSuffixes(years, 1, 2020)).toEqual([
+      ' - Season 2015', ' - Season 2016', ' - Season 2017',
+      ' - Season 2018', ' - Season 2019', ' - Season 2020',
+    ])
+  })
+  it('never adds Specials (years have none)', () => {
+    expect(yearSuffixes(years, null, null).join('|')).not.toContain('Specials')
   })
 })
 

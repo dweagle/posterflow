@@ -492,10 +492,13 @@ if frontend_dist.exists():
             if not file_path.resolve().is_relative_to(frontend_dist.resolve()):
                 return PlainTextResponse("Not found", status_code=404)
             if file_path.exists():
-                return FileResponse(file_path)
-        
+                # HTML must always revalidate so a rebuilt app/plugin (e.g. photopea-plugin.html) is
+                # never served stale from the browser cache; hashed /assets keep their long-lived caching.
+                headers = {"Cache-Control": "no-cache"} if file_path.suffix == ".html" else None
+                return FileResponse(file_path, headers=headers)
+
         # Otherwise serve index.html (for SPA routing)
-        return FileResponse(frontend_dist / "index.html")
+        return FileResponse(frontend_dist / "index.html", headers={"Cache-Control": "no-cache"})
 else:
     log_warning(LogTags.STARTUP, "Frontend dist folder not found - API-only mode")
     
