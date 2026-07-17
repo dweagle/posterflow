@@ -1,4 +1,5 @@
 import hashlib
+import os
 import traceback
 import json
 from datetime import datetime, timezone
@@ -141,24 +142,29 @@ def _update_last_sync_time(db: Any, source_dir: str) -> None:
 
 
 def _has_files_newer_than(source_dir: Path, since: datetime) -> bool:
-    """Return True if any image file in source_dir has an mtime or ctime strictly after `since`.
+    """Return True if any image file anywhere under source_dir has an mtime or ctime
+    strictly after `since`.
 
-    mtime catches content changes (new/replaced files).
-    ctime catches renames and permission changes without a content write.
+    Recurses: asset drives keep every file in logos/, backgrounds/ and squareart/
+    subfolders, so a top-level-only scan sees only those directories and misses every
+    change on an asset drive. os.walk covers nested layouts and flat drives alike.
+
+    mtime catches content changes (new/replaced files); ctime catches renames/moves and
+    permission changes without a content write. Deletions are not detected — nothing is
+    left behind with a newer timestamp.
     """
     since_ts = since.timestamp()
     try:
-        for entry in source_dir.iterdir():
-            if not entry.is_file():
-                continue
-            if entry.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
-            try:
-                st = entry.stat()
+        for root, _dirs, files in os.walk(source_dir):
+            for name in files:
+                if os.path.splitext(name)[1].lower() not in IMAGE_EXTENSIONS:
+                    continue
+                try:
+                    st = os.stat(os.path.join(root, name))
+                except OSError:
+                    continue
                 if st.st_mtime > since_ts or st.st_ctime > since_ts:
                     return True
-            except OSError:
-                continue
     except OSError:
         pass
     return False
@@ -806,8 +812,9 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
             total_renamed += scope_renamed
             log_success(LogTags.IDARR, f"IDarr scope '{scope_label}' complete: {scope_renamed} renamed", job_id=job_id)
 
-            # Run personal sync inline if requested and files were renamed (or forced),
-            # or if any image in the source dir is newer than the last recorded sync time.
+            # Personal sync fires on an explicit opt-in when there's something to push:
+            # files renamed, forced, no prior sync, or an image anywhere under the source
+            # dir (recursing into asset-drive subfolders) is newer than the last sync.
             _force_scope_sync = bool(idarr_config.get("force_sync_after_run"))
             _should_sync_scope = scope_renamed > 0 or _force_scope_sync
             if not _should_sync_scope and sync_after_run and not dry_run and source_dir:
@@ -834,6 +841,8 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
                 else:
                     log_warning(LogTags.IDARR, f"Inline sync skipped for '{scope_label}': missing personal_drive_id or source dir",
                                 job_id=job_id)
+            elif sync_after_run and not dry_run:
+                log_info(LogTags.IDARR, f"Inline sync skipped for '{scope_label}': no files changed since last sync", job_id=job_id)
             update_job_state(db, job, progress=scope_end_progress, message=f"Scope '{scope_label}' complete")
 
         update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100,

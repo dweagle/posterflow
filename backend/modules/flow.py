@@ -581,8 +581,11 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         # Plex upload, so upload never pushes stale/orphaned posters.
         # Asset cleanup is auxiliary, not a numbered step, so it stays out of the
         # run/skipped/failed tallies and is surfaced via its own summary embed.
+        # Gated on rename: the UI nests the cleanup toggle under Rename & Organize, so a
+        # stored cleanup_assets.enabled must not run on its own when rename is disabled.
         cleanup_embed = None
-        if flow_config.get("cleanup_assets", {}).get("enabled", False):
+        _rename_enabled = flow_config.get("rename_assets", {}).get("enabled", False)
+        if _rename_enabled and flow_config.get("cleanup_assets", {}).get("enabled", False):
             log_info(LogTags.WORKFLOW, "Running asset cleanup (post-rename/border)")
             update_job_state(db, job, message="Cleaning up orphaned asset folders...")
             try:
