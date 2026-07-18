@@ -21,6 +21,7 @@ from api.maker_tools import (
     _build_lang_params,
     _build_psd,
     _build_tmdb_images,
+    _content_disposition,
     _extract_name,
     _fetch_tmdb_image_bytes,
     _measure_logo_density,
@@ -206,8 +207,21 @@ def test_extract_name_handles_empty_string():
 
 
 # ---------------------------------------------------------------------------
-# API: GET /api/maker-tools/monitor/config
+# _content_disposition
 # ---------------------------------------------------------------------------
+
+
+def test_content_disposition_em_dash_is_latin1_safe():
+    # Regression: a raw em dash in the header value crashed Starlette's latin-1
+    # header encoding (500), so Photopea hung on load. Must stay latin-1 encodable.
+    header = _content_disposition("inline", "Alien — Romulus (2024).psd")
+    header.encode("latin-1")  # would raise UnicodeEncodeError before the fix
+    assert header.startswith("inline; filename*=utf-8''")
+    assert "%E2%80%94" in header
+
+
+def test_content_disposition_ascii_name_uses_plain_filename():
+    assert _content_disposition("attachment", "Movie.psd") == 'attachment; filename="Movie.psd"'
 
 
 def test_get_maker_monitor_config_returns_defaults_when_no_setting(client):
@@ -1094,6 +1108,23 @@ def test_psd_export_export_folder_saves_and_returns_json(client, test_db):
     assert data["filename"].endswith(".psd")
     assert "My Show" in data["filename"]
     assert data["open_photopea"] is False  # open_photopea not set → False
+
+
+def test_serve_psd_export_em_dash_filename_returns_bytes(client, test_db):
+    """Regression: an em-dash filename must not crash the latin-1 Content-Disposition
+    header — the serve endpoint (Photopea's files:[url] load) should return the PSD
+    bytes, not a 500 that leaves Photopea stuck on 'loading'."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+        filename = "Alien — Romulus (2024).psd"
+        (Path(tmpdir) / filename).write_bytes(b"FAKEPSD")
+
+        response = client.get(f"/api/maker-tools/psd-exports/{filename}")
+
+    assert response.status_code == 200
+    assert response.content == b"FAKEPSD"
+    assert "utf-8''" in response.headers["content-disposition"]
 
 
 def test_psd_export_sanitizes_dangerous_filename_chars(client, test_db):

@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -1592,6 +1593,20 @@ def _psd_image_folder_key(style: str) -> str:
     return SETTING_PSD_IMAGE_EXPORT_FOLDER_MM2K if _normalize_psd_style(style) == "MM2K" else SETTING_PSD_IMAGE_EXPORT_FOLDER
 
 
+def _content_disposition(disposition_type: str, filename: str) -> str:
+    """Content-Disposition value safe for non-latin-1 filenames (em dashes etc.).
+
+    HTTP header values are latin-1; a raw non-latin-1 filename (em dash, etc.)
+    crashes Starlette's header encoding (500), which is why Photopea hangs on load.
+    RFC 6266 filename* carries those as UTF-8; latin-1-safe names keep the plain form.
+    """
+    try:
+        filename.encode("latin-1")
+    except UnicodeEncodeError:
+        return f"{disposition_type}; filename*=utf-8''{quote(filename)}"
+    return f'{disposition_type}; filename="{filename}"'
+
+
 def _validate_psd_filename(filename: str) -> None:
     """Reject path traversal and non-PSD names. Raises HTTP 400 on failure.
 
@@ -2240,7 +2255,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     return Response(
         content=psd_bytes,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{output_filename}"'},
+        headers={"Content-Disposition": _content_disposition("attachment", output_filename)},
     )
 
 
@@ -2265,7 +2280,7 @@ def serve_psd_export(filename: str, token: str = "", exp: str = "", style: str =
         content=file_path.read_bytes(),
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": _content_disposition("inline", filename),
             "Access-Control-Allow-Origin": "*",
         },
     )
