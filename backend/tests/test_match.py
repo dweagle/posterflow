@@ -1,10 +1,13 @@
 """Tests for util/posters/match.py"""
 import pytest
 
+from util.posters.index import build_search_index, create_new_empty_index
 from util.posters.match import (
+    NO_SHARED_ID,
     compare_strings,
     collection_title_variants,
     is_match,
+    match_assets_to_media,
     match_tmdb_collection,
 )
 
@@ -321,3 +324,87 @@ class TestIsMatchNormalizedFolder:
         matched, reason = is_match(asset, media)
         assert matched is True
         assert "folder" in reason
+
+
+# ---------------------------------------------------------------------------
+# id-lock near miss (NO_SHARED_ID)
+# ---------------------------------------------------------------------------
+
+class TestNoSharedId:
+    """The id lock skips the title fallback, so a title-agreeing pair with no shared id
+    is reported rather than dropped silently."""
+
+    def _series(self, **ids):
+        base = {"type": "series", "title": "RIPLEY", "year": 2024,
+                "normalized_title": "ripley", "tmdb_id": None, "tvdb_id": None, "imdb_id": None}
+        return {**base, **ids}
+
+    def test_imdb_only_poster_vs_tvdb_only_library_is_near_miss(self):
+        asset = self._series(imdb_id="tt11016042", files=["/p/RIPLEY (2024) {imdb-tt11016042}.jpg"])
+        media = self._series(tvdb_id=372727)
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == NO_SHARED_ID
+
+    def test_shared_imdb_matches(self):
+        # His case: the folder imdb came from Sonarr, so it agrees and must not warn.
+        asset = self._series(imdb_id="tt11016042")
+        media = self._series(tvdb_id=372727, imdb_id="tt11016042")
+        matched, reason = is_match(asset, media)
+        assert matched is True
+        assert reason == "by imdb_id"
+
+    def test_conflicting_ids_are_not_near_miss(self):
+        # Same title, genuinely different items — a shared id type that disagrees is a
+        # real rejection, not a tagging gap.
+        asset = self._series(tvdb_id=111)
+        media = self._series(tvdb_id=222)
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ""
+
+    def test_different_titles_are_not_near_miss(self):
+        asset = self._series(title="Ripley Under Ground", normalized_title="ripleyunderground",
+                             imdb_id="tt0219171")
+        media = self._series(tvdb_id=372727)
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ""
+
+    def _run_capturing_logs(self, asset, media):
+        """Run a match, returning (result, logged_text). Logging is loguru, which neither
+        propagates to caplog nor flushes through capfd, so attach a sink directly."""
+        from loguru import logger
+
+        index = create_new_empty_index()
+        build_search_index(index, asset["title"], asset)
+
+        messages: list = []
+        sink_id = logger.add(messages.append, level="WARNING")
+        try:
+            result = match_assets_to_media({"series": [media]}, index)
+        finally:
+            logger.remove(sink_id)
+        return result, "".join(messages)
+
+    def test_near_miss_reported_and_item_unmatched(self):
+        asset = self._series(imdb_id="tt11016042", files=["/p/RIPLEY (2024) {imdb-tt11016042}.jpg"])
+        media = self._series(tvdb_id=372727)
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert result["series"] == []
+        assert "share no id" in logged
+        assert "{imdb-tt11016042}" in logged          # poster side
+        assert "{tvdb-372727}" in logged              # library side
+        assert "RIPLEY (2024) {imdb-tt11016042}.jpg" in logged
+
+    def test_shared_imdb_produces_no_warning(self):
+        # Regression: Sonarr-named "{imdb-...}" folders match and must stay silent.
+        asset = self._series(imdb_id="tt11016042", files=["/p/RIPLEY (2024) {imdb-tt11016042}.jpg"])
+        media = self._series(tvdb_id=372727, imdb_id="tt11016042")
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert len(result["series"]) == 1
+        assert "share no id" not in logged

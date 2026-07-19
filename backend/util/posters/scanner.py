@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from unidecode import unidecode
 
-from core.logging import log_debug, log_error, log_info, log_warning, LogTags
+from core.logging import log_debug, log_error, log_info, LogTags
 from util.constants import (
     illegal_chars_regex,
     remove_special_chars,
@@ -124,22 +124,6 @@ def scan_files_in_nested_folders(folder_path: str) -> Optional[List[Dict]]:
     return assets_dict
 
 
-def warn_if_series_unmatchable(series: Dict) -> bool:
-    """Warn (and return True) if a series poster's only id is an imdb — likely a silent no-match."""
-    # imdb ids diverge between TMDB and TVDB, so a TMDB-sourced imdb won't match a
-    # Sonarr (tvdb-keyed) series, and the id lock skips title fallback. A tvdb/tmdb tag fixes it.
-    if series.get("imdb_id") and not series.get("tvdb_id") and not series.get("tmdb_id"):
-        log_warning(
-            LogTags.SCANNER,
-            f"Series poster '{series.get('title')}' has only an imdb id (no tvdb/tmdb); "
-            f"imdb ids differ between TMDB and TVDB — it may not match. Add a tvdb id.",
-            title=series.get("title"),
-            imdb_id=series.get("imdb_id"),
-        )
-        return True
-    return False
-
-
 def parse_folder_group(folder_path: str, base_name: str, files: List[str]) -> Dict:
     """Parse metadata and build a structured dictionary for assets within a folder.
 
@@ -180,7 +164,7 @@ def parse_folder_group(folder_path: str, base_name: str, files: List[str]) -> Di
                 title, tmdb_id, normalized_title, full_paths, parent_folder
             )
         if is_series or tvdb_id:
-            series = create_series(
+            return create_series(
                 title,
                 year,
                 tvdb_id,
@@ -190,8 +174,6 @@ def parse_folder_group(folder_path: str, base_name: str, files: List[str]) -> Di
                 parent_folder,
                 tmdb_id=tmdb_id,
             )
-            warn_if_series_unmatchable(series)
-            return series
         return create_movie(
             title, year, tmdb_id, imdb_id, normalized_title, full_paths, parent_folder
         )
@@ -247,7 +229,7 @@ def parse_file_group(folder_path: str, base_name: str, files: List[str]) -> Dict
                 media_folder=media_folder,
             )
         if is_series or tvdb_id:
-            series = create_series(
+            return create_series(
                 title,
                 year,
                 tvdb_id,
@@ -258,8 +240,6 @@ def parse_file_group(folder_path: str, base_name: str, files: List[str]) -> Dict
                 media_folder=media_folder,
                 tmdb_id=tmdb_id,
             )
-            warn_if_series_unmatchable(series)
-            return series
         return create_movie(
             title,
             year,

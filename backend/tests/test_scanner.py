@@ -7,7 +7,6 @@ from util.posters.scanner import (
     process_files,
     scan_files_in_flat_folder,
     scan_files_in_nested_folders,
-    warn_if_series_unmatchable,
 )
 
 
@@ -218,32 +217,34 @@ def test_process_files_returns_none_for_empty_folder(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# warn_if_series_unmatchable
+# id parsing (the scanner reports ids as-found; no-match diagnosis lives in match.py)
 # ---------------------------------------------------------------------------
 
 
-def test_warn_series_unmatchable_imdb_only():
-    # imdb-only series poster (no tvdb/tmdb) is the residual silent-no-match case.
-    assert warn_if_series_unmatchable(
-        {"type": "series", "title": "X", "imdb_id": "tt37812919", "tvdb_id": None, "tmdb_id": None}
-    ) is True
+def test_series_imdb_only_parsed_as_found(tmp_path):
+    # An imdb-only series folder is legitimate when the library item also carries an imdb
+    # (e.g. Sonarr folders named "{imdb-...}"), so the scanner reports it without judging
+    # matchability — that call needs the media side and lives in match.py.
+    folder = tmp_path / "RIPLEY (2024) {imdb-tt11016042}"
+    folder.mkdir()
+    (folder / "poster.jpg").write_bytes(b"x")
+    (folder / "Season01.jpg").write_bytes(b"x")
+
+    results = scan_files_in_nested_folders(str(tmp_path))
+
+    assert len(results) == 1
+    assert results[0]["type"] == "series"
+    assert results[0]["imdb_id"] == "tt11016042"
+    assert results[0]["tvdb_id"] is None
 
 
-def test_warn_series_not_flagged_when_tvdb_present():
-    assert warn_if_series_unmatchable(
-        {"type": "series", "title": "X", "imdb_id": "tt1", "tvdb_id": 479385, "tmdb_id": None}
-    ) is False
+def test_series_all_ids_parsed(tmp_path):
+    folder = tmp_path / "RIPLEY (2024) {tmdb-94028} {tvdb-372727} {imdb-tt11016042}"
+    folder.mkdir()
+    (folder / "poster.jpg").write_bytes(b"x")
 
+    results = scan_files_in_nested_folders(str(tmp_path))
 
-def test_warn_series_not_flagged_when_tmdb_present():
-    # tmdb now matches via tmdb_id_ref, so a tmdb+imdb poster should not warn.
-    assert warn_if_series_unmatchable(
-        {"type": "series", "title": "X", "imdb_id": "tt1", "tvdb_id": None, "tmdb_id": 302228}
-    ) is False
-
-
-def test_warn_series_not_flagged_when_no_ids():
-    # No ids at all → matches by title fallback, so no warning.
-    assert warn_if_series_unmatchable(
-        {"type": "series", "title": "X", "imdb_id": None, "tvdb_id": None, "tmdb_id": None}
-    ) is False
+    assert (results[0]["tmdb_id"], results[0]["tvdb_id"], results[0]["imdb_id"]) == (
+        94028, 372727, "tt11016042",
+    )

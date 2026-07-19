@@ -2,10 +2,23 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.logging import log_debug, LogTags
+from core.logging import log_debug, log_warning, LogTags
 from util.constants import folder_year_regex
 from util.posters.index import search_matches
 from util.data.normalization import normalize_titles
+
+# is_match rejection reason: titles agree but the two sides share no id, so the id lock
+# skipped the title fallback. Reported rather than dropped — it's usually a tagging gap.
+NO_SHARED_ID = "no shared id"
+
+# Cap the per-item near-miss detail in the summary; the rest stay at debug level.
+_NEAR_MISS_DETAIL_LIMIT = 15
+
+
+def _id_tags(d: Dict[str, Any]) -> str:
+    """Render an asset/media dict's ids as filename-style tags, or '(none)'."""
+    tags = [f"{{{k}-{d[f'{k}_id']}}}" for k in ("tmdb", "tvdb", "imdb") if d.get(f"{k}_id")]
+    return " ".join(tags) if tags else "(none)"
 
 
 def media_source_refs(media: Dict[str, Any]) -> Dict[str, Any]:
@@ -148,6 +161,12 @@ def is_match(
             return True
         return any(asset_year == year for year in media_years if year is not None)
 
+    def title_matches() -> Tuple[bool, str]:
+        for condition, reason in _title_criteria(asset, media):
+            if condition and year_matches():
+                return True, reason
+        return False, ""
+
     def has_any_valid_id(d: Dict[str, Any]) -> bool:
         for k in ["tmdb_id", "tvdb_id", "imdb_id"]:
             v = d.get(k)
@@ -216,9 +235,29 @@ def is_match(
         for matched, reason in id_match_criteria:
             if matched:
                 return True, reason
+        # Rejected. Distinguish two very different causes, because only one is a defect:
+        #   - a shared id type that disagrees -> genuinely different items, stay silent.
+        #   - no id type on both sides -> nothing could be compared, and the id lock skips
+        #     the title fallback below, so an agreeing title means this is almost certainly
+        #     a tagging gap (e.g. imdb-only poster vs tvdb-only library item). Flag it.
+        shares_an_id_type = any(
+            media_value and asset.get(key)
+            for key, media_value in (
+                ("tvdb_id", media.get("tvdb_id")),
+                ("tmdb_id", _media_tmdb),
+                ("imdb_id", media.get("imdb_id")),
+            )
+        )
+        if not shares_an_id_type and title_matches()[0]:
+            return False, NO_SHARED_ID
         return False, ""
 
-    match_criteria = [
+    return title_matches()
+
+
+def _title_criteria(asset: Dict[str, Any], media: Dict[str, Any]) -> List[Tuple[Any, str]]:
+    """Title/alias equivalence tests, shared by the fallback path and near-miss detection."""
+    return [
         (asset.get("title") == media.get("title"), "by exact title"),
         (
             asset.get("title") in media.get("alternate_titles", []),
@@ -281,10 +320,6 @@ def is_match(
             "by normalized loose comparison",
         ),
     ]
-    for condition, reason in match_criteria:
-        if condition and year_matches():
-            return True, reason
-    return False, ""
 
 
 def match_assets_to_media(
@@ -304,17 +339,19 @@ def match_assets_to_media(
     """
     asset_types = ["movies", "series", "collections"]
     matched: Dict[str, List[Dict[str, Any]]] = {atype: [] for atype in asset_types}
-    
+    near_misses: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+
     use_asset_types = [t for t in media_dict if media_dict[t] is not None]
-    
+
     for asset_type in use_asset_types:
         if asset_type in media_dict:
             matched_dict: List[Dict[str, Any]] = []
             media_data = media_dict[asset_type]
-            
+
             for media in media_data:
                 found_match = False
                 search_asset = None
+                near_miss_asset = None
                 seasons = media.get("seasons") or []
                 media_seasons_numbers = [
                     season["season_number"] for season in seasons
@@ -363,7 +400,9 @@ def match_assets_to_media(
                                     asset_season_numbers,
                                 )
                             break
-                
+                        if reason == NO_SHARED_ID and near_miss_asset is None:
+                            near_miss_asset = candidate
+
                 if not found_match and not id_candidates:
                     titles_to_check = [media["title"]] + media.get(
                         "alternate_titles", []
@@ -415,7 +454,12 @@ def match_assets_to_media(
                                         asset_season_numbers,
                                     )
                                 break
-                
+                        if reason == NO_SHARED_ID and near_miss_asset is None:
+                            near_miss_asset = search_asset
+
+                if not found_match and near_miss_asset is not None:
+                    near_misses.append((media, near_miss_asset))
+
                 if found_match:
                     matched_dict.append(
                         {
@@ -436,8 +480,42 @@ def match_assets_to_media(
                     )
             
             matched[asset_type] = matched_dict
-    
+
+    _log_near_misses(near_misses)
     return matched
+
+
+def _log_near_misses(near_misses: List[Tuple[Dict[str, Any], Dict[str, Any]]]) -> None:
+    """Report items whose poster matched by title but shared no id with the library item.
+
+    Both sides are named because the fix depends on which one is missing the overlap —
+    the id lock rejects on absence of a shared id, not on a bad id.
+    """
+    if not near_misses:
+        return
+
+    log_warning(
+        LogTags.MATCH,
+        f"{len(near_misses)} item(s) had a matching poster but share no id with the "
+        f"library item, so they were skipped. Add the library id to the poster filename:",
+        count=len(near_misses),
+    )
+    for index, (media, asset) in enumerate(near_misses):
+        source = os.path.basename((asset.get("files") or [""])[0]) or asset.get("title", "")
+        detail = (
+            f"    {media.get('title')} ({media.get('year')})\n"
+            f"        poster  {_id_tags(asset)}  {source}\n"
+            f"        library {_id_tags(media)}"
+        )
+        if index < _NEAR_MISS_DETAIL_LIMIT:
+            log_warning(LogTags.MATCH, detail, media_title=media.get("title"))
+        else:
+            log_debug(LogTags.MATCH, detail, media_title=media.get("title"))
+    if len(near_misses) > _NEAR_MISS_DETAIL_LIMIT:
+        log_warning(
+            LogTags.MATCH,
+            f"    ... and {len(near_misses) - _NEAR_MISS_DETAIL_LIMIT} more (enable debug logging for the full list)",
+        )
 
 
 def handle_series_match(
