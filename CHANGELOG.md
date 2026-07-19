@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-07-19
+### Added
+- Photopea Plugin: batch export now supports year ranges, along with UI improvements.
+
+### Fixed
+- Border Replacer: Plex rule matching now correctly includes collections.
+- Maker Tools: PSD exports now correctly handle non-Latin-1 characters.
+- Workflow: asset cleanup now only runs when the renamer is enabled in the workflow.
+- IDarr: artwork drives now correctly scan nested folders when determining item changes so auto sync is not skipped.
+
 ## [0.11.0] - 2026-07-11
 ### Added
 - Workflow: create, save, and schedule multiple workflows.
