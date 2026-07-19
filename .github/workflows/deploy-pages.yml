@@ -1,0 +1,52 @@
+name: deploy-pages
+
+# Deploys the Photopea plugin to GitHub Pages, but only when the plugin
+# folder changes. Requires Pages source to be set to "GitHub Actions"
+# (Settings -> Pages -> Build and deployment -> Source).
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'photopea-posterflow/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Stage site
+        # Nest under photopea-posterflow/ so the existing plugin URL
+        # (…/posterflow/photopea-posterflow/photopea-posterflow.html) stays identical.
+        run: |
+          mkdir -p _site/photopea-posterflow
+          cp -r photopea-posterflow/. _site/photopea-posterflow/
+          touch _site/.nojekyll
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
