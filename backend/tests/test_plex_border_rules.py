@@ -180,6 +180,9 @@ class _FakeItem:
 class _FakeCollection:
     def __init__(self, title, items):
         self.title = title
+        self.type = "collection"
+        self.year = None
+        self.guids = []
         self._items = items
 
     def items(self):
@@ -187,16 +190,22 @@ class _FakeCollection:
 
 
 class _FakeSection:
-    def __init__(self, key, type_, results, collections=None):
+    def __init__(self, key, type_, results, collections=None, collection_results=None):
         self.key = key
         self.type = type_
         self.title = f"Section {key}"
         self._results = results
         self._collections = collections or []
+        # (field, value) -> [collections] carrying that label/genre (server-side filter).
+        self._collection_results = collection_results or {}
 
     def search(self, **kwargs):
         if kwargs.get("libtype") == "collection":
-            return self._collections
+            rest = {k: v for k, v in kwargs.items() if k != "libtype"}
+            if not rest:
+                return self._collections  # title-match path enumerates every collection
+            (field, value), = rest.items()
+            return self._collection_results.get((field, value), [])
         # label=... / genre=... filter
         (field, value), = kwargs.items()
         return self._results.get((field, value), [])
@@ -263,6 +272,56 @@ def test_build_plex_matcher_collection(test_db, monkeypatch):
 
     matcher = build_plex_matcher(test_db, "manual")
     assert matcher.resolve("Iron Man (2008)") is not None
+
+
+def test_item_match_keys_collection_is_yearless_movie():
+    """A collection keys as a yearless movie regardless of its library, matching the
+    token-less collection poster folder that folder_match_keys infers."""
+    from services.plex_border_rules import _item_match_keys
+
+    tv_coll = _FakeCollection("Disney+ Top 10", [])
+    # is_movie=False (a TV library) but the collection still keys as a movie.
+    keys = _item_match_keys(tv_coll, is_movie=False)
+    assert keys == folder_match_keys("Disney+ Top 10") == {"title:disneytop10::movie"}
+
+
+def test_build_plex_matcher_label_on_collection_borders_collection_poster(test_db, monkeypatch):
+    """A label put on a COLLECTION borders the collection's own poster, not its member items.
+    Plex keeps collection labels separate from item labels, so the item search returns nothing
+    while the collection search finds it. Covers a TV-library collection too, whose yearless,
+    tvdb-less poster folder is inferred as a movie."""
+    member = _FakeItem("Iron Man", year=2008, guids=["tmdb://1726"])
+    movie_coll = _FakeCollection("The 80s", [member])
+    tv_coll = _FakeCollection("Disney+ Top 10", [])
+    movie_section = _FakeSection(
+        "1", "movie",
+        results={},  # NO item carries the label — only the collection does
+        collection_results={("label", "Test"): [movie_coll]},
+    )
+    tv_section = _FakeSection(
+        "2", "show",
+        results={},
+        collection_results={("label", "Test"): [tv_coll]},
+    )
+    _patch_plex(monkeypatch, {"http://plex": [movie_section, tv_section]})
+
+    test_db.add(Setting(key="plex_instances", value=json.dumps([
+        {"name": "Main", "url": "http://plex", "api_key": "token"},
+    ])))
+    test_db.add(Setting(key="border_replacer_rule_run_types", value="manual"))
+    test_db.add(Setting(key="border_replacer_rule_libraries", value=json.dumps(["Main:1", "Main:2"])))
+    test_db.add(Setting(key="border_replacer_plex_rules", value=json.dumps([
+        {"name": "Test", "match": "label", "value": "Test", "mode": "include", "colors": ["#d22d2d"]},
+    ])))
+    test_db.commit()
+
+    matcher = build_plex_matcher(test_db, "manual")
+    assert matcher is not None
+    # Both collection posters match (the TV collection keyed as a yearless movie).
+    assert matcher.resolve("The 80s") is not None
+    assert matcher.resolve("Disney+ Top 10") is not None
+    # The member item is NOT bordered — it does not carry the label itself.
+    assert matcher.resolve("Iron Man (2008) {tmdb-1726}") is None
 
 
 def test_build_plex_matcher_no_libraries_selected_returns_none(test_db, monkeypatch):

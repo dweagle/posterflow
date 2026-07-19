@@ -74,10 +74,16 @@ def folder_match_keys(folder: str) -> Set[str]:
 def _item_match_keys(item: Any, is_movie: bool) -> Set[str]:
     """Match keys for a Plex item, following the same ID precedence as
     poster_renamer._asset_matches_target: tvdb/imdb definitive, tmdb movie-only, plus a
-    year+type-scoped title fallback."""
+    year+type-scoped title fallback.
+
+    A collection is keyed by title as a yearless MOVIE regardless of the library it lives in:
+    its poster folder carries no year and no tvdb token, so folder_match_keys always infers
+    media='movie' for it. Keying a TV-library collection as 'show' would never match its own
+    poster."""
     keys: Set[str] = set()
-    media = "movie" if is_movie else "show"
-    year = getattr(item, "year", None)
+    is_collection = getattr(item, "type", "") == "collection"
+    media = "movie" if (is_movie or is_collection) else "show"
+    year = None if is_collection else getattr(item, "year", None)
     title_key = _title_key(getattr(item, "title", "") or "", str(year) if year else "", media)
     if title_key:
         keys.add(title_key)
@@ -86,7 +92,7 @@ def _item_match_keys(item: Any, is_movie: bool) -> Set[str]:
         for kind in ("tmdb", "imdb", "tvdb"):
             prefix = f"{kind}://"
             if gid.startswith(prefix):
-                if kind == "tmdb" and not is_movie:
+                if kind == "tmdb" and not (is_movie or is_collection):
                     continue  # tmdb ids collide across movie/TV namespaces
                 keys.add(f"{kind}:{gid[len(prefix):].lower()}")
     return keys
@@ -199,15 +205,27 @@ def _selected_library_keys(db: Session) -> Set[str]:
 
 
 def _search_section(section: Any, match: str, value: str) -> List[Any]:
-    """Server-side query for the items in a section matching one rule."""
+    """Server-side query for the items in a section matching one rule.
+
+    A label/genre rule also matches COLLECTIONS carrying that label/genre, so a label put on
+    a collection borders the collection's OWN poster (member items are bordered only if they
+    individually carry the label). Plex stores collection labels in a namespace separate from
+    item labels, so section.search(label=..) alone never returns them."""
     if match == "collection":
+        # Match a collection by title → border its member items.
         matched: List[Any] = []
         for coll in section.search(libtype="collection"):
             if str(getattr(coll, "title", "")).strip().lower() == value.strip().lower():
                 matched.extend(coll.items())
         return matched
-    # label / genre → Plex field filter (server-side).
-    return section.search(**{match: value})
+    # label / genre → items carrying the field (server-side)...
+    matched = list(section.search(**{match: value}))
+    # ...plus any collection carrying it, keyed to its own poster.
+    try:
+        matched.extend(section.search(libtype="collection", **{match: value}))
+    except Exception:
+        pass  # some fields aren't filterable on collections; skip if unsupported
+    return matched
 
 
 def _query_plex_matches(db: Session, rules: List[PlexBorderRule]) -> tuple[int, bool]:
