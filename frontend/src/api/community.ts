@@ -68,6 +68,13 @@ export const getCommunityRequests = (
 export const submitCommunityRequest = (payload: SubmitRequestPayload): Promise<SubmitRequestResponse> =>
   postData('/api/community/requests', payload)
 
+// Styles (CL2K/MM2K) an item has already been fulfilled in — powers the
+// "already made" warning in the request modals. "" = fulfilled, style unknown.
+export const getFulfilledRequestStyles = (
+  params: Record<string, string | number>,
+): Promise<{ styles: string[] }> =>
+  getData('/api/community/requests/fulfilled-styles', { params })
+
 // Persist the connected Discord identity + token so headless scan jobs can
 // reconcile this user's own published list items (remove ones resolved locally).
 // The token authorizes removal via the same edge function a manual remove uses.

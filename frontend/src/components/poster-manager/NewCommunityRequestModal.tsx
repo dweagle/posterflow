@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle } from '../community/posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning } from '../community/posterStyles'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -95,6 +95,16 @@ export default function NewCommunityRequestModal({
   // Derive effective title/year for submission
   const effectiveTitle = selected?.title ?? customTitle.trim()
   const effectiveYear = selected?.year ?? (customYear.trim() ? parseInt(customYear.trim(), 10) : null)
+
+  // Non-blocking notice when this item was already fulfilled in the chosen style.
+  const alreadyMade = useAlreadyMadeWarning(
+    selected
+      ? { tmdb_id: selected.tmdb_id, media_type: selected.media_type, title: selected.title }
+      : effectiveTitle
+        ? { media_type: searchType, title: effectiveTitle }
+        : null,
+    posterStyle,
+  )
 
   // A search surfaced matches, but the user hasn't picked one or confirmed it's
   // custom — e.g. they typed a custom title while a real match sat in the results.
@@ -376,6 +386,13 @@ export default function NewCommunityRequestModal({
               </button>
             ))}
           </div>
+
+          {alreadyMade && (
+            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
+              <AlertCircle size={14} />
+              <span>{alreadyMade}</span>
+            </div>
+          )}
 
           {/* Extra style preferences — optional */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>

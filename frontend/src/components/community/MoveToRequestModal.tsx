@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
-import { Loader2, Send } from 'lucide-react'
+import { AlertCircle, Loader2, Send } from 'lucide-react'
 import { type CommunityListItem } from '../../api/community'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle } from './posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning } from './posterStyles'
 
 export type MoveToRequestValues = {
   styleTags: string[]
@@ -48,6 +48,9 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
   const toggleExtra = (tag: string) =>
     setExtraTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
 
+  // Non-blocking notice when this item was already fulfilled in the chosen style.
+  const alreadyMade = useAlreadyMadeWarning(item, posterStyle)
+
   const canSubmit = !submitting && !!posterStyle
 
   const handleConfirm = () => {
@@ -92,6 +95,13 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
               </button>
             ))}
           </div>
+
+          {alreadyMade && (
+            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
+              <AlertCircle size={14} />
+              <span>{alreadyMade}</span>
+            </div>
+          )}
 
           {/* Extra style preferences — optional */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>

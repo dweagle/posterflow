@@ -1,7 +1,8 @@
 // Shared community poster-style vocabulary, used by every request-creation
 // surface (the New Community Request modal and the Lists "Move to Request" flow)
 // so the two never drift.
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { getFulfilledRequestStyles } from '../../api/community'
 
 // Required, single-select style. The stored tag values keep the "… Style" suffix
 // for consistency with existing requests; cards derive the badge from them.
@@ -42,6 +43,59 @@ export function setStoredPosterStyle(value: string): void {
   } catch {
     /* ignore blocked/unavailable storage */
   }
+}
+
+// ── "Already made" warning ───────────────────────────────────────────────────
+// Re-requesting a fulfilled item is allowed, but the user should know it was
+// already made and explain in the notes what they want different. Returns the
+// warning text for the current item + chosen style, or null.
+export function useAlreadyMadeWarning(
+  item: {
+    tmdb_id?: number | null
+    media_type?: string | null
+    season_number?: number | null
+    title?: string | null
+  } | null,
+  styleValue: string | null,
+): string | null {
+  const [fulfilled, setFulfilled] = useState<string[] | null>(null)
+  const tmdbId = item?.tmdb_id ?? null
+  const mediaType = item?.media_type ?? null
+  const seasonNumber = item?.season_number ?? null
+  const title = (item?.title ?? '').trim()
+
+  useEffect(() => {
+    setFulfilled(null)
+    if (!mediaType || (tmdbId == null && !title)) return
+    // Multi-season list items carry no season number; a show-wide lookup would
+    // false-warn off any one fulfilled season, so skip the check for those.
+    if (mediaType === 'season' && seasonNumber == null) return
+    const params: Record<string, string | number> = { media_type: mediaType }
+    if (tmdbId != null) {
+      params.tmdb_id = tmdbId
+      if (seasonNumber != null) params.season_number = seasonNumber
+    } else {
+      params.title = title
+    }
+    let cancelled = false
+    // Small debounce so typing a custom title doesn't fire a request per key.
+    const id = setTimeout(() => {
+      getFulfilledRequestStyles(params)
+        .then((r) => { if (!cancelled) setFulfilled(r.styles) })
+        .catch(() => { /* best-effort — no warning on lookup failure */ })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(id) }
+  }, [tmdbId, mediaType, seasonNumber, title])
+
+  if (!fulfilled || !styleValue) return null
+  const label = POSTER_STYLES.find((s) => s.value === styleValue)?.label ?? styleValue
+  if (fulfilled.includes(label)) {
+    return `This poster was already made in ${label} style. Only request it again if you need something different — and say what in the notes.`
+  }
+  if (fulfilled.includes('')) {
+    return 'This poster may have already been made (an earlier fulfilled request doesn’t say which style). Only request it if you need something different — and say what in the notes.'
+  }
+  return null
 }
 
 // State seeded from — and written back to — the persisted choice, so selecting a

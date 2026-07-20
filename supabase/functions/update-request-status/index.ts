@@ -122,11 +122,12 @@ interface RequestRow {
   requested_by_discord_id: string | null
   claimed_by_discord_id: string | null
   created_at: string | null
+  style_tags: string[] | null
 }
 
 async function fetchRequest(requestId: string): Promise<RequestRow | null> {
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,tmdb_id,media_type,season_number,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id,created_at&limit=1`,
+    `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=id,status,tmdb_id,media_type,season_number,discord_message_id,title,requested_by_discord_id,claimed_by_discord_id,created_at,style_tags&limit=1`,
     { headers: SB_HEADERS },
   )
   if (!resp.ok) return null
@@ -195,10 +196,21 @@ async function updateRequest(
   return rows.length > 0
 }
 
-// Cross-sync: a fulfilled request means the poster now exists, so mark every
-// matching community-list item (any owner) fulfilled — keeps it out of the
-// active worklist while preserving history/credit. Best-effort; never blocks
-// the request completion.
+// The community poster style (CL2K/MM2K) in a request's tags / list item's tag.
+// Mirrors the poster_request_style() SQL helper — CL2K wins if both appear.
+function styleOf(tags: unknown): string {
+  const t = Array.isArray(tags) ? tags : typeof tags === 'string' ? [tags] : []
+  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
+  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
+  return ''
+}
+
+// Cross-sync: a fulfilled request means the poster now exists in that style, so
+// mark every matching community-list item (any owner) fulfilled — keeps it out
+// of the active worklist while preserving history/credit. Style-aware: only a
+// SAME-style entry is mirrored (an entry with no recognized style counts as any
+// style — completing a CL2K request must not close an MM2K list entry).
+// Best-effort; never blocks the request completion.
 async function fulfillMatchingListItems(
   row: RequestRow,
   makerName: string,
@@ -206,6 +218,7 @@ async function fulfillMatchingListItems(
 ): Promise<void> {
   try {
     const params = new URLSearchParams()
+    params.set('select', 'id,style_tag')
     params.set('media_type', `eq.${row.media_type}`)
     params.set('status', 'in.(open,in_progress)')
     if (row.tmdb_id != null) {
@@ -219,8 +232,23 @@ async function fulfillMatchingListItems(
       params.set('tmdb_id', 'is.null')
       params.set('title', `ilike.${row.title}`)
     }
+    const listResp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?${params}`, {
+      headers: SB_HEADERS,
+    })
+    if (!listResp.ok) {
+      console.error('[update-request-status] list mirror lookup failed:', await listResp.text())
+      return
+    }
+    const reqStyle = styleOf(row.style_tags)
+    const ids = ((await listResp.json()) as { id: string; style_tag: string | null }[])
+      .filter((r) => {
+        const s = styleOf(r.style_tag)
+        return s === reqStyle || s === ''
+      })
+      .map((r) => r.id)
+    if (ids.length === 0) return
     const now = new Date().toISOString()
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?${params}`, {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?id=in.(${ids.join(',')})`, {
       method: 'PATCH',
       headers: { ...SB_HEADERS, Prefer: 'return=minimal' },
       body: JSON.stringify({

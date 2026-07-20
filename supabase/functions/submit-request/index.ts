@@ -93,12 +93,24 @@ async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
   }
 }
 
+// The community poster style (CL2K/MM2K) in a request's tags / list item's tag.
+// Mirrors the poster_request_style() SQL helper — CL2K wins if both appear.
+function styleOf(tags: unknown): string {
+  const t = Array.isArray(tags) ? tags : typeof tags === 'string' ? [tags] : []
+  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
+  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
+  return ''
+}
+
 // ── Cross-sync with community lists ──────────────────────────────────────────
 // A formal request supersedes the community-list entry for that poster, so
 // creating one removes the SHARED list row (for everyone who wanted it — the
-// list is now one row per poster). Only an `open` row is cleared; a row a maker
-// has already claimed from the list (in_progress) is left so the request can't
-// yank in-progress work. Deleting the row cascades its wanters. Best-effort.
+// list is now one row per poster). Style-aware: only an entry in the SAME style
+// is superseded (an entry with no recognized style counts as any style — a
+// CL2K request must not clear an MM2K entry or vice versa). Only an `open` row
+// is cleared; a row a maker has already claimed from the list (in_progress) is
+// left so the request can't yank in-progress work. Deleting the row cascades
+// its wanters. Best-effort.
 async function clearListEntryForRequest(
   // The remote supabase-js import's default generics don't line up with the
   // inferred client instance, so type just the query builder we use here.
@@ -109,7 +121,7 @@ async function clearListEntryForRequest(
     // Find the matching OPEN shared list row(s) for this media.
     let q = supabase
       .from('poster_list_items')
-      .select('id')
+      .select('id,style_tag')
       .eq('media_type', body.p_media_type as string)
       .eq('status', 'open')
     if (body.p_tmdb_id != null) {
@@ -129,7 +141,13 @@ async function clearListEntryForRequest(
       console.error('[submit-request] list clear lookup failed:', selErr)
       return
     }
-    const ids = (rows ?? []).map((r: { id: string }) => r.id)
+    const reqStyle = styleOf(body.p_style_tags)
+    const ids = (rows ?? [])
+      .filter((r: { style_tag: string | null }) => {
+        const s = styleOf(r.style_tag)
+        return s === reqStyle || s === ''
+      })
+      .map((r: { id: string }) => r.id)
     if (ids.length === 0) return
     // Delete the wanters; the orphan-cleanup trigger then removes the now-empty
     // open poster row(s). Going through wanters (not deleting the poster row

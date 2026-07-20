@@ -66,6 +66,87 @@ function jsonResponse(data: unknown, status = 200): Response {
   })
 }
 
+// The community poster style (CL2K/MM2K) in a request's tags / list item's tag.
+// Mirrors the poster_request_style() SQL helper — CL2K wins if both appear.
+function styleOf(tags: unknown): string {
+  const t = Array.isArray(tags) ? tags : typeof tags === 'string' ? [tags] : []
+  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
+  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
+  return ''
+}
+
+interface MirrorRow {
+  tmdb_id: number | null
+  media_type: string
+  season_number: number | null
+  title: string
+  style_tags: string[] | null
+}
+
+// Cross-sync: a fulfilled request means the poster now exists in that style, so
+// mark every matching community-list item (any owner) fulfilled — the same
+// style-aware mirror update-request-status runs for UI completions. Only a
+// SAME-style entry is mirrored (an entry with no recognized style counts as any
+// style). Best-effort; never blocks the Discord flow.
+async function fulfillMatchingListItems(
+  row: MirrorRow,
+  makerName: string,
+  makerId: string | null,
+): Promise<void> {
+  const sbHeaders = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json',
+  }
+  try {
+    const params = new URLSearchParams()
+    params.set('select', 'id,style_tag')
+    params.set('media_type', `eq.${row.media_type}`)
+    params.set('status', 'in.(open,in_progress)')
+    if (row.tmdb_id != null) {
+      params.set('tmdb_id', `eq.${row.tmdb_id}`)
+      if (row.media_type === 'season' && row.season_number != null) {
+        params.set('season_number', `eq.${row.season_number}`)
+      } else {
+        params.set('season_number', 'is.null')
+      }
+    } else {
+      params.set('tmdb_id', 'is.null')
+      params.set('title', `ilike.${row.title}`)
+    }
+    const listResp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?${params}`, {
+      headers: sbHeaders,
+    })
+    if (!listResp.ok) {
+      console.error('[discord-interactions] list mirror lookup failed:', await listResp.text())
+      return
+    }
+    const reqStyle = styleOf(row.style_tags)
+    const ids = ((await listResp.json()) as { id: string; style_tag: string | null }[])
+      .filter((r) => {
+        const s = styleOf(r.style_tag)
+        return s === reqStyle || s === ''
+      })
+      .map((r) => r.id)
+    if (ids.length === 0) return
+    const now = new Date().toISOString()
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_list_items?id=in.(${ids.join(',')})`, {
+      method: 'PATCH',
+      headers: { ...sbHeaders, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        status: 'fulfilled',
+        fulfilled_by: makerName,
+        fulfilled_by_discord_id: makerId,
+        fulfilled_at: now,
+        updated_at: now,
+      }),
+    })
+    if (!resp.ok) console.error('[discord-interactions] list mirror failed:', await resp.text())
+  } catch (e) {
+    console.error('[discord-interactions] list mirror error:', e)
+  }
+}
+
 // Background task: persists the status change to Supabase and locks the thread
 // on complete. Runs fire-and-forget after we've already returned type 7 to Discord.
 async function persistButtonClick(
@@ -97,7 +178,7 @@ async function persistButtonClick(
   // Run status update and requester-ID fetch in parallel to minimise background task duration
   const fetchRequesterPromise = (action === 'complete' || action === 'reject')
     ? fetch(
-        `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=requested_by_discord_id&limit=1`,
+        `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${requestId}&select=requested_by_discord_id,tmdb_id,media_type,season_number,title,style_tags&limit=1`,
         {
           headers: {
             apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -129,9 +210,17 @@ async function persistButtonClick(
   }
 
   let requesterDiscordId: string | null = null
+  let requestRow: (MirrorRow & { requested_by_discord_id: string | null }) | null = null
   if (reqResp?.ok) {
-    const rows = await reqResp.json() as { requested_by_discord_id: string | null }[]
-    requesterDiscordId = rows?.[0]?.requested_by_discord_id ?? null
+    const rows = await reqResp.json() as (MirrorRow & { requested_by_discord_id: string | null })[]
+    requestRow = rows?.[0] ?? null
+    requesterDiscordId = requestRow?.requested_by_discord_id ?? null
+  }
+
+  // Mirror the completion into the community lists (same-style entries only) —
+  // parity with the PosterFlow-UI complete path in update-request-status.
+  if (action === 'complete' && updateResp.ok && requestRow) {
+    await fulfillMatchingListItems(requestRow, clicker, clickerUserId)
   }
 
   // Post a farewell message and schedule thread closure in 24 hours

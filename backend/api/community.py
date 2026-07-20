@@ -32,6 +32,17 @@ router = APIRouter(prefix="/api/community", tags=["community"])
 SETTING_DISCORD_IDENTITY = "community_discord_identity"
 
 
+def _request_style(tags: Optional[list]) -> str:
+    """The community poster style (CL2K/MM2K) in a request's style tags.
+    Mirrors the poster_request_style() SQL helper — CL2K wins if both appear."""
+    t = set(tags or [])
+    if t & {"CL2K Style", "CL2K"}:
+        return "CL2K"
+    if t & {"MM2K Style", "MM2K"}:
+        return "MM2K"
+    return ""
+
+
 class DiscordIdentityPayload(BaseModel):
     discord_user_id: str
     discord_username: Optional[str] = None
@@ -155,6 +166,46 @@ async def get_my_request_counts(discord_id: str = ""):
         return result
 
 
+@router.get("/requests/fulfilled-styles")
+async def get_fulfilled_request_styles(
+    media_type: str = Query(...),
+    tmdb_id: Optional[int] = Query(None),
+    season_number: Optional[int] = Query(None),
+    title: Optional[str] = Query(None),
+):
+    """Styles (CL2K/MM2K) this item has already been fulfilled in.
+
+    Powers the "already made" warning in the request modals. An empty string in
+    the list means a fulfilled request whose style is unknown (no style tags).
+    Best-effort: returns an empty list on errors so the modal never blocks.
+    """
+    params: dict = {
+        "select": "style_tags",
+        "media_type": f"eq.{media_type}",
+        "status": "eq.fulfilled",
+    }
+    if tmdb_id is not None:
+        params["tmdb_id"] = f"eq.{tmdb_id}"
+        if media_type == "season" and season_number is not None:
+            params["season_number"] = f"eq.{season_number}"
+    elif title and title.strip():
+        params["tmdb_id"] = "is.null"
+        params["title"] = f"ilike.{title.strip()}"
+    else:
+        return {"styles": []}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/poster_requests",
+                headers=SUPABASE_HEADERS,
+                params=params,
+            )
+            resp.raise_for_status()
+            return {"styles": sorted({_request_style(r.get("style_tags")) for r in resp.json()})}
+    except Exception:
+        return {"styles": []}
+
+
 @router.get("/requests")
 async def get_community_requests(
     status: Optional[str] = Query(None),
@@ -250,36 +301,40 @@ async def submit_community_request(payload: PosterRequestPayload):
         tmdb_id=payload.tmdb_id,
     )
 
+    style = _request_style(payload.style_tags)
+    style_label = f"{style} " if style else ""
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Block season requests when an active show-level request already exists
+            # Block season requests when an active show-level request in the same
+            # style already exists (a show-level request covers all its seasons)
             if payload.media_type == "season" and payload.tmdb_id is not None:
                 conflict_resp = await client.get(
                     f"{SUPABASE_URL}/rest/v1/poster_requests",
                     headers=SUPABASE_HEADERS,
                     params={
-                        "select": "id",
+                        "select": "id,style_tags",
                         "tmdb_id": f"eq.{payload.tmdb_id}",
                         "media_type": "eq.show",
                         "status": "not.in.(fulfilled,rejected)",
-                        "limit": 1,
                     },
                 )
                 conflict_resp.raise_for_status()
-                if conflict_resp.json():
+                if any(_request_style(r.get("style_tags")) == style for r in conflict_resp.json()):
                     raise HTTPException(
                         status_code=409,
-                        detail="A show-level request already exists for this series — season requests aren't needed separately.",
+                        detail=f"A show-level {style_label}request already exists for this series — season requests aren't needed separately.",
                     )
 
-            # Block duplicate requests — if an active request for this item already exists globally, reject
+            # Block duplicates — only an ACTIVE request for this item in the SAME
+            # style rejects; CL2K and MM2K requests can be pending side by side,
+            # and fulfilled/rejected history never blocks a new request.
             if payload.tmdb_id is not None:
                 dup_params: dict = {
-                    "select": "id",
+                    "select": "id,style_tags",
                     "tmdb_id": f"eq.{payload.tmdb_id}",
                     "media_type": f"eq.{payload.media_type}",
                     "status": "not.in.(fulfilled,rejected)",
-                    "limit": 1,
                 }
                 if payload.media_type == "season" and payload.season_number is not None:
                     dup_params["season_number"] = f"eq.{payload.season_number}"
@@ -288,32 +343,25 @@ async def submit_community_request(payload: PosterRequestPayload):
                     headers=SUPABASE_HEADERS,
                     params=dup_params,
                 )
-                dup_resp.raise_for_status()
-                if dup_resp.json():
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"'{payload.title.strip()}' has already been requested.",
-                    )
             else:
                 # Custom item (no TMDB ID) — deduplicate by exact title + media_type
                 dup_resp = await client.get(
                     f"{SUPABASE_URL}/rest/v1/poster_requests",
                     headers=SUPABASE_HEADERS,
                     params={
-                        "select": "id",
+                        "select": "id,style_tags",
                         "tmdb_id": "is.null",
                         "title": f"ilike.{payload.title.strip()}",
                         "media_type": f"eq.{payload.media_type}",
                         "status": "not.in.(fulfilled,rejected)",
-                        "limit": 1,
                     },
                 )
-                dup_resp.raise_for_status()
-                if dup_resp.json():
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"'{payload.title.strip()}' has already been requested.",
-                    )
+            dup_resp.raise_for_status()
+            if any(_request_style(r.get("style_tags")) == style for r in dup_resp.json()):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"'{payload.title.strip()}' already has an active {style_label}request.",
+                )
 
             # All writes go through the submit-request edge function.
             # The edge function verifies the signed Discord token, derives the

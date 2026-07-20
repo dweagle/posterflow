@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle } from '../community/posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning } from '../community/posterStyles'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -104,6 +104,19 @@ export default function CommunityRequestModal({
   const toggleExtraTag = useCallback((tag: string) => {
     setExtraTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
   }, [])
+
+  // Non-blocking notice when this item was already fulfilled in the chosen style.
+  // Mirrors the submit payload: 'season' only carries a number when single-season.
+  const isSeasonRequest = seasonNumbers != null && seasonNumbers.length > 0
+  const alreadyMade = useAlreadyMadeWarning(
+    {
+      tmdb_id: selected?.tmdb_id ?? null,
+      media_type: isSeasonRequest ? 'season' : (selected?.media_type ?? tmdbType),
+      season_number: isSeasonRequest && seasonNumbers!.length === 1 ? seasonNumbers![0] : null,
+      title: selected?.title ?? cleanTitle,
+    },
+    posterStyle,
+  )
 
   // Determine if the submit should be blocked because of missing TMDB selection
   const hasResults = allCandidates.length > 0
@@ -321,6 +334,13 @@ export default function CommunityRequestModal({
               </button>
             ))}
           </div>
+
+          {alreadyMade && (
+            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
+              <AlertCircle size={14} />
+              <span>{alreadyMade}</span>
+            </div>
+          )}
 
           {/* Extra style preferences — optional */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
