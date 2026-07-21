@@ -1,6 +1,6 @@
 # Multi-stage build for single-container deployment
 # Stage 1: Build frontend
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
 WORKDIR /frontend
 COPY frontend/package*.json ./
@@ -9,24 +9,24 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Final image with backend + frontend
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-trixie
 
 ARG BRANCH
 
 # Use bash with pipefail for safer pipe handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system dependencies; upgrade openssl specifically to patch CVE-2026-28390
+# Install system dependencies; pull latest openssl security patches (orig. CVE-2026-28390; trixie renamed libssl3 -> libssl3t64)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     gosu \
     libcairo2 \
-    && apt-get install -y --no-install-recommends --only-upgrade libssl3 openssl \
+    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
-COPY --from=rclone/rclone:1.73.4 /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --from=rclone/rclone:1.74.4 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
@@ -43,9 +43,8 @@ WORKDIR /app
 
 # Copy requirements and install as root
 COPY backend/requirements.txt backend/requirements-dev.txt ./
-RUN python -m pip install --no-cache-dir "pip==26.1.1" && \
+RUN python -m pip install --no-cache-dir "pip==26.1.2" && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir --no-deps psd-tools==1.10.4 && \
     pip uninstall -y pip
 
 # Create necessary directories

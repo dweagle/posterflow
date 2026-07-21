@@ -22,6 +22,7 @@ from core.auth import mint_psd_access_token, verify_psd_access_token
 from core.config import settings as app_settings
 from core.job_queue import job_queue
 from core.logging import LogIcons, LogTags, log_debug, log_error, log_info, log_success, log_user_action, log_warning
+from core.rate_limiter import tmdb_bucket
 from database import SessionLocal, get_db
 from models.drive import Drive
 from models.job import (
@@ -941,6 +942,7 @@ def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: in
     header, before giving up — so a brief throttle doesn't fail the request outright."""
     attempt = 0
     while True:
+        tmdb_bucket.acquire()  # shared with IDarr — TMDB limits by IP, not by key
         try:
             resp = requests.get(url, params=params, timeout=timeout)
         except Exception as exc:
@@ -1900,7 +1902,7 @@ def _build_psd(
             pos_left = 0
             pos_top = 0
 
-        poster_layer = PixelLayer.frompil(poster_pil, psd, layer_name=layer_name, top=pos_top, left=pos_left)
+        poster_layer = PixelLayer.frompil(poster_pil, psd, name=layer_name, top=pos_top, left=pos_left)
 
         if template_path is not None:
             poster_group = psd.find("POSTER")
@@ -1933,7 +1935,7 @@ def _build_psd(
         # Centre horizontally (may extend outside canvas bounds on wide images)
         left = (canvas_w - new_w) // 2
 
-        bg_layer = PixelLayer.frompil(bg_pil, psd, layer_name=layer_name, top=0, left=left)
+        bg_layer = PixelLayer.frompil(bg_pil, psd, name=layer_name, top=0, left=left)
 
         if template_path is not None:
             poster_group = psd.find("POSTER")
@@ -1978,17 +1980,20 @@ def _build_psd(
 
         logo_count = len(logo_bytes_list)
         layer_name = f"{base_name} - Logo" if logo_count == 1 else f"{base_name} - Logo {logo_count - logo_idx}"
-        logo_layer = PixelLayer.frompil(logo_pil, None, layer_name=layer_name, top=logo_top, left=logo_left)
-
+        parent = psd
+        insert_front = False
         if template_path is not None:
             logo_group = psd.find("LOGO")
             if logo_group is not None:
-                logo_group.insert(0, logo_layer)
+                parent, insert_front = logo_group, True
             else:
                 log_warning(LogTags.API, "LOGO group not found in template; inserting at root")
-                psd.append(logo_layer)
-        else:
-            psd._layers.append(logo_layer)
+
+        logo_layer = PixelLayer.frompil(logo_pil, parent, name=layer_name, top=logo_top, left=logo_left)
+        if insert_front:
+            # frompil appends at the end; logos belong at the front of the group
+            parent.remove(logo_layer)
+            parent.insert(0, logo_layer)
 
         valid_logo_count += 1
 

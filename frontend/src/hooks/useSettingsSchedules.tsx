@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type JSX } from 'react'
 import {
   createSchedule,
   deleteSchedule,
@@ -66,7 +66,7 @@ export const useSettingsSchedules = ({
       case 'poster_workflow':
         return 'Poster Workflow'
       case 'poster_renamer':
-        return 'Poster Renamer'
+        return 'Asset Renamer'
       case 'idarr':
         return 'IDarr'
       case 'maker_monitor':
