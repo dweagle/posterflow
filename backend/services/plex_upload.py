@@ -2,8 +2,10 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -12,10 +14,12 @@ from sqlalchemy.orm import Session
 from core.logging import LogTags, log_debug, log_error, log_info, log_warning
 from models.plex_upload import PlexUploadRecord
 from models.setting import get_setting
+from util.poster_settings import get_poster_destination
 from util.arr.client import create_arr_client
 from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
 from util.posters.match import collection_title_variants
+from util.posters.scanner import artwork_type_of, artwork_flat_base
 
 
 PlexUploadProgressCallback = Callable[[int, int, Dict[str, int], str], None]
@@ -25,10 +29,17 @@ class PlexUploadService:
     """Upload organized poster assets to Plex libraries."""
 
     IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+    # Plex 500s decoding very large images server-side. Downscale outliers past this longest
+    # side, or over the byte cap (Kometa skips uploads at ~10MB — we downscale instead).
+    MAX_UPLOAD_DIMENSION = 4000
+    MAX_UPLOAD_BYTES = 10_000_000
     SETTING_RADARR_INSTANCES = "radarr_instances"
     SETTING_SONARR_INSTANCES = "sonarr_instances"
     SETTING_INSTANCE_LIBRARY_MAP = "plex_upload_instance_library_map"
     DEFAULT_EDITION_MOVIE = "default_edition"
+    # Artwork subtype → the plexapi upload method for it (all take filepath=).
+    ARTWORK_UPLOAD_METHODS = {"logo": "uploadLogo", "background": "uploadArt", "squareart": "uploadSquareArt"}
+    SETTING_UPLOAD_ARTWORK = "plex_upload_artwork"
     ERROR_NO_PLEX_INSTANCES = "No Plex instances configured. Configure in Settings → Media tab."
     ERROR_NO_LIBRARIES_SELECTED = "No Plex libraries selected. Configure in Settings → Media tab."
     ERROR_INVALID_LIBRARY_CONFIG = "Invalid Plex library configuration. Configure in Settings → Media tab."
@@ -41,6 +52,7 @@ class PlexUploadService:
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
         self._year_discrepancies: List[Dict[str, Any]] = []  # ID-matched uploads where folder year != Plex year
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._local_artwork_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
@@ -62,6 +74,7 @@ class PlexUploadService:
 
     def invalidate_local_assets_cache(self) -> None:
         self._local_assets_cache = {}
+        self._local_artwork_cache = {}
 
     def invalidate_arr_availability_cache(self) -> None:
         self._arr_availability_cache = {}
@@ -158,6 +171,15 @@ class PlexUploadService:
             "season_assets": sum(1 for asset in local_assets if asset.get("asset_type") == "season"),
             "library_totals": library_totals,
             "media_upload_counts": self._empty_media_upload_counts(),
+            "artwork": {
+                "scanned": 0,
+                "matched": 0,
+                "uploaded": 0,
+                "would_upload": 0,
+                "skipped": 0,
+                "errors": 0,
+                "by_type": {"logo": 0, "background": 0, "squareart": 0},
+            },
         }
 
     @staticmethod
@@ -313,6 +335,14 @@ class PlexUploadService:
         self._local_assets_cache[cache_key] = discovered_assets
         return discovered_assets
 
+    def _get_local_artwork(self, destination: Path, *, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        cache_key = str(destination)
+        if not force_refresh and cache_key in self._local_artwork_cache:
+            return self._local_artwork_cache[cache_key]
+        discovered = self._discover_local_artwork(destination)
+        self._local_artwork_cache[cache_key] = discovered
+        return discovered
+
     def _load_json_setting(
         self,
         setting_key: str,
@@ -358,21 +388,34 @@ class PlexUploadService:
             return self._error_result("Upload preflight returned incomplete context.")
 
         local_assets = self._get_local_assets(destination_dir)
-        if not local_assets:
+        artwork_enabled = self._is_artwork_upload_enabled()
+        artwork_assets = self._discover_local_artwork(destination_dir) if artwork_enabled else []
+        if not local_assets and not artwork_assets:
             return self._no_assets_result(self.MESSAGE_NO_POSTER_ASSETS)
 
         stats = self._build_run_stats(local_assets, library_totals)
         self._begin_upload_run(single_target=False)
         arr_availability = self._get_arr_availability_index()
-        self._process_assets_for_upload(
-            local_assets=local_assets,
-            index=index,
-            stats=stats,
-            dry_run=dry_run,
-            arr_availability=arr_availability,
-            remove_overlay_label=remove_overlay_label,
-            progress_callback=progress_callback,
-        )
+        if local_assets:
+            self._process_assets_for_upload(
+                local_assets=local_assets,
+                index=index,
+                stats=stats,
+                dry_run=dry_run,
+                arr_availability=arr_availability,
+                remove_overlay_label=remove_overlay_label,
+                progress_callback=progress_callback,
+            )
+        if artwork_assets:
+            stats["artwork"]["scanned"] = len(artwork_assets)
+            self._process_artwork_for_upload(
+                artwork_assets=artwork_assets,
+                index=index,
+                stats=stats,
+                dry_run=dry_run,
+                progress_callback=progress_callback,
+            )
+            self._log_artwork_summary(stats, dry_run=dry_run)
         stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
@@ -398,6 +441,7 @@ class PlexUploadService:
         dry_run: bool = False,
         reapply: bool = False,
         remove_overlay_label: bool = False,
+        include_artwork: bool = False,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
     ) -> Dict[str, Any]:
         if reapply and not dry_run:
@@ -433,7 +477,8 @@ class PlexUploadService:
             return self._error_result("Upload preflight returned incomplete context.")
 
         all_assets = self._get_local_assets(destination_dir)
-        if not all_assets:
+        artwork_all = self._get_local_artwork(destination_dir) if include_artwork else []
+        if not all_assets and not artwork_all:
             return self._no_assets_result(self.MESSAGE_NO_POSTER_ASSETS)
 
         media_type_normalized = media_type.lower().strip()
@@ -446,24 +491,47 @@ class PlexUploadService:
             tmdb_id=tmdb_id,
             tvdb_id=tvdb_id,
             imdb_id=imdb_id,
-        )
+        ) if all_assets else []
 
-        if not local_assets:
+        # Artwork is per-title (no seasons), so match the item regardless of the
+        # triggering season — a season webhook still refreshes the show's artwork.
+        target_artwork = self._select_local_assets_for_target(
+            artwork_all,
+            media_type=media_type_normalized,
+            title=title,
+            year=year,
+            season_number=None,
+            tmdb_id=tmdb_id,
+            tvdb_id=tvdb_id,
+            imdb_id=imdb_id,
+        ) if artwork_all else []
+
+        if not local_assets and not target_artwork:
             return self._no_assets_result(f"No local assets found for '{title}'.")
 
         stats = self._build_run_stats(local_assets, library_totals)
         self._begin_upload_run(single_target=True)
         arr_availability = self._get_arr_availability_index(media_type_filter=media_type_normalized)
-        self._process_assets_for_upload(
-            local_assets=local_assets,
-            index=index,
-            stats=stats,
-            dry_run=dry_run,
-            arr_availability=arr_availability,
-            remove_overlay_label=remove_overlay_label,
-            media_type_filter=media_type_normalized,
-            progress_callback=progress_callback,
-        )
+        if local_assets:
+            self._process_assets_for_upload(
+                local_assets=local_assets,
+                index=index,
+                stats=stats,
+                dry_run=dry_run,
+                arr_availability=arr_availability,
+                remove_overlay_label=remove_overlay_label,
+                media_type_filter=media_type_normalized,
+                progress_callback=progress_callback,
+            )
+        if target_artwork:
+            stats["artwork"]["scanned"] = len(target_artwork)
+            self._process_artwork_for_upload(
+                artwork_assets=target_artwork,
+                index=index,
+                stats=stats,
+                dry_run=dry_run,
+            )
+            self._log_artwork_summary(stats, dry_run=dry_run)
         stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
@@ -485,8 +553,13 @@ class PlexUploadService:
         tmdb_id: Optional[int] = None,
         tvdb_id: Optional[int] = None,
         imdb_id: Optional[str] = None,
+        include_artwork: bool = False,
     ) -> bool:
-        """Return True when a target resolves to local assets that are already cached for all matched Plex targets."""
+        """Return True when a target resolves to local assets that are already cached for all matched Plex targets.
+
+        When include_artwork is set, the target's artwork (logo/background/squareart) must ALSO
+        be cached — so a re-fired webhook whose poster is cached still runs to push new artwork.
+        """
         preflight_error, destination_dir, index, _library_totals = self._prepare_upload_context()
         if preflight_error:
             return False
@@ -520,6 +593,28 @@ class PlexUploadService:
                 arr_availability=arr_availability,
             ):
                 return False
+
+        if include_artwork:
+            # Artwork is per-title (season_number=None), so a season webhook still checks
+            # the show's artwork. No artwork on disk → nothing to upload → still "cached".
+            target_artwork = self._select_local_assets_for_target(
+                self._get_local_artwork(destination_dir),
+                media_type=media_type_normalized,
+                title=title,
+                year=year,
+                season_number=None,
+                tmdb_id=tmdb_id,
+                tvdb_id=tvdb_id,
+                imdb_id=imdb_id,
+            )
+            for asset in target_artwork:
+                if not self._is_asset_fully_cached_for_targets(
+                    asset,
+                    index=index,
+                    media_type_filter=media_type_normalized,
+                    arr_availability=arr_availability,
+                ):
+                    return False
 
         return True
 
@@ -893,11 +988,7 @@ class PlexUploadService:
         return result
 
     def _get_destination_dir(self) -> Path:
-        setting = get_setting(self.db, "poster_destination")
-        if not setting or not setting.value:
-            raise ValueError("No destination directory configured. Configure in Poster Manager settings.")
-
-        destination = Path(setting.value)
+        destination = Path(get_poster_destination(self.db))
         if not destination.exists() or not destination.is_dir():
             raise ValueError(f"Destination directory does not exist: {destination}")
 
@@ -1080,6 +1171,11 @@ class PlexUploadService:
             if any(part.lower() == "tmp" for part in rel_parts):
                 continue
 
+            # Artwork (logo/background/squareart) shares the item folders but must never be
+            # uploaded as a poster — it's handled by the separate artwork upload pass.
+            if artwork_type_of(file_path.name):
+                continue
+
             if file_path.parent == destination:
                 parsed = self._parse_root_file(file_path)
             else:
@@ -1168,6 +1264,52 @@ class PlexUploadService:
             return int(digits)
         except ValueError:
             return None
+
+    def _is_artwork_upload_enabled(self) -> bool:
+        setting = get_setting(self.db, self.SETTING_UPLOAD_ARTWORK)
+        return bool(setting and str(setting.value).strip().lower() in ("true", "1", "yes", "on"))
+
+    def _discover_local_artwork(self, destination: Path) -> List[Dict[str, Any]]:
+        """Discover placed artwork files (logo/background/squareart) in the destination.
+
+        Produces the same asset shape as poster discovery plus an ``artwork_type`` key, so
+        the existing Plex-matching helpers apply unchanged. Artwork is per-title (no seasons).
+        """
+        assets: List[Dict[str, Any]] = []
+        for file_path in destination.rglob("*"):
+            if not file_path.is_file() or file_path.suffix.lower() not in self.IMAGE_EXTENSIONS:
+                continue
+            if any(part.lower() == "tmp" for part in file_path.relative_to(destination).parts):
+                continue
+            parsed = self._parse_local_artwork_file(file_path, destination)
+            if parsed:
+                assets.append(parsed)
+        assets.sort(key=lambda a: (str(a.get("media_key") or ""), str(a.get("artwork_type") or "")))
+        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local artwork files", count=len(assets))
+        return assets
+
+    def _parse_local_artwork_file(self, file_path: Path, destination: Path) -> Optional[Dict[str, Any]]:
+        artwork_type = artwork_type_of(file_path.name)
+        if not artwork_type:
+            return None
+        if file_path.parent == destination:
+            # Flat naming: "Title (Year) {tmdb-1}-square.png" — strip the subtype suffix.
+            base = artwork_flat_base(file_path.name)
+            if base is None:
+                return None
+        else:
+            # Nested: the item folder name carries the title/year/ids.
+            base = file_path.parent.name
+        year_match = re.search(r'\((\d{4})\)', base)
+        return {
+            "path": str(file_path),
+            "media_key": normalize_titles(base),
+            "display_name": self._humanize_title(base),
+            "asset_type": "main",
+            "season_number": None,
+            "folder_year": int(year_match.group(1)) if year_match else None,
+            "artwork_type": artwork_type,
+        }
 
     def _build_plex_index(
         self,
@@ -1565,6 +1707,56 @@ class PlexUploadService:
         except Exception:
             return self._title_year_key(show)
 
+    @contextmanager
+    def _upload_ready(self, file_path: str):
+        """Yield a path safe to upload: the original, or a downscaled temp copy when the image
+        is too large for Plex (which 500s on very large images). Gated on longest side AND file
+        size (~10MB, the threshold Kometa flags). Temp copy is cleaned up on exit."""
+        try:
+            from PIL import Image
+            with Image.open(file_path) as im:
+                width, height = im.size
+                fmt = im.format
+            file_size = os.path.getsize(file_path)
+        except Exception:
+            yield file_path  # unreadable / not an image — let Plex decide
+            return
+
+        if max(width, height) <= self.MAX_UPLOAD_DIMENSION and file_size <= self.MAX_UPLOAD_BYTES:
+            yield file_path
+            return
+
+        tmp_path = None
+        try:
+            fd, tmp_path = tempfile.mkstemp(suffix=os.path.splitext(file_path)[1] or ".png")
+            os.close(fd)
+            save_kwargs = {"quality": 95} if fmt == "JPEG" else {}
+            # Cap the longest side, then shrink further if the encoded file is still too large
+            # (e.g. a dense PNG under the dimension cap but over the byte cap).
+            longest = min(max(width, height), self.MAX_UPLOAD_DIMENSION)
+            new_size = (width, height)
+            for _ in range(6):
+                scale = longest / max(width, height)
+                new_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+                with Image.open(file_path) as im:
+                    im.resize(new_size, Image.LANCZOS).save(tmp_path, format=fmt, **save_kwargs)
+                if os.path.getsize(tmp_path) <= self.MAX_UPLOAD_BYTES or longest <= 1000:
+                    break
+                longest = int(longest * 0.85)
+            log_info(
+                LogTags.UPLOADER,
+                f"Downscaled oversized image {width}x{height} ({file_size // 1024} KB) -> "
+                f"{new_size[0]}x{new_size[1]} ({os.path.getsize(tmp_path) // 1024} KB) before upload",
+                file=file_path,
+            )
+            yield tmp_path
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
     def _upload_asset(
         self,
         asset: Dict[str, Any],
@@ -1639,14 +1831,15 @@ class PlexUploadService:
                 if dry_run:
                     log_info(
                         LogTags.UPLOADER,
-                        f"Dry run: Uploaded {self._describe_show_with_season(show.title, season_number)}",
+                        f"Dry run: Uploaded Poster for {self._describe_show_with_season(show.title, season_number)}",
                         file=file_path,
                         asset=asset_label,
                     )
                     uploaded += 1
                     media_counts["seasons"] += 1
                     continue
-                season_obj.uploadPoster(filepath=file_path)
+                with self._upload_ready(file_path) as up_path:
+                    season_obj.uploadPoster(filepath=up_path)
                 self._drop_file_cache(file_path)
                 time.sleep(self.upload_delay_ms / 2000.0)
                 if remove_overlay_label:
@@ -1668,7 +1861,7 @@ class PlexUploadService:
                 )
                 log_info(
                     LogTags.UPLOADER,
-                    f"Uploaded {self._describe_show_with_season(show.title, season_number)}",
+                    f"Uploaded Poster for {self._describe_show_with_season(show.title, season_number)}",
                     file=file_path,
                     asset=asset_label,
                 )
@@ -1863,14 +2056,15 @@ class PlexUploadService:
             if dry_run:
                 log_info(
                     LogTags.UPLOADER,
-                    f"Dry run: Uploaded {item_label}",
+                    f"Dry run: Uploaded Poster for {item_label}",
                     file=file_path,
                     asset=asset_label,
                 )
                 uploaded += 1
                 media_counts[item_media_type] += 1
                 continue
-            item.uploadPoster(filepath=file_path)
+            with self._upload_ready(file_path) as up_path:
+                item.uploadPoster(filepath=up_path)
             self._drop_file_cache(file_path)
             time.sleep(self.upload_delay_ms / 1000.0)
             if remove_overlay_label:
@@ -1902,12 +2096,165 @@ class PlexUploadService:
                     media_type=item_media_type,
                     rating_key=rating_key,
                 )
-            log_info(LogTags.UPLOADER, f"Uploaded {item_label}", file=file_path, asset=asset_label)
+            log_info(LogTags.UPLOADER, f"Uploaded Poster for {item_label}", file=file_path, asset=asset_label)
 
         if uploaded > 0:
             self._note_year_discrepancy(asset, matched_items, asset_id_keys, file_path)
 
         return uploaded, True, raw_candidate_count, len(matched_items), media_counts, 0
+
+    def _upload_artwork_asset(
+        self,
+        asset: Dict[str, Any],
+        index: Dict[str, Dict[str, List[Any]]],
+        dry_run: bool,
+    ) -> Tuple[int, bool]:
+        """Upload one artwork file (logo/background/squareart) to its matched Plex item(s).
+
+        Reuses the poster path's Plex matching + per-file dedupe; simpler because artwork has
+        no seasons or editions and pushes via the subtype-specific plexapi method.
+        """
+        artwork_type = str(asset.get("artwork_type") or "")
+        method_name = self.ARTWORK_UPLOAD_METHODS.get(artwork_type)
+        if not method_name:
+            return 0, False
+
+        file_path = asset["path"]
+        media_key = asset["media_key"]
+        asset_label = self._asset_label(asset)
+        asset_id_keys = self._extract_asset_id_keys(asset)
+        folder_year = asset.get("folder_year")
+
+        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
+        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
+
+        inferred_filter, resolution_reason = self._resolve_target_media_type(
+            asset,
+            media_type_filter=None,
+            arr_availability=None,
+            movies_raw=movies_raw,
+            shows_raw=shows_raw,
+            collections_raw=collections_raw,
+        )
+        if not inferred_filter:
+            if not resolution_reason:
+                self._log_unmatched(f"No Plex match for {artwork_type}: {asset_label}", file=file_path)
+            return 0, False
+
+        matched_items: List[Any] = []
+        for candidates in self._candidate_groups_for_filter(inferred_filter, movies_raw, shows_raw, collections_raw):
+            deduped = self._dedupe_plex_items(candidates)
+            if deduped:
+                matched_items = deduped
+                break
+        if not matched_items:
+            self._log_unmatched(f"No Plex match for {artwork_type}: {asset_label}", file=file_path)
+            return 0, False
+
+        record = self._get_uploaded_record(file_path)
+        uploaded_to_libraries = set(record.get("uploaded_to_libraries", []))
+        uploaded_to_library_keys = set(record.get("uploaded_to_library_keys", []))
+        uploaded_rating_keys = set(record.get("uploaded_to_rating_keys", []))
+
+        uploaded = 0
+        for item in matched_items:
+            item_label = self._describe_plex_item(item)
+            item_media_type = self._classify_plex_item(item)
+            library_name = self._item_library_name(item)
+            library_key = self._item_library_key(item)
+            rating_key = self._item_rating_key(item)
+            rating_key_changed = self._rating_key_indicates_change(rating_key, uploaded_rating_keys)
+            cached = self._is_item_cached_for_library(
+                library_name=library_name,
+                library_key=library_key,
+                uploaded_to_libraries=uploaded_to_libraries,
+                uploaded_to_library_keys=uploaded_to_library_keys,
+            )
+            if cached and not rating_key_changed:
+                self._record_rating_key_if_new(
+                    file_path, rating_key, uploaded_rating_keys, dry_run=dry_run,
+                    library_name=library_name, library_key=library_key, media_type=item_media_type,
+                )
+                continue
+            if dry_run:
+                log_info(LogTags.UPLOADER, f"Dry run: Uploaded {artwork_type} for {item_label}", file=file_path, asset=asset_label)
+                uploaded += 1
+                continue
+            with self._upload_ready(file_path) as up_path:
+                getattr(item, method_name)(filepath=up_path)
+            self._drop_file_cache(file_path)
+            time.sleep(self.upload_delay_ms / 1000.0)
+            uploaded += 1
+            if library_name:
+                uploaded_to_libraries.add(library_name)
+            if library_key:
+                uploaded_to_library_keys.add(library_key)
+            if rating_key:
+                uploaded_rating_keys.add(rating_key)
+            self._mark_uploaded(
+                file_path, library_name=library_name, library_key=library_key,
+                media_type=item_media_type, rating_key=rating_key,
+            )
+            log_info(LogTags.UPLOADER, f"Uploaded {artwork_type} for {item_label}", file=file_path, asset=asset_label)
+
+        return uploaded, True
+
+    def _log_artwork_summary(self, stats: Dict[str, Any], *, dry_run: bool) -> None:
+        """One line per run so artwork is visible without reading every per-file line.
+        Logged by both the full and single-item paths."""
+        art = stats["artwork"]
+        by_type = art["by_type"]
+        log_info(
+            LogTags.UPLOADER,
+            f"Artwork upload: {art['would_upload'] if dry_run else art['uploaded']} "
+            f"{'would upload' if dry_run else 'uploaded'} "
+            f"({by_type['logo']} logos, {by_type['background']} backgrounds, {by_type['squareart']} squareart), "
+            f"{art['matched']} matched, {art['skipped']} skipped, {art['errors']} errors",
+            scanned=art["scanned"],
+        )
+
+    def _process_artwork_for_upload(
+        self,
+        *,
+        artwork_assets: List[Dict[str, Any]],
+        index: Dict[str, Dict[str, List[Any]]],
+        stats: Dict[str, Any],
+        dry_run: bool,
+        progress_callback: Optional[PlexUploadProgressCallback] = None,
+    ) -> None:
+        art = stats["artwork"]
+        total = len(artwork_assets)
+        for i, asset in enumerate(artwork_assets, start=1):
+            try:
+                uploaded_count, matched = self._upload_artwork_asset(asset, index, dry_run)
+                if matched:
+                    art["matched"] += 1
+                if dry_run:
+                    art["would_upload"] += uploaded_count
+                else:
+                    art["uploaded"] += uploaded_count
+                if uploaded_count == 0:
+                    art["skipped"] += 1
+                else:
+                    atype = str(asset.get("artwork_type") or "")
+                    if atype in art["by_type"]:
+                        art["by_type"][atype] += uploaded_count
+            except Exception as e:
+                art["errors"] += 1
+                log_error(LogTags.UPLOADER, f"Failed processing artwork '{asset.get('path')}': {e}\n{traceback.format_exc()}")
+            if progress_callback:
+                try:
+                    file_name = Path(str(asset.get("path") or "")).name
+                    label = "would upload" if dry_run else "uploaded"
+                    value = art["would_upload"] if dry_run else art["uploaded"]
+                    progress_callback(
+                        i, total,
+                        {"matched": art["matched"], "uploaded": art["uploaded"], "would_upload": art["would_upload"], "skipped": art["skipped"], "errors": art["errors"]},
+                        f"Artwork {i}/{total}: {file_name} | matched={art['matched']}, {label}={value}, skipped={art['skipped']}, errors={art['errors']}",
+                    )
+                except Exception as callback_error:
+                    log_warning(LogTags.UPLOADER, f"Artwork upload progress callback failed: {callback_error}")
 
     def _note_year_discrepancy(
         self,

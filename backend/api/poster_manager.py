@@ -35,6 +35,11 @@ from models.drive import Drive
 from models.manual_media import ManualMediaEntry
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
+from util.poster_settings import (
+    DEFAULT_POSTER_DESTINATION,
+    SETTING_POSTER_DESTINATION,
+    get_poster_destination,
+)
 from models.workflow import (
     Workflow,
     list_workflows,
@@ -57,7 +62,6 @@ from services.border_replacer import (
 
 router = APIRouter(prefix="/api/posterflow", tags=["poster-manager"])
 
-SETTING_POSTER_DESTINATION = "poster_destination"
 SETTING_POSTER_ACTION_TYPE = "poster_action_type"
 SETTING_POSTER_ASSET_FOLDERS = "poster_asset_folders"
 SETTING_POSTER_RENAMER_STATS = "poster_renamer_stats"
@@ -93,17 +97,6 @@ def job_started_response(
 
 def log_job_queued(tag: str, label: str, job_id: int, suffix: str = "") -> None:
     log_info(tag, f"{label} queued in background (Job ID: {job_id}{suffix})")
-
-
-def _require_destination_setting(
-    db: Session,
-    missing_detail: str,
-    require_value: bool = False,
-) -> str:
-    setting = get_setting(db, SETTING_POSTER_DESTINATION)
-    if not setting or (require_value and not setting.value):
-        raise HTTPException(status_code=400, detail=missing_detail)
-    return setting.value
 
 
 def _require_existing_path(
@@ -150,6 +143,21 @@ class FlowJobConfig(BaseModel):
     stop_on_error: bool = True
 
 
+class SyncFlowJobConfig(BaseModel):
+    """Sync Drives step. Poster and artwork drives are separate drive types. Artwork is
+    opt-in, matching the Asset Renamer's Include selector (which defaults to posters)."""
+    enabled: bool = True
+    stop_on_error: bool = True
+    posters: bool = True
+    artwork: bool = False
+
+
+class DetectFlowJobConfig(BaseModel):
+    """Detect Unmatched step: one slot-aware pass over the Include selection, no per-asset toggle."""
+    enabled: bool = True
+    stop_on_error: bool = True
+
+
 class CleanupFlowJobConfig(BaseModel):
     enabled: bool = True
     delete_unknown: bool = False
@@ -164,9 +172,9 @@ class IdarrFlowJobConfig(BaseModel):
 
 class FlowConfig(BaseModel):
     idarr: IdarrFlowJobConfig = Field(default_factory=IdarrFlowJobConfig)
-    sync_drives: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
-    rename_posters: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
-    detect_unmatched: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
+    sync_drives: SyncFlowJobConfig = Field(default_factory=SyncFlowJobConfig)
+    rename_assets: FlowJobConfig = FlowJobConfig(enabled=True, stop_on_error=True)
+    detect_unmatched: DetectFlowJobConfig = Field(default_factory=DetectFlowJobConfig)
     border_replacer: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=True)
     plex_upload: FlowJobConfig = FlowJobConfig(enabled=False, stop_on_error=False)
     cleanup_assets: CleanupFlowJobConfig = Field(default_factory=CleanupFlowJobConfig)
@@ -214,10 +222,10 @@ def rename_posters(
         priority_setting = get_setting(db, SETTING_POSTER_DRIVE_PRIORITY)
 
         if not priority_setting:
-            log_warning(LogTags.POSTER_RENAMER, "No drive priority configured")
+            log_warning(LogTags.RENAMER, "No drive priority configured")
             raise HTTPException(
                 status_code=400,
-                detail="No drive priority configured. Please configure drive priority in Poster Manager → Drive Priority tab."
+                detail="No drive priority configured. Please configure drive priority in Asset Manager → Drive Priority tab."
             )
 
         try:
@@ -225,10 +233,10 @@ def rename_posters(
             drive_ids = priority_data.get("drive_ids", [])
 
             if not drive_ids:
-                log_warning(LogTags.POSTER_RENAMER, "Drive priority list is empty")
+                log_warning(LogTags.RENAMER, "Drive priority list is empty")
                 raise HTTPException(
                     status_code=400,
-                    detail="Drive priority list is empty. Please add drives to the priority list in Poster Manager → Drive Priority tab."
+                    detail="Drive priority list is empty. Please add drives to the priority list in Asset Manager → Drive Priority tab."
                 )
 
             drives_available = db.query(Drive).filter(
@@ -237,17 +245,17 @@ def rename_posters(
             ).count()
 
             if drives_available == 0:
-                log_warning(LogTags.POSTER_RENAMER, "No drives in priority list are subscribed (endpoint validation)")
+                log_warning(LogTags.RENAMER, "No drives in priority list are subscribed (endpoint validation)")
                 raise HTTPException(
                     status_code=400,
-                    detail="No drives in priority list are subscribed. Please subscribe to drives in the GDrives page and add them to Poster Manager → Drive Priority tab."
+                    detail="No drives in priority list are subscribed. Please subscribe to drives in the GDrives page and add them to Asset Manager → Drive Priority tab."
                 )
 
         except json.JSONDecodeError:
-            log_error(LogTags.POSTER_RENAMER, "Failed to parse drive priority data (endpoint)")
+            log_error(LogTags.RENAMER, "Failed to parse drive priority data (endpoint)")
             raise HTTPException(
                 status_code=400,
-                detail="Drive priority configuration is invalid. Please reconfigure in Poster Manager → Drive Priority tab."
+                detail="Drive priority configuration is invalid. Please reconfigure in Asset Manager → Drive Priority tab."
             )
 
         job = create_job(
@@ -257,7 +265,7 @@ def rename_posters(
         )
         job_id = job.id
 
-        log_job_queued(LogTags.POSTER_RENAMER, "Poster Renamer", job_id)
+        log_job_queued(LogTags.RENAMER, "Poster Renamer", job_id)
 
         config_data = config.model_dump()
         job_queue.submit(run_rename_background_job, job_id, job_id, config_data)
@@ -270,7 +278,7 @@ def rename_posters(
     except HTTPException:
         raise
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Failed to start Poster Renamer: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Failed to start Poster Renamer: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to start Poster Renamer")
 
 
@@ -284,11 +292,7 @@ def run_border_replacer(
     Returns immediately with job_id while border replacer executes asynchronously.
     """
     try:
-        source_dir = _require_destination_setting(
-            db,
-            "No destination directory configured. Please configure in Poster Manager settings.",
-            require_value=True,
-        )
+        source_dir = get_poster_destination(db)
         _require_existing_path(source_dir, f"Destination directory does not exist: {source_dir}")
 
         dry_run = payload.dry_run if payload else False
@@ -309,7 +313,7 @@ def run_border_replacer(
         )
         job_id = job.id
 
-        log_job_queued(LogTags.POSTER_RENAMER, "Border replacer", job_id, f", mode: {mode}")
+        log_job_queued(LogTags.RENAMER, "Border replacer", job_id, f", mode: {mode}")
 
         job_queue.submit(run_border_replacer_background_job, job_id, job_id, dry_run, mode)
 
@@ -321,7 +325,7 @@ def run_border_replacer(
     except HTTPException:
         raise
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Failed to start border replacer: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Failed to start border replacer: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to start border replacer")
 
 
@@ -547,7 +551,7 @@ def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return config
 
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Error getting Poster Renamer config: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error getting Poster Renamer config: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting Poster Renamer config")
 
 
@@ -560,9 +564,12 @@ def save_rename_config(
     Save Poster Renamer configuration.
     """
     try:
-        dest = config.destination or config.destination_dir
+        # An explicit blank means "use the default" — store it rather than dropping the
+        # write, which would silently keep the old path. Omitting both fields (None)
+        # still leaves the setting alone. destination_dir is the legacy alias.
+        dest = config.destination if config.destination is not None else config.destination_dir
         if dest is not None:
-            upsert_setting(db, SETTING_POSTER_DESTINATION, dest)
+            upsert_setting(db, SETTING_POSTER_DESTINATION, dest.strip() or DEFAULT_POSTER_DESTINATION)
 
         if config.action_type is not None:
             upsert_setting(db, SETTING_POSTER_ACTION_TYPE, config.action_type)
@@ -575,7 +582,7 @@ def save_rename_config(
 
     except Exception as e:
         db.rollback()
-        log_error(LogTags.POSTER_RENAMER, f"Error saving Poster Renamer config: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error saving Poster Renamer config: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error saving Poster Renamer config")
 
 
@@ -663,7 +670,7 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Error getting poster stats: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error getting poster stats: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting poster stats")
 
 
@@ -688,7 +695,7 @@ def get_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Error getting drive priority: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error getting drive priority: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting drive priority")
 
 
@@ -720,7 +727,7 @@ def save_drive_priority(
 
     except Exception as e:
         db.rollback()
-        log_error(LogTags.POSTER_RENAMER, f"Error saving drive priority: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error saving drive priority: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error saving drive priority")
 
 
@@ -733,7 +740,7 @@ def get_auto_run_border(db: Session = Depends(get_db)) -> Dict[str, bool]:
         setting = get_setting(db, SETTING_AUTO_RUN_BORDER)
         return {"enabled": setting.value.lower() == "true" if setting else False}
     except Exception as e:
-        log_error(LogTags.POSTER_RENAMER, f"Error getting auto-run border setting: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error getting auto-run border setting: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting auto-run border setting")
 
 
@@ -759,7 +766,7 @@ def save_auto_run_border(
         return {"success": True}
     except Exception as e:
         db.rollback()
-        log_error(LogTags.POSTER_RENAMER, f"Error saving auto-run border setting: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.RENAMER, f"Error saving auto-run border setting: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error saving auto-run border setting")
 
 
@@ -834,10 +841,7 @@ def start_unmatched_detection(
     Finds media without matching posters in organized folder.
     """
     try:
-        destination_dir = _require_destination_setting(
-            db,
-            "No destination directory configured. Please configure in Poster Manager → Overview tab.",
-        )
+        destination_dir = get_poster_destination(db)
 
         _require_existing_path(
             destination_dir,
@@ -853,6 +857,7 @@ def start_unmatched_detection(
 
         log_job_queued(LogTags.UNMATCHED, "Detection", job_id)
 
+        # One slot-aware pass: a single Detect refreshes posters AND artwork (renamer parity).
         job_queue.submit(run_unmatched_detection_background_job, job_id, job_id)
 
         return job_started_response(
@@ -1344,9 +1349,7 @@ def delete_manual_media(entry_id: int, db: Session = Depends(get_db)) -> Dict[st
 def _normalize_flow_config(parsed: Any) -> Dict[str, Any]:
     """Coerce a raw stored flow config into the full, well-shaped step config."""
     default_step_config: Dict[str, Dict[str, bool]] = {
-        "sync_drives": {"enabled": True, "stop_on_error": True},
-        "rename_posters": {"enabled": True, "stop_on_error": True},
-        "detect_unmatched": {"enabled": True, "stop_on_error": True},
+        "rename_assets": {"enabled": True, "stop_on_error": True},
         "border_replacer": {"enabled": False, "stop_on_error": True},
         "plex_upload": {"enabled": False, "stop_on_error": False},
     }
@@ -1357,12 +1360,36 @@ def _normalize_flow_config(parsed: Any) -> Dict[str, Any]:
         "sync_after_run": False,
     }
     default_cleanup_config: Dict[str, bool] = {"enabled": True, "delete_unknown": False}
+    default_sync_config: Dict[str, bool] = {
+        "enabled": True,
+        "stop_on_error": True,
+        "posters": True,
+        "artwork": False,
+    }
+    default_detect_config: Dict[str, bool] = {
+        "enabled": True,
+        "stop_on_error": True,
+    }
 
     if not isinstance(parsed, dict):
         return {
             "idarr": dict(default_idarr_config),
             "cleanup_assets": dict(default_cleanup_config),
+            "sync_drives": dict(default_sync_config),
+            "detect_unmatched": dict(default_detect_config),
             **{k: dict(v) for k, v in default_step_config.items()},
+        }
+
+    # Forward-map legacy split rename steps (rename_posters / rename_artwork) → unified rename_assets.
+    if "rename_assets" not in parsed and ("rename_posters" in parsed or "rename_artwork" in parsed):
+        legacy_posters = parsed.get("rename_posters") if isinstance(parsed.get("rename_posters"), dict) else {}
+        legacy_artwork = parsed.get("rename_artwork") if isinstance(parsed.get("rename_artwork"), dict) else {}
+        parsed = {
+            **parsed,
+            "rename_assets": {
+                "enabled": bool(legacy_posters.get("enabled", False)) or bool(legacy_artwork.get("enabled", False)),
+                "stop_on_error": bool(legacy_posters.get("stop_on_error", True)),
+            },
         }
 
     normalized: Dict[str, Any] = {"idarr": dict(default_idarr_config)}
@@ -1384,6 +1411,30 @@ def _normalize_flow_config(parsed: Any) -> Dict[str, Any]:
             }
         else:
             normalized[key] = dict(default_step_config[key])
+    sync_value = parsed.get("sync_drives")
+    if isinstance(sync_value, dict):
+        normalized["sync_drives"] = {
+            "enabled": bool(sync_value.get("enabled", True)),
+            "stop_on_error": bool(sync_value.get("stop_on_error", True)),
+            # Configs saved before artwork drives existed have neither key. Posters
+            # default on (that's what the step always did); artwork is opt-in, matching
+            # the Asset Renamer's Include selector.
+            "posters": bool(sync_value.get("posters", True)),
+            "artwork": bool(sync_value.get("artwork", False)),
+        }
+    else:
+        normalized["sync_drives"] = dict(default_sync_config)
+
+    detect_value = parsed.get("detect_unmatched")
+    if isinstance(detect_value, dict):
+        # One slot-aware pass covers posters AND artwork — no per-asset toggle here.
+        normalized["detect_unmatched"] = {
+            "enabled": bool(detect_value.get("enabled", True)),
+            "stop_on_error": bool(detect_value.get("stop_on_error", True)),
+        }
+    else:
+        normalized["detect_unmatched"] = dict(default_detect_config)
+
     cleanup_value = parsed.get("cleanup_assets")
     if isinstance(cleanup_value, dict):
         normalized["cleanup_assets"] = {

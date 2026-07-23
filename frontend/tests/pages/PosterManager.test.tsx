@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PosterManager from '../../src/pages/PosterManager'
 
-const mockHandleStartRename = vi.fn()
+const mockHandleStartAssetRename = vi.fn()
 const mockHandleDiscardChanges = vi.fn()
 const mockResetPriorityToOriginal = vi.fn()
 const mockResetBorderSettingsToOriginal = vi.fn()
@@ -23,6 +23,7 @@ vi.mock('../../src/contexts/AppEventsContext', () => ({
   useAppEvents: () => ({
     unmatchedStats: { summary: { grand_total: { unmatched: 2 } } },
     refreshStats: vi.fn(),
+    jobs: [],
   }),
 }))
 
@@ -143,7 +144,7 @@ vi.mock('../../src/hooks/usePosterManagerSettings', () => ({
 vi.mock('../../src/hooks/usePosterManagerActions', () => ({
   usePosterManagerActions: () => ({
     handleDetectUnmatched: vi.fn(),
-    handleStartRename: mockHandleStartRename,
+    handleStartAssetRename: mockHandleStartAssetRename,
     handleRunBorderReplacer: vi.fn(),
   }),
 }))
@@ -196,11 +197,11 @@ describe('PosterManager', () => {
     const user = userEvent.setup()
     render(<PosterManager />)
 
-    await user.click(screen.getByRole('button', { name: /Poster Renamer/i }))
+    await user.click(screen.getByRole('button', { name: /Asset Renamer/i }))
     expect(screen.getByText('Rename Tab Mock')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Run Rename' }))
-    expect(mockHandleStartRename).toHaveBeenCalledWith(false)
+    expect(mockHandleStartAssetRename).toHaveBeenCalledWith(false)
   })
 
   it('resets border state when discarding unsaved changes from border tab', async () => {

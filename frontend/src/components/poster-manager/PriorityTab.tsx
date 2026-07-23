@@ -1,11 +1,14 @@
-import { Download, GripVertical, List, Minus, Plus, Save, Trash2 } from 'lucide-react'
-import Toolbar from './Toolbar'
+import { Download, GripVertical, List, Minus, Plus, Trash2 } from 'lucide-react'
+import PriorityHeader from './PriorityHeader'
+import { type PriorityScope } from './PriorityScopeSelector'
 import { DragEvent, TouchEvent as ReactTouchEvent, useState } from 'react'
 import { Drive } from '../../api/client'
 import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
 import PosterStyleModal from './PosterStyleModal'
 
 type PriorityTabProps = {
+  scope: PriorityScope
+  onScopeChange: (scope: PriorityScope) => void
   hasUnsavedPriorityChanges: boolean
   saving: boolean
   onSavePriority: () => void
@@ -33,6 +36,8 @@ type PriorityTabProps = {
 }
 
 function PriorityTab({
+  scope,
+  onScopeChange,
   hasUnsavedPriorityChanges,
   saving,
   onSavePriority,
@@ -118,12 +123,13 @@ function PriorityTab({
 
   return (
     <>
-      <Toolbar title="Configure Drive Priority" description="Select which poster styles to use and set their priority order. Higher priority drives will override lower ones.">
-        <button className={`btn-toolbar ${hasUnsavedPriorityChanges ? 'btn-unsaved' : ''}`} onClick={onSavePriority} disabled={!hasUnsavedPriorityChanges || saving}>
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
-      </Toolbar>
+      <PriorityHeader
+        scope={scope}
+        onScopeChange={onScopeChange}
+        saving={saving}
+        hasUnsavedChanges={hasUnsavedPriorityChanges}
+        onSave={onSavePriority}
+      />
 
       <div className="priority-tab">
         {styleStats && styleTotal > 0 && (

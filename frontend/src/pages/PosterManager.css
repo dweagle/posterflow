@@ -31,88 +31,7 @@
   margin-bottom: 0;
 }
 
-/* Toolbar - shared across all PosterManager tabs */
-.poster-manager .toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem;
-  background-color: #3D4556;
-  border-radius: 8px;
-  margin-bottom: 2rem;
-}
-
-.poster-manager .toolbar .toolbar-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.poster-manager .toolbar h2 {
-  color: #64b5f6;
-  margin: 0;
-  font-size: 1.25rem;
-  white-space: nowrap;
-}
-
-.poster-manager .toolbar-info {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: help;
-  color: #888;
-  transition: color 0.2s;
-}
-
-.poster-manager .toolbar-info:hover {
-  color: #64b5f6;
-}
-
-.poster-manager .toolbar-info svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.poster-manager .toolbar-tooltip {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  background: #252525;
-  border: 1px solid #424242;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  color: #ccc;
-  font-size: 0.85rem;
-  width: 300px;
-  max-width: 90vw;
-  line-height: 1.4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 100;
-  white-space: normal;
-}
-
-.poster-manager .toolbar-info:hover .toolbar-tooltip {
-  opacity: 1;
-}
-
-.poster-manager .action-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.poster-manager .btn-pair {
-  display: flex;
-  gap: 0.5rem;
-  width: 185px;
-  flex-shrink: 0;
-}
+/* Toolbar styling now lives in styles/globals.css, shared by every page. */
 
 /* Icon spacing inside buttons */
 .poster-manager .btn-secondary svg {
@@ -120,7 +39,6 @@
   flex-shrink: 0;
 }
 
-.poster-manager .btn-toolbar svg,
 .poster-manager .btn-primary svg {
   flex-shrink: 0;
 }
@@ -160,65 +78,6 @@
   padding: 0.5rem 1rem;
   border: 1px solid transparent;
   font-size: 0.9rem;
-}
-
-.poster-manager .btn-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem;
-  min-width: 185px;
-  background-color: #5c6882;
-  color: #E8ECEF;
-  border: none;
-  border-radius: 4px;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-.poster-manager .btn-toolbar:hover:not(:disabled) {
-  background-color: #6c7892;
-}
-
-.poster-manager .btn-toolbar.btn-primary {
-  background-color: #5B89C4;
-  color: #fff;
-}
-
-.poster-manager .btn-toolbar.btn-primary:hover:not(:disabled) {
-  background-color: #6c9bd4;
-}
-
-.poster-manager .btn-toolbar.btn-unsaved {
-  background-color: #ef5350;
-  color: #fff;
-}
-
-.poster-manager .btn-toolbar.btn-unsaved:hover:not(:disabled) {
-  background-color: #e53935;
-}
-
-.poster-manager .btn-toolbar:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.poster-manager .btn-toolbar.btn-toolbar-link {
-  border: 1px solid #4b5563;
-  border-radius: 6px;
-  background: #424242;
-  color: #fff;
-  padding: 0.45rem 0.25rem;
-  font-size: 0.85rem;
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-}
-
-.poster-manager .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
-  background: #555;
 }
 
 /* Tabs - consistent with Settings */
@@ -315,7 +174,7 @@
 .poster-manager .settings-section h2 {
   font-size: 1.25rem;
   color: #fff;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.6rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -862,6 +721,42 @@
   display: block;
   margin-top: 0.5rem;
   font-weight: 500;
+}
+
+/* Live preview of the paths a setting produces, so the layout is concrete. */
+.path-example {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: #22262f;
+  border-left: 2px solid #5B89C4;
+  border-radius: 4px;
+}
+
+.path-example-label {
+  color: #888;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.15rem;
+}
+
+.path-example code {
+  color: #9fb8d8;
+  font-size: 0.78rem;
+  /* Long destinations shouldn't widen the settings grid. */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.field-group small code {
+  color: #9fb8d8;
+  background: #22262f;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.9em;
 }
 
 /* Poster Manager config toggles (Rename/Border tabs) */
@@ -1456,6 +1351,103 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border-color: #9c27b0;
 }
 
+.bulk-btn.artwork {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.bulk-btn.artwork:hover {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: #f59e0b;
+}
+
+/* Logos | Backdrops | Square Art selector — sits inline in the Unmatched Artwork toolbar */
+.artwork-type-selector {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Asset-type switches on their own row under the Unmatched toolbar, left-justified. */
+.unmatched-type-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 0 1.25rem;
+}
+
+.unmatched-type-row .artwork-type-selector {
+  margin: 0;
+}
+.artwork-type-selector button,
+.priority-scope-toggle button,
+.plex-upload-scope-toggle button {
+  padding: 0.4rem 1rem;
+  /* Uniform width so the asset-type switches read as one set. */
+  min-width: 120px;
+  text-align: center;
+  background: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Detection Settings sits at the end of the row: its own button, sized to its label
+   and set slightly apart since it's a different kind of destination. */
+.artwork-type-selector button.type-selector-settings {
+  min-width: 0;
+  margin-left: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.artwork-type-selector button:hover,
+.priority-scope-toggle button:hover,
+.plex-upload-scope-toggle button:hover {
+  background: #333;
+  border-color: #555;
+  color: #fff;
+}
+.artwork-type-selector button.active,
+.priority-scope-toggle button.active,
+.plex-upload-scope-toggle button.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #1a1a1a;
+}
+
+/* Poster Drives | Artwork Drives switcher — its own row under the Drive Priority
+   toolbar, matching the Unmatched asset-type row above (button styling is shared). */
+.priority-scope-toggle {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.25rem;
+}
+
+/* Both labels are wider than the shared 120px floor; widen so the pair stays even. */
+.priority-scope-toggle button {
+  min-width: 140px;
+}
+
+/* Settings | Manual Uploads switch under the Plex Upload toolbar. Same row + button
+   styling as the Unmatched and Drive Priority switches above. */
+.plex-upload-scope-toggle {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.25rem;
+}
+
+.plex-upload-scope-toggle button {
+  min-width: 140px;
+}
+
 .available-drives h3,
 .priority-list-container h3 {
   color: #fff;
@@ -1832,6 +1824,21 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border: 1px solid rgba(156, 39, 176, 0.32);
 }
 
+/* Artwork drive accents (priority tab, artwork view) */
+.drive-card-small.artwork {
+  border-left: 3px solid #f59e0b;
+}
+
+.priority-drive-card.artwork {
+  border-left: 4px solid #f59e0b;
+}
+
+.drive-badge-artwork {
+  background: rgba(245, 158, 11, 0.16);
+  color: #e5e7eb;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
 .poster-manager .btn-remove {
   display: flex;
   align-items: center;
@@ -1965,40 +1972,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 /* 2-row mode: toolbar title on top, buttons grid at natural 185px size */
-@media (max-width: 1300px) {
-  .poster-manager .toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .poster-manager .toolbar .toolbar-title {
-    width: 100%;
-  }
-
-  .poster-manager .action-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 185px);
-    justify-content: start;
-    width: 100%;
-  }
-
-  .poster-manager .btn-pair {
-    width: 185px;
-  }
-}
-
 /* Mobile: full width single column */
-@media (max-width: 550px) {
-  .poster-manager .action-buttons {
-    grid-template-columns: 1fr;
-  }
-
-  .poster-manager .btn-pair {
-    width: 100%;
-  }
-
-  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
+@media (max-width: 550px) {  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
   .poster-manager .toolbar-tooltip {
     display: none;
   }
@@ -3165,10 +3140,11 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 /* Unmatched Grid */
 .unmatched-grid {
   display: grid;
-  /* minmax(0, 1fr) — not plain 1fr — so a card can't refuse to shrink below its
-     content's min-width (e.g. long collection titles), which was making the
-     columns unequal and overflowing the row. */
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* auto-fit (not auto-fill) collapses unused tracks, so however many cards a type has
+     — 4 for posters, 3 for artwork (no seasons) — they stretch to fill the row instead
+     of leaving a hole on the right. The 260px floor keeps columns equal and stops a long
+     title from widening its own track; below 1300px the breakpoints take over. */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 1rem;
 }
 
@@ -3542,17 +3518,6 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border-color: #5B89C4;
 }
 
-.poster-manager .btn-toolbar.btn-danger {
-  background: #3a2323;
-  border-color: #7c4a4a;
-  color: #e6b0b0;
-}
-
-.poster-manager .btn-toolbar.btn-danger:hover:not(:disabled) {
-  background: #4a2a2a;
-  border-color: #9c5a5a;
-}
-
 .run-flow-btn {
   background: linear-gradient(135deg, #5B89C4, #7ca4d6) !important;
 }
@@ -3754,6 +3719,64 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   color: #ccc;
   font-size: 0.85rem;
   cursor: pointer;
+}
+
+.asset-include-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.5rem;
+  margin: 0.35rem 0 0.5rem;
+  min-height: 26px; /* reserve the row so toggles don't cause layout shift while loading */
+}
+
+.asset-include-toggle {
+  align-self: flex-start;
+}
+
+/* Reserve toggle-row height so gated (load-deferred) toggles don't shift layout. */
+.renamer-config-card .toggle-field {
+  min-height: 24px;
+}
+
+.renamer-config-card .section-description {
+  margin-bottom: 0.75rem;
+}
+.renamer-config-card .field-group {
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.renamer-config-card .field-group small {
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* Sub-group headings inside the Rename Configuration card. */
+.config-subgroup-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8aa2c4;
+  margin-bottom: 0.3rem;
+}
+
+.config-subgroup-divider {
+  margin-top: 0.85rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.config-subgroup-hint {
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #7c8798;
 }
 
 .checkbox-option input[type="checkbox"] {

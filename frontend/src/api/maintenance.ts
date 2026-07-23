@@ -27,6 +27,7 @@ export interface DatabaseStats {
   would_delete: number
   sample_records?: Array<{
     id: number
+    asset_type?: 'poster' | 'artwork'
     file_name: string
     file_path: string
     drive_id: string
@@ -37,6 +38,7 @@ export interface DatabaseStats {
   }>
   orphaned_records?: Array<{
     id: number
+    asset_type?: 'poster' | 'artwork'
     file_name: string
     file_path: string
     drive_id: string

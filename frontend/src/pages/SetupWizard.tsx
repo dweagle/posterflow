@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
+import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -29,8 +29,6 @@ interface FormData {
   sonarr_instances: ServerInstance[]
   radarr_instances: ServerInstance[]
 }
-
-const DEFAULT_POSTER_DESTINATION = '/config/posters/assets'
 
 function SetupWizard({ onComplete }: SetupWizardProps) {
   const navigate = useNavigate()
@@ -1356,9 +1354,9 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
               <ul className="setup-complete-list">
                 <li>Open <strong>GDrives</strong> and subscribe to the poster drive packs you want to use.</li>
-                <li>Open <strong>Poster Manager → Settings</strong> and confirm your destination directory and file operation mode.</li>
-                <li>Open <strong>Poster Manager → Drive Priority</strong> and order drives/styles so matching uses your preferred source first.</li>
-                <li>Open <strong>Poster Manager → Workflow</strong> and run a <strong>Dry Run</strong> before running the full workflow.</li>
+                <li>Open <strong>Asset Manager → Settings</strong> and confirm your destination directory and file operation mode.</li>
+                <li>Open <strong>Asset Manager → Drive Priority</strong> and order drives/styles so matching uses your preferred source first.</li>
+                <li>Open <strong>Asset Manager → Workflow</strong> and run a <strong>Dry Run</strong> before running the full workflow.</li>
                 <li>Open <strong>Settings → Scheduling</strong> to automate sync and workflow jobs.</li>
                 <li>Check <strong>Job Logs</strong> / <strong>Logs</strong> after first runs to verify everything is working as expected.</li>
               </ul>

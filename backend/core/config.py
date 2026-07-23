@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # Paths
     config_dir: Path = Path("/config")   # Database, rclone config, drives cache
     gdrive_dir: Path = Path("/config/posters/gdrive")  # Synced GDrive poster folders (overrideable via DB setting)
+    artwork_gdrive_dir: Path = Path("/config/artwork/gdrive")  # Synced GDrive artwork folders (logos/backgrounds/squareart)
     logs_dir: Path = Path("/config/logs")  # Application logs
 
     
@@ -19,6 +20,16 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 1  # Maximum concurrent sync jobs
     job_ws_poll_interval_active: float = 0.2  # seconds when jobs are running/pending
     job_ws_poll_interval_idle: float = 0.75  # seconds when no active jobs
+
+    # Rclone / GDrive sync tuning. Batch sync is sequential by design (run_sync_all_job); concurrency comes from rclone_transfers.
+    rclone_tps_limit: int = 10  # Max Drive API tps per rclone process; downloads cost 200 quota units, per-user cap ~27/sec
+    rclone_pacer_min_sleep: str = "60ms"  # Drive backend pacer; must allow more tps than rclone_tps_limit or it caps us
+    rclone_transfers: int = 8  # Concurrent file transfers per rclone process
+    rclone_upload_chunk_size: str = "64Mi"  # Buffered in RAM per transfer (64Mi x 4 uploads = 256MiB peak)
+    rclone_upload_transfers: int = 4  # Small uploads are latency-bound (~1s each) so throughput tracks this; too high earns 403s rclone absorbs as backoff
+    # Upload-only rate ceilings (uploads cost 50 quota units vs 200 for downloads); move both together — tps above 1/pacer_min_sleep is pacer-capped. None = share download values.
+    rclone_upload_tps_limit: int | None = None
+    rclone_upload_pacer_min_sleep: str | None = None
 
     # CORS
     cors_origins: str = "http://localhost:8357,http://127.0.0.1:8357,http://localhost:5173,http://127.0.0.1:5173,https://www.photopea.com"

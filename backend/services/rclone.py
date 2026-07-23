@@ -33,6 +33,15 @@ SYNC_INCLUDE_REGEX = "{{(?i).*\\.(" + "|".join(SYNC_ALLOWED_EXTENSIONS) + ")$}}"
 
 SYNC_MAX_FILE_SIZE = "250M"
 
+# Indent a drive's per-file results / notices / completion so they read as sub-items under
+# the "Syncing '<drive>' -> ..." header line. Fixed spaces (not a tab) so the offset is the
+# same regardless of the tag/icon prefix width in the log viewer.
+SYNC_RESULT_INDENT = "    "
+
+# Each rclone stats block has two "Transferred:" lines: a byte total carrying a size
+# unit, and a bare file count. Only the count may drive progress.
+BYTE_STATS_RE = re.compile(r"(?:Bytes|[KMGTP]iB)")
+
 class RcloneService:
     """Service for managing rclone operations with Google Drive"""
 
@@ -75,6 +84,8 @@ class RcloneService:
         """Create minimal rclone config file if it does not already exist."""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.config_path.exists():
+            # Read-only by default; uploader tokens already carry auth/drive and Google
+            # enforces the token's scope, not this field, so maker uploads still work.
             config_content = """[gdrive]
 type = drive
 scope = drive.readonly
@@ -98,7 +109,7 @@ scope = drive.readonly
         if "gdrive" not in config:
             config["gdrive"] = {}
         config["gdrive"]["type"] = "drive"
-        config["gdrive"]["scope"] = "drive.readonly"
+        config["gdrive"]["scope"] = "drive.readonly"  # See _ensure_config: read-only is the default posture
         config["gdrive"]["client_id"] = client_id
         config["gdrive"]["client_secret"] = client_secret
         config["gdrive"]["token"] = token_json
@@ -255,7 +266,9 @@ scope = drive.readonly
                     '--include', SYNC_INCLUDE_REGEX,  # Only pull poster/PSD file types, never arbitrary files
                     '--max-size', SYNC_MAX_FILE_SIZE,  # Skip oversized files (disk-fill protection)
                     '--fast-list',  # Faster for large folders
-                    '--tpslimit=8',  # Limit API calls to 8/sec to avoid rate limits
+                    f'--tpslimit={settings.rclone_tps_limit}',  # Cap Drive API calls/sec to avoid rate limits
+                    f'--drive-pacer-min-sleep={settings.rclone_pacer_min_sleep}',  # Lift rclone's own 10/sec pacer ceiling
+                    f'--transfers={settings.rclone_transfers}',  # Concurrent downloads
                     '--size-only',  # Compare by size only (fast)
                     '--no-update-modtime',  # Preserve original mtimes for filecmp change detection
                     '--check-first',  # Check all files before transferring
@@ -310,10 +323,10 @@ scope = drive.readonly
                         msg = line.split('INFO  :')[1].strip()
                         # Only log meaningful operations (Copied, Not copying, etc.)
                         if any(keyword in msg for keyword in ['Copied', 'Not copying', 'Deleted', 'Renamed', 'There was nothing to transfer']):
-                            log_info(LogTags.RCLONE, msg)
+                            log_info(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}{msg}")
                     except Exception as parse_error:
                         log_debug(LogTags.RCLONE, f"Failed to parse rclone INFO line: {parse_error}")
-                
+
                 # Log rclone warnings (skip stats-related NOTICE lines)
                 elif 'NOTICE:' in line or 'WARNING:' in line:
                     try:
@@ -321,11 +334,11 @@ scope = drive.readonly
                             msg = line.split('NOTICE:')[1].strip()
                             # Skip stats output (Transferred, Checks, etc.)
                             if msg and not any(skip in msg for skip in ['Transferred:', 'Checks:', 'Elapsed time']):
-                                log_warning(LogTags.RCLONE, f"Notice: {msg}")
+                                log_warning(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Notice: {msg}")
                         else:
                             msg = line.split('WARNING:')[1].strip()
                             if msg:
-                                log_warning(LogTags.RCLONE, f"Warning: {msg}")
+                                log_warning(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Warning: {msg}")
                     except Exception as parse_error:
                         log_debug(LogTags.RCLONE, f"Failed to parse rclone warning line: {parse_error}")
                 
@@ -449,7 +462,7 @@ scope = drive.readonly
                 if elapsed_time:
                     summary += f" in {elapsed_time}"
                 
-                log_success(LogTags.RCLONE, f"Completed: {summary}")
+                log_success(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Completed: {summary}")
                 # Persist any token refresh rclone performed back to the DB so the
                 # next sync doesn't overwrite a freshly-refreshed token with the old one.
                 if original_token:
@@ -538,13 +551,23 @@ scope = drive.readonly
 
             log_info(LogTags.RCLONE, f"Uploading '{local_path}' -> '{display_name}' via rclone {sync_mode}")
 
+            # Uploads may run hotter than downloads; fall back to the shared values when unset.
+            upload_tps = settings.rclone_upload_tps_limit or settings.rclone_tps_limit
+            upload_pacer = settings.rclone_upload_pacer_min_sleep or settings.rclone_pacer_min_sleep
+
             process = subprocess.Popen(  # nosec B603
                 [
                     self.rclone_binary, sync_mode, str(local_path), remote_path,
                     '--config', str(self.config_path),
                     *auth_args,
                     '--fast-list',
-                    '--tpslimit=8',
+                    f'--tpslimit={upload_tps}',
+                    f'--drive-pacer-min-sleep={upload_pacer}',
+                    f'--transfers={settings.rclone_upload_transfers}',
+                    # Bigger chunks move large PSDs in FEWER requests, which helps throughput
+                    # without adding to the write rate.
+                    f'--drive-chunk-size={settings.rclone_upload_chunk_size}',
+                    '--drive-stop-on-upload-limit',  # Fail fast on the 750GiB/day cap instead of retrying into a wall
                     '--check-first',
                     '--stats', '1s',
                     '--stats-log-level', 'NOTICE',
@@ -564,6 +587,7 @@ scope = drive.readonly
             listed_re = re.compile(r"Listed\s+([\d,]+)")
             transferred_re = re.compile(r"Transferred:\s*([\d,]+)\s*/\s*([\d,]+)")
             max_listed = 0
+            transfers_started = False
 
             if progress_callback:
                 try:
@@ -581,8 +605,18 @@ scope = drive.readonly
                     except Exception:  # nosec B110
                         pass
 
+                # Once transfers begin, rclone reprints the now-final "Checks:" line in every
+                # stats block. Reporting that as the checking phase overwrites the live upload
+                # message once a second with a frozen "Checked X/Y" -- the bar looks stuck on
+                # checking while files are in fact uploading.
+                if not transfers_started and (
+                    "now starting transfers" in line
+                    or any(k in line for k in ("Copied (", "Updated (", "Renamed ("))
+                ):
+                    transfers_started = True
+
                 checks_match = checks_re.search(line)
-                if checks_match and progress_callback:
+                if checks_match and progress_callback and not transfers_started:
                     try:
                         checked = int(checks_match.group(1).replace(",", ""))
                         checked_total = int(checks_match.group(2).replace(",", ""))
@@ -604,13 +638,18 @@ scope = drive.readonly
                     except Exception as callback_error:
                         log_warning(LogTags.RCLONE, f"Upload progress callback error: {callback_error}")
 
-                transferred_match = transferred_re.search(line)
+                # Skip the byte-total line; its "0 / 0 Bytes" would read as a file count.
+                transferred_match = None if BYTE_STATS_RE.search(line) else transferred_re.search(line)
                 if transferred_match and progress_callback:
                     try:
                         transferred_count = int(transferred_match.group(1).replace(",", ""))
                         transferred_total = int(transferred_match.group(2).replace(",", ""))
-                        if transferred_count <= 0 and transferred_total > 0:
+                        # Nothing transferred yet means we're still listing/checking. --check-first
+                        # prints "0 / 0" every second; emitting an uploading phase here pins the
+                        # bar at the uploading floor for the rest of the run.
+                        if transferred_count <= 0:
                             continue
+                        transfers_started = True
                         effective_total = max(transferred_total, transferred_count, 1)
                         progress_callback(
                             min(transferred_count, effective_total),
@@ -625,7 +664,7 @@ scope = drive.readonly
                     try:
                         msg = line.split('INFO  :', 1)[1].strip()
                         if any(keyword in msg for keyword in ['Copied', 'Updated', 'Deleted', 'Renamed', 'There was nothing to transfer']):
-                            log_info(LogTags.RCLONE, msg)
+                            log_info(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}{msg}")
                             if any(keyword in msg for keyword in ['Copied', 'Updated', 'Renamed']):
                                 files_uploaded += 1
                                 if progress_callback:
@@ -645,11 +684,11 @@ scope = drive.readonly
                         if 'NOTICE:' in line:
                             msg = line.split('NOTICE:', 1)[1].strip()
                             if msg and not any(skip in msg for skip in ['Transferred:', 'Checks:', 'Elapsed time']):
-                                log_warning(LogTags.RCLONE, f"Notice: {msg}")
+                                log_warning(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Notice: {msg}")
                         else:
                             msg = line.split('WARNING:', 1)[1].strip()
                             if msg:
-                                log_warning(LogTags.RCLONE, f"Warning: {msg}")
+                                log_warning(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Warning: {msg}")
                     except Exception:
                         log_debug(LogTags.RCLONE, "Failed to parse upload NOTICE/WARNING line")
                 elif 'ERROR :' in line or 'ERROR:' in line:
@@ -673,7 +712,7 @@ scope = drive.readonly
                         )
                     except Exception as callback_error:
                         log_warning(LogTags.RCLONE, f"Upload progress callback error: {callback_error}")
-                log_success(LogTags.RCLONE, f"Upload complete to '{display_name}' ({sync_mode})")
+                log_success(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Upload complete to '{display_name}' ({sync_mode})")
                 return {"success": True, "mode": sync_mode, "files_uploaded": files_uploaded}
 
             error_output = ''.join(recent_lines).strip()

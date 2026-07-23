@@ -1,5 +1,14 @@
 import { MutableRefObject, useEffect, useRef, useState } from 'react'
 import { Drive, getDrivePriority, saveDrivePriority } from '../api/client'
+import {
+  TOUCH_DRAG_THRESHOLD,
+  TOUCH_EDGE_SPEED,
+  TOUCH_EDGE_ZONE,
+  TouchDragState,
+  createTouchGhost,
+  findTouch,
+  resolveTouchDrop,
+} from '../utils/touchDragList'
 
 type ToastType = 'success' | 'error' | 'info'
 
@@ -21,73 +30,6 @@ interface UsePosterManagerPriorityParams {
 // the native path uses. It reuses only the shared priorityList / draggedDrive /
 // dragOverIndex state — nothing in the native handlers is modified.
 // ============================================================================
-
-type TouchDrop =
-  | { type: 'priority'; index: number }
-  | { type: 'available' }
-  | { type: 'none' }
-
-const TOUCH_DRAG_THRESHOLD = 6 // px of finger travel before a press becomes a drag
-const TOUCH_EDGE_ZONE = 56 // px from a scroll container edge that triggers auto-scroll
-const TOUCH_EDGE_SPEED = 14 // px per frame auto-scroll speed
-
-interface TouchDragState {
-  touchId: number
-  drive: Drive
-  sourceEl: HTMLElement
-  startX: number
-  startY: number
-  lastY: number
-  offsetX: number
-  offsetY: number
-  started: boolean
-  ghost: HTMLElement | null
-  scrollEl: HTMLElement | null
-}
-
-const findTouch = (touches: TouchList, id: number): Touch | null => {
-  for (let i = 0; i < touches.length; i++) {
-    if (touches[i].identifier === id) return touches[i]
-  }
-  return null
-}
-
-// Where a touch at (x, y) would land, using the element under the finger.
-const resolveTouchDrop = (el: HTMLElement | null, y: number, listLength: number): TouchDrop => {
-  if (!el) return { type: 'none' }
-  if (el.closest('.available-drives')) return { type: 'available' }
-  if (el.closest('.priority-drop-zone')) {
-    const cardEl = el.closest('[data-priority-index]') as HTMLElement | null
-    if (cardEl) {
-      const index = Number(cardEl.dataset.priorityIndex)
-      const rect = cardEl.getBoundingClientRect()
-      return { type: 'priority', index: y > rect.top + rect.height / 2 ? index + 1 : index }
-    }
-    if (el.closest('.drop-zone-start')) return { type: 'priority', index: 0 }
-    return { type: 'priority', index: listLength }
-  }
-  return { type: 'none' }
-}
-
-const createTouchGhost = (source: HTMLElement, x: number, y: number) => {
-  const rect = source.getBoundingClientRect()
-  const offsetX = x - rect.left
-  const offsetY = y - rect.top
-  const ghost = source.cloneNode(true) as HTMLElement
-  ghost.classList.add('drag-ghost')
-  ghost.classList.remove('drop-target-before', 'drop-target-after')
-  ghost.style.position = 'fixed'
-  ghost.style.left = '0'
-  ghost.style.top = '0'
-  ghost.style.width = `${rect.width}px`
-  ghost.style.height = `${rect.height}px`
-  ghost.style.margin = '0'
-  ghost.style.pointerEvents = 'none'
-  ghost.style.zIndex = '9999'
-  ghost.style.transform = `translate3d(${x - offsetX}px, ${y - offsetY}px, 0)`
-  document.body.appendChild(ghost)
-  return { ghost, offsetX, offsetY }
-}
 
 export const usePosterManagerPriority = ({
   drives,
@@ -351,7 +293,7 @@ export const usePosterManagerPriority = ({
   // Refs let the window-level touch listeners read fresh state without re-subscribing.
   const priorityListRef = useRef<Drive[]>(priorityList)
   priorityListRef.current = priorityList
-  const touchDragRef = useRef<TouchDragState | null>(null)
+  const touchDragRef = useRef<TouchDragState<Drive> | null>(null)
   const touchAutoScrollRaf = useRef<number | null>(null)
   // Last indicator value pushed to React, so we only re-render on an actual change.
   const touchIndicatorRef = useRef<number | null>(null)

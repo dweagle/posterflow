@@ -32,73 +32,65 @@
   margin-bottom: 1.5rem;
 }
 
+/* Toolbar styling lives in styles/globals.css. This bar sits in .maker-tools-panel,
+   a flex column whose gap already spaces it, so it drops the baseline's bottom margin. */
 .maker-tools-page .toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem;
-  background-color: #3D4556;
-  border-radius: 8px;
   margin-bottom: 0;
 }
 
-.maker-tools-page .toolbar-title {
+/* Toolbar primary buttons keep the standard .btn-toolbar size. The larger
+   .maker-tools-page .btn-primary sizing below is meant for modal Save buttons, but it also
+   matches toolbar buttons (e.g. Run Monitor) and made them taller than a plain .btn-toolbar. */
+.maker-tools-page .toolbar .btn-toolbar.btn-primary {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+.artwork-scope-control {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
+  margin-left: 0.75rem;
+  color: #cfd6e4;
 }
 
-.maker-tools-page .toolbar h2 {
-  color: #64b5f6;
-  margin: 0;
-  font-size: 1.25rem;
+.artwork-scope-control .artwork-scope-label {
+  font-weight: 600;
+  font-size: 0.85rem;
   white-space: nowrap;
 }
 
-.maker-tools-page .toolbar-info {
-  position: relative;
-  display: flex;
-  align-items: center;
-  color: #aaa;
-  cursor: default;
-}
-
-.maker-tools-page .toolbar-tooltip {
-  display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 280px;
-  background: #2a2a2a;
-  border: 1px solid #424242;
+.artwork-scope-control select {
+  background: #2a3040;
+  border: 1px solid #566178;
+  color: #fff;
   border-radius: 6px;
-  padding: 0.5rem 0.65rem;
-  font-size: 0.8rem;
-  color: #ccc;
-  line-height: 1.45;
-  z-index: 50;
-  pointer-events: none;
-  white-space: normal;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-width: 200px;
+  transition: border-color 0.15s;
 }
 
-.maker-tools-page .toolbar-info:hover .toolbar-tooltip {
-  display: block;
+.artwork-scope-control select:hover,
+.artwork-scope-control select:focus {
+  border-color: #64b5f6;
+  outline: none;
 }
 
-.maker-tools-page .action-buttons {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+/* Missing-artwork badges on unmatched cards — red-tinted so they don't read as the
+   blue/green/orange media-type badges. Page-scoped: appears on finder cards AND the
+   resolve-first cards. */
+.maker-tools-page .badge.artwork-missing-badge {
+  background: rgba(239, 83, 80, 0.16);
+  border: 1px solid rgba(239, 83, 80, 0.45);
+  color: #ef9a9a;
 }
 
-.maker-tools-page .btn-pair {
-  display: flex;
-  gap: 0.5rem;
-  width: 185px;
-  flex-shrink: 0;
+.maker-tools-page .artwork-missing-label {
+  color: #999;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .maker-tools-page .modal-overlay {
@@ -344,63 +336,7 @@
   margin: 0 0 0.45rem;
 }
 
-.maker-tools-page .btn-toolbar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  border: none;
-  border-radius: 6px;
-  background: #5c6882;
-  color: #E8ECEF;
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
-  min-width: 185px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.maker-tools-page .btn-toolbar.btn-toolbar-link {
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-  border: 1px solid #4b5563;
-  background: #424242;
-  padding: 0.45rem 0.25rem;
-  font-size: 0.85rem;
-}
-
-.maker-tools-page .btn-toolbar:hover:not(:disabled) {
-  background: #6c7892;
-}
-
-.maker-tools-page .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
-  background: #555;
-}
-
-.maker-tools-page .btn-toolbar:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.maker-tools-page .btn-toolbar.btn-primary {
-  background: #64b5f6;
-  border-color: #64b5f6;
-}
-
-.maker-tools-page .btn-toolbar.btn-primary:hover:not(:disabled) {
-  background: #42a5f5;
-  border-color: #42a5f5;
-}
-
-.maker-tools-page .btn-toolbar.btn-danger {
-  background: #3f2727;
-  border-color: #5b3131;
-}
-
-.maker-tools-page .btn-toolbar.btn-danger:hover:not(:disabled) {
-  background: #542f2f;
-}
+/* Toolbar button styling lives in styles/globals.css. */
 
 .maker-list-item.maker-drive-item .btn-toolbar.btn-danger {
   min-width: 44px;
@@ -677,27 +613,6 @@
   border-color: rgba(255, 255, 255, 0.25);
 }
 
-@media (max-width: 1300px) {
-  .maker-tools-page .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .maker-tools-page .toolbar-title {
-    width: 100%;
-  }
-
-  .maker-tools-page .action-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 185px);
-    gap: 0.5rem;
-  }
-
-  .maker-tools-page .btn-pair {
-    width: 185px;
-  }
-}
-
 @media (max-width: 1200px) {
   .maker-grid {
     grid-template-columns: 1fr;
@@ -736,22 +651,6 @@
 }
 
 @media (max-width: 550px) {
-  .maker-tools-page .action-buttons {
-    grid-template-columns: 1fr;
-  }
-
-  .maker-tools-page .btn-pair {
-    width: 100%;
-  }
-
-  .maker-tools-page .btn-toolbar {
-    min-width: 0;
-  }
-
-  .maker-tools-page .toolbar-info:hover .toolbar-tooltip {
-    display: none;
-  }
-
   .maker-library-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

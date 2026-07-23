@@ -111,18 +111,28 @@ export const usePosterManagerLibraries = ({
       const data = await getPlexLibraryConfigs()
       setLibraryConfigs(data.configs)
 
-      const settingKey = activeTab === 'unmatched' ? 'unmatched_assets_libraries' : 'poster_renamer_libraries'
+      const settingKey =
+        activeTab === 'unmatched' ? 'unmatched_assets_libraries'
+        : 'asset_renamer_libraries'
 
       const settings = await getSettings()
       let finalSelection: Set<string> = new Set()
 
-      const rawSelection = settings[settingKey]
+      // Seed the unified asset selection from the user's existing poster selection on first use.
+      const seedFromPoster = (settingKey === 'asset_renamer_libraries' && !settings[settingKey])
+        ? settings['poster_renamer_libraries']
+        : undefined
+      const rawSelection = settings[settingKey] || seedFromPoster
 
       if (rawSelection) {
         try {
           const saved = JSON.parse(rawSelection)
           finalSelection = new Set(saved)
           setSelectedLibraries(finalSelection)
+          // Persist the seeded selection so future loads read asset_renamer_libraries directly.
+          if (seedFromPoster && !settings[settingKey]) {
+            await saveBulkSettings({ [settingKey]: rawSelection })
+          }
         } catch (error) {
           console.error(`Error parsing ${settingKey}:`, error)
         }
@@ -180,7 +190,9 @@ export const usePosterManagerLibraries = ({
 
   const saveRenameSettings = async () => {
     try {
-      const settingKey = activeTab === 'unmatched' ? 'unmatched_assets_libraries' : 'poster_renamer_libraries'
+      const settingKey =
+        activeTab === 'unmatched' ? 'unmatched_assets_libraries'
+        : 'asset_renamer_libraries'
       const libraryArray = Array.from(selectedLibraries)
 
       const settingsToSave: Record<string, string> = {
@@ -222,7 +234,7 @@ export const usePosterManagerLibraries = ({
         setHasUnsavedBorderChanges(false)
       }
 
-      const featureName = activeTab === 'unmatched' ? 'Unmatched assets' : 'Poster Renamer'
+      const featureName = activeTab === 'unmatched' ? 'Unmatched assets' : 'Asset Renamer'
       showToast(`${featureName} settings saved successfully`)
     } catch (error) {
       console.error('Error saving library settings:', error)

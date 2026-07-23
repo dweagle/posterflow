@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye, Info, Play, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import Toolbar from './Toolbar'
+import Toolbar from '../Toolbar'
 import BorderStyleControls, { BorderStyleValue, OverlaySelect, StyleValuePreview } from './BorderStyleControls'
 import PlexRulesSection from './PlexRulesSection'
 import NumberField from './NumberField'
@@ -60,6 +60,7 @@ type BorderTabProps = {
   hasUnsavedBorderChanges: boolean
   saving: boolean
   runningBorderReplacer: boolean
+  settingsLoaded: boolean
   borderWidth: number
   bandWidth: number
   borderMode: 'incremental' | 'full'
@@ -122,6 +123,7 @@ function BorderTab({
   hasUnsavedBorderChanges,
   saving,
   runningBorderReplacer,
+  settingsLoaded,
   borderWidth,
   bandWidth,
   borderMode,
@@ -436,6 +438,10 @@ function BorderTab({
         </button>
       </Toolbar>
 
+      {!settingsLoaded ? (
+        <div className="settings-section"><p className="section-description">Loading border settings…</p></div>
+      ) : (
+      <>
       <div className="settings-section border-settings-card">
         <div className="section-header-row">
           <h2>Border Settings</h2>
@@ -456,7 +462,7 @@ function BorderTab({
                 <Info size={14} />
                 <div className="toolbar-tooltip">
                   When enabled, only processes items changed since the last run (faster); when disabled, processes all items regardless of changes.
-                  Applies to all execution paths: workflow, auto-run after Poster Renamer, and standalone runs.
+                  Applies to all execution paths: workflow, auto-run after Asset Renamer, and standalone runs.
                 </div>
               </span>
             </div>
@@ -1023,6 +1029,8 @@ function BorderTab({
         onToggleRunType={onToggleRuleRunType}
         onToggleLibrary={onToggleRuleLibrary}
       />
+      </>
+      )}
 
       <ConfirmDialog
         isOpen={showResetConfirm}

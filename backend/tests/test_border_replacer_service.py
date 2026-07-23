@@ -78,6 +78,40 @@ def test_main_style_remove_strips_border(test_db, tmp_path):
     assert _get_corner_color(destination_dir / "Movie (2020)" / "poster.png") == (0, 0, 255)
 
 
+def test_border_skips_artwork_files(test_db, tmp_path):
+    """Artwork (logo/background/square) now shares the item folder + tmp/ staging with posters,
+    so the border replacer must skip it — only posters get bordered."""
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    item = source_dir / "Movie (2020)"
+    item.mkdir(parents=True)
+    for name in ("poster.png", "logo.png", "background.jpg", "square.jpg"):
+        _create_source_image(item / name, (0, 255, 0))
+    # flat-named artwork must be skipped too
+    _create_source_image(source_dir / "Movie (2020)-logo.png", (0, 255, 0))
+
+    service = BorderReplacerService(test_db)
+    result = service.process_posters(
+        source_dir=str(source_dir),
+        destination_dir=str(destination_dir),
+        border_colors=["#FF0000"],
+        remove_borders=False,
+        border_width=26,
+        exclusion_list=[],
+        dry_run=False,
+        mode="full",
+        style_opts={"style": "solid"},
+    )
+    assert result["success"] is True
+    dest_item = destination_dir / "Movie (2020)"
+    assert (dest_item / "poster.png").is_file()                 # poster bordered → placed
+    assert _get_corner_color(dest_item / "poster.png") == (255, 0, 0)  # red border applied
+    assert not (dest_item / "logo.png").exists()                # artwork skipped
+    assert not (dest_item / "background.jpg").exists()
+    assert not (dest_item / "square.jpg").exists()
+    assert not (destination_dir / "Movie (2020)-logo.png").exists()  # flat artwork skipped
+
+
 def test_active_holiday_overrides_main_remove_style(test_db, tmp_path):
     """With main style='remove', an active holiday still applies its border — the whole point
     of using the style instead of the global remove-borders toggle."""

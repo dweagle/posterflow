@@ -20,8 +20,10 @@ from models.job import (
     job_type_sync_group,
 )
 from models.drive import Drive
+from models.artwork_drive import ArtworkDrive
 from models.idarr import resolve_idarr_scope_token
 from models.setting import get_setting_value
+from util.poster_settings import get_poster_destination
 from models.workflow import get_workflow_config
 from core.config import settings
 from core.job_queue import job_queue
@@ -126,16 +128,10 @@ def sync_all_drives_job(job_id: int) -> dict:
     """
     return run_sync_all_job(job_id, triggered_by="scheduled")
 
-def sync_drive_group_job(drive_group: str) -> None:
-    """
-    Background job to sync all drives of a specific group (CL2K, MM2K, or Custom).
-    Called by APScheduler for scheduled tasks.
-    
-    Args:
-        drive_group: The group to sync - 'CL2K', 'MM2K', or 'Custom'
-    """
-    return run_sync_group_job(drive_group, triggered_by="scheduled")
-
+def sync_all_artwork_drives_job(job_id: int) -> dict:
+    """Sync all subscribed artwork drives. Artwork is a separate drive type with its own
+    table, so it schedules separately from poster drives (same unified sync entrypoint)."""
+    return run_sync_all_job(job_id, triggered_by="scheduled", sync_posters=False, sync_artwork=True)
 
 def sync_drive_group_for_schedule(drive_group: str) -> None:
     """
@@ -176,7 +172,7 @@ def run_workflow_for_schedule(workflow_id: Optional[int] = None) -> None:
 def run_poster_rename_for_schedule() -> None:
     """Wrapper for scheduled Poster Renamer runs."""
     def _submit(db: Session) -> None:
-        destination = get_setting_value(db, "poster_destination", "/config/posters/assets")
+        destination = get_poster_destination(db)
         action_type = get_setting_value(db, "poster_action_type", "copy")
         asset_folders_value = get_setting_value(db, "poster_asset_folders", "true")
         asset_folders = str(asset_folders_value).lower() == "true"
@@ -187,6 +183,9 @@ def run_poster_rename_for_schedule() -> None:
             "asset_folders": asset_folders,
             "dry_run": False,
             "match_threshold": 0.8,
+            # Same selection as UI/workflow/API runs — without this the renamer falls
+            # back to the legacy poster_renamer_libraries key and drifts from the UI.
+            "library_setting_key": "asset_renamer_libraries",
         }
 
         _queue_pending_job(
@@ -208,6 +207,7 @@ def run_unmatched_assets_for_schedule() -> None:
             db,
             JOB_TYPE_UNMATCHED_DETECTION,
             run_unmatched_detection_background_job,
+            # One slot-aware pass covers posters AND artwork.
             args_builder=lambda job: (job.id,),
             runner_kwargs={"triggered_by": "scheduled"},
         ),
@@ -375,6 +375,19 @@ def sync_all_drives_for_schedule() -> None:
 
     _run_scheduled_operation("Scheduled all drives sync failed", _submit)
 
+def sync_all_artwork_drives_for_schedule() -> None:
+    """Wrapper for scheduled artwork-drive syncs."""
+    def _submit(db: Session) -> None:
+        drives_count = db.query(ArtworkDrive).filter(ArtworkDrive.subscribed == True).count()
+        _queue_pending_job(
+            db,
+            f"Artwork Sync All ({drives_count} drives)" if drives_count else "Artwork Sync All",
+            sync_all_artwork_drives_job,
+            args_builder=lambda job: (job.id,),
+        )
+
+    _run_scheduled_operation("Scheduled artwork drives sync failed", _submit)
+
 def update_schedules() -> None:
     """
     Update APScheduler jobs from database schedules.
@@ -402,6 +415,11 @@ def update_schedules() -> None:
                 else:
                     job_func = sync_all_drives_for_schedule
                     job_args = []
+            elif schedule.job_type == 'artwork_sync':
+                # Artwork schedules cover every subscribed artwork drive — the per-drive
+                # and drive_group columns are poster-drive concepts.
+                job_func = sync_all_artwork_drives_for_schedule
+                job_args = []
             elif schedule.job_type == 'poster_workflow':
                 job_func = run_workflow_for_schedule
                 workflow_id = None

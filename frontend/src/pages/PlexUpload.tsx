@@ -1,5 +1,5 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { Settings2, UploadCloud, RefreshCw, Webhook, Search } from 'lucide-react'
+import { BookOpen, Save, UploadCloud, RefreshCw, Webhook, Search } from 'lucide-react'
 import {
   getApiErrorMessage,
   getJob,
@@ -36,14 +36,17 @@ import {
 } from '../api/client'
 import { useToast } from '../components/Toast'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
+import Toolbar from '../components/Toolbar'
 import './PlexUpload.css'
 
 
-type PlexUploadTab = 'manual' | 'settings'
+// 'webhook' names what that tab actually configures; manual run options stay beside the
+// run buttons. 'activity' holds monitoring (stats + cache), which isn't configuration.
+type PlexUploadTab = 'webhook' | 'manual' | 'activity'
 const PLEX_UPLOAD_TAB_STORAGE_KEY = 'posterflow.plexUpload.activeTab'
 
 const isPlexUploadTab = (value: string): value is PlexUploadTab => {
-  return ['manual', 'settings'].includes(value)
+  return ['webhook', 'manual', 'activity'].includes(value)
 }
 
 type ManualSettingsSnapshot = {
@@ -54,11 +57,13 @@ type ManualSettingsSnapshot = {
   rename_before_upload: boolean
   border_before_upload: boolean
   upload_delay_ms: number
+  upload_artwork: boolean
 }
 
 type AutomationSettingsSnapshot = {
   webhook_enabled: boolean
   webhook_remove_overlay_label: boolean
+  webhook_artwork: boolean
   webhook_rename_then_upload: boolean
   webhook_adopt_existing_processed: boolean
   webhook_retry_attempts: number
@@ -88,7 +93,7 @@ const normalizeOverrideConfigs = (configs: PlexUploadLibraryConfig[]): PlexUploa
     .sort((left, right) => String(left.instance_name).localeCompare(String(right.instance_name)))
 }
 
-const createManualSnapshot = (dryRun: boolean, reapply: boolean, removeOverlayLabel: boolean, syncBeforeUpload: boolean, renameBeforeUpload: boolean, borderBeforeUpload: boolean, uploadDelayMs: number): ManualSettingsSnapshot => ({
+const createManualSnapshot = (dryRun: boolean, reapply: boolean, removeOverlayLabel: boolean, syncBeforeUpload: boolean, renameBeforeUpload: boolean, borderBeforeUpload: boolean, uploadDelayMs: number, uploadArtwork: boolean): ManualSettingsSnapshot => ({
   dry_run: Boolean(dryRun),
   reapply: Boolean(reapply),
   remove_overlay_label: Boolean(removeOverlayLabel),
@@ -96,11 +101,13 @@ const createManualSnapshot = (dryRun: boolean, reapply: boolean, removeOverlayLa
   rename_before_upload: Boolean(renameBeforeUpload),
   border_before_upload: Boolean(borderBeforeUpload),
   upload_delay_ms: Number(uploadDelayMs) || 50,
+  upload_artwork: Boolean(uploadArtwork),
 })
 
 const createAutomationSnapshot = (
   webhookEnabled: boolean,
   webhookRemoveOverlayLabel: boolean,
+  webhookArtwork: boolean,
   webhookRenameThenUpload: boolean,
   webhookAdoptExistingProcessed: boolean,
   webhookRetryAttempts: number,
@@ -111,6 +118,7 @@ const createAutomationSnapshot = (
 ): AutomationSettingsSnapshot => ({
   webhook_enabled: Boolean(webhookEnabled),
   webhook_remove_overlay_label: Boolean(webhookRemoveOverlayLabel),
+  webhook_artwork: Boolean(webhookArtwork),
   webhook_rename_then_upload: Boolean(webhookRenameThenUpload),
   webhook_adopt_existing_processed: Boolean(webhookAdoptExistingProcessed),
   webhook_retry_attempts: Number(webhookRetryAttempts) || 10,
@@ -120,6 +128,7 @@ const createAutomationSnapshot = (
   override_configs: normalizeOverrideConfigs(overrideConfigs),
 })
 
+// Rendered only as the Asset Manager's Plex Upload tab, inside that page's container.
 function PlexUpload() {
   const SEARCH_DEBOUNCE_MS = 250
   const CACHE_BROWSER_PAGE_SIZE = 25
@@ -128,7 +137,7 @@ function PlexUpload() {
     if (savedTab && isPlexUploadTab(savedTab)) {
       return savedTab
     }
-    return 'settings'
+    return 'webhook' // also migrates the old 'settings' tab id
   })
   const [manualSettingsReady, setManualSettingsReady] = useState(false)
   const [toggleSettingsReady, setToggleSettingsReady] = useState(false)
@@ -139,6 +148,7 @@ function PlexUpload() {
   const [renameBeforeUpload, setRenameBeforeUpload] = useState(true)
   const [borderBeforeUpload, setBorderBeforeUpload] = useState(false)
   const [manualUploadDelayMs, setManualUploadDelayMs] = useState(50)
+  const [uploadArtwork, setUploadArtwork] = useState(false)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
   const [manualSettingsLoading, setManualSettingsLoading] = useState(false)
   const [manualSettingsSaving, setManualSettingsSaving] = useState(false)
@@ -149,6 +159,7 @@ function PlexUpload() {
   const [webhookSaving, setWebhookSaving] = useState(false)
   const [webhookEnabled, setWebhookEnabled] = useState(true)
   const [webhookRemoveOverlayLabel, setWebhookRemoveOverlayLabel] = useState(true)
+  const [webhookArtwork, setWebhookArtwork] = useState(false)
   const [webhookRenameThenUpload, setWebhookRenameThenUpload] = useState(true)
   const [webhookAdoptExistingProcessed, setWebhookAdoptExistingProcessed] = useState(true)
   const [webhookRetryAttempts, setWebhookRetryAttempts] = useState(10)
@@ -196,11 +207,12 @@ function PlexUpload() {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false)
   const [pendingTabChange, setPendingTabChange] = useState<PlexUploadTab | null>(null)
   const singleSourceSearchInputRef = useRef<HTMLInputElement | null>(null)
-  const manualBaselineRef = useRef<ManualSettingsSnapshot>(createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs))
+  const manualBaselineRef = useRef<ManualSettingsSnapshot>(createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs, uploadArtwork))
   const automationBaselineRef = useRef<AutomationSettingsSnapshot>(
     createAutomationSnapshot(
       webhookEnabled,
       webhookRemoveOverlayLabel,
+      webhookArtwork,
       webhookRenameThenUpload,
       webhookAdoptExistingProcessed,
       webhookRetryAttempts,
@@ -452,6 +464,7 @@ function PlexUpload() {
       const settings = await getPlexWebhookSettings()
       const nextWebhookEnabled = Boolean(settings.enabled)
       const nextWebhookRemoveOverlayLabel = Boolean(settings.remove_overlay_label)
+      const nextWebhookArtwork = Boolean(settings.artwork)
       const nextWebhookRenameThenUpload = Boolean(settings.rename_then_upload)
       const nextWebhookAdoptExistingProcessed = Boolean(settings.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(settings.retry_attempts) || 10
@@ -460,6 +473,7 @@ function PlexUpload() {
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)
+      setWebhookArtwork(nextWebhookArtwork)
       setWebhookRenameThenUpload(nextWebhookRenameThenUpload)
       setWebhookAdoptExistingProcessed(nextWebhookAdoptExistingProcessed)
       setWebhookRetryAttempts(nextWebhookRetryAttempts)
@@ -469,6 +483,7 @@ function PlexUpload() {
       automationBaselineRef.current = createAutomationSnapshot(
         nextWebhookEnabled,
         nextWebhookRemoveOverlayLabel,
+        nextWebhookArtwork,
         nextWebhookRenameThenUpload,
         nextWebhookAdoptExistingProcessed,
         nextWebhookRetryAttempts,
@@ -497,6 +512,7 @@ function PlexUpload() {
         Boolean(settings.rename_before_upload ?? true),
         Boolean(settings.border_before_upload ?? false),
         Number(settings.upload_delay_ms) || 50,
+        Boolean(settings.upload_artwork ?? false),
       )
 
       setDryRun(nextSnapshot.dry_run)
@@ -506,6 +522,7 @@ function PlexUpload() {
       setRenameBeforeUpload(nextSnapshot.rename_before_upload)
       setBorderBeforeUpload(nextSnapshot.border_before_upload)
       setManualUploadDelayMs(nextSnapshot.upload_delay_ms)
+      setUploadArtwork(nextSnapshot.upload_artwork)
       manualBaselineRef.current = nextSnapshot
     } catch (error) {
       console.error('Failed to load manual Plex Upload settings:', error)
@@ -527,6 +544,7 @@ function PlexUpload() {
         rename_before_upload: renameBeforeUpload,
         border_before_upload: borderBeforeUpload,
         upload_delay_ms: manualUploadDelayMs,
+        upload_artwork: uploadArtwork,
       })
 
       const nextSnapshot = createManualSnapshot(
@@ -537,6 +555,7 @@ function PlexUpload() {
         Boolean(response.rename_before_upload ?? true),
         Boolean(response.border_before_upload ?? false),
         Number(response.upload_delay_ms) || 50,
+        Boolean(response.upload_artwork ?? false),
       )
 
       setDryRun(nextSnapshot.dry_run)
@@ -546,6 +565,7 @@ function PlexUpload() {
       setRenameBeforeUpload(nextSnapshot.rename_before_upload)
       setBorderBeforeUpload(nextSnapshot.border_before_upload)
       setManualUploadDelayMs(nextSnapshot.upload_delay_ms)
+      setUploadArtwork(nextSnapshot.upload_artwork)
       manualBaselineRef.current = nextSnapshot
       setHasUnsavedManualSettings(false)
       showToast('Manual run settings saved', 'success')
@@ -688,6 +708,7 @@ function PlexUpload() {
       automationBaselineRef.current = createAutomationSnapshot(
         automationBaselineRef.current.webhook_enabled,
         automationBaselineRef.current.webhook_remove_overlay_label,
+        automationBaselineRef.current.webhook_artwork,
         automationBaselineRef.current.webhook_rename_then_upload,
         automationBaselineRef.current.webhook_adopt_existing_processed,
         automationBaselineRef.current.webhook_retry_attempts,
@@ -761,6 +782,7 @@ function PlexUpload() {
       automationBaselineRef.current = createAutomationSnapshot(
         automationBaselineRef.current.webhook_enabled,
         automationBaselineRef.current.webhook_remove_overlay_label,
+        automationBaselineRef.current.webhook_artwork,
         automationBaselineRef.current.webhook_rename_then_upload,
         automationBaselineRef.current.webhook_adopt_existing_processed,
         automationBaselineRef.current.webhook_retry_attempts,
@@ -809,6 +831,8 @@ function PlexUpload() {
       const [mapResponse, settings] = await Promise.all([getPlexUploadInstanceMap(), getSettings()])
       setInstanceMap(mapResponse.map || {})
       setArrInstanceNames(parseArrInstanceNames(settings))
+      // upload_artwork now arrives with the rest of the manual settings, so it isn't read
+      // here — a second writer would race that load and clobber an unsaved edit.
     } catch (error) {
       console.error('Failed to load Plex Upload instance routing map:', error)
       showToast(getApiErrorMessage(error, 'Failed to load instance routing map'), 'error')
@@ -865,6 +889,11 @@ function PlexUpload() {
     const separator = effectiveWebhookUrl.includes('?') ? '&' : '?'
     return `${effectiveWebhookUrl}${separator}instance=${encodeURIComponent(instanceName)}`
   }
+
+  // Stale ?instance= names reported by the backend — a webhook URL still pointing at a
+  // renamed/removed arr instance. Noisiest first.
+  const unknownInstanceTokens = Object.entries(webhookStats?.unknown_instance_tokens ?? {})
+    .sort((a, b) => (b[1]?.count ?? 0) - (a[1]?.count ?? 0))
 
   // Resolve a (plex instance, library key) pair to its human-readable library title
   // for the compact routing summary shown on the page.
@@ -1009,6 +1038,7 @@ function PlexUpload() {
       const response = await savePlexWebhookSettings({
         enabled: webhookEnabled,
         remove_overlay_label: webhookRemoveOverlayLabel,
+        artwork: webhookArtwork,
         rename_then_upload: webhookRenameThenUpload,
         adopt_existing_processed: webhookAdoptExistingProcessed,
         retry_attempts: webhookRetryAttempts,
@@ -1017,6 +1047,7 @@ function PlexUpload() {
       })
       const nextWebhookEnabled = Boolean(response.enabled)
       const nextWebhookRemoveOverlayLabel = Boolean(response.remove_overlay_label)
+      const nextWebhookArtwork = Boolean(response.artwork)
       const nextWebhookRenameThenUpload = Boolean(response.rename_then_upload)
       const nextWebhookAdoptExistingProcessed = Boolean(response.adopt_existing_processed)
       const nextWebhookRetryAttempts = Number(response.retry_attempts) || 10
@@ -1025,6 +1056,7 @@ function PlexUpload() {
 
       setWebhookEnabled(nextWebhookEnabled)
       setWebhookRemoveOverlayLabel(nextWebhookRemoveOverlayLabel)
+      setWebhookArtwork(nextWebhookArtwork)
       setWebhookRenameThenUpload(nextWebhookRenameThenUpload)
       setWebhookAdoptExistingProcessed(nextWebhookAdoptExistingProcessed)
       setWebhookRetryAttempts(nextWebhookRetryAttempts)
@@ -1034,6 +1066,7 @@ function PlexUpload() {
       automationBaselineRef.current = createAutomationSnapshot(
         nextWebhookEnabled,
         nextWebhookRemoveOverlayLabel,
+        nextWebhookArtwork,
         nextWebhookRenameThenUpload,
         nextWebhookAdoptExistingProcessed,
         nextWebhookRetryAttempts,
@@ -1120,9 +1153,9 @@ function PlexUpload() {
       return
     }
 
-    const currentSnapshot = createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs)
+    const currentSnapshot = createManualSnapshot(dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs, uploadArtwork)
     setHasUnsavedManualSettings(JSON.stringify(currentSnapshot) !== JSON.stringify(manualBaselineRef.current))
-  }, [manualSettingsReady, dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs])
+  }, [manualSettingsReady, dryRun, reapply, removeOverlayLabel, syncBeforeUpload, renameBeforeUpload, borderBeforeUpload, manualUploadDelayMs, uploadArtwork])
 
   useEffect(() => {
     if (!toggleSettingsReady) {
@@ -1132,6 +1165,7 @@ function PlexUpload() {
     const currentSnapshot = createAutomationSnapshot(
       webhookEnabled,
       webhookRemoveOverlayLabel,
+      webhookArtwork,
       webhookRenameThenUpload,
       webhookAdoptExistingProcessed,
       webhookRetryAttempts,
@@ -1146,6 +1180,7 @@ function PlexUpload() {
     toggleSettingsReady,
     webhookEnabled,
     webhookRemoveOverlayLabel,
+    webhookArtwork,
     webhookRenameThenUpload,
     webhookAdoptExistingProcessed,
     webhookRetryAttempts,
@@ -1158,7 +1193,7 @@ function PlexUpload() {
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const hasUnsavedChanges = (activeTab === 'manual' && hasUnsavedManualSettings)
-        || (activeTab === 'settings' && hasUnsavedAutomationSettings)
+        || (activeTab === 'webhook' && hasUnsavedAutomationSettings)
 
       if (hasUnsavedChanges) {
         event.preventDefault()
@@ -1178,7 +1213,7 @@ function PlexUpload() {
     }
 
     const hasUnsavedOnActiveTab = (activeTab === 'manual' && hasUnsavedManualSettings)
-      || (activeTab === 'settings' && hasUnsavedAutomationSettings)
+      || (activeTab === 'webhook' && hasUnsavedAutomationSettings)
 
     if (hasUnsavedOnActiveTab) {
       setPendingTabChange(nextTab)
@@ -1199,11 +1234,13 @@ function PlexUpload() {
       setRenameBeforeUpload(baseline.rename_before_upload)
       setBorderBeforeUpload(baseline.border_before_upload)
       setManualUploadDelayMs(baseline.upload_delay_ms)
+      setUploadArtwork(baseline.upload_artwork)
       setHasUnsavedManualSettings(false)
-    } else if (activeTab === 'settings') {
+    } else if (activeTab === 'webhook') {
       const baseline = automationBaselineRef.current
       setWebhookEnabled(baseline.webhook_enabled)
       setWebhookRemoveOverlayLabel(baseline.webhook_remove_overlay_label)
+      setWebhookArtwork(baseline.webhook_artwork)
       setWebhookRenameThenUpload(baseline.webhook_rename_then_upload)
       setWebhookAdoptExistingProcessed(baseline.webhook_adopt_existing_processed)
       setWebhookRetryAttempts(baseline.webhook_retry_attempts)
@@ -1299,52 +1336,267 @@ function PlexUpload() {
     <div className="page-container plex-upload-page">
       <div className="plex-upload-header">
         <h1>Plex Upload</h1>
-        <p>Run manual poster uploads to Plex using your existing Media settings configuration.</p>
+        <p>Upload posters and artwork to Plex — automatically via webhooks, or manually on demand.</p>
       </div>
 
-      <div className="plex-upload-tabs">
+      <Toolbar
+        title="Plex Upload"
+        description="Upload posters and artwork to Plex — automatically via webhooks, or manually on demand"
+        titleControl={
+          activeTab === 'webhook' ? (
+            <button
+              type="button"
+              className={`btn-toolbar ${showSetupGuide ? 'btn-primary' : ''}`}
+              onClick={() => setShowSetupGuide((current) => !current)}
+              aria-expanded={showSetupGuide}
+            >
+              <BookOpen size={14} />
+              Setup Walkthrough
+            </button>
+          ) : undefined
+        }
+      >
+        {/* One Save per sub-tab, in the toolbar like every other tab. Activity is
+            monitoring, so it has nothing to save. */}
+        {activeTab === 'webhook' && (
+          <button
+            className={`btn-toolbar ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
+            onClick={saveWebhookSettings}
+            disabled={!toggleSettingsReady || webhookLoading || webhookSaving || !hasUnsavedAutomationSettings}
+            title={hasUnsavedAutomationSettings ? 'Save changes' : 'No changes to save'}
+          >
+            <Save size={16} />
+            {webhookSaving ? 'Saving...' : 'Save Settings'}
+          </button>
+        )}
+        {activeTab === 'manual' && (
+          <button
+            className={`btn-toolbar ${hasUnsavedManualSettings ? 'btn-unsaved' : ''}`}
+            onClick={saveManualSettings}
+            disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive || !hasUnsavedManualSettings}
+            title={hasUnsavedManualSettings ? 'Save changes' : 'No changes to save'}
+          >
+            <Save size={16} />
+            {manualSettingsSaving ? 'Saving...' : 'Save Settings'}
+          </button>
+        )}
+      </Toolbar>
+
+      {/* Pops open under the toolbar; the toggle lives next to the toolbar title. */}
+      {activeTab === 'webhook' && showSetupGuide && (
+        <section className="plex-upload-card walkthrough-panel">
+          <div className="walkthrough-content">
+                <ol>
+                  <li>
+                    Open <strong>Settings → Media Servers</strong> and confirm Plex, Radarr, and Sonarr instances are configured.
+                  </li>
+                  <li>
+                    Enable webhook processing below, then use this webhook URL in both Radarr and Sonarr:
+                    <div className="walkthrough-endpoint webhook-url-block">
+                      <code className="webhook-url-value">{effectiveWebhookUrl}</code>
+                      <button
+                        type="button"
+                        className="plex-refresh-btn webhook-copy-btn"
+                        onClick={() => copyWebhookUrl(effectiveWebhookUrl)}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    {passwordSet ? (
+                      <div className="webhook-token-warning">
+                        <strong>App password is enabled.</strong> You must use the URL above — it
+                        includes a <code>?token=</code> that authenticates the webhook. Without it,
+                        Radarr/Sonarr requests are rejected with <code>401 Unauthorized</code> and no
+                        posters upload. If you remove the app password later, the plain URL (without
+                        the token) works again.
+                        <div className="webhook-token-actions">
+                          <button
+                            type="button"
+                            className="plex-refresh-btn"
+                            onClick={handleRegenerateToken}
+                            disabled={regeneratingToken}
+                          >
+                            {regeneratingToken ? 'Regenerating…' : 'Regenerate token'}
+                          </button>
+                          <span className="webhook-token-hint">
+                            Rotating the token invalidates the old URL — update Radarr/Sonarr afterwards.
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="card-description webhook-token-hint">
+                        No app password is set, so this webhook needs no token. If you set a password
+                        later (Settings → Security), come back here and copy the tokenized URL.
+                      </p>
+                    )}
+                    <ul className="walkthrough-substeps">
+                      <li>
+                        <strong>Radarr:</strong> Settings → Connect → + → Webhook.
+                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On File Import</strong> and <strong>On File Upgrade</strong> only in import events.
+                      </li>
+                      <li>
+                        <strong>Sonarr:</strong> Settings → Connect → + → Webhook.
+                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On Import Complete</strong> only in import events.
+                      </li>
+                      <li>
+                        Save each connector, then use the built-in <strong>Test</strong> button in Radarr/Sonarr to confirm delivery.
+                      </li>
+                      <li className="walkthrough-multi-instance">
+                        <strong>Running multiple Radarr/Sonarr instances?</strong> Open <strong>Library Targeting →
+                        Configure libraries</strong> below. Each instance has its own webhook URL there ending in
+                        <code>&instance=&lt;name&gt;</code> — paste <em>that</em> instance's URL into its own connector
+                        instead of the generic URL above. Why it matters:
+                        <ul className="walkthrough-substeps walkthrough-multi-instance-list">
+                          <li>
+                            <strong>Attribution:</strong> the <code>&instance=</code> token tells PosterFlow which
+                            instance fired, so it can route the upload to that instance's libraries — reliably, even if
+                            the instance's name in Radarr/Sonarr doesn't match what you configured here.
+                          </li>
+                          <li>
+                            <strong>No cross-suppression:</strong> without it, two instances importing the same title
+                            within ~10 minutes can be treated as duplicates and one upload gets skipped. Distinct
+                            instance URLs keep them separate.
+                          </li>
+                          <li>
+                            <strong>Optional:</strong> a single-instance setup can keep using the generic URL above.
+                            Instances left unmapped simply upload to all selected libraries.
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    Verify activity with <strong>Webhook Stats</strong> on this page and <strong>logs</strong>:
+                    <ul className="walkthrough-substeps">
+                      <li><strong>Test on a small library or test library.</strong></li>
+                      <li><strong>Real downloads/imports:</strong> Add new shows/movies through Sonarr/Radarr to test auto upload.</li>
+                      <li><strong>Kometa 'Overlay':</strong> if the 'Remove Overlay label' setting is off, and you run Kometa overlays, new overlays will not be readded'.</li>
+                    </ul>
+                  </li>
+                </ol>
+                <p className="card-description walkthrough-note">
+                  Possible Test: Run a manual upload from this page (start with <strong>Dry run</strong>) to backfill existing posters. A non-dry run can replace existing posters in Plex.
+                </p>
+                {/* First-run advice — lived in a permanent red banner, which read as an error. */}
+                <p className="card-description walkthrough-note">
+                  <strong>On first use:</strong> run a full manual upload from <strong>Uploads / Options</strong>.
+                  That caches every current poster, so later automated runs don't re-upload them.
+                </p>
+          </div>
+        </section>
+      )}
+
+      {/* Same switch row as the Unmatched and Drive Priority tabs. */}
+      <div className="plex-upload-scope-toggle">
         <button
           type="button"
-          className={`tab-settings ${activeTab === 'settings' ? 'active' : ''}`}
-          onClick={() => handleTabChange('settings')}
+          className={activeTab === 'webhook' ? 'active' : ''}
+          onClick={() => handleTabChange('webhook')}
         >
-          <Settings2 size={16} /> Settings
+          Webhook
         </button>
         <button
           type="button"
-          className={`tab-manual ${activeTab === 'manual' ? 'active' : ''}`}
+          className={activeTab === 'manual' ? 'active' : ''}
           onClick={() => handleTabChange('manual')}
         >
-          <UploadCloud size={16} /> Manual Uploads
+          Uploads / Options
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'activity' ? 'active' : ''}
+          onClick={() => handleTabChange('activity')}
+        >
+          Activity / Cache
         </button>
       </div>
+
+      {unknownInstanceTokens.length > 0 && (
+        <div className="webhook-token-warning webhook-unknown-instance-warning">
+          <strong>Stale webhook URL detected.</strong> Webhooks arrived with an{' '}
+          <code>&instance=</code> name that matches no configured Radarr/Sonarr instance:{' '}
+          {unknownInstanceTokens.map(([name, info], index) => (
+            <span key={name}>
+              {index > 0 && ', '}
+              <code>{name}</code> ({info.source || 'unknown source'}, {info.count}{' '}
+              {info.count === 1 ? 'event' : 'events'})
+            </span>
+          ))}
+          . If you renamed that instance in Settings, open <strong>Library Targeting →
+          Configure libraries</strong> and paste its updated webhook URL into that app —
+          until then those events fall back to payload attribution and can route to the
+          wrong libraries. Reset Webhook Stats (Activity / Cache) to clear this notice.
+        </div>
+      )}
 
       {activeTab === 'manual' && (
         <section className="plex-upload-section">
           <div className="plex-upload-section-header">
-            <h2>Run & Monitor</h2>
-            <p>Run uploads manually for all posters or a single item, then monitor the latest job status.</p>
+            <h2>Uploads & Options</h2>
+            <p>Options that shape every upload — including the Workflow's — plus manual runs for all posters or a single item.</p>
           </div>
 
           <section className="plex-upload-card plex-manual-options-card">
-            <div className="plex-card-header-row">
-              <h2>Manual Run Options (Shared)</h2>
-              <button
-                type="button"
-                className={`plex-refresh-btn ${hasUnsavedManualSettings ? 'btn-unsaved' : ''}`}
-                onClick={saveManualSettings}
-                disabled={!manualSettingsReady || manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-              >
-                {manualSettingsSaving ? 'Saving…' : 'Save Manual Settings'}
-              </button>
-            </div>
-            <p className="card-description">These options apply to both manual run actions below: <strong>All Posters</strong> and <strong>Single Poster</strong>.</p>
-            <p className="card-description">Pre-upload preparation follows your configured <strong>Poster Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
+            <h2>Upload Options</h2>
+            <p className="card-description">Pre-upload preparation follows your configured <strong>Asset Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
 
             {!manualSettingsReady ? (
-              <p className="card-description">Loading saved manual options…</p>
+              <p className="card-description">Loading saved options…</p>
             ) : (
-              <>
+              <div className="upload-options-groups">
+                {/* These describe how PosterFlow uploads, so every run honours them — the
+                    Workflow's Plex Upload step reads them straight from these settings. */}
+                <div className="upload-options-group">
+                <div className="config-subgroup-heading">
+                  Upload Behaviour
+                  <span className="config-subgroup-hint">Also used by the Workflow's Plex Upload step and scheduled runs</span>
+                </div>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={removeOverlayLabel}
+                    onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
+                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                  />
+                  <span>Remove Overlay label after upload (Kometa-compatible)</span>
+                </label>
+
+                <label className="plex-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={uploadArtwork}
+                    onChange={(event) => setUploadArtwork(event.target.checked)}
+                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                  />
+                  <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
+                </label>
+
+                <div className="webhook-retry-row">
+                  <label className="plex-input-row">
+                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload. Lower is faster; increase if Plex returns errors. 0 = no delay. The webhook has its own delay — it uploads one item per event, so it can afford to be gentler.</span></span></span>
+                    <input
+                      type="number"
+                      className="no-spinner"
+                      min={0}
+                      max={2000}
+                      value={manualUploadDelayMs}
+                      onChange={(event) => setManualUploadDelayMs(Math.max(0, Number(event.target.value)))}
+                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
+                    />
+                  </label>
+                </div>
+
+                </div>
+
+                {/* The Workflow decides these for itself (it has its own sync/rename/border
+                    steps and never dry-runs), so they only shape the runs on this page. */}
+                <div className="upload-options-group">
+                <div className="config-subgroup-heading config-subgroup-divider">
+                  Manual Runs Only
+                  <span className="config-subgroup-hint">Only affect <strong>All Posters</strong> and <strong>Single Poster</strong> below</span>
+                </div>
+
                 <label className="plex-checkbox-row">
                   <input
                     type="checkbox"
@@ -1358,11 +1610,11 @@ function PlexUpload() {
                 <label className="plex-checkbox-row">
                   <input
                     type="checkbox"
-                    checked={removeOverlayLabel}
-                    onChange={(event) => setRemoveOverlayLabel(event.target.checked)}
+                    checked={reapply}
+                    onChange={(event) => setReapply(event.target.checked)}
                     disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
                   />
-                  <span>Remove Overlay label after upload (Kometa-compatible)</span>
+                  <span>Reapply (clear upload cache before run; ignored during dry run)</span>
                 </label>
 
                 <label className="plex-checkbox-row">
@@ -1394,34 +1646,11 @@ function PlexUpload() {
                   />
                   <span>Replace borders before upload</span>
                 </label>
-
-                <label className="plex-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={reapply}
-                    onChange={(event) => setReapply(event.target.checked)}
-                    disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                  />
-                  <span>Reapply (clear upload cache before run; ignored during dry run)</span>
-                </label>
-
-                <div className="webhook-retry-row">
-                  <label className="plex-input-row">
-                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each uploadPoster call. Lower values are faster; increase if Plex returns errors. 0 = no delay.</span></span></span>
-                    <input
-                      type="number"
-                      className="no-spinner"
-                      min={0}
-                      max={2000}
-                      value={manualUploadDelayMs}
-                      onChange={(event) => setManualUploadDelayMs(Math.max(0, Number(event.target.value)))}
-                      disabled={manualSettingsLoading || manualSettingsSaving || loading || singleUploadLoading || isJobActive}
-                    />
-                  </label>
                 </div>
-              </>
+              </div>
             )}
           </section>
+
 
           <div className="plex-upload-grid">
             <section className="plex-upload-card upload-cache-card">
@@ -1553,125 +1782,12 @@ function PlexUpload() {
         </section>
       )}
 
-      {activeTab === 'settings' && (
+      {activeTab === 'webhook' && (
         <>
-          <section className="plex-upload-card walkthrough-card">
-            <div className="plex-card-header-row walkthrough-header-row">
-              <h2>Setup Walkthrough</h2>
-              <button
-                type="button"
-                className="plex-refresh-btn walkthrough-toggle-btn"
-                onClick={() => setShowSetupGuide((current) => !current)}
-              >
-                {showSetupGuide ? 'Hide' : 'Show'}
-              </button>
-            </div>
-
-            {showSetupGuide && (
-              <div className="walkthrough-content">
-                <ol>
-                  <li>
-                    Open <strong>Settings → Media Servers</strong> and confirm Plex, Radarr, and Sonarr instances are configured.
-                  </li>
-                  <li>
-                    Enable webhook processing below, then use this webhook URL in both Radarr and Sonarr:
-                    <div className="walkthrough-endpoint webhook-url-block">
-                      <code className="webhook-url-value">{effectiveWebhookUrl}</code>
-                      <button
-                        type="button"
-                        className="plex-refresh-btn webhook-copy-btn"
-                        onClick={() => copyWebhookUrl(effectiveWebhookUrl)}
-                      >
-                        Copy
-                      </button>
-                    </div>
-                    {passwordSet ? (
-                      <div className="webhook-token-warning">
-                        <strong>App password is enabled.</strong> You must use the URL above — it
-                        includes a <code>?token=</code> that authenticates the webhook. Without it,
-                        Radarr/Sonarr requests are rejected with <code>401 Unauthorized</code> and no
-                        posters upload. If you remove the app password later, the plain URL (without
-                        the token) works again.
-                        <div className="webhook-token-actions">
-                          <button
-                            type="button"
-                            className="plex-refresh-btn"
-                            onClick={handleRegenerateToken}
-                            disabled={regeneratingToken}
-                          >
-                            {regeneratingToken ? 'Regenerating…' : 'Regenerate token'}
-                          </button>
-                          <span className="webhook-token-hint">
-                            Rotating the token invalidates the old URL — update Radarr/Sonarr afterwards.
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="card-description webhook-token-hint">
-                        No app password is set, so this webhook needs no token. If you set a password
-                        later (Settings → Security), come back here and copy the tokenized URL.
-                      </p>
-                    )}
-                    <ul className="walkthrough-substeps">
-                      <li>
-                        <strong>Radarr:</strong> Settings → Connect → + → Webhook.
-                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On File Import</strong> and <strong>On File Upgrade</strong> only in import events.
-                      </li>
-                      <li>
-                        <strong>Sonarr:</strong> Settings → Connect → + → Webhook.
-                        Set <strong>Method</strong> to <strong>POST</strong>, paste the URL above, and check <strong>On Import Complete</strong> only in import events.
-                      </li>
-                      <li>
-                        Save each connector, then use the built-in <strong>Test</strong> button in Radarr/Sonarr to confirm delivery.
-                      </li>
-                      <li className="walkthrough-multi-instance">
-                        <strong>Running multiple Radarr/Sonarr instances?</strong> Open <strong>Library Targeting →
-                        Configure libraries</strong> below. Each instance has its own webhook URL there ending in
-                        <code>&instance=&lt;name&gt;</code> — paste <em>that</em> instance's URL into its own connector
-                        instead of the generic URL above. Why it matters:
-                        <ul className="walkthrough-substeps walkthrough-multi-instance-list">
-                          <li>
-                            <strong>Attribution:</strong> the <code>&instance=</code> token tells PosterFlow which
-                            instance fired, so it can route the upload to that instance's libraries — reliably, even if
-                            the instance's name in Radarr/Sonarr doesn't match what you configured here.
-                          </li>
-                          <li>
-                            <strong>No cross-suppression:</strong> without it, two instances importing the same title
-                            within ~10 minutes can be treated as duplicates and one upload gets skipped. Distinct
-                            instance URLs keep them separate.
-                          </li>
-                          <li>
-                            <strong>Optional:</strong> a single-instance setup can keep using the generic URL above.
-                            Instances left unmapped simply upload to all selected libraries.
-                          </li>
-                        </ul>
-                      </li>
-                    </ul>
-                  </li>
-                  <li>
-                    Verify activity with <strong>Webhook Stats</strong> on this page and <strong>logs</strong>:
-                    <ul className="walkthrough-substeps">
-                      <li><strong>Test on a small library or test library.</strong></li>
-                      <li><strong>Real downloads/imports:</strong> Add new shows/movies through Sonarr/Radarr to test auto upload.</li>
-                      <li><strong>Kometa 'Overlay':</strong> if the 'Remove Overlay label' setting is off, and you run Kometa overlays, new overlays will not be readded'.</li>
-                    </ul>
-                  </li>
-                </ol>
-                <p className="card-description walkthrough-note">
-                  Possible Test: Run a manual upload from this page (start with <strong>Dry run</strong>) to backfill existing posters. A non-dry run can replace existing posters in Plex.
-                </p>
-              </div>
-            )}
-          </section>
-
-          <div className="plex-upload-initial-warning">
-            <strong>Initial Setup Recommendation:</strong> Run a full manual Plex upload on first use. This caches all current posters and prevents unnecessary re-uploads during future automated runs.
-          </div>
-
           <section className="plex-upload-section">
             <div className="plex-upload-section-header">
-              <h2>Automation & Controls</h2>
-              <p>Configure webhook behavior, library targeting, then monitor stats and cache below.</p>
+              <h2>Webhook Automation</h2>
+              <p>Uploads triggered by Radarr/Sonarr events. Stats and cache live under Activity.</p>
             </div>
 
             <div className="plex-upload-grid webhook-automation-grid">
@@ -1681,16 +1797,6 @@ function PlexUpload() {
                     <Webhook size={18} />
                     <h2>Webhook Settings</h2>
                   </div>
-                  {toggleSettingsReady && (
-                    <button
-                      type="button"
-                      className={`plex-refresh-btn webhook-save-btn ${hasUnsavedAutomationSettings ? 'btn-unsaved' : ''}`}
-                      onClick={saveWebhookSettings}
-                      disabled={webhookLoading || webhookSaving}
-                    >
-                      {webhookSaving ? 'Saving…' : 'Save Webhook Settings'}
-                    </button>
-                  )}
                 </div>
 
                 <p className="card-description webhook-compact-description">Endpoint: <strong>{webhookPath}</strong></p>
@@ -1701,7 +1807,7 @@ function PlexUpload() {
                     webhooks are rejected.
                   </p>
                 )}
-                <p className="card-description webhook-compact-description">Webhook pre-upload preparation follows your configured <strong>Poster Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
+                <p className="card-description webhook-compact-description">Webhook pre-upload preparation follows your configured <strong>Asset Renamer</strong> and <strong>Border Replacer</strong> settings.</p>
 
                 {!toggleSettingsReady ? (
                   <p className="card-description">Loading webhook settings…</p>
@@ -1726,7 +1832,17 @@ function PlexUpload() {
                             onChange={(event) => setWebhookRemoveOverlayLabel(event.target.checked)}
                             disabled={webhookLoading || webhookSaving}
                           />
-                          <span>Remove Overlay label after webhook upload (Kometa-compatible)</span>
+                          <span>Remove Overlay label after upload (Kometa-compatible)</span>
+                        </label>
+
+                        <label className="plex-checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={webhookArtwork}
+                            onChange={(event) => setWebhookArtwork(event.target.checked)}
+                            disabled={webhookLoading || webhookSaving}
+                          />
+                          <span>Upload artwork (logos, backgrounds, square art) alongside posters</span>
                         </label>
 
                         <label className="plex-checkbox-row">
@@ -1736,7 +1852,7 @@ function PlexUpload() {
                             onChange={(event) => setWebhookRenameThenUpload(event.target.checked)}
                             disabled={webhookLoading || webhookSaving}
                           />
-                          <span>Run rename pass before webhook upload (improves first-hit matching)</span>
+                          <span>Rename posters before upload (improves first-hit matching)</span>
                         </label>
 
                         <label className="plex-checkbox-row">
@@ -1777,7 +1893,7 @@ function PlexUpload() {
                           </label>
 
                           <label className="plex-input-row">
-                            <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each uploadPoster call. Lower values are faster; increase if Plex returns errors. 0 = no delay.</span></span></span>
+                            <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload for a single webhook event. Lower is faster; increase if Plex returns errors. 0 = no delay. Manual runs have their own delay, since they upload in bulk.</span></span></span>
                             <input
                               type="number"
                               className="no-spinner"
@@ -1843,228 +1959,239 @@ function PlexUpload() {
                     )}
                   </div>
                 )}
+
               </section>
             </div>
 
-            <section className="plex-upload-card webhook-card webhook-stats-card">
-              <div className="webhook-title-row webhook-stats-title-row">
-                <div className="webhook-title-label">
-                  <h2>Webhook Stats</h2>
-                </div>
-                <div className="webhook-stats-actions">
-                  <button
-                    type="button"
-                    className="plex-refresh-btn"
-                    onClick={resetWebhookStats}
-                    disabled={webhookStatsResetting}
-                  >
-                    {webhookStatsResetting ? 'Resetting…' : 'Reset Stats'}
-                  </button>
-                  <button
-                    type="button"
-                    className="plex-refresh-btn"
-                    onClick={() => fetchWebhookStats()}
-                    disabled={webhookStatsLoading}
-                  >
-                    <RefreshCw size={16} className={webhookStatsLoading ? 'spinning' : ''} />
-                    Refresh
-                  </button>
-                </div>
-              </div>
-
-              {webhookStats ? (
-                <>
-                  <div className="webhook-stat-chips">
-                    <div className="webhook-stat-chip chip-received"><span>Received</span><strong>{webhookStats.received}</strong></div>
-                    <div className="webhook-stat-chip chip-queued"><span>Queued</span><strong>{webhookStats.queued}</strong></div>
-                    <div className="webhook-stat-chip chip-duplicates"><span>Duplicates</span><strong>{webhookStats.duplicates}</strong></div>
-                    <div className="webhook-stat-chip chip-test"><span>Test events</span><strong>{webhookStats.skipped_test}</strong></div>
-                    <div className="webhook-stat-chip chip-duplicates"><span>Skipped (cached)</span><strong>{webhookStats.skipped_cached}</strong></div>
-                    <div className="webhook-stat-chip chip-parse"><span>Skipped (no asset)</span><strong>{webhookStats.skipped_no_asset ?? 0}</strong></div>
-                    <div className="webhook-stat-chip chip-disabled"><span>Disabled rejects</span><strong>{webhookStats.rejected_disabled}</strong></div>
-                    <div className="webhook-stat-chip chip-parse"><span>Parse errors</span><strong>{webhookStats.parse_errors}</strong></div>
-                    <div className="webhook-stat-chip chip-internal"><span>Internal errors</span><strong>{webhookStats.internal_errors}</strong></div>
-                  </div>
-
-                  <div className="webhook-stats-grid-compact">
-                    <div><span>Last event:</span> <strong>{formatWebhookTimestamp(webhookStats.last_event_at)}</strong></div>
-                    <div><span>Last queued:</span> <strong>{formatWebhookTimestamp(webhookStats.last_queued_at)}</strong></div>
-                    <div><span>Last error:</span> <strong>{webhookStats.last_error || '—'}</strong></div>
-                  </div>
-                </>
-              ) : (
-                <p className="card-description">No webhook stats available yet.</p>
-              )}
-
-              <p className="card-description webhook-compact-footnote">
-                Duplicate events are automatically suppressed within a short time window.
-              </p>
-
-              <h3 className="webhook-dedupe-heading">Clear Single Duplicate Lock</h3>
-              <p className="card-description webhook-dedupe-description">
-                This search only looks at active duplicate locks stored in the database (not source filesystem assets).
-              </p>
-
-              <div className="webhook-dedupe-clear-row">
-                <div className="webhook-dedupe-search-wrap">
-                  <input
-                    type="text"
-                    className="webhook-dedupe-input"
-                    placeholder="Search title (movie or series)"
-                    value={webhookDedupeTitle}
-                    onChange={(event) => {
-                      setWebhookDedupeTitle(event.target.value)
-                      setWebhookDedupeMediaType(null)
-                    }}
-                    disabled={webhookDedupeClearing}
-                  />
-                  {(webhookDedupeSearchLoading || webhookDedupeTitle.trim()) && (
-                    <div className="webhook-dedupe-search-results">
-                      {webhookDedupeSearchLoading ? (
-                        <div className="webhook-dedupe-search-empty">Searching…</div>
-                      ) : webhookDedupeSearchResults.length === 0 ? (
-                        <div className="webhook-dedupe-search-empty">No results</div>
-                      ) : (
-                        webhookDedupeSearchResults.map((item, index) => {
-                          const key = `${item.dedupe_key}-${index}`
-                          const typeLabel = item.media_type === 'series' ? 'Series' : 'Movie'
-                          const label = `${item.title}${item.year ? ` (${item.year})` : ''}${item.media_type === 'series' && item.season_number != null ? ` • Season ${item.season_number}` : ''} • ${typeLabel}`
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              className="webhook-dedupe-result"
-                              onClick={() => selectWebhookDedupeSearchResult(item)}
-                            >
-                              {label}
-                            </button>
-                          )
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  className="webhook-dedupe-input webhook-dedupe-number no-spinner"
-                  placeholder="Year"
-                  value={webhookDedupeYear}
-                  onChange={(event) => setWebhookDedupeYear(event.target.value)}
-                  disabled={webhookDedupeClearing}
-                />
-                {webhookDedupeMediaType === 'series' && (
-                  <input
-                    type="number"
-                    className="webhook-dedupe-input webhook-dedupe-number no-spinner"
-                    placeholder="Season"
-                    value={webhookDedupeSeason}
-                    onChange={(event) => setWebhookDedupeSeason(event.target.value)}
-                    disabled={webhookDedupeClearing}
-                  />
-                )}
-                <button
-                  type="button"
-                  className="plex-refresh-btn"
-                  onClick={clearWebhookDedupeForItem}
-                  disabled={webhookDedupeClearing || !webhookDedupeMediaType}
-                >
-                  {webhookDedupeClearing ? 'Clearing…' : 'Clear Duplicate Lock'}
-                </button>
-              </div>
-            </section>
-
-            <section className="plex-upload-card">
-              <div className="plex-card-header-row">
-                <h2>Upload Cache</h2>
-                <button
-                  type="button"
-                  className="plex-refresh-btn"
-                  onClick={() => fetchUploadCache()}
-                  disabled={cacheLoading}
-                >
-                  <RefreshCw size={16} className={cacheLoading ? 'spinning' : ''} />
-                  Refresh
-                </button>
-              </div>
-              <p className="card-description">
-                Tracks previously uploaded file/library and movie edition combinations to skip duplicates across runs.
-              </p>
-
-              {!uploadCache ? (
-                <p className="card-description">No upload cache data loaded.</p>
-              ) : (
-                <>
-                  <div className="webhook-stats-grid upload-cache-summary">
-                    <div><span>Files cached:</span> <strong>{uploadCache.entries_count}</strong></div>
-                    <div><span>Library refs:</span> <strong>{uploadCache.total_library_refs}</strong></div>
-                    <div><span>Edition refs:</span> <strong>{uploadCache.total_edition_refs}</strong></div>
-                  </div>
-
-                  <div className="upload-cache-actions">
-                    <button
-                      type="button"
-                      className="plex-refresh-btn"
-                      onClick={exportUploadCache}
-                      disabled={uploadCache.entries_count === 0}
-                    >
-                      Export JSON
-                    </button>
-                    <button
-                      type="button"
-                      className="plex-refresh-btn"
-                      onClick={openCacheBrowser}
-                      disabled={uploadCache.entries_count === 0}
-                    >
-                      Browse Cache
-                    </button>
-                    <button
-                      type="button"
-                      className="plex-refresh-btn"
-                      onClick={() => clearUploadCacheEntries()}
-                      disabled={cacheClearing || uploadCache.entries_count === 0}
-                    >
-                      {cacheClearing ? 'Clearing…' : 'Clear All Cache'}
-                    </button>
-                  </div>
-
-                  {uploadCache.entries.length === 0 ? (
-                    <p className="card-description">Upload cache is empty.</p>
-                  ) : (
-                    <>
-                      <p className="card-description upload-cache-note">
-                        Showing latest 10 cache entries. Use <strong>Clear All Cache</strong> to remove all entries, including older items not shown here.
-                      </p>
-                      <div className="upload-cache-list">
-                      {uploadCache.entries.slice(-10).reverse().map((entry) => (
-                        <div key={entry.file_path} className="upload-cache-item">
-                          <div className="upload-cache-item-main">
-                            <strong>{entry.file_path}</strong>
-                            <span className="upload-cache-meta-row">
-                              <span className="upload-cache-meta-label">Libraries ({entry.uploaded_to_libraries.length}):</span>
-                              <span className="upload-cache-meta-value">{entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}</span>
-                              <span className="upload-cache-meta-sep">•</span>
-                              <span className="upload-cache-meta-label">Editions:</span>
-                              <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="plex-refresh-btn"
-                            onClick={() => clearUploadCacheEntries(entry.file_path)}
-                            disabled={cacheClearing}
-                          >
-                            Clear Entry
-                          </button>
-                        </div>
-                      ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </section>
           </section>
         </>
+      )}
+
+      {activeTab === 'activity' && (
+        <section className="plex-upload-section">
+          <div className="plex-upload-section-header">
+            <h2>Activity & Cache</h2>
+            <p>Monitor webhook events and browse the upload cache. Nothing here is configuration.</p>
+          </div>
+
+        <section className="plex-upload-card webhook-card webhook-stats-card">
+          <div className="webhook-title-row webhook-stats-title-row">
+            <div className="webhook-title-label">
+              <h2>Webhook Stats</h2>
+            </div>
+            <div className="webhook-stats-actions">
+              <button
+                type="button"
+                className="plex-refresh-btn"
+                onClick={resetWebhookStats}
+                disabled={webhookStatsResetting}
+              >
+                {webhookStatsResetting ? 'Resetting…' : 'Reset Stats'}
+              </button>
+              <button
+                type="button"
+                className="plex-refresh-btn"
+                onClick={() => fetchWebhookStats()}
+                disabled={webhookStatsLoading}
+              >
+                <RefreshCw size={16} className={webhookStatsLoading ? 'spinning' : ''} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {webhookStats ? (
+            <>
+              <div className="webhook-stat-chips">
+                <div className="webhook-stat-chip chip-received"><span>Received</span><strong>{webhookStats.received}</strong></div>
+                <div className="webhook-stat-chip chip-queued"><span>Queued</span><strong>{webhookStats.queued}</strong></div>
+                <div className="webhook-stat-chip chip-duplicates"><span>Duplicates</span><strong>{webhookStats.duplicates}</strong></div>
+                <div className="webhook-stat-chip chip-test"><span>Test events</span><strong>{webhookStats.skipped_test}</strong></div>
+                <div className="webhook-stat-chip chip-duplicates"><span>Skipped (cached)</span><strong>{webhookStats.skipped_cached}</strong></div>
+                <div className="webhook-stat-chip chip-parse"><span>Skipped (no asset)</span><strong>{webhookStats.skipped_no_asset ?? 0}</strong></div>
+                <div className="webhook-stat-chip chip-disabled"><span>Disabled rejects</span><strong>{webhookStats.rejected_disabled}</strong></div>
+                <div className="webhook-stat-chip chip-parse"><span>Parse errors</span><strong>{webhookStats.parse_errors}</strong></div>
+                <div className="webhook-stat-chip chip-internal"><span>Internal errors</span><strong>{webhookStats.internal_errors}</strong></div>
+              </div>
+
+              <div className="webhook-stats-grid-compact">
+                <div><span>Last event:</span> <strong>{formatWebhookTimestamp(webhookStats.last_event_at)}</strong></div>
+                <div><span>Last queued:</span> <strong>{formatWebhookTimestamp(webhookStats.last_queued_at)}</strong></div>
+                <div><span>Last error:</span> <strong>{webhookStats.last_error || '—'}</strong></div>
+              </div>
+            </>
+          ) : (
+            <p className="card-description">No webhook stats available yet.</p>
+          )}
+
+          <p className="card-description webhook-compact-footnote">
+            Duplicate events are automatically suppressed within a short time window.
+          </p>
+
+          <h3 className="webhook-dedupe-heading">Clear Single Duplicate Lock</h3>
+          <p className="card-description webhook-dedupe-description">
+            This search only looks at active duplicate locks stored in the database (not source filesystem assets).
+          </p>
+
+          <div className="webhook-dedupe-clear-row">
+            <div className="webhook-dedupe-search-wrap">
+              <input
+                type="text"
+                className="webhook-dedupe-input"
+                placeholder="Search title (movie or series)"
+                value={webhookDedupeTitle}
+                onChange={(event) => {
+                  setWebhookDedupeTitle(event.target.value)
+                  setWebhookDedupeMediaType(null)
+                }}
+                disabled={webhookDedupeClearing}
+              />
+              {(webhookDedupeSearchLoading || webhookDedupeTitle.trim()) && (
+                <div className="webhook-dedupe-search-results">
+                  {webhookDedupeSearchLoading ? (
+                    <div className="webhook-dedupe-search-empty">Searching…</div>
+                  ) : webhookDedupeSearchResults.length === 0 ? (
+                    <div className="webhook-dedupe-search-empty">No results</div>
+                  ) : (
+                    webhookDedupeSearchResults.map((item, index) => {
+                      const key = `${item.dedupe_key}-${index}`
+                      const typeLabel = item.media_type === 'series' ? 'Series' : 'Movie'
+                      const label = `${item.title}${item.year ? ` (${item.year})` : ''}${item.media_type === 'series' && item.season_number != null ? ` • Season ${item.season_number}` : ''} • ${typeLabel}`
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className="webhook-dedupe-result"
+                          onClick={() => selectWebhookDedupeSearchResult(item)}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+            <input
+              type="number"
+              className="webhook-dedupe-input webhook-dedupe-number no-spinner"
+              placeholder="Year"
+              value={webhookDedupeYear}
+              onChange={(event) => setWebhookDedupeYear(event.target.value)}
+              disabled={webhookDedupeClearing}
+            />
+            {webhookDedupeMediaType === 'series' && (
+              <input
+                type="number"
+                className="webhook-dedupe-input webhook-dedupe-number no-spinner"
+                placeholder="Season"
+                value={webhookDedupeSeason}
+                onChange={(event) => setWebhookDedupeSeason(event.target.value)}
+                disabled={webhookDedupeClearing}
+              />
+            )}
+            <button
+              type="button"
+              className="plex-refresh-btn"
+              onClick={clearWebhookDedupeForItem}
+              disabled={webhookDedupeClearing || !webhookDedupeMediaType}
+            >
+              {webhookDedupeClearing ? 'Clearing…' : 'Clear Duplicate Lock'}
+            </button>
+          </div>
+        </section>
+
+        <section className="plex-upload-card">
+          <div className="plex-card-header-row">
+            <h2>Upload Cache</h2>
+            <button
+              type="button"
+              className="plex-refresh-btn"
+              onClick={() => fetchUploadCache()}
+              disabled={cacheLoading}
+            >
+              <RefreshCw size={16} className={cacheLoading ? 'spinning' : ''} />
+              Refresh
+            </button>
+          </div>
+          <p className="card-description">
+            Tracks previously uploaded file/library and movie edition combinations to skip duplicates across runs.
+          </p>
+
+          {!uploadCache ? (
+            <p className="card-description">No upload cache data loaded.</p>
+          ) : (
+            <>
+              <div className="webhook-stats-grid upload-cache-summary">
+                <div><span>Files cached:</span> <strong>{uploadCache.entries_count}</strong></div>
+                <div><span>Library refs:</span> <strong>{uploadCache.total_library_refs}</strong></div>
+                <div><span>Edition refs:</span> <strong>{uploadCache.total_edition_refs}</strong></div>
+              </div>
+
+              <div className="upload-cache-actions">
+                <button
+                  type="button"
+                  className="plex-refresh-btn"
+                  onClick={exportUploadCache}
+                  disabled={uploadCache.entries_count === 0}
+                >
+                  Export JSON
+                </button>
+                <button
+                  type="button"
+                  className="plex-refresh-btn"
+                  onClick={openCacheBrowser}
+                  disabled={uploadCache.entries_count === 0}
+                >
+                  Browse Cache
+                </button>
+                <button
+                  type="button"
+                  className="plex-refresh-btn"
+                  onClick={() => clearUploadCacheEntries()}
+                  disabled={cacheClearing || uploadCache.entries_count === 0}
+                >
+                  {cacheClearing ? 'Clearing…' : 'Clear All Cache'}
+                </button>
+              </div>
+
+              {uploadCache.entries.length === 0 ? (
+                <p className="card-description">Upload cache is empty.</p>
+              ) : (
+                <>
+                  <p className="card-description upload-cache-note">
+                    Showing latest 10 cache entries. Use <strong>Clear All Cache</strong> to remove all entries, including older items not shown here.
+                  </p>
+                  <div className="upload-cache-list">
+                  {uploadCache.entries.slice(-10).reverse().map((entry) => (
+                    <div key={entry.file_path} className="upload-cache-item">
+                      <div className="upload-cache-item-main">
+                        <strong>{entry.file_path}</strong>
+                        <span className="upload-cache-meta-row">
+                          <span className="upload-cache-meta-label">Libraries ({entry.uploaded_to_libraries.length}):</span>
+                          <span className="upload-cache-meta-value">{entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}</span>
+                          <span className="upload-cache-meta-sep">•</span>
+                          <span className="upload-cache-meta-label">Editions:</span>
+                          <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="plex-refresh-btn"
+                        onClick={() => clearUploadCacheEntries(entry.file_path)}
+                        disabled={cacheClearing}
+                      >
+                        Clear Entry
+                      </button>
+                    </div>
+                  ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </section>
+        </section>
       )}
 
       <UnsavedChangesModal

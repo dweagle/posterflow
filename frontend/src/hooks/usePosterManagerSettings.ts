@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { Drive, PosterConfig, getDrives, getPosterConfig, savePosterConfig } from '../api/client'
+import { DEFAULT_POSTER_DESTINATION, Drive, PosterConfig, getDrives, getPosterConfig, savePosterConfig } from '../api/client'
 
 interface UsePosterManagerSettingsOptions {
   config: PosterConfig | null
@@ -47,10 +47,19 @@ export function usePosterManagerSettings({
   const handleSaveConfig = useCallback(async () => {
     if (!config) return
 
+    // Resolve a blank destination to the default, as the setup wizard does. The API
+    // ignores an empty destination rather than storing it, so without this a cleared
+    // field silently keeps the old path.
+    const resolved: PosterConfig = {
+      ...config,
+      destination: config.destination.trim() || DEFAULT_POSTER_DESTINATION,
+    }
+
     try {
       setSaving(true)
-      await savePosterConfig(config)
-      originalConfigRef.current = JSON.parse(JSON.stringify(config))
+      await savePosterConfig(resolved)
+      setConfig(resolved)
+      originalConfigRef.current = JSON.parse(JSON.stringify(resolved))
       setHasUnsavedChanges(false)
       showToast('Settings saved')
     } catch (error) {
@@ -59,7 +68,7 @@ export function usePosterManagerSettings({
     } finally {
       setSaving(false)
     }
-  }, [config, originalConfigRef, setHasUnsavedChanges, setSaving, showToast])
+  }, [config, originalConfigRef, setConfig, setHasUnsavedChanges, setSaving, showToast])
 
   const resetConfigToOriginal = useCallback(() => {
     if (!originalConfigRef.current) return

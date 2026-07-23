@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from models.setting import Setting
 from models.drive import Drive
 from models.job import Job
+from util.poster_settings import DEFAULT_POSTER_DESTINATION
 
 
 # ---------------------------------------------------------------------------
@@ -350,11 +351,32 @@ def test_rename_rejects_when_priority_drives_not_subscribed(client, test_db):
     assert "No drives in priority list are subscribed" in response.json()["detail"]
 
 
-def test_border_replacer_rejects_when_destination_missing(client):
-    """Border replacer should fail when destination setting is not configured."""
-    response = client.post("/api/posterflow/border-replacer/run", json={})
+def test_border_replacer_falls_back_to_default_destination(client):
+    """An unconfigured destination resolves to the default rather than erroring as unset.
+
+    The only remaining failure is that the path doesn't exist yet, which names the
+    default so the user can see where it looked. os.path.exists is pinned so the result
+    doesn't depend on whether /config exists wherever the suite runs.
+    """
+    with patch("api.poster_manager.os.path.exists", return_value=False):
+        response = client.post("/api/posterflow/border-replacer/run", json={})
+
     assert response.status_code == 400
-    assert "No destination directory configured" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "Destination directory does not exist" in detail
+    assert DEFAULT_POSTER_DESTINATION in detail
+
+
+def test_border_replacer_falls_back_when_destination_blank(client, test_db):
+    """A blank destination means the default too, matching what the UI documents."""
+    test_db.add(Setting(key="poster_destination", value=""))
+    test_db.commit()
+
+    with patch("api.poster_manager.os.path.exists", return_value=False):
+        response = client.post("/api/posterflow/border-replacer/run", json={})
+
+    assert response.status_code == 400
+    assert DEFAULT_POSTER_DESTINATION in response.json()["detail"]
 
 
 def test_border_replacer_rejects_when_destination_path_missing(client, test_db):
@@ -588,7 +610,7 @@ def test_flow_module_delegates_to_module_runners(test_db, monkeypatch):
 
     flow_config = {
         "sync_drives": {"enabled": True, "stop_on_error": True},
-        "rename_posters": {"enabled": True, "stop_on_error": True},
+        "rename_assets": {"enabled": True, "stop_on_error": True},
         "border_replacer": {"enabled": True, "stop_on_error": True},
         "detect_unmatched": {"enabled": True, "stop_on_error": True},
     }
@@ -618,6 +640,46 @@ def test_flow_module_delegates_to_module_runners(test_db, monkeypatch):
     ]
     assert rename_config.get("auto_run_border") is False
     assert rename_config.get("skip_border_post_processing") is True
+
+
+def test_flow_forward_maps_legacy_rename_posters_config(test_db, monkeypatch):
+    """A raw poster_flow_config with the legacy rename_posters key still runs the rename step."""
+    import modules.flow as flow_module
+
+    call_order: list[str] = []
+
+    monkeypatch.setattr("modules.flow.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.flow.add_job_log_handler", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("modules.flow.remove_job_log_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "modules.flow._promote_child_progress_to_parent",
+        lambda _db, _parent_job, child_job_id, _start, _end, _fallback, runner, *runner_args: runner(child_job_id, *runner_args),
+    )
+
+    def _complete(child_job_id: int) -> None:
+        child = test_db.query(Job).filter(Job.id == child_job_id).first()
+        child.status = "completed"
+        child.progress = 100
+        test_db.commit()
+
+    def _rename_runner(child_job_id: int, _config_data: dict, skip_discord: bool = False, **kwargs):
+        call_order.append("rename_posters")
+        _complete(child_job_id)
+
+    monkeypatch.setattr("modules.flow.run_rename_background_job", _rename_runner)
+
+    # Legacy config: rename_posters enabled, NO rename_assets key.
+    legacy = {"rename_posters": {"enabled": True, "stop_on_error": True}}
+    test_db.add(Setting(key="poster_flow_config", value=json.dumps(legacy)))
+    job = Job(job_type="Poster Workflow", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    flow_module.run_flow_background_job(job.id, dry_run=False)
+
+    # Forward-map made rename_assets enabled → poster rename ran (default include = posters).
+    assert "rename_posters" in call_order
 
 
 def test_flow_config_save_returns_500_when_storage_fails(client, monkeypatch):
@@ -726,3 +788,50 @@ def test_upload_overlay_rejects_wrong_size(client):
         files={"file": ("test_frame_small.png", _overlay_png_bytes("RGBA", size=(500, 500)), "image/png")},
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Saving the destination
+# ---------------------------------------------------------------------------
+
+
+def _saved_destination(test_db):
+    setting = test_db.query(Setting).filter(Setting.key == "poster_destination").first()
+    return setting.value if setting else None
+
+
+def test_save_config_stores_the_destination(client, test_db):
+    response = client.post("/api/posterflow/config", json={"destination": "/kometa/config/assets"})
+
+    assert response.status_code == 200
+    assert _saved_destination(test_db) == "/kometa/config/assets"
+
+
+def test_save_config_stores_default_for_blank_destination(client, test_db):
+    """Blank means the default. Previously the write was dropped, so a cleared field
+    silently kept the old path while reporting success."""
+    test_db.add(Setting(key="poster_destination", value="/old/path"))
+    test_db.commit()
+
+    response = client.post("/api/posterflow/config", json={"destination": ""})
+
+    assert response.status_code == 200
+    assert _saved_destination(test_db) == DEFAULT_POSTER_DESTINATION
+
+
+def test_save_config_leaves_destination_alone_when_omitted(client, test_db):
+    """Saving only other fields must not touch the destination."""
+    test_db.add(Setting(key="poster_destination", value="/kometa/config/assets"))
+    test_db.commit()
+
+    response = client.post("/api/posterflow/config", json={"action_type": "move"})
+
+    assert response.status_code == 200
+    assert _saved_destination(test_db) == "/kometa/config/assets"
+
+
+def test_save_config_accepts_the_legacy_destination_dir_alias(client, test_db):
+    response = client.post("/api/posterflow/config", json={"destination_dir": "/legacy/path"})
+
+    assert response.status_code == 200
+    assert _saved_destination(test_db) == "/legacy/path"

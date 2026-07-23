@@ -32,7 +32,7 @@ import {
   uploadPsdToExportFolder,
   getSeasonImages,
   getTmdbImages,
-  getTmdbImageProxyUrl,
+  getArtworkTaggedDownloadUrl, // canonical download names
   getTmdbOriginCountry,
   getTvDetails,
   getApiErrorMessage,
@@ -285,6 +285,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
   const [galleryPreview, setGalleryPreview] = useState<TmdbImage | null>(null)
   const [galleryPreviewIsLogo, setGalleryPreviewIsLogo] = useState(false)
+  // remember what the previewed image is, so its Download button
+  // can request the correctly-tagged filename.
+  const [galleryPreviewRole, setGalleryPreviewRole] = useState<'poster' | 'backdrop' | 'logo'>('poster')
+  const [galleryPreviewSeason, setGalleryPreviewSeason] = useState<number | null>(null)
 
   // PSD export state
   const [psdSelection, setPsdSelection] = useState<{ posters: string[]; backdrops: string[]; logos: string[] }>({ posters: [], backdrops: [], logos: [] })
@@ -397,14 +401,16 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     }
   }, [showToast])
 
-  const handleGalleryDownload = useCallback(async (filePath: string) => {
-    const url = getTmdbImageProxyUrl(filePath)
-    const filename = filePath.split('/').filter(Boolean).pop() ?? 'poster.jpg'
+  // downloads are named canonically by the server
+  // (Title (Year) {ids}[ - Season N][ - logo|background].ext), matching the rest of the app.
+  const handleGalleryDownload = useCallback(async (filePath: string, role: 'poster' | 'backdrop' | 'logo' = 'poster', season?: number | null) => {
     try {
-      const resp = await fetch(url)
+      const resp = await fetch(getArtworkTaggedDownloadUrl(filePath, role, item, season))
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const blob = await resp.blob()
-      const objectUrl = URL.createObjectURL(blob)
+      const cd = resp.headers.get('Content-Disposition') || ''
+      const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd)
+      const filename = m ? decodeURIComponent(m[1] || m[2]) : (filePath.split('/').filter(Boolean).pop() ?? 'artwork.jpg')
+      const objectUrl = URL.createObjectURL(await resp.blob())
       const a = document.createElement('a')
       a.href = objectUrl
       a.download = filename
@@ -415,7 +421,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } catch {
       showToast('Failed to download image', 'error')
     }
-  }, [showToast])
+  }, [item, showToast])
 
   const ensureTvDetails = useCallback(async () => {
     if (tvDetails || tvDetailsLoading) return
@@ -979,7 +985,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                       <button
                                         type="button"
                                         className="tmdb-gallery-thumb-btn"
-                                        onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(false) }}
+                                        onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(false); setGalleryPreviewRole('poster'); setGalleryPreviewSeason(selectedSeason) }}
                                         title="Preview full size"
                                       >
                                         <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
@@ -1026,7 +1032,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                           type="button"
                                           className="tmdb-gallery-dl"
                                           title="Download"
-                                          onClick={() => void handleGalleryDownload(img.file_path)}
+                                          onClick={() => void handleGalleryDownload(img.file_path, 'poster', selectedSeason)}
                                         >
                                           <Download size={12} />
                                         </button>
@@ -1061,7 +1067,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                           <button
                             type="button"
                             className="tmdb-gallery-thumb-btn"
-                            onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(activeGalleryTab === 'logos') }}
+                            onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(activeGalleryTab === 'logos'); setGalleryPreviewRole(role); setGalleryPreviewSeason(null) }}
                             title="Preview full size"
                           >
                             <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
@@ -1113,7 +1119,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                               type="button"
                               className="tmdb-gallery-dl"
                               title="Download"
-                              onClick={() => void handleGalleryDownload(img.file_path)}
+                              onClick={() => void handleGalleryDownload(img.file_path, role)}
                             >
                               <Download size={12} />
                             </button>
@@ -1157,7 +1163,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 type="button"
                 className="btn-toolbar btn-primary"
                 style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
-                onClick={() => void handleGalleryDownload(galleryPreview.file_path)}
+                onClick={() => void handleGalleryDownload(galleryPreview.file_path, galleryPreviewRole, galleryPreviewSeason)}
               >
                 <Download size={13} /> Download
               </button>

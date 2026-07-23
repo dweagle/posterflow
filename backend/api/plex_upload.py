@@ -55,6 +55,7 @@ from modules.upload import (
     SETTING_PLEX_WEBHOOK_UPLOAD_DELAY_MS,
     SETTING_PLEX_WEBHOOK_ENABLED,
     SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL,
+    SETTING_PLEX_WEBHOOK_ARTWORK,
     SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD,
     SETTING_PLEX_WEBHOOK_ADOPT_EXISTING_PROCESSED,
     SETTING_PLEX_WEBHOOK_RETRY_ATTEMPTS,
@@ -69,6 +70,7 @@ from modules.upload import (
     _is_duplicate_webhook_event as is_duplicate_webhook_event,
     _is_webhook_enabled as is_webhook_enabled,
     _is_webhook_remove_overlay_label_enabled as is_webhook_remove_overlay_label_enabled,
+    _is_webhook_artwork_enabled as is_webhook_artwork_enabled,
     _is_webhook_rename_then_upload_enabled as is_webhook_rename_then_upload_enabled,
     _is_webhook_adopt_existing_processed_enabled as is_webhook_adopt_existing_processed_enabled,
     _load_library_configs_setting as load_library_configs_setting,
@@ -78,11 +80,14 @@ from modules.upload import (
     _load_priority_source_dirs as load_priority_source_dirs,
     _load_webhook_stats as load_webhook_stats,
     _parse_arr_webhook_payload as parse_arr_webhook_payload,
+    _record_unknown_instance_token as record_unknown_instance_token,
     _reset_webhook_stats as reset_webhook_stats,
     _search_webhook_dedupe_entries as search_webhook_dedupe_entries,
     _get_manual_dry_run_enabled as get_manual_dry_run_enabled,
     _get_manual_reapply_enabled as get_manual_reapply_enabled,
     _get_manual_remove_overlay_label_enabled as get_manual_remove_overlay_label_enabled,
+    _get_upload_artwork_enabled as get_upload_artwork_enabled,
+    SETTING_PLEX_UPLOAD_ARTWORK,
     _get_manual_rename_before_upload_enabled as get_manual_rename_before_upload_enabled,
     _get_manual_sync_before_upload_enabled as get_manual_sync_before_upload_enabled,
     _get_manual_border_before_upload_enabled as get_manual_border_before_upload_enabled,
@@ -132,6 +137,7 @@ def build_manual_settings_response(db: Session) -> Dict[str, Any]:
         "rename_before_upload": get_manual_rename_before_upload_enabled(db),
         "border_before_upload": get_manual_border_before_upload_enabled(db),
         "upload_delay_ms": get_manual_upload_delay_ms(db),
+        "upload_artwork": get_upload_artwork_enabled(db),
     }
 
 
@@ -139,6 +145,7 @@ def build_webhook_settings_response(db: Session) -> Dict[str, Any]:
     return {
         "enabled": is_webhook_enabled(db),
         "remove_overlay_label": is_webhook_remove_overlay_label_enabled(db),
+        "artwork": is_webhook_artwork_enabled(db),
         "rename_then_upload": is_webhook_rename_then_upload_enabled(db),
         "adopt_existing_processed": is_webhook_adopt_existing_processed_enabled(db),
         "retry_attempts": get_webhook_retry_attempts(db),
@@ -290,6 +297,7 @@ class PlexWebhookSettingsRequest(BaseModel):
     """Payload for Plex webhook settings."""
     enabled: bool
     remove_overlay_label: bool = True
+    artwork: bool = False
     rename_then_upload: bool = True
     adopt_existing_processed: bool = True
     retry_attempts: int = PLEX_WEBHOOK_RETRY_ATTEMPTS
@@ -306,6 +314,8 @@ class PlexManualSettingsRequest(BaseModel):
     rename_before_upload: bool = True
     border_before_upload: bool = False
     upload_delay_ms: int = 50
+    # Also governs the workflow's Plex Upload step; the webhook has its own toggle.
+    upload_artwork: bool = False
 
 
 class PlexLibraryConfigItem(BaseModel):
@@ -375,7 +385,7 @@ def run_plex_upload(
         if run_workflow_first:
             workflow_config = {
                 "sync_drives":       {"enabled": sync_before_upload,    "stop_on_error": True},
-                "rename_posters":    {"enabled": rename_before_upload,  "stop_on_error": True},
+                "rename_assets":     {"enabled": rename_before_upload,  "stop_on_error": True},
                 "border_replacer":   {"enabled": border_before_upload,  "stop_on_error": False},
                 "detect_unmatched": {"enabled": False, "stop_on_error": False},
             }
@@ -734,7 +744,6 @@ def get_plex_thumb(
     """Proxy a Plex thumbnail image through the backend to avoid CORS issues."""
     try:
         import requests as _requests
-        from plexapi.server import PlexServer
 
         plex_instances_setting = get_setting(db, 'plex_instances')
         if not plex_instances_setting or not plex_instances_setting.value:
@@ -849,8 +858,18 @@ def resolve_arr_instance(db: Session, request: Request, parsed: Dict[str, Any]) 
     }
 
     token = (request.query_params.get("instance") or "").strip()
-    if token and token.lower() in names_by_lower:
-        return names_by_lower[token.lower()]
+    if token:
+        if token.lower() in names_by_lower:
+            return names_by_lower[token.lower()]
+        # An explicit token that matches nothing means the webhook URL in the arr app
+        # is stale — typically the instance was renamed here afterwards. Record it so
+        # the page can warn, then fall through to payload attribution.
+        record_unknown_instance_token(db, token, source)
+        log_warning(
+            LogTags.UPLOADER,
+            f"Webhook ?instance= token '{token}' matches no configured {source} instance — "
+            f"update that app's webhook URL from the Plex Upload page (falling back to payload attribution)",
+        )
 
     payload_name = str(parsed.get("instance_name") or "").strip()
     if payload_name and payload_name.lower() in names_by_lower:
@@ -1045,6 +1064,7 @@ def save_plex_manual_settings(
             bool_to_setting(payload.border_before_upload),
         )
         upsert_setting(db, SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS, str(max(0, payload.upload_delay_ms)))
+        upsert_setting(db, SETTING_PLEX_UPLOAD_ARTWORK, bool_to_setting(payload.upload_artwork))
         db.commit()
 
         return {
@@ -1069,6 +1089,7 @@ def save_plex_webhook_settings(
             SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL,
             bool_to_setting(payload.remove_overlay_label),
         )
+        upsert_setting(db, SETTING_PLEX_WEBHOOK_ARTWORK, bool_to_setting(payload.artwork))
         upsert_setting(
             db,
             SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD,

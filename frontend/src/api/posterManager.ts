@@ -1,6 +1,10 @@
 import client, { getData, postData, putData, deleteData } from './http'
 
 // Poster types and functions
+// Where posters and artwork are renamed to when the destination is left blank. Matches
+// the backend's own fallback (poster_destination default).
+export const DEFAULT_POSTER_DESTINATION = '/config/posters/assets'
+
 export interface PosterConfig {
   destination: string
   asset_folders: boolean
@@ -76,12 +80,21 @@ export const savePosterConfig = async (config: PosterConfig) => {
   return postData('/api/posterflow/config', config)
 }
 
-export const startPosterRename = async (config: PosterConfig): Promise<{ 
-  job_id: number; 
+export const startPosterRename = async (config: PosterConfig): Promise<{
+  job_id: number;
   status: string;
   unmatched_detection?: UnmatchedStats;
 }> => {
   return postData('/api/posterflow/rename', { config })
+}
+
+export const startAssetRename = async (dryRun: boolean = false): Promise<{
+  jobs: Array<{ job_id: number; type: string }>;
+  job_id?: number;
+  status: string;
+  message: string;
+}> => {
+  return postData('/api/posterflow/asset-rename', { dry_run: dryRun })
 }
 
 export interface BorderReplacerRunOptions {
@@ -272,10 +285,16 @@ export interface CleanupFlowJobConfig {
   delete_unknown: boolean
 }
 
+/** Sync Drives step. Poster and artwork drives are separate drive types, each opt-in. */
+export interface SyncFlowJobConfig extends FlowJobConfig {
+  posters: boolean
+  artwork: boolean
+}
+
 export interface FlowConfig {
   idarr: IdarrFlowJobConfig
-  sync_drives: FlowJobConfig
-  rename_posters: FlowJobConfig
+  sync_drives: SyncFlowJobConfig
+  rename_assets: FlowJobConfig
   detect_unmatched: FlowJobConfig
   border_replacer: FlowJobConfig
   plex_upload: FlowJobConfig

@@ -1,11 +1,12 @@
 import datetime
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from core.logging import log_debug, log_warning, LogTags, logger
+from core.logging import log_debug, log_warning, log_phase, LogTags, logger
 from util.posters.index import build_search_index, create_new_empty_index, search_matches
 from util.posters.match import is_match
+from util.data.construct import ITEM_SLOTS
 from util.data.normalization import normalize_file_names
 from util.posters.scanner import process_files
 
@@ -13,12 +14,22 @@ from util.posters.scanner import process_files
 def get_assets_files(
     source_dirs: str | List[str],
     merge: bool = True,
+    exclude_artwork: bool = False,
+    artwork_out: Optional[Dict[str, List[str]]] = None,
+    per_dir_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> Tuple[Optional[List[Dict]], Optional[Dict[str, Any]]]:
     """Process one or more directories to extract and organize media assets.
 
     Args:
         source_dirs (str or List[str]): One or more paths to media source directories.
         merge (bool): Whether to merge/deduplicate assets by content and title.
+        exclude_artwork (bool): Skip Artwork Renamer files (logo/background/squareart) so
+            poster consumers scanning the shared destination don't count artwork as posters.
+        artwork_out (dict|None): When given (keyed by artwork type), collect placed artwork
+            item names during the same walk so one traversal feeds both poster and artwork
+            indexes. Mutated in place — populated even when the poster result is empty.
+        per_dir_callback: Optional callback(index, total, dir_name) fired before each
+            source directory is scanned, for job progress reporting.
 
     Returns:
         Tuple[Optional[List[Dict]], Optional[Dict[str, Any]]]: A tuple containing a flat
@@ -33,8 +44,12 @@ def get_assets_files(
 
     start_time = datetime.datetime.now()
 
-    for source_dir in source_dirs:
-        new_assets = process_files(source_dir)
+    log_phase(LogTags.SCANNER, f"Scanning {len(source_dirs)} poster source(s)")
+
+    for dir_index, source_dir in enumerate(source_dirs):
+        if per_dir_callback:
+            per_dir_callback(dir_index, len(source_dirs), os.path.basename(str(source_dir).rstrip("/")))
+        new_assets = process_files(source_dir, exclude_artwork=exclude_artwork, artwork_out=artwork_out)
         if new_assets:
             if merge:
                 merge_assets(new_assets, final_assets, prefix_index, source_priority)
@@ -61,9 +76,93 @@ def get_assets_files(
     return final_assets, prefix_index
 
 
+def _short_name(path: str) -> str:
+    """A filename's distinguishing tail — everything after the last ' - '.
+
+    Drives repeat the whole item identity in every file ("English Teacher (2024) {tmdb-258902}
+    {tvdb-421968} {imdb-tt20782190} - logo.png"), so listing three of them restates the same
+    ~70 characters three times. The log line already names the item, so only the suffix
+    carries information: logo.png / background.jpg / Season 02.jpg.
+    """
+    base = os.path.basename(path)
+    return base.rsplit(" - ", 1)[-1] if " - " in base else base
+
+
+def _drive_of(path: str, source_priority: Optional[Dict[str, int]]) -> str:
+    """The DRIVE a file came from, not its parent folder.
+
+    ``dirname`` is the drive only for a flat layout. For artwork it's the type subfolder, so
+    a merge read "from [backgrounds]"; for a nested poster drive it's the item folder.
+    """
+    if source_priority:
+        for source_dir in source_priority:
+            try:
+                Path(path).relative_to(source_dir)
+                return os.path.basename(str(source_dir).rstrip("/")) or str(source_dir)
+            except ValueError:
+                continue
+    parent = os.path.dirname(path)
+    # Artwork lives in a type subfolder under its drive — name the drive, not the subfolder.
+    if os.path.basename(parent) in ("logos", "backgrounds", "squareart"):
+        parent = os.path.dirname(parent)
+    return os.path.basename(parent)
+
+
+def drive_rank(path: str, source_priority: Optional[Dict[str, int]]) -> int:
+    """Which drive a file came from, as a priority index (lower wins). Unknown paths sort last."""
+    if not source_priority:
+        return 0
+    for source_dir, idx in source_priority.items():
+        try:
+            Path(path).relative_to(source_dir)
+            return idx
+        except ValueError:
+            continue
+    return len(source_priority)
+
+
+def merge_slots(
+    final: Dict[str, Any], new: Dict[str, Any],
+    source_priority: Optional[Dict[str, int]] = None,
+) -> None:
+    """Merge ``new``'s slots into ``final`` PER SLOT, lowest drive rank winning each one.
+
+    Slot-keyed rather than filename-keyed, because the two sides distinguish their files
+    differently: poster files by filename (poster.jpg / Season01.jpg), artwork files by
+    DIRECTORY (logos/ / backgrounds/ / squareart/) with an identical stem. A filename-keyed
+    merge collapses an item's logo+background+square into one file, since
+    ``normalize_file_names`` strips the extension.
+
+    Per-slot (not per-box) so an item's logo can come from one drive and its square from
+    another — the artwork priority rule.
+    """
+    new_slots = new.get("slots")
+    if not new_slots:
+        return
+    final_slots = final.get("slots")
+    if not final_slots:
+        final["slots"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in new_slots.items()}
+        return
+
+    for slot in ITEM_SLOTS:
+        incoming = new_slots.get(slot)
+        if not incoming:
+            continue
+        current = final_slots.get(slot)
+        if not current or drive_rank(incoming, source_priority) < drive_rank(current, source_priority):
+            final_slots[slot] = incoming
+
+    final_seasons = final_slots.setdefault("seasons", {})
+    for season, incoming in (new_slots.get("seasons") or {}).items():
+        current = final_seasons.get(season)
+        if not current or drive_rank(incoming, source_priority) < drive_rank(current, source_priority):
+            final_seasons[season] = incoming
+
+
 def merge_assets(
     new_assets: List[Dict], final_assets: List[Dict], prefix_index: Dict,
     source_priority: Optional[Dict[str, int]] = None,
+    log_new: bool = True,
 ) -> None:
     """Merge new asset entries into the final asset list, collapsing duplicates,
     handling upgrades, and indexing.
@@ -72,6 +171,10 @@ def merge_assets(
         new_assets (List[Dict]): List of new asset dictionaries.
         final_assets (List[Dict]): List to append/merge assets into.
         prefix_index (Dict): Index for fast search/lookup.
+        log_new (bool): Log a line per NEWLY appended (unmerged) asset. On by default because
+            the poster scanner logs nothing per item, so this is a poster item's only record.
+            Artwork callers pass False — the artwork scan already logs each item, with better
+            detail (its slots and the real drive name).
     """
     for new in new_assets:
         search_matched_assets = search_matches(prefix_index, new["title"])
@@ -109,7 +212,13 @@ def merge_assets(
 
             is_matched, reason = is_match(final, new)
             if is_matched and (
-                final["type"] == new["type"]
+                # A type-less box is artwork — a filename can't say movie vs series, so it
+                # fits whatever item it matched. Without this it only merged into a box with
+                # season_numbers (series), so MOVIE and COLLECTION artwork never joined its
+                # poster and was never placed.
+                not final.get("type")
+                or not new.get("type")
+                or final["type"] == new["type"]
                 or final.get("season_numbers")
                 or new.get("season_numbers")
             ):
@@ -152,16 +261,11 @@ def merge_assets(
                     else:
                         final["season_numbers"] = new_season_numbers
                 
+                # Slots merge per-slot by drive priority; files stay filename-keyed above.
+                merge_slots(final, new, source_priority)
+
                 if source_priority:
-                    def _priority_key(f: str, _sp: Dict[str, int] = source_priority) -> tuple:
-                        for sd, idx in _sp.items():
-                            try:
-                                Path(f).relative_to(sd)
-                                return (idx, f)
-                            except ValueError:
-                                continue
-                        return (len(_sp), f)
-                    final["files"].sort(key=_priority_key)
+                    final["files"].sort(key=lambda f: (drive_rank(f, source_priority), f))
                 else:
                     final["files"].sort()
                 post_files = list(final["files"])
@@ -172,74 +276,62 @@ def merge_assets(
                     if not final.get(key) and new.get(key):
                         final[key] = new[key]
                 
-                # Build detailed debug output
-                src_parent = os.path.basename(os.path.dirname(new["files"][0]))
-                reason_str = f"  Reason: {reason}."
-                files_str = f"  Files: {pre_file_count} → {post_file_count}"
-                
-                # Track what changed
+                # Header carries the reason (was its own line, alongside a "Files: N → N"
+                # counter that read "1 → 1" exactly when a duplicate was skipped). What
+                # changed follows on ONE detail line instead of being wrapped across two.
+                src_parent = _drive_of(new["files"][0], source_priority)
                 pre_basenames = {os.path.basename(f): f for f in pre_files}
                 post_basenames = {os.path.basename(f): f for f in post_files}
                 new_basenames = {os.path.basename(f): f for f in new["files"]}
-                
-                upgrade_lines = []
+
+                # Files the incoming drive also had, where the existing (higher priority) copy won.
                 kept_count = 0
                 kept_from_drive = None
-                
-                # Check for files that were kept (existed in pre, still exists in post, but new drive had a different version)
                 for pre_base, pre_full in pre_basenames.items():
-                    if pre_base in post_basenames:
-                        post_full = post_basenames[pre_base]
-                        if pre_base in new_basenames:
-                            new_full = new_basenames[pre_base]
-                            if pre_full == post_full and pre_full != new_full:
-                                # Kept higher priority file, skipped lower priority
-                                kept_count += 1
-                                if not kept_from_drive:
-                                    kept_from_drive = os.path.basename(os.path.dirname(pre_full))
-                
-                # Check for newly added files
-                for post_base, post_full in post_basenames.items():
-                    if post_base not in pre_basenames:
-                        post_dir = os.path.basename(os.path.dirname(post_full))
-                        upgrade_lines.append(
-                            f"    - Added:    {post_base} [{post_dir}]"
-                        )
-                
-                if kept_count > 0 and kept_from_drive:
-                    upgrade_lines.insert(0, f"- Kept {kept_count} higher priority file(s) from [{kept_from_drive}],")
-                    upgrade_lines.append(f"  not using poster from [{src_parent}]")
-                
-                # Format as separate log entries with indentation
-                base_msg = f"'{final['title']}' ({final['type']}) from [{src_parent}]"
-                
-                # Main line with icon
+                    if pre_full == post_basenames.get(pre_base) and pre_base in new_basenames:
+                        if pre_full != new_basenames[pre_base]:
+                            kept_count += 1
+                            if not kept_from_drive:
+                                kept_from_drive = _drive_of(pre_full, source_priority)
+
+                added = sorted(_short_name(p) for b, p in post_basenames.items() if b not in pre_basenames)
+
+                year = f" ({final['year']})" if final.get("year") else ""
                 log_debug(
-                    LogTags.SCANNER,
-                    base_msg,
-                    title=final['title'],
-                    type=final['type'],
-                    source=src_parent
+                    LogTags.MERGE,
+                    f"{final['title']}{year} ({final['type'] or 'artwork'}) - "
+                    f"from [{src_parent}]: Reason {reason}",
+                    title=final["title"], type=final["type"], source=src_parent,
+                    files_before=pre_file_count, files_after=post_file_count, reason=reason,
                 )
-                
-                # Details line without icon (custom format)
-                logger.debug(f"[{LogTags.SCANNER:^15}]       {reason_str},   {files_str}")
-                
-                # Additional details (if any) with progressive indentation
-                if upgrade_lines:
-                    for line in upgrade_lines:
-                        logger.debug(f"[{LogTags.SCANNER:^15}]         {line}")
-                
+
+                detail = []
+                if added:
+                    detail.append(f"Added {len(added)} file(s) from [{src_parent}]: {', '.join(added)}")
+                if kept_count and kept_from_drive:
+                    detail.append(
+                        f"Kept {kept_count} higher priority file(s) from [{kept_from_drive}], "
+                        f"not using poster from [{src_parent}]"
+                    )
+                if detail:
+                    # No icon, indented under the header — same style as before.
+                    logger.debug(f"[{LogTags.MERGE:^9}]         - {'; '.join(detail)}")
+
                 merged = True
                 break
         
         if not merged:
             final_assets.append(new)
             build_search_index(prefix_index, new["title"], new)
-            src_parent = os.path.basename(os.path.dirname(new["files"][0]))
+            if not log_new:
+                continue
+            src_parent = _drive_of(new["files"][0], source_priority)
+            new_year = f" ({new['year']})" if new.get("year") else ""
             log_debug(LogTags.SCANNER,
-                f"'{new['title']}' ({new['type']}), {len(new['files'])} file(s) from [{src_parent}]",
+                f"{new['title']}{new_year} ({new['type'] or 'artwork'}), "
+                f"{len(new['files'])} file(s) from [{src_parent}]",
                 title=new['title'],
+                year=new.get('year'),
                 type=new['type'],
                 file_count=len(new['files']),
                 source=src_parent

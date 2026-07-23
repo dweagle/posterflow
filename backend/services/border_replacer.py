@@ -31,6 +31,7 @@ from core.logging import (
     log_section_end,
 )
 from models.setting import get_setting, upsert_setting
+from util.posters.scanner import artwork_type_of
 
 try:
     from PIL import Image, ImageDraw, UnidentifiedImageError
@@ -39,6 +40,14 @@ except ImportError as e:
         f"PIL/Pillow not installed: {e}\n"
         "Install with: pip install Pillow"
     )
+
+
+def _is_poster_image(filename: str) -> bool:
+    """A borderable poster image. Excludes artwork (logo/background/square), which now shares
+    the item folders and tmp/ staging with posters — borders must never touch artwork."""
+    if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        return False
+    return artwork_type_of(filename) is None
 
 
 def _drop_file_cache(path: str) -> None:
@@ -1309,7 +1318,7 @@ class BorderReplacerService:
                     folder = None if rel_path == "." else rel_path
                     
                     for file in files:
-                        if not file.lower().endswith((".jpg", ".jpeg", ".png")):
+                        if not _is_poster_image(file):
                             continue
                         
                         input_file = os.path.join(root, file)
@@ -1551,7 +1560,7 @@ class BorderReplacerService:
                     rel_path = os.path.relpath(root, source_dir)
                     folder = None if rel_path == "." else rel_path
                     for file in files:
-                        if not file.lower().endswith((".jpg", ".jpeg", ".png")):
+                        if not _is_poster_image(file):
                             continue
                         dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
                         full_mode_dest_paths.add(dest_file)
@@ -1601,7 +1610,7 @@ class BorderReplacerService:
                 # Otherwise, count by walking
                 for root, dirs, files in os.walk(source_dir):
                     for file in files:
-                        if file.lower().endswith((".jpg", ".jpeg", ".png")):
+                        if _is_poster_image(file):
                             total_items += 1
 
             if total_items == 0:
@@ -1629,7 +1638,7 @@ class BorderReplacerService:
                 folder = None if rel_path == "." else rel_path
 
                 for file in files:
-                    if not file.lower().endswith((".jpg", ".jpeg", ".png")):
+                    if not _is_poster_image(file):
                         continue
 
                     input_file = os.path.join(root, file)

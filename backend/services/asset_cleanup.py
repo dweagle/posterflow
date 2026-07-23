@@ -35,6 +35,7 @@ from models.setting import get_setting, upsert_setting
 from util.posters.assets import get_assets_files
 from util.posters.index import search_matches
 from util.posters.match import collection_title_variants, is_match
+from util.posters.scanner import artwork_type_of, artwork_flat_base
 
 MEDIA_TYPES = ("movies", "series", "collections")
 
@@ -208,7 +209,10 @@ class AssetCleanupService:
         dry_run: bool = True,
         delete_unknown: bool = False,
         media_dict: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        library_setting_key: str = "asset_renamer_libraries",
         progress_callback: Optional[ProgressCallback] = None,
+        artwork_boxes: Optional[List[Dict[str, Any]]] = None,
+        artwork_sourced: Optional[Dict[int, set]] = None,
     ) -> Dict[str, Any]:
         """Reconcile the destination assets folder against the live media library.
 
@@ -236,8 +240,11 @@ class AssetCleanupService:
         if media_dict is None:
             from services.poster_renamer import PosterRenameService
 
+            # Same library selection the Asset Renamer uses, so cleanup reconciles against the
+            # SAME set of items it placed — otherwise items in one selection but not the other
+            # get their artwork pruned as "source removed" and re-placed next run (a loop).
             media_dict = PosterRenameService(self.db).get_media_from_instances(
-                log_tag=LogTags.CLEANUP, setting_key="poster_renamer_libraries"
+                log_tag=LogTags.CLEANUP, setting_key=library_setting_key
             )
 
         total_media = sum(len(media_dict.get(t, [])) for t in MEDIA_TYPES)
@@ -266,6 +273,21 @@ class AssetCleanupService:
 
         ignore_set = {self._normalize_for_ignore(name) for name in self._get_list_setting("asset_cleanup_ignore")}
 
+        # Artwork types the drives still source per item, so orphaned artwork in matched folders
+        # can be pruned. A rename+cleanup run hands its own match verdicts across (one library
+        # match, no place/prune disagreement); standalone cleanup re-derives them here.
+        # Only expected failures degrade to "prune nothing" (ValueError = no subscribed drives, OSError = unreadable drive); defects propagate.
+        if artwork_sourced is None:
+            try:
+                from services.artwork_scan import sourced_types_by_media
+                artwork_sourced = sourced_types_by_media(self.db, media_dict, artwork_boxes)
+            except (ValueError, OSError) as exc:
+                log_warning(LogTags.CLEANUP, f"No artwork sources available; skipping artwork reconciliation: {exc}")
+                artwork_sourced = {}
+        # Per-type guard: only prune a type some item still sources (an empty type can't be
+        # told apart from a down source, so it's never mass-deleted).
+        globally_sourced_artwork = {t for types in artwork_sourced.values() for t in types}
+
         roots = [destination_dir]
         tmp_dir = os.path.join(destination_dir, "tmp")
         if os.path.isdir(tmp_dir):
@@ -285,6 +307,9 @@ class AssetCleanupService:
                 unsafe_types=unsafe_types,
                 ignore_set=ignore_set,
                 result=result,
+                # Artwork lives in the item folders under the main destination, not tmp/.
+                artwork_sourced=artwork_sourced if root == destination_dir else {},
+                globally_sourced_artwork=globally_sourced_artwork if root == destination_dir else set(),
             )
 
         # ── Empty-folder sweep ─────────────────────────────────────────────
@@ -301,7 +326,8 @@ class AssetCleanupService:
             LogTags.CLEANUP,
             (
                 f"Cleanup {'(dry run) ' if dry_run else ''}complete in {elapsed:.2f}s — "
-                f"removed {counts['removed_orphans']} orphan(s), {counts['removed_stale']} stale duplicate(s); "
+                f"removed {counts['removed_orphans']} orphan(s), {counts['removed_stale']} stale duplicate(s), "
+                f"{counts['removed_artwork']} orphaned artwork; "
                 f"kept {counts['unknown_kept']} unknown for review"
             ),
             **counts,
@@ -321,8 +347,12 @@ class AssetCleanupService:
         unsafe_types: set[str],
         ignore_set: set[str],
         result: Dict[str, Any],
+        artwork_sourced: Optional[Dict[int, set]] = None,
+        globally_sourced_artwork: Optional[set] = None,
     ) -> None:
         """Run grouping + classification + deletion for one scan root."""
+        artwork_sourced = artwork_sourced or {}
+        globally_sourced_artwork = globally_sourced_artwork or set()
         log_info(LogTags.CLEANUP, f"Scanning {root} ...")
         try:
             assets_dict, prefix_index = get_assets_files([root], merge=False)
@@ -335,6 +365,12 @@ class AssetCleanupService:
             return
 
         groups, orphans = self._group_assets_to_media(media_dict, assets_dict, prefix_index)
+
+        # A flat series main poster/artwork ('Show (2020).jpg', 'Show (2020) - logo.png') has
+        # no season marker or tvdb id, so it classifies as 'movies' and a down Sonarr would
+        # delete it. Only guard against that when the destination shows the user actually has
+        # series (a confidently-typed series asset), so movie-only libraries aren't affected.
+        has_series_evidence = any(str(a.get("type")) == "series" for a in assets_dict)
 
         to_remove: List[Tuple[Dict[str, Any], str]] = []  # (asset, reason)
 
@@ -383,7 +419,11 @@ class AssetCleanupService:
             if self._normalize_for_ignore(name) in ignore_set:
                 log_debug(LogTags.CLEANUP, f"Ignored (config): {name}")
                 continue
-            if str(asset.get("type")) in unsafe_types:
+            asset_type = str(asset.get("type") or "")
+            if asset_type in unsafe_types:
+                continue
+            # 'movies' is indistinguishable from a series whose source is down (see above).
+            if asset_type == "movies" and "series" in unsafe_types and has_series_evidence:
                 continue
             if self._is_confident_orphan(asset) or (delete_unknown and self._asset_folder_path(asset) is not None):
                 to_remove.append((asset, "orphan (no matching media)"))
@@ -409,6 +449,92 @@ class AssetCleanupService:
                     result["counts"]["removed_orphans"] += 1
 
         result["counts"]["kept"] += len(keepers)
+
+        if globally_sourced_artwork:
+            self._prune_orphaned_artwork(
+                groups, root, artwork_sourced, globally_sourced_artwork, ignore_set,
+                dry_run=dry_run, result=result,
+            )
+
+    def _remove_orphan_artwork(self, file_path: str, atype: str, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
+        fname = os.path.basename(file_path)
+        reason = f"orphaned {atype} (source removed from drives)"
+        log_info(LogTags.CLEANUP, f"  {'Would remove' if dry_run else 'Removing'}: {item} — {fname} — {reason}")
+        if not dry_run:
+            try:
+                os.remove(file_path)
+            except OSError as exc:
+                log_warning(LogTags.CLEANUP, f"Failed to remove orphaned artwork {file_path}: {exc}")
+                return
+        result["removed"].append({"name": fname, "path": file_path, "reason": reason})
+        result["counts"]["removed_artwork"] += 1
+
+    def _prune_orphaned_artwork(
+        self,
+        groups: List[Dict[str, Any]],
+        destination_dir: str,
+        artwork_sourced: Dict[int, set],
+        globally_sourced: set,
+        ignore_set: set[str],
+        *,
+        dry_run: bool,
+        result: Dict[str, Any],
+    ) -> None:
+        """Remove artwork the drives no longer provide, in both nested (item folder) and flat
+        (``{name} - {type}.ext`` at the root) layouts. Only matched (live-media) folders/items
+        are visited, so a down media source is never touched; globally_sourced gates per type
+        so an empty source can't mass-delete."""
+        # A folder/name can match several media; union what any of them source so a file some
+        # matched item still provides is never deleted.
+        provided_by_asset: Dict[int, set] = {}          # nested: id(asset) -> types
+        assets_by_id: Dict[int, Dict[str, Any]] = {}
+        provided_by_base: Dict[str, set] = {}           # flat: canonical name -> types
+        for group in groups:
+            provided = artwork_sourced.get(id(group["media"]), set())
+            provided_by_base.setdefault(self._canonical_name(group["media"]), set()).update(provided)
+            for asset in group["assets"]:
+                provided_by_asset.setdefault(id(asset), set()).update(provided)
+                assets_by_id[id(asset)] = asset
+
+        # ── Nested: scan each matched item folder (artwork is filtered out of asset["files"]).
+        for asset_id, asset in assets_by_id.items():
+            folder_path = self._asset_folder_path(asset)
+            if not folder_path:
+                continue
+            folder_name = self._asset_folder_name(asset)
+            if folder_name and self._normalize_for_ignore(folder_name) in ignore_set:
+                continue
+            provided = provided_by_asset.get(asset_id, set())
+            try:
+                entries = os.listdir(folder_path)
+            except OSError:
+                continue  # folder already gone (e.g. removed as a stale duplicate)
+            for fname in entries:
+                atype = artwork_type_of(fname)  # internal type, or None for non-artwork
+                if atype is None or atype not in globally_sourced or atype in provided:
+                    continue
+                file_path = os.path.join(folder_path, fname)
+                if os.path.isfile(file_path):
+                    self._remove_orphan_artwork(file_path, atype, item=folder_name or os.path.basename(folder_path), dry_run=dry_run, result=result)
+
+        # ── Flat: reconcile "{canonical}-square.ext" files at the destination root.
+        try:
+            root_entries = os.listdir(destination_dir)
+        except OSError:
+            root_entries = []
+        for fname in root_entries:
+            atype = artwork_type_of(fname)
+            if not atype or atype not in globally_sourced:
+                continue
+            base = artwork_flat_base(fname)
+            if base is None or self._normalize_for_ignore(base) in ignore_set:
+                continue
+            provided = provided_by_base.get(base)  # None → not a matched healthy item; leave it
+            if provided is None or atype in provided:
+                continue
+            file_path = os.path.join(destination_dir, fname)
+            if os.path.isfile(file_path):
+                self._remove_orphan_artwork(file_path, atype, item=base, dry_run=dry_run, result=result)
 
     # ── deletion + db reconciliation ───────────────────────────────────────
 
@@ -500,6 +626,7 @@ class AssetCleanupService:
                 "kept": 0,
                 "removed_orphans": 0,
                 "removed_stale": 0,
+                "removed_artwork": 0,
                 "unknown_kept": 0,
                 "empty_swept": 0,
             },

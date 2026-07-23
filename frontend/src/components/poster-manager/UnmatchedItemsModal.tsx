@@ -43,6 +43,11 @@ type UnmatchedItemsModalProps = {
   modalDisplayLimit: number
   tmdbApiKeyConfigured: boolean
   onClose: () => void
+  // Hide the community publishing surface (per-item Request + Add-to-List / Create-List
+  // footer). Community requests/lists are poster-only for now, so artwork hides them.
+  hideCommunity?: boolean
+  // Asset type being listed ('Posters', 'Logos', ...), used in the modal heading.
+  typeNoun?: string
 }
 
 function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
@@ -57,12 +62,14 @@ function getTmdbLink(candidate: TmdbCandidate): string {
   return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
 }
 
-function getModalTitle(modalType: UnmatchedModalType): string {
-  if (modalType === 'movies') return 'Movies Missing Posters'
-  if (modalType === 'series') return 'Series Missing Main Posters'
-  if (modalType === 'seasons') return 'Series Missing Season Posters'
-  if (modalType === 'collections') return 'Collections Missing Posters'
-  if (modalType === 'all') return 'All Missing Posters'
+// hasSeasons mirrors UnmatchedTab's heading logic — "Main" only distinguishes anything
+// when season posters exist, and artwork has no season dimension.
+function getModalTitle(modalType: UnmatchedModalType, typeNoun: string, hasSeasons: boolean): string {
+  if (modalType === 'movies') return `Movies Missing ${typeNoun}`
+  if (modalType === 'series') return `Series Missing ${hasSeasons ? 'Main ' : ''}${typeNoun}`
+  if (modalType === 'seasons') return `Series Missing Season ${typeNoun}`
+  if (modalType === 'collections') return `Collections Missing ${typeNoun}`
+  if (modalType === 'all') return `All Missing ${typeNoun}`
   return ''
 }
 
@@ -178,7 +185,11 @@ function UnmatchedItemsModal({
   modalDisplayLimit,
   tmdbApiKeyConfigured,
   onClose,
+  hideCommunity = false,
+  typeNoun = 'Posters',
 }: UnmatchedItemsModalProps) {
+  const statsHaveSeasons = Boolean(unmatchedStats?.summary?.seasons && unmatchedStats.summary.seasons.total > 0)
+  const modalTitle = getModalTitle(modalType, typeNoun, statsHaveSeasons)
   const { showToast } = useToast()
   const { isConnected, token, login } = useDiscordAuth()
   const { getStatus: getClaimStatus } = useCommunityClaimStatus()
@@ -322,7 +333,7 @@ function UnmatchedItemsModal({
       <div className="modal-overlay" onClick={handleOverlayClick}>
         <div className="modal-content schedule-modal">
           <div className="modal-header">
-            <h2>{getModalTitle(modalType)}</h2>
+            <h2>{modalTitle}</h2>
             <button className="modal-close" onClick={onClose}>×</button>
           </div>
           <div className="modal-body">
@@ -453,15 +464,17 @@ function UnmatchedItemsModal({
             <Search size={13} />
             <span>Maker</span>
           </button>
-          <button
-            type="button"
-            className="community-request-btn"
-            title="Request this poster from the community"
-            onClick={() => setRequestItem(item)}
-          >
-            <Star size={13} />
-            <span>Request</span>
-          </button>
+          {!hideCommunity && (
+            <button
+              type="button"
+              className="community-request-btn"
+              title="Request this poster from the community"
+              onClick={() => setRequestItem(item)}
+            >
+              <Star size={13} />
+              <span>Request</span>
+            </button>
+          )}
           </div>
           </div>
           {item.missingSeasonsNumbers && item.missingSeasonsNumbers.length > 0 && (
@@ -577,7 +590,7 @@ function UnmatchedItemsModal({
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content schedule-modal list-items-modal">
         <div className="modal-header">
-          <h2>{getModalTitle(modalType)}</h2>
+          <h2>{modalTitle}</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
@@ -619,32 +632,36 @@ function UnmatchedItemsModal({
         </div>
 
         <div className="modal-footer">
-          {isConnected && (
+          {isConnected && !hideCommunity && (
             <PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />
           )}
           <button className="btn-secondary" onClick={onClose}>Close</button>
-          <button
-            className="btn-secondary"
-            onClick={handleAddToLists}
-            disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
-            title={
-              !isConnected ? 'Connect Discord to publish to Community Lists'
-              : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
-              : 'Publish these items to the Community Lists tab for makers'
-            }
-          >
-            {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
-            Add All to List
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
-            disabled={publishing || allItems.length === 0}
-            title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
-          >
-            <ListChecks size={16} />
-            Create List
-          </button>
+          {!hideCommunity && (
+            <>
+              <button
+                className="btn-secondary"
+                onClick={handleAddToLists}
+                disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
+                title={
+                  !isConnected ? 'Connect Discord to publish to Community Lists'
+                  : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
+                  : 'Publish these items to the Community Lists tab for makers'
+                }
+              >
+                {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
+                Add All to List
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+                disabled={publishing || allItems.length === 0}
+                title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+              >
+                <ListChecks size={16} />
+                Create List
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

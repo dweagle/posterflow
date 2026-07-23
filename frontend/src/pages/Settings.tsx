@@ -135,24 +135,24 @@ const DISCORD_NOTIFICATION_FEATURE_ORDER = [
 
 const DISCORD_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info'; label: string }[]> = {
   workflow: [
-    { type: 'success', label: 'Success - Per-step summary embed — one embed per step that ran (sync, renamer, border, plex, unmatched), each showing its own result' },
+    { type: 'success', label: 'Success - Per-step summary embed — one embed per step that ran (poster sync, artwork sync, renamer, border, plex, unmatched), each showing its own result' },
     { type: 'error', label: 'Error - Step failed — included in the summary as an error embed for that step' },
     { type: 'error', label: 'Error - Workflow crashed — sent if the entire workflow throws before finishing' },
   ],
   sync: [
-    { type: 'success', label: 'Success - Sync completed — drive name, files added / replaced / deleted' },
-    { type: 'error', label: 'Error - Sync failed — error message' },
+    { type: 'success', label: 'Success - Sync completed — poster or artwork drive name, files added / replaced / deleted' },
+    { type: 'error', label: 'Error - Sync failed — error message (poster and artwork drives both reported)' },
   ],
   poster_renamer: [
-    { type: 'success', label: 'Success - Rename completed — posters matched, movies / series / collections list' },
+    { type: 'success', label: 'Success - Rename completed — posters matched (movies / series / collections list) and artwork files placed' },
     { type: 'error', label: 'Error - Rename failed — error message' },
   ],
   unmatched_assets: [
-    { type: 'info', label: 'Info- Scan completed — total missing posters, movies / shows / seasons count' },
+    { type: 'info', label: 'Info- Scan completed — missing posters (movies / shows / seasons / collections) and missing artwork per type (logo / background / squareart)' },
     { type: 'error', label: 'Error - Detection failed — error message' },
   ],
   plex_upload: [
-    { type: 'success', label: 'Success - Full upload completed — movies / shows / seasons / collections uploaded' },
+    { type: 'success', label: 'Success - Full upload completed — movies / shows / seasons / collections uploaded, plus artwork uploaded by type' },
     { type: 'success', label: 'Success - Webhook upload — item uploaded (media type, title, count)' },
     { type: 'error', label: 'Error - Upload failed — error message' },
     { type: 'info', label: 'Info - Webhook: no local assets found for target item (no ping)' },
@@ -172,8 +172,8 @@ const DISCORD_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info
 
 const DISCORD_NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
   workflow: 'Workflow Start/End',
-  sync: 'Google Drive Sync Summary',
-  poster_renamer: 'Poster Renamer Results',
+  sync: 'Drive Sync Summary (Posters + Artwork)',
+  poster_renamer: 'Asset Renamer Results',
   unmatched_assets: 'Unmatched Summary',
   plex_upload: 'Plex Upload Item',
   idarr: 'IDarr Summary',

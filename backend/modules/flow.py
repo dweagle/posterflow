@@ -21,6 +21,7 @@ from core.logging import (
     remove_job_log_handler,
 )
 from models.setting import get_setting, get_setting_value
+from util.poster_settings import get_asset_include, get_poster_destination
 from models.job import (
     Job,
     JOB_TYPE_SYNC_ALL_PREFIX,
@@ -194,11 +195,24 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         else:
             flow_config = {
                 "sync_drives": {"enabled": True, "stop_on_error": True},
-                "rename_posters": {"enabled": True, "stop_on_error": True},
+                "rename_assets": {"enabled": True, "stop_on_error": True},
                 "detect_unmatched": {"enabled": True, "stop_on_error": True},
                 "border_replacer": {"enabled": False, "stop_on_error": True},
                 "plex_upload": {"enabled": False, "stop_on_error": False},
                 "cleanup_assets": {"enabled": True, "delete_unknown": False},
+            }
+
+        # Forward-map legacy split rename steps → unified rename_assets. The flow reads
+        # poster_flow_config raw (not through the API normalizer), so older stored configs
+        # would otherwise skip the rename step entirely.
+        if isinstance(flow_config, dict) and "rename_assets" not in flow_config and (
+            "rename_posters" in flow_config or "rename_artwork" in flow_config
+        ):
+            _lp = flow_config.get("rename_posters") or {}
+            _la = flow_config.get("rename_artwork") or {}
+            flow_config["rename_assets"] = {
+                "enabled": bool(_lp.get("enabled", False)) or bool(_la.get("enabled", False)),
+                "stop_on_error": bool(_lp.get("stop_on_error", True)),
             }
 
         if dry_run:
@@ -217,12 +231,15 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         total_steps = sum(1 for enabled in (
             idarr_flow_cfg.get("enabled", False),
             flow_config.get("sync_drives", {}).get("enabled", False),
-            flow_config.get("rename_posters", {}).get("enabled", False),
+            flow_config.get("rename_assets", {}).get("enabled", False),
             flow_config.get("border_replacer", {}).get("enabled", False),
             flow_config.get("plex_upload", {}).get("enabled", False),
             flow_config.get("detect_unmatched", {}).get("enabled", False),
         ) if enabled)
         step = 0
+        # Filled by the rename step with its media fetch + unfiltered artwork drive scan, so
+        # the cleanup step below reuses them instead of re-fetching and re-walking the drives.
+        rename_scan: dict[str, Any] = {}
 
         # ── IDarr ──────────────────────────────────────────────────────────
         if idarr_flow_cfg.get("enabled", False):
@@ -307,11 +324,19 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             update_job_state(db, job, progress=15, message="IDarr skipped")
 
         # ── Sync Google Drives ─────────────────────────────────────────────
-        if flow_config.get("sync_drives", {}).get("enabled", False):
+        _sync_cfg = flow_config.get("sync_drives", {})
+        # The flow reads the stored config raw, so these defaults must match
+        # _normalize_flow_config's: posters on, artwork opt-in.
+        _sync_posters = bool(_sync_cfg.get("posters", True))
+        _sync_artwork = bool(_sync_cfg.get("artwork", False))
+        if _sync_cfg.get("enabled", False) and _sync_posters:
             step += 1
             log_step(LogTags.WORKFLOW, step, total_steps, "Syncing Google Drives")
             update_job_state(db, job, progress=15, message=format_workflow_step(step, total_steps, "Syncing Google Drives..."))
 
+            # Artwork drives are a separate table with their own sync job, so they get
+            # their own child below rather than riding along with the poster sync.
+            _poster_sync_end = 32 if _sync_artwork else 40
             sync_child = _create_child_job(db, JOB_TYPE_SYNC_ALL_PREFIX, "Workflow requested sync all")
             try:
                 sync_result = _promote_child_progress_to_parent(
@@ -319,8 +344,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     job,
                     sync_child.id,
                     15,
-                    40,
-                    format_workflow_step(step, total_steps, "Syncing Google Drives..."),
+                    _poster_sync_end,
+                    format_workflow_step(step, total_steps, "Syncing poster drives..."),
                     partial(run_sync_all_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
@@ -334,7 +359,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     "result": sync_result,
                     "embed_spec": {
                         "event_type": "success",
-                        "title": "Google Drive Sync Summary",
+                        "title": "Poster Drive Sync Summary",
                         "description": f"{int(_sr.get('drives_synced', 1))} drive(s) processed",
                         "fields": [
                             {"name": "New", "value": str(int(_sr.get("added", 0))), "inline": True},
@@ -346,8 +371,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Sync finished", child_job_id=sync_child.id)
-                    update_job_state(db, job, progress=40, message=format_workflow_step_complete(step, total_steps, "Sync finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Poster drive sync finished", child_job_id=sync_child.id)
+                    update_job_state(db, job, progress=_poster_sync_end, message=format_workflow_step_complete(step, total_steps, "Poster drive sync finished"))
                 else:
                     raise Exception(child_message or "Sync step failed")
 
@@ -378,101 +403,73 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                         job_id=job_id,
                     )
                     return results
-        else:
+        elif not _sync_cfg.get("enabled", False):
             log_info(LogTags.WORKFLOW, "Sync drives disabled - skipping")
             results["jobs_skipped"].append({"job": "sync_drives", "reason": "Disabled in configuration"})
             update_job_state(db, job, progress=40, message="Sync drives skipped")
+        else:
+            log_info(LogTags.WORKFLOW, "Poster drive sync not selected - skipping")
+            results["jobs_skipped"].append({"job": "sync_drives", "reason": "Poster drives not selected"})
+            if not _sync_artwork:
+                # Neither type selected: the enabled step still counts toward total_steps.
+                step += 1
+                update_job_state(db, job, progress=40, message=format_workflow_step_complete(step, total_steps, "Sync skipped (nothing selected)"))
 
-        # ── Rename & Organize Posters ─────────────────────────────────────────
-        if flow_config.get("rename_posters", {}).get("enabled", False):
-            step += 1
-            log_step(LogTags.WORKFLOW, step, total_steps, "Renaming and organizing posters")
-            update_job_state(db, job, progress=40, message=format_workflow_step(step, total_steps, "Renaming and organizing posters..."))
+        # ── Sync Artwork Drives ───────────────────────────────────────────────
+        # Separate drive type, separate table, separate job — but the same step, so the
+        # rename step below organizes artwork that was just synced rather than stale files.
+        if _sync_cfg.get("enabled", False) and _sync_artwork:
+            if not _sync_posters:
+                step += 1
+                log_step(LogTags.WORKFLOW, step, total_steps, "Syncing Google Drives")
+            log_info(LogTags.WORKFLOW, "Syncing artwork drives")
+            update_job_state(db, job, progress=32, message=format_workflow_step(step, total_steps, "Syncing artwork drives..."))
 
-            rename_child = _create_child_job(db, JOB_TYPE_POSTER_RENAMER, "Workflow requested Poster Renamer")
+            artwork_sync_child = _create_child_job(db, "Artwork Sync All", "Workflow requested artwork sync all")
             try:
-                config_data: dict[str, Any] = {
-                    "destination": get_setting_value(db, "poster_destination", "/config/posters/assets"),
-                    "action_type": get_setting_value(db, "poster_action_type", "copy"),
-                    "dry_run": dry_run,
-                    "match_threshold": 0.8,
-                    "auto_run_border": False,
-                    "skip_border_post_processing": flow_config.get("border_replacer", {}).get("enabled", False),
-                }
-                asset_folders_value = get_setting_value(db, "poster_asset_folders")
-                config_data["asset_folders"] = asset_folders_value.lower() == "true" if asset_folders_value else True
-
-                _promote_child_progress_to_parent(
+                artwork_sync_result = _promote_child_progress_to_parent(
                     db,
                     job,
-                    rename_child.id,
+                    artwork_sync_child.id,
+                    32,
                     40,
-                    65,
-                    format_workflow_step(step, total_steps, "Renaming and organizing posters..."),
-                    partial(run_rename_background_job, triggered_by="workflow"),
-                    config_data,
+                    format_workflow_step(step, total_steps, "Syncing artwork drives..."),
+                    partial(run_sync_all_job, triggered_by="workflow", sync_posters=False, sync_artwork=True),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
                 )
-                child_ok, child_message = _get_child_result(db, rename_child.id)
+                child_ok, child_message = _get_child_result(db, artwork_sync_child.id)
 
-                _rs: dict = {}
-                _ro: dict = {}
-                try:
-                    import json as _json
-                    _rs_raw = get_setting_value(db, "poster_renamer_stats")
-                    if _rs_raw:
-                        _rs = _json.loads(_rs_raw)
-                    _ro_raw = get_setting_value(db, "poster_renamer_last_output")
-                    if _ro_raw:
-                        _ro = _json.loads(_ro_raw)
-                except Exception as e:
-                    log_debug(LogTags.WORKFLOW, f"Could not load poster_renamer stats/output from settings: {e}")
+                _asr = artwork_sync_result or {}
                 results["jobs_run"].append({
-                    "job": "rename_posters",
+                    "job": "sync_artwork_drives",
                     "success": child_ok,
-                    "child_job_id": rename_child.id,
+                    "child_job_id": artwork_sync_child.id,
+                    "result": artwork_sync_result,
                     "embed_spec": {
                         "event_type": "success",
-                        "title": "Poster Renamer Notification",
-                        "description": (
-                            f"Matched {int(_rs.get('total_matched', 0))} poster(s): "
-                            f"movies={int(_rs.get('movies', 0))}, "
-                            f"series={int(_rs.get('series', 0))}, "
-                            f"collections={int(_rs.get('collections', 0))}"
-                        ),
+                        "title": "Artwork Drive Sync Summary",
+                        "description": f"{int(_asr.get('drives_synced', 1))} artwork drive(s) processed",
                         "fields": [
-                            {
-                                "name": f"Movies ({len(_ro.get('movies', []))})",
-                                "value": _build_renamer_section(_ro.get("movies", [])),
-                                "inline": False,
-                            },
-                            {
-                                "name": f"Series ({len(_ro.get('series', []))})",
-                                "value": _build_renamer_section(_ro.get("series", [])),
-                                "inline": False,
-                            },
-                            {
-                                "name": f"Collections ({len(_ro.get('collections', []))})",
-                                "value": _build_renamer_section(_ro.get("collections", [])),
-                                "inline": False,
-                            },
+                            {"name": "New", "value": str(int(_asr.get("added", 0))), "inline": True},
+                            {"name": "Replaced", "value": str(int(_asr.get("updated", 0))), "inline": True},
+                            {"name": "Deleted", "value": str(int(_asr.get("deleted", 0))), "inline": True},
                         ],
                         "color": 0x4CAF50,
                     },
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Rename finished", child_job_id=rename_child.id)
-                    update_job_state(db, job, progress=65, message=format_workflow_step_complete(step, total_steps, "Rename finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Artwork drive sync finished", child_job_id=artwork_sync_child.id)
+                    update_job_state(db, job, progress=40, message=format_workflow_step_complete(step, total_steps, "Artwork drive sync finished"))
                 else:
-                    raise Exception(child_message or "Rename step failed")
+                    raise Exception(child_message or "Artwork sync step failed")
 
             except Exception as e:
                 error_msg = str(e)
-                log_error(LogTags.WORKFLOW, f"Rename posters failed: {error_msg}\n{traceback.format_exc()}")
-                results["jobs_failed"].append({"job": "rename_posters", "error": error_msg, "child_job_id": rename_child.id})
+                log_error(LogTags.WORKFLOW, f"Sync artwork drives failed: {error_msg}\n{traceback.format_exc()}")
+                results["jobs_failed"].append({"job": "sync_artwork_drives", "error": error_msg, "child_job_id": artwork_sync_child.id})
 
-                if flow_config.get("rename_posters", {}).get("stop_on_error", True):
+                if _sync_cfg.get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
                     send_discord_notification(
@@ -480,30 +477,138 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                         feature_key="workflow",
                         event_type="error",
                         title="Workflow Failed",
-                        description=f"Renamer step failed: {error_msg}",
+                        description=f"Artwork sync step failed: {error_msg}",
                         fields=[
                             {"name": "Job ID", "value": str(job_id), "inline": True},
-                            {"name": "Step", "value": "Rename Posters", "inline": True},
+                            {"name": "Step", "value": "Sync Drives (artwork)", "inline": True},
                         ],
                         color=0xF44336,
                     )
                     send_major_error_notification(
                         db,
-                        source="workflow.rename_posters",
+                        source="workflow.sync_artwork_drives",
                         message=error_msg,
                         job_id=job_id,
                     )
                     return results
+        elif _sync_cfg.get("enabled", False):
+            results["jobs_skipped"].append({"job": "sync_artwork_drives", "reason": "Artwork drives not selected"})
+
+        # ── Rename & Organize Assets ──────────────────────────────────────────
+        # One step runs the poster and/or artwork renamers per the shared Include
+        # selection (asset_renamer_include), both using asset_renamer_libraries.
+        if flow_config.get("rename_assets", {}).get("enabled", False):
+            step += 1
+            _assets_stop_on_error = flow_config.get("rename_assets", {}).get("stop_on_error", True)
+            include = get_asset_include(db)
+            log_step(LogTags.WORKFLOW, step, total_steps, "Renaming and organizing assets")
+            update_job_state(db, job, progress=40, message=format_workflow_step(step, total_steps, "Renaming and organizing assets..."))
+
+            _dest = get_poster_destination(db)
+            _action = get_setting_value(db, "poster_action_type", "copy")
+            _af_value = get_setting_value(db, "poster_asset_folders")
+            _asset_folders = _af_value.lower() == "true" if _af_value else True
+
+            def _fail_assets_step(error_msg: str) -> None:
+                results["success"] = False
+                update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
+                send_discord_notification(
+                    db, feature_key="workflow", event_type="error", title="Workflow Failed",
+                    description=f"Rename Assets step failed: {error_msg}",
+                    fields=[
+                        {"name": "Job ID", "value": str(job_id), "inline": True},
+                        {"name": "Step", "value": "Rename & Organize Assets", "inline": True},
+                    ],
+                    color=0xF44336,
+                )
+                send_major_error_notification(db, source="workflow.rename_assets", message=error_msg, job_id=job_id)
+
+            # One child runs the merged Asset Renamer (posters and/or artwork per the Include).
+            if include:
+                rename_child = _create_child_job(db, JOB_TYPE_POSTER_RENAMER, "Workflow requested Asset Renamer")
+                try:
+                    config_data: dict[str, Any] = {
+                        "destination": _dest,
+                        "action_type": _action,
+                        "dry_run": dry_run,
+                        "match_threshold": 0.8,
+                        "auto_run_border": False,
+                        "skip_border_post_processing": flow_config.get("border_replacer", {}).get("enabled", False),
+                        "asset_folders": _asset_folders,
+                        "library_setting_key": "asset_renamer_libraries",
+                        "include": include,
+                    }
+                    # The rename hands back its media fetch + artwork drive scan so this
+                    # workflow's cleanup (below) reuses them instead of redoing both.
+                    _promote_child_progress_to_parent(
+                        db, job, rename_child.id, 40, 66,
+                        format_workflow_step(step, total_steps, "Renaming and organizing assets..."),
+                        partial(run_rename_background_job, triggered_by="workflow", scan_out=rename_scan),
+                        config_data, True,
+                    )
+                    child_ok, child_message = _get_child_result(db, rename_child.id)
+
+                    _rs: dict = {}
+                    _ro: dict = {}
+                    try:
+                        import json as _json
+                        _rs_raw = get_setting_value(db, "poster_renamer_stats")
+                        if _rs_raw:
+                            _rs = _json.loads(_rs_raw)
+                        _ro_raw = get_setting_value(db, "poster_renamer_last_output")
+                        if _ro_raw:
+                            _ro = _json.loads(_ro_raw)
+                    except Exception as e:
+                        log_debug(LogTags.WORKFLOW, f"Could not load poster_renamer stats/output from settings: {e}")
+                    results["jobs_run"].append({
+                        "job": "rename_assets",
+                        "success": child_ok,
+                        "child_job_id": rename_child.id,
+                        "embed_spec": {
+                            "event_type": "success",
+                            "title": "Asset Renamer Notification",
+                            "description": (
+                                f"Matched {int(_rs.get('total_matched', 0))} poster(s): "
+                                f"movies={int(_rs.get('movies', 0))}, "
+                                f"series={int(_rs.get('series', 0))}, "
+                                f"collections={int(_rs.get('collections', 0))}"
+                                + (f" · Placed {int(_rs.get('artwork', 0) or 0):,} artwork file(s)" if "artwork" in _rs else "")
+                            ),
+                            "fields": [
+                                {"name": f"Movies ({len(_ro.get('movies', []))})", "value": _build_renamer_section(_ro.get("movies", [])), "inline": False},
+                                {"name": f"Series ({len(_ro.get('series', []))})", "value": _build_renamer_section(_ro.get("series", [])), "inline": False},
+                                {"name": f"Collections ({len(_ro.get('collections', []))})", "value": _build_renamer_section(_ro.get("collections", [])), "inline": False},
+                            ] + ([{"name": "Artwork", "value": f"{int(_rs.get('artwork', 0) or 0):,} file(s) placed", "inline": False}] if "artwork" in _rs else []),
+                            "color": 0x4CAF50,
+                        },
+                    })
+                    if child_ok:
+                        log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps}: Asset rename finished", child_job_id=rename_child.id)
+                    else:
+                        raise Exception(child_message or "Rename step failed")
+                except Exception as e:
+                    error_msg = str(e)
+                    log_error(LogTags.WORKFLOW, f"Rename assets failed: {error_msg}\n{traceback.format_exc()}")
+                    results["jobs_failed"].append({"job": "rename_assets", "error": error_msg, "child_job_id": rename_child.id})
+                    if _assets_stop_on_error:
+                        _fail_assets_step(error_msg)
+                        return results
+
+                update_job_state(db, job, progress=66, message=format_workflow_step_complete(step, total_steps, "Assets organized"))
+            else:
+                log_info(LogTags.WORKFLOW, "Include selection is empty - skipping asset rename")
+                results["jobs_skipped"].append({"job": "rename_assets", "reason": "No asset types selected"})
+                update_job_state(db, job, progress=66, message=format_workflow_step_complete(step, total_steps, "Asset rename skipped (nothing selected)"))
         else:
-            log_info(LogTags.WORKFLOW, "Rename posters disabled - skipping")
-            results["jobs_skipped"].append({"job": "rename_posters", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=65, message="Rename posters skipped")
+            log_info(LogTags.WORKFLOW, "Rename assets disabled - skipping")
+            results["jobs_skipped"].append({"job": "rename_assets", "reason": "Disabled in configuration"})
+            update_job_state(db, job, progress=66, message="Rename assets skipped")
 
         # ── Border Replacer ─────────────────────────────────────────────────
         if flow_config.get("border_replacer", {}).get("enabled", False):
             step += 1
             log_step(LogTags.WORKFLOW, step, total_steps, "Applying borders to posters")
-            update_job_state(db, job, progress=65, message=format_workflow_step(step, total_steps, "Applying borders to posters..."))
+            update_job_state(db, job, progress=66, message=format_workflow_step(step, total_steps, "Applying borders to posters..."))
 
             border_child = _create_child_job(db, JOB_TYPE_BORDER_REPLACER, "Workflow requested border replacer")
             try:
@@ -515,8 +620,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     db,
                     job,
                     border_child.id,
-                    60,
-                    75,
+                    66,
+                    78,
                     format_workflow_step(step, total_steps, "Applying borders to posters..."),
                     partial(run_border_replacer_background_job, triggered_by="workflow"),
                     dry_run,
@@ -599,6 +704,11 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     dry_run=dry_run,
                     triggered_by="workflow",
                     job=job,
+                    # Reuse the rename's media fetch + artwork scan + match verdicts
+                    # (see rename_scan above) — one library match per run.
+                    media_dict=rename_scan.get("media_dict"),
+                    artwork_boxes=rename_scan.get("artwork_boxes"),
+                    artwork_sourced=rename_scan.get("artwork_sourced"),
                 )
                 cleanup_embed = {
                     "event_type": "success",
@@ -699,11 +809,14 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             update_job_state(db, job, progress=90, message="Plex upload skipped")
 
         # ── Detect Unmatched ────────────────────────────────────────────────
-        if flow_config.get("detect_unmatched", {}).get("enabled", False):
+        # One slot-aware pass covers posters AND artwork (no separate artwork detection).
+        _detect_cfg = flow_config.get("detect_unmatched", {})
+        if _detect_cfg.get("enabled", False):
             step += 1
             log_step(LogTags.WORKFLOW, step, total_steps, "Detecting unmatched assets")
             update_job_state(db, job, progress=90, message=format_workflow_step(step, total_steps, "Detecting unmatched assets..."))
 
+            _poster_detect_end = 99
             unmatched_child = _create_child_job(db, JOB_TYPE_UNMATCHED_DETECTION, "Workflow requested unmatched detection")
             try:
                 _promote_child_progress_to_parent(
@@ -711,7 +824,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     job,
                     unmatched_child.id,
                     90,
-                    99,
+                    _poster_detect_end,
                     format_workflow_step(step, total_steps, "Detecting unmatched assets..."),
                     partial(run_unmatched_detection_background_job, triggered_by="workflow"),
                     True,  # skip_discord: sub-module notifications suppressed in workflow
@@ -727,6 +840,23 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 except Exception as e:
                     log_debug(LogTags.WORKFLOW, f"Could not load unmatched_last_stats from settings: {e}")
                 _uc = int(_us.get("unmatched_count", 0))
+                _art_stats = _us.get("artwork") or {}
+                _unmatched_desc = f"{_uc:,} missing posters"
+                _unmatched_fields = [
+                    {"name": "Total", "value": str(_uc), "inline": True},
+                    {"name": "Movies", "value": str(int(_us.get("movies_missing", 0))), "inline": True},
+                    {"name": "Shows", "value": str(int(_us.get("shows_missing", 0))), "inline": True},
+                    {"name": "Seasons", "value": str(int(_us.get("seasons_missing", 0))), "inline": True},
+                    {"name": "Collections", "value": str(int(_us.get("collections_missing", 0))), "inline": True},
+                ]
+                if _art_stats:
+                    _unmatched_desc += f" · {int(_us.get('artwork_missing', 0) or 0):,} missing artwork"
+                    for _atype, _astats in _art_stats.items():
+                        _unmatched_fields.append({
+                            "name": str(_atype).capitalize(),
+                            "value": f"{int(_astats.get('missing', 0)):,} missing of {int(_astats.get('total', 0)):,}",
+                            "inline": True,
+                        })
                 results["jobs_run"].append({
                     "job": "detect_unmatched",
                     "success": child_ok,
@@ -734,21 +864,15 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     "embed_spec": {
                         "event_type": "success",
                         "title": "Unmatched Assets Summary",
-                        "description": f"{_uc:,} total assets missing posters",
-                        "fields": [
-                            {"name": "Total", "value": str(_uc), "inline": True},
-                            {"name": "Movies", "value": str(int(_us.get("movies_missing", 0))), "inline": True},
-                            {"name": "Shows", "value": str(int(_us.get("shows_missing", 0))), "inline": True},
-                            {"name": "Seasons", "value": str(int(_us.get("seasons_missing", 0))), "inline": True},
-                            {"name": "Collections", "value": str(int(_us.get("collections_missing", 0))), "inline": True},
-                        ],
+                        "description": _unmatched_desc,
+                        "fields": _unmatched_fields,
                         "color": 0x4CAF50,
                     },
                 })
 
                 if child_ok:
                     log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Unmatched detection finished", child_job_id=unmatched_child.id)
-                    update_job_state(db, job, progress=99, message=format_workflow_step_complete(step, total_steps, "Unmatched detection finished"))
+                    update_job_state(db, job, progress=_poster_detect_end, message=format_workflow_step_complete(step, total_steps, "Unmatched detection finished"))
                 else:
                     raise Exception(child_message or "Unmatched step failed")
 
@@ -788,8 +912,11 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
 
         _step_labels = {
             "idarr": "IDarr Rename",
-            "sync_drives": "Sync Drives",
+            "sync_drives": "Sync Drives (posters)",
+            "sync_artwork_drives": "Sync Drives (artwork)",
+            "rename_assets": "Rename & Organize Assets",
             "rename_posters": "Rename Posters",
+            "rename_artwork": "Rename Artwork",
             "border_replacer": "Border Replacer",
             "detect_unmatched": "Detect Unmatched",
             "plex_upload": "Plex Upload",

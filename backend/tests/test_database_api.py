@@ -1,8 +1,6 @@
-import os
-from pathlib import Path
-
-from models.drive import Drive
 from models.poster import Poster
+from models.artwork import Artwork
+from models.artwork_drive import ArtworkDrive
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +160,54 @@ def test_cleanup_execute_with_no_orphans_returns_zero_deleted(client, test_db, t
     response = client.post("/api/database/cleanup/execute?confirm=true")
     assert response.status_code == 200
     assert response.json()["deleted_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Artwork parity: cleanup covers orphaned Artwork rows too
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_preview_identifies_orphaned_artwork_from_unsubscribed_drive(client, test_db):
+    test_db.add(ArtworkDrive(name="My Artwork Drive", drive_id="art-drv", subscribed=False))
+    test_db.add(Artwork(
+        artwork_drive_id="art-drv",
+        artwork_type="logo",
+        file_name="Show (2020) {tmdb-1} - logo.png",
+        file_path="/nonexistent/artwork/Show (2020) {tmdb-1} - logo.png",
+    ))
+    test_db.commit()
+
+    response = client.get("/api/database/cleanup/preview?full=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["orphaned_count"] == 1
+    record = data["orphaned_records"][0]
+    assert record["asset_type"] == "artwork"
+    assert record["reason"] == "Drive unsubscribed"
+    assert record["drive_name"] == "My Artwork Drive"
+
+
+def test_cleanup_execute_deletes_orphaned_artwork_but_keeps_present_files(client, test_db, tmp_path):
+    real_art = tmp_path / "keep - background.jpg"
+    real_art.write_bytes(b"img")
+    test_db.add(ArtworkDrive(name="Art", drive_id="art-drv", subscribed=True))
+    test_db.add(Artwork(
+        artwork_drive_id="art-drv", artwork_type="background",
+        file_name="keep - background.jpg", file_path=str(real_art),
+    ))
+    test_db.add(Artwork(
+        artwork_drive_id="art-drv", artwork_type="logo",
+        file_name="gone - logo.png", file_path="/nonexistent/gone - logo.png",
+    ))
+    test_db.commit()
+
+    response = client.post("/api/database/cleanup/execute?confirm=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deleted_count"] == 1
+    assert data["artwork_records_deleted"] == 1
+    assert data["poster_records_deleted"] == 0
+
+    remaining = test_db.query(Artwork).all()
+    assert len(remaining) == 1
+    assert remaining[0].file_name == "keep - background.jpg"

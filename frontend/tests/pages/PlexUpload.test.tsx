@@ -143,30 +143,176 @@ describe('PlexUpload', () => {
     })
   })
 
-  it('shows settings tab by default and switches to manual tab', async () => {
+  it('shows the webhook tab by default and switches to the uploads tab', async () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
     expect(screen.getByText('Webhook Settings')).toBeTruthy()
-    expect(screen.queryByText('Manual Run Options (Shared)')).toBeNull()
+    expect(screen.queryByText('Upload Options')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Manual Uploads' }))
+    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
 
-    expect(screen.getByText('Manual Run Options (Shared)')).toBeTruthy()
-    expect(screen.getByText('Run & Monitor')).toBeTruthy()
+    expect(screen.getByText('Upload Options')).toBeTruthy()
+    expect(screen.getByText('Uploads & Options')).toBeTruthy()
   })
 
-  it('keeps setup walkthrough collapsed by default and expands on Show', async () => {
+  // The switch row and toolbar match the Asset Manager's Unmatched / Drive Priority tabs.
+  it('renders the toolbar and marks the active switch', async () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
-    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(screen.getByRole('heading', { level: 2, name: 'Plex Upload' })).toBeTruthy()
 
+    const webhook = screen.getByRole('button', { name: 'Webhook' })
+    const manual = screen.getByRole('button', { name: 'Uploads / Options' })
+    expect(screen.getByRole('button', { name: 'Activity / Cache' })).toBeTruthy()
+    expect(webhook.className).toContain('active')
+    expect(manual.className).not.toContain('active')
+
+    await user.click(manual)
+    expect(screen.getByRole('button', { name: 'Uploads / Options' }).className).toContain('active')
+    expect(screen.getByRole('button', { name: 'Webhook' }).className).not.toContain('active')
+  })
+
+  // Standalone page again (own sidebar entry + route), so it provides its own page container
+  // and page header.
+  it('renders as a standalone page', () => {
+    render(<PlexUpload />)
+
+    expect(document.querySelector('.plex-upload-page.page-container')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Plex Upload' })).toBeTruthy()
+    expect(document.querySelector('.plex-upload-scope-toggle')).toBeTruthy()
+    // The old page-tab bar styling is gone; this is a switch row now.
+    expect(document.querySelector('.plex-upload-tabs')).toBeNull()
+  })
+
+  // The toggle lives next to the toolbar title; the panel opens under the toolbar.
+  it('keeps setup walkthrough collapsed by default and toggles it from the toolbar', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    await user.click(screen.getByRole('button', { name: 'Webhook' }))
+
+    const toggle = screen.getByRole('button', { name: /Setup Walkthrough/i })
+    expect(toggle.closest('.toolbar-title')).toBeTruthy()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText(/Enable webhook processing below/i)).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Show' }))
+    await user.click(toggle)
 
     expect(screen.getByText(/Enable webhook processing below/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Setup Walkthrough/i }).getAttribute('aria-expanded')).toBe('true')
+
+    await user.click(screen.getByRole('button', { name: /Setup Walkthrough/i }))
+    expect(screen.queryByText(/Enable webhook processing below/i)).toBeNull()
+  })
+
+  // The grouping is a claim about the backend: flow.py reads plex_upload_manual_remove_overlay_label
+  // and the upload job reads the manual delay + plex_upload_artwork, while the workflow hardcodes
+  // dry_run/reapply off and runs its own sync/rename/border steps.
+  it('separates settings the workflow honours from manual-run-only ones', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
+    await waitFor(() => expect(screen.getByText('Upload Options')).toBeTruthy())
+
+    const card = document.querySelector('.plex-manual-options-card') as HTMLElement
+    // Each group is its own element so they can sit in two columns on wide screens.
+    expect(card.querySelectorAll('.upload-options-groups > .upload-options-group')).toHaveLength(2)
+    const headings = [...card.querySelectorAll('.config-subgroup-heading')].map((h) => h.textContent ?? '')
+    expect(headings[0]).toMatch(/Upload Behaviour/i)
+    expect(headings[0]).toMatch(/Workflow.*scheduled/i)
+    expect(headings[1]).toMatch(/Manual Runs Only/i)
+
+    // Everything before the second heading reaches the workflow; everything after doesn't.
+    const divider = card.querySelector('.config-subgroup-divider') as HTMLElement
+    const isBeforeDivider = (label: RegExp) => {
+      const el = [...card.querySelectorAll('span')].find((n) => label.test(n.textContent ?? ''))!
+      return Boolean(divider.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING)
+    }
+
+    expect(isBeforeDivider(/Remove Overlay label/i)).toBe(true)
+    expect(isBeforeDivider(/Upload artwork/i)).toBe(true)
+    expect(isBeforeDivider(/Upload delay/i)).toBe(true)
+
+    expect(isBeforeDivider(/Dry run/i)).toBe(false)
+    expect(isBeforeDivider(/Reapply/i)).toBe(false)
+    expect(isBeforeDivider(/Sync drives before upload/i)).toBe(false)
+    expect(isBeforeDivider(/Rename posters before upload/i)).toBe(false)
+    expect(isBeforeDivider(/Replace borders before upload/i)).toBe(false)
+
+    // Each column holds its own group's settings, so the two-column layout can't split a group.
+    const [behaviour, manualOnly] = [...card.querySelectorAll('.upload-options-group')]
+    expect(behaviour.textContent).toMatch(/Remove Overlay label/i)
+    expect(behaviour.textContent).toMatch(/Upload delay/i)
+    expect(behaviour.textContent).not.toMatch(/Dry run/i)
+    expect(manualOnly.textContent).toMatch(/Dry run/i)
+    expect(manualOnly.textContent).toMatch(/Replace borders/i)
+    expect(manualOnly.textContent).not.toMatch(/Remove Overlay label/i)
+  })
+
+  // Save sits in the toolbar like every other tab, and targets the active sub-tab.
+  it('offers one toolbar Save per sub-tab, disabled until dirty', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    await waitFor(() => expect(mockGetPlexWebhookSettings).toHaveBeenCalled())
+
+    // Nothing edited yet.
+    const save = screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    expect(document.querySelector('.toolbar .btn-toolbar')).toBeTruthy()
+
+    await user.click(screen.getByLabelText(/Adopt existing processed posters/i))
+    expect((screen.getByRole('button', { name: /Save Settings/i }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole('button', { name: /Save Settings/i }).className).toContain('btn-unsaved')
+  })
+
+  // Activity is monitoring, so there is nothing to save there.
+  it('offers no Save on the Activity tab', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    await user.click(screen.getByRole('button', { name: 'Activity / Cache' }))
+    expect(screen.queryByRole('button', { name: /Save Settings/i })).toBeNull()
+  })
+
+  // Monitoring isn't configuration: Stats and Cache belong under Activity, not the
+  // webhook config surface where they used to live.
+  it('keeps monitoring on Activity and out of the Webhook tab', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    // Webhook tab: config only.
+    expect(screen.getByText('Webhook Settings')).toBeTruthy()
+    expect(screen.queryByText('Webhook Stats')).toBeNull()
+    expect(screen.queryByText('Upload Cache')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Activity / Cache' }))
+
+    expect(screen.getByText('Webhook Stats')).toBeTruthy()
+    expect(screen.getByText('Upload Cache')).toBeTruthy()
+    expect(screen.queryByText('Webhook Settings')).toBeNull()
+  })
+
+  // The old permanent red banner read as an error; it's first-run advice.
+  it('does not show a standing setup warning', () => {
+    render(<PlexUpload />)
+
+    expect(document.querySelector('.plex-upload-initial-warning')).toBeNull()
+    expect(screen.queryByText(/Initial Setup Recommendation/i)).toBeNull()
+  })
+
+  // The walkthrough only documents webhook setup, so it has no place on the manual tab.
+  it('offers the walkthrough toggle only on the settings tab', async () => {
+    const user = userEvent.setup()
+    render(<PlexUpload />)
+
+    expect(screen.getByRole('button', { name: /Setup Walkthrough/i })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Uploads / Options' }))
+    expect(screen.queryByRole('button', { name: /Setup Walkthrough/i })).toBeNull()
   })
 
   it('saves adopt existing processed toggle in webhook settings payload', async () => {
@@ -179,7 +325,7 @@ describe('PlexUpload', () => {
 
     const adoptCheckbox = screen.getByLabelText(/Adopt existing processed posters/i)
     await user.click(adoptCheckbox)
-    await user.click(screen.getByRole('button', { name: 'Save Webhook Settings' }))
+    await user.click(screen.getByRole('button', { name: /Save Settings/i }))
 
     await waitFor(() => {
       expect(mockSavePlexWebhookSettings).toHaveBeenCalledWith(expect.objectContaining({

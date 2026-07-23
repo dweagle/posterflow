@@ -27,6 +27,7 @@ from core.logging import (
 from database import SessionLocal
 from models.drive import Drive
 from models.setting import get_setting, upsert_setting
+from util.poster_settings import get_poster_destination
 from models.job import (
     Job,
     JOB_STATUS_RUNNING,
@@ -58,11 +59,12 @@ def _extract_edition_from_radarr_path(path: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
-SETTING_POSTER_DESTINATION = "poster_destination"
 SETTING_POSTER_DRIVE_PRIORITY = "poster_drive_priority"
 SETTING_PLEX_WEBHOOK_DEDUPE_CACHE = "plex_webhook_dedupe_cache"
 SETTING_PLEX_WEBHOOK_ENABLED = "plex_webhook_enabled"
 SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL = "plex_webhook_remove_overlay_label"
+SETTING_PLEX_WEBHOOK_ARTWORK = "plex_webhook_artwork"
+SETTING_PLEX_UPLOAD_ARTWORK = "plex_upload_artwork"
 SETTING_PLEX_WEBHOOK_RENAME_THEN_UPLOAD = "plex_webhook_rename_then_upload"
 SETTING_PLEX_WEBHOOK_ADOPT_EXISTING_PROCESSED = "plex_webhook_adopt_existing_processed"
 SETTING_PLEX_WEBHOOK_RETRY_ATTEMPTS = "plex_webhook_retry_attempts"
@@ -96,23 +98,23 @@ def _load_priority_source_dirs(db: Session) -> tuple[list[str], Optional[str]]:
 def _load_priority_source_dir_context(db: Session) -> tuple[list[Dict[str, Any]], Optional[str]]:
     priority_setting = get_setting(db, SETTING_POSTER_DRIVE_PRIORITY)
     if not priority_setting or not priority_setting.value:
-        return [], "No drive priority configured. Configure in Poster Manager → Drive Priority tab."
+        return [], "No drive priority configured. Configure in Asset Manager → Drive Priority tab."
 
     try:
         priority_payload = json.loads(priority_setting.value)
     except json.JSONDecodeError:
-        return [], "Drive priority configuration is invalid. Reconfigure in Poster Manager → Drive Priority tab."
+        return [], "Drive priority configuration is invalid. Reconfigure in Asset Manager → Drive Priority tab."
 
     if not isinstance(priority_payload, dict):
-        return [], "Drive priority configuration is invalid. Reconfigure in Poster Manager → Drive Priority tab."
+        return [], "Drive priority configuration is invalid. Reconfigure in Asset Manager → Drive Priority tab."
 
     raw_drive_ids = priority_payload.get("drive_ids", [])
     if not isinstance(raw_drive_ids, list) or not raw_drive_ids:
-        return [], "Drive priority list is empty. Add source drives in Poster Manager → Drive Priority tab."
+        return [], "Drive priority list is empty. Add source drives in Asset Manager → Drive Priority tab."
 
     drive_ids: list[int] = [int(drive_id) for drive_id in raw_drive_ids if isinstance(drive_id, int)]
     if not drive_ids:
-        return [], "Drive priority list has no valid drive IDs. Reconfigure in Poster Manager → Drive Priority tab."
+        return [], "Drive priority list has no valid drive IDs. Reconfigure in Asset Manager → Drive Priority tab."
 
     drives = (
         db.query(Drive)
@@ -234,14 +236,7 @@ def _run_webhook_preupload_rename_pass(
         },
     }
 
-    destination_setting = get_setting(db, SETTING_POSTER_DESTINATION)
-    destination_dir = destination_setting.value.strip() if destination_setting and destination_setting.value else ""
-    if not destination_dir:
-        log_warning(
-            LogTags.UPLOADER,
-            "Webhook rename-then-upload is enabled but poster destination is not configured; skipping rename prep",
-        )
-        return summary
+    destination_dir = get_poster_destination(db)
 
     _source_dir_ctx, source_dirs_error = _load_priority_source_dir_context(db)
     if source_dirs_error:
@@ -711,6 +706,11 @@ def _get_manual_border_before_upload_enabled(db: Session) -> bool:
     return _read_bool_setting(db, SETTING_PLEX_UPLOAD_MANUAL_BORDER_BEFORE_UPLOAD, default=False)
 
 
+# Manual + workflow uploads share this; the webhook has its own plex_webhook_artwork.
+def _get_upload_artwork_enabled(db: Session) -> bool:
+    return _read_bool_setting(db, SETTING_PLEX_UPLOAD_ARTWORK, default=False)
+
+
 def _get_manual_upload_delay_ms(db: Session) -> int:
     s = get_setting(db, SETTING_PLEX_UPLOAD_MANUAL_UPLOAD_DELAY_MS)
     try:
@@ -733,6 +733,10 @@ def _utc_now_iso() -> str:
 
 def _is_webhook_remove_overlay_label_enabled(db: Session) -> bool:
     return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_REMOVE_OVERLAY_LABEL, default=True)
+
+
+def _is_webhook_artwork_enabled(db: Session) -> bool:
+    return _read_bool_setting(db, SETTING_PLEX_WEBHOOK_ARTWORK, default=False)
 
 
 def _is_webhook_rename_then_upload_enabled(db: Session) -> bool:
@@ -781,6 +785,10 @@ def _default_webhook_stats() -> Dict[str, Any]:
         "last_event_at": None,
         "last_queued_at": None,
         "last_error": None,
+        # ?instance= tokens that matched no configured arr instance (stale after a
+        # rename until the webhook URL in the arr app is updated): {token: {count,
+        # source, last_seen}}. Cleared by the stats reset.
+        "unknown_instance_tokens": {},
     }
 
 
@@ -1183,6 +1191,32 @@ def _reset_webhook_stats(db: Session) -> Dict[str, Any]:
     stats = _default_webhook_stats()
     _save_webhook_stats(db, stats)
     return stats
+
+
+_UNKNOWN_INSTANCE_TOKEN_CAP = 10
+
+
+def _record_unknown_instance_token(db: Session, token: str, source: str) -> None:
+    """Track a webhook ?instance= token that matched no configured arr instance so the
+    Plex Upload page can warn that a webhook URL is stale (typically after a rename)."""
+    stats = _load_webhook_stats(db)
+    tokens = stats.get("unknown_instance_tokens")
+    if not isinstance(tokens, dict):
+        tokens = {}
+    entry = tokens.get(token)
+    if not isinstance(entry, dict):
+        entry = {}
+    tokens[token] = {
+        "count": int(entry.get("count", 0) or 0) + 1,
+        "source": source or str(entry.get("source", "")),
+        "last_seen": _utc_now_iso(),
+    }
+    if len(tokens) > _UNKNOWN_INSTANCE_TOKEN_CAP:
+        # Garbage tokens shouldn't grow the blob forever; keep the most recently seen.
+        ordered = sorted(tokens.items(), key=lambda kv: str(kv[1].get("last_seen", "")))
+        tokens = dict(ordered[-_UNKNOWN_INSTANCE_TOKEN_CAP:])
+    stats["unknown_instance_tokens"] = tokens
+    _save_webhook_stats(db, stats)
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -1651,6 +1685,12 @@ def run_plex_upload_background_job(
             raise Exception(result.get("error", "Plex upload failed"))
 
         stats = result.get("stats", {})
+        # Artwork uploads are counted separately from posters (stats["artwork"]); surface
+        # them wherever poster counts are reported, or a run looks like it did nothing.
+        artwork_stats = stats.get("artwork", {}) if isinstance(stats.get("artwork"), dict) else {}
+        artwork_scanned = int(artwork_stats.get("scanned", 0))
+        artwork_uploaded = int(artwork_stats.get("would_upload" if dry_run else "uploaded", 0))
+        artwork_by_type = artwork_stats.get("by_type", {}) if isinstance(artwork_stats.get("by_type"), dict) else {}
         uploaded_label = "would_upload" if dry_run else "uploaded"
         uploaded_count = int(stats.get(uploaded_label, 0))
         matched_count = int(stats.get("matched", 0))
@@ -1675,7 +1715,9 @@ def run_plex_upload_background_job(
                 "Plex upload",
                 (
                     f"({'dry run' if dry_run else 'live'}): "
-                    f"{uploaded_count:,} uploaded, {matched_count:,}/{scanned_count:,} matched, "
+                    f"{uploaded_count:,} poster(s) uploaded"
+                    + (f", {artwork_uploaded:,} artwork" if artwork_scanned else "")
+                    + f", {matched_count:,}/{scanned_count:,} matched, "
                     f"candidates {unique_candidates:,}/{raw_candidates:,} unique/raw"
                 ),
             ),
@@ -1701,6 +1743,8 @@ def run_plex_upload_background_job(
             collections=collections_uploaded,
             skipped=int(stats.get("skipped", 0)),
             errors=int(stats.get("errors", 0)),
+            artwork_scanned=artwork_scanned,
+            artwork_uploaded=artwork_uploaded,
         )
 
         summary_label = "would_upload" if dry_run else "uploaded"
@@ -1712,6 +1756,18 @@ def run_plex_upload_background_job(
                 f"seasons={seasons_uploaded}, collections={collections_uploaded}, total={uploaded_count}"
             ),
         )
+
+        if artwork_scanned:
+            log_info(
+                LogTags.UPLOADER,
+                (
+                    f"Artwork totals (final): {summary_label} | "
+                    f"logos={int(artwork_by_type.get('logo', 0))}, "
+                    f"backgrounds={int(artwork_by_type.get('background', 0))}, "
+                    f"squareart={int(artwork_by_type.get('squareart', 0))}, "
+                    f"total={artwork_uploaded}"
+                ),
+            )
 
         if isinstance(library_totals, list) and library_totals:
             log_info(LogTags.UPLOADER, "Library summary (final)")
@@ -1744,6 +1800,17 @@ def run_plex_upload_background_job(
                 {"name": "Matched", "value": f"{matched_count:,}/{scanned_count:,}", "inline": True},
                 {"name": "Mode", "value": mode_label, "inline": True},
             ]
+            if artwork_scanned:
+                discord_fields.append({
+                    "name": "Artwork",
+                    "value": (
+                        f"{artwork_uploaded:,}/{artwork_scanned:,} uploaded — "
+                        f"logos {int(artwork_by_type.get('logo', 0))}, "
+                        f"backgrounds {int(artwork_by_type.get('background', 0))}, "
+                        f"squareart {int(artwork_by_type.get('squareart', 0))}"
+                    ),
+                    "inline": False,
+                })
             if year_discrepancy_text:
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
@@ -1753,7 +1820,11 @@ def run_plex_upload_background_job(
                 feature_key="plex_upload",
                 event_type="success",
                 title="Plex Upload Completed",
-                description=f"{uploaded_count:,} poster(s) uploaded ({mode_label.lower()})",
+                description=(
+                    f"{uploaded_count:,} poster(s)"
+                    + (f" and {artwork_uploaded:,} artwork file(s)" if artwork_scanned else "")
+                    + f" uploaded ({mode_label.lower()})"
+                ),
                 fields=discord_fields,
                 color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
             )
@@ -1846,10 +1917,23 @@ def _format_year_discrepancy_text(year_discrepancies: list) -> str:
     )
 
 
+def _accumulate_artwork_stats(aggregated: Dict[str, Any], target_stats: Dict[str, Any]) -> None:
+    """Sum one webhook target's artwork stats into the run aggregate. Artwork is a nested dict,
+    so the flat-int key loop that aggregates the other stats can't pick it up."""
+    art = target_stats.get("artwork") if isinstance(target_stats.get("artwork"), dict) else {}
+    if not art:
+        return
+    aggregated["scanned"] += int(art.get("scanned", 0))
+    aggregated["uploaded"] += int(art.get("uploaded", 0))
+    by_type = art.get("by_type") if isinstance(art.get("by_type"), dict) else {}
+    for atype, count in by_type.items():
+        aggregated["by_type"][atype] = int(aggregated["by_type"].get(atype, 0)) + int(count or 0)
+
+
 def _build_no_local_assets_warning_message(media_type: str | None, title: str | None) -> str:
     return (
         "No local assets found for webhook target after pre-upload steps. "
-        "Add the source drive in Poster Manager \u2192 Drive Priority or place the poster in destination. "
+        "Add the source drive in Asset Manager \u2192 Drive Priority or place the poster/artwork in destination. "
         f"Target: {media_type}: {title}"
     )
 
@@ -2094,6 +2178,7 @@ def run_plex_webhook_background_job(
 
         service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
         service.set_arr_instance_scope(parsed_payload.get("arr_instance"))
+        webhook_include_artwork = _is_webhook_artwork_enabled(db)
 
         # For Radarr upgrade events, use the movieFile path to detect edition changes without
         # relying on Plex scan state (which may lag behind the actual file import).
@@ -2177,6 +2262,7 @@ def run_plex_webhook_background_job(
                 tmdb_id=parsed_payload.get("tmdb_id"),
                 tvdb_id=parsed_payload.get("tvdb_id"),
                 imdb_id=parsed_payload.get("imdb_id"),
+                include_artwork=webhook_include_artwork,
             )
             target_cache_checks.append(
                 {
@@ -2404,6 +2490,8 @@ def run_plex_webhook_background_job(
                 "errors": 0,
                 "plex_seasons_missing": 0,
             }
+            # Artwork is nested (not a flat int), so it accumulates separately from the loop above.
+            aggregated_artwork: Dict[str, Any] = {"scanned": 0, "uploaded": 0, "by_type": {}}
             year_discrepancies = []
 
             for target in webhook_targets:
@@ -2425,6 +2513,7 @@ def run_plex_webhook_background_job(
                     imdb_id=parsed_payload.get("imdb_id"),
                     dry_run=False,
                     remove_overlay_label=remove_overlay_label,
+                    include_artwork=webhook_include_artwork,
                     progress_callback=progress_callback,
                 )
 
@@ -2499,13 +2588,14 @@ def run_plex_webhook_background_job(
                     )
                 for key in aggregated_stats:
                     aggregated_stats[key] += int(target_stats.get(key, 0))
+                _accumulate_artwork_stats(aggregated_artwork, target_stats)
 
             if result and result.get("retry_scheduled"):
                 continue
 
             result = {
                 "success": True,
-                "stats": aggregated_stats,
+                "stats": {**aggregated_stats, "artwork": aggregated_artwork},
             }
 
             if not result.get("success", False):
@@ -2585,6 +2675,11 @@ def run_plex_webhook_background_job(
         scanned_count = int(stats.get("scanned", 0))
         raw_candidates = int(stats.get("candidate_matches_raw", 0))
         unique_candidates = int(stats.get("candidate_matches_unique", 0))
+        # Artwork counted separately from posters, same as the full upload reports it.
+        wh_artwork = stats.get("artwork") if isinstance(stats.get("artwork"), dict) else {}
+        wh_artwork_scanned = int(wh_artwork.get("scanned", 0))
+        wh_artwork_uploaded = int(wh_artwork.get("uploaded", 0))
+        wh_artwork_by_type = wh_artwork.get("by_type") if isinstance(wh_artwork.get("by_type"), dict) else {}
 
         if matched_count == 0 and uploaded_count == 0:
             if saw_retryable_preflight_failure and not saw_non_preflight_processing:
@@ -2657,6 +2752,8 @@ def run_plex_webhook_background_job(
             uploaded=uploaded_count,
             candidates_raw=raw_candidates,
             candidates_unique=unique_candidates,
+            artwork_scanned=wh_artwork_scanned,
+            artwork_uploaded=wh_artwork_uploaded,
             skipped=int(stats.get("skipped", 0)),
             errors=int(stats.get("errors", 0)),
         )
@@ -2682,6 +2779,17 @@ def run_plex_webhook_background_job(
                 {"name": "Title", "value": str(title), "inline": True},
                 {"name": "Uploaded", "value": str(uploaded_count), "inline": True},
             ]
+            if wh_artwork_scanned:
+                discord_fields.append({
+                    "name": "Artwork",
+                    "value": (
+                        f"{wh_artwork_uploaded:,}/{wh_artwork_scanned:,} uploaded — "
+                        f"logos {int(wh_artwork_by_type.get('logo', 0))}, "
+                        f"backgrounds {int(wh_artwork_by_type.get('background', 0))}, "
+                        f"squareart {int(wh_artwork_by_type.get('squareart', 0))}"
+                    ),
+                    "inline": False,
+                })
             if year_discrepancy_text:
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}

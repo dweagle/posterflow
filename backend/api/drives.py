@@ -10,7 +10,7 @@ import json
 from pydantic import BaseModel, ConfigDict, field_serializer
 from datetime import datetime, timezone
 
-from database import get_db, SessionLocal
+from database import get_db
 from models.drive import Drive
 from models.job import Job, JOB_STATUS_PENDING
 from models.poster import Poster
@@ -136,6 +136,29 @@ def _restore_drive_to_priority(db: Session, drive_id: int) -> bool:
     _save_removed_priority_map(db, removed_map)
     return True
 
+
+def _append_drive_to_priority(db: Session, drive_id: int) -> bool:
+    """Append a drive to the bottom of poster priority if it isn't already in the list."""
+    priority_setting = get_setting(db, SETTING_POSTER_DRIVE_PRIORITY)
+    priority_data: Dict[str, Any] = {}
+    if priority_setting and priority_setting.value:
+        try:
+            priority_data = json.loads(priority_setting.value)
+        except json.JSONDecodeError:
+            priority_data = {}
+    drive_ids = priority_data.get("drive_ids", [])
+    if not isinstance(drive_ids, list):
+        drive_ids = []
+    if any(str(existing_id) == str(drive_id) for existing_id in drive_ids):
+        return False
+    drive_ids.append(drive_id)
+    priority_data["drive_ids"] = drive_ids
+    if "enabled_styles" not in priority_data or not isinstance(priority_data.get("enabled_styles"), list):
+        priority_data["enabled_styles"] = ["MM2K", "CL2K", "Custom"]
+    upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
+    return True
+
+
 DriveStyle = Literal["CL2K", "MM2K", "Custom"]
 
 class DriveSchema(BaseModel):
@@ -244,20 +267,25 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
     return drive_schemas
 
 @router.post("/{drive_id}/subscribe")
-def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def subscribe_drive(drive_id: int, add_to_priority: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Subscribe to a drive for syncing"""
     drive = db.query(Drive).filter(Drive.id == drive_id).first()
     if not drive:
         raise HTTPException(status_code=404, detail="Drive not found")
-    
+
     drive.subscribed = True
     restored_to_priority = _restore_drive_to_priority(db, drive.id)
+    added_to_priority = False
+    if add_to_priority and not restored_to_priority:
+        added_to_priority = _append_drive_to_priority(db, drive.id)
     db.commit()
     db.refresh(drive)
-    
+
     log_message = f"Subscribed to drive: {drive.name} ({drive.style_type})"
     if restored_to_priority:
         log_message += " (restored to poster priority)"
+    elif added_to_priority:
+        log_message += " (added to poster priority)"
     log_user_action(log_message)
 
     # Auto-scan local folder for drives with GDrive sync disabled.
@@ -287,6 +315,7 @@ def subscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, A
         "message": f"Subscribed to {drive.name}",
         "drive": drive_response,
         "restored_to_priority": restored_to_priority,
+        "added_to_priority": added_to_priority,
         "scan_job_id": scan_job_id,
     }
 

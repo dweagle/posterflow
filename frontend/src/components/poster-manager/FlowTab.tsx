@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FlowConfig, FlowResult, IdarrFlowJobConfig, MakerIdarrSyncTarget, Workflow } from '../../api/client'
 import ConfirmDialog from '../ConfirmDialog'
-import Toolbar from './Toolbar'
+import Toolbar from '../Toolbar'
 
 type FlowTabProps = {
   workflows: Workflow[]
@@ -25,7 +25,7 @@ type FlowTabProps = {
   onDeleteWorkflow: () => void
   onSaveFlowConfig: () => void
   onRunFlow: (dryRun: boolean) => void
-  onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown', value: boolean) => void
+  onChangeFlowConfig: (job: keyof FlowConfig, field: 'enabled' | 'stop_on_error' | 'delete_unknown' | 'posters' | 'artwork', value: boolean) => void
   onChangeIdarrFlowConfig: (field: keyof IdarrFlowJobConfig, value: boolean | number[]) => void
   onToggleIdarrScope: (scopeIndex: number, included: boolean) => void
 }
@@ -241,33 +241,42 @@ function FlowTab({
               <span className="toggle-slider"></span>
             </label>
           </div>
-          <p className="job-description">Download latest posters from all subscribed Google Drives</p>
+          <p className="job-description">Download the latest assets from your subscribed Google Drives</p>
           {flowConfig.sync_drives.enabled && (
             <div className="job-options">
               <label className="checkbox-option">
                 <input type="checkbox" checked={flowConfig.sync_drives.stop_on_error} onChange={(e) => onChangeFlowConfig('sync_drives', 'stop_on_error', e.target.checked)} />
                 <span>Stop workflow if this step fails</span>
               </label>
+              {/* Separate drive types with separate syncs — sync what this run will organize. */}
+              <label className="checkbox-option">
+                <input type="checkbox" checked={flowConfig.sync_drives.posters} onChange={(e) => onChangeFlowConfig('sync_drives', 'posters', e.target.checked)} />
+                <span>Sync poster drives</span>
+              </label>
+              <label className="checkbox-option">
+                <input type="checkbox" checked={flowConfig.sync_drives.artwork} onChange={(e) => onChangeFlowConfig('sync_drives', 'artwork', e.target.checked)} />
+                <span>Sync artwork drives (logos, backgrounds, square art)</span>
+              </label>
             </div>
           )}
         </div>
 
-        <div className={`flow-job-card ${!flowConfig.rename_posters.enabled ? 'disabled' : ''}`}>
+        <div className={`flow-job-card ${!flowConfig.rename_assets.enabled ? 'disabled' : ''}`}>
           <div className="job-header">
             <div className="job-header-left">
               <span className="job-number">{stepOffset + 2}</span>
-              <span className="job-title">Rename & Organize Posters</span>
+              <span className="job-title">Rename & Organize Assets</span>
             </div>
             <label className="toggle-switch">
-              <input type="checkbox" checked={flowConfig.rename_posters.enabled} onChange={(e) => onChangeFlowConfig('rename_posters', 'enabled', e.target.checked)} />
+              <input type="checkbox" checked={flowConfig.rename_assets.enabled} onChange={(e) => onChangeFlowConfig('rename_assets', 'enabled', e.target.checked)} />
               <span className="toggle-slider"></span>
             </label>
           </div>
-          <p className="job-description">Match posters to your media library and organize them in {destination || '/data/posters/organized'}</p>
-          {flowConfig.rename_posters.enabled && (
+          <p className="job-description">Match posters and artwork to your media library and organize them in {destination || '/data/posters/organized'} (uses the Include selection on the Asset Renamer tab)</p>
+          {flowConfig.rename_assets.enabled && (
             <div className="job-options">
               <label className="checkbox-option">
-                <input type="checkbox" checked={flowConfig.rename_posters.stop_on_error} onChange={(e) => onChangeFlowConfig('rename_posters', 'stop_on_error', e.target.checked)} />
+                <input type="checkbox" checked={flowConfig.rename_assets.stop_on_error} onChange={(e) => onChangeFlowConfig('rename_assets', 'stop_on_error', e.target.checked)} />
                 <span>Stop workflow if this step fails</span>
               </label>
               <div className="checkbox-option-row">
@@ -353,7 +362,7 @@ function FlowTab({
               <span className="toggle-slider"></span>
             </label>
           </div>
-          <p className="job-description">Check which media in your library is missing posters</p>
+          <p className="job-description">Check which media in your library is missing assets — one pass covers posters and artwork (logos, backgrounds, square art)</p>
           {flowConfig.detect_unmatched.enabled && (
             <div className="job-options">
               <label className="checkbox-option">

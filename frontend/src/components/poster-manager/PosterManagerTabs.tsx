@@ -17,7 +17,7 @@ function PosterManagerTabs({ activeTab, onTabChange, unmatchedCount }: PosterMan
       </button>
       <button className={activeTab === 'rename' ? 'active' : ''} onClick={() => onTabChange('rename')}>
         <FolderSync size={16} className="tab-icon icon-rename" />
-        Poster Renamer
+        Asset Renamer
       </button>
       <button className={activeTab === 'border' ? 'active' : ''} onClick={() => onTabChange('border')}>
         <Layers size={16} className="tab-icon icon-border" />

@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { 
+import {
   Drive,
   PosterConfig,
   getSettings,
+  saveBulkSettings,
 } from '../api/client'
 import { getPosterStats, PosterStyleStats } from '../api/posterManager'
 import { useToast } from '../components/Toast'
@@ -12,9 +13,13 @@ import PosterManagerTabs, { PosterManagerTab } from '../components/poster-manage
 import UnmatchedItemsModal, { UnmatchedModalType } from '../components/poster-manager/UnmatchedItemsModal'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import PriorityTab from '../components/poster-manager/PriorityTab'
+import ArtworkPriorityTab from '../components/poster-manager/ArtworkPriorityTab'
+import { type PriorityScope } from '../components/poster-manager/PriorityScopeSelector'
 import { CommunityClaimStatusProvider } from '../hooks/useCommunityClaimStatus'
 import FlowTab from '../components/poster-manager/FlowTab'
 import UnmatchedTab from '../components/poster-manager/UnmatchedTab'
+import { UnmatchedScope, UNMATCHED_SCOPES } from '../components/poster-manager/UnmatchedTypeSelector'
+import { useArtworkUnmatched } from '../hooks/useArtworkUnmatched'
 import RenamerTab from '../components/poster-manager/RenamerTab'
 import BorderTab from '../components/poster-manager/BorderTab'
 import SettingsTab from '../components/poster-manager/SettingsTab'
@@ -36,6 +41,14 @@ const CARD_PREVIEW_LIMIT = 5 // Number of items to show in card preview
 const MODAL_DISPLAY_LIMIT = 200 // Max items to render in modal
 const POSTER_MANAGER_TAB_STORAGE_KEY = 'posterflow.posterManager.activeTab'
 
+// Card labels per asset type in the Unmatched view.
+const UNMATCHED_TYPE_NOUN: Record<UnmatchedScope, string> = {
+  posters: 'Posters',
+  logo: 'Logos',
+  background: 'Backdrops',
+  squareart: 'Square Art',
+}
+
 const isPosterManagerTab = (value: string): value is PosterManagerTab => {
   return ['flow', 'settings', 'priority', 'border', 'rename', 'unmatched'].includes(value)
 }
@@ -50,12 +63,34 @@ function PosterManager() {
     }
     return 'flow'
   })
+  const [priorityScope, setPriorityScope] = useState<PriorityScope>(
+    () => (localStorage.getItem('posterflow.posterManager.priorityScope') === 'artwork' ? 'artwork' : 'posters')
+  )
+  const handlePriorityScopeChange = (scope: PriorityScope) => {
+    setPriorityScope(scope)
+    localStorage.setItem('posterflow.posterManager.priorityScope', scope)
+  }
+  const [unmatchedScope, setUnmatchedScope] = useState<UnmatchedScope>(() => {
+    const saved = localStorage.getItem('posterflow.posterManager.unmatchedScope')
+    if (saved && (UNMATCHED_SCOPES as string[]).includes(saved)) return saved as UnmatchedScope
+    return saved === 'artwork' ? 'logo' : 'posters' // migrate the old 2-way scope
+  })
+  // The shared Detection Settings view — its own destination at the end of the type row.
+  const [showUnmatchedSettings, setShowUnmatchedSettings] = useState(false)
+  const chooseUnmatchedScope = (scope: UnmatchedScope) => {
+    setUnmatchedScope(scope)
+    setShowUnmatchedSettings(false)
+    localStorage.setItem('posterflow.posterManager.unmatchedScope', scope)
+  }
   const [config, setConfig] = useState<PosterConfig | null>(null)
   const [showUnmatchedModal, setShowUnmatchedModal] = useState<UnmatchedModalType>(null)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
   const [styleStats, setStyleStats] = useState<PosterStyleStats | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [renaming, setRenaming] = useState(false)
+  const [assetInclude, setAssetInclude] = useState<string[]>(['posters'])
+  const [originalAssetInclude, setOriginalAssetInclude] = useState<string[]>(['posters'])
+  const [assetIncludeLoaded, setAssetIncludeLoaded] = useState(false)
   const [detectingUnmatched, setDetectingUnmatched] = useState(false)
   const [runningBorderReplacer, setRunningBorderReplacer] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
@@ -122,6 +157,7 @@ function PosterManager() {
     autoRunBorder,
     autoRunCleanup,
     cleanupDeleteUnknown,
+    borderSettingsLoaded,
     holidaySchedules,
     removeBorders,
     setBorderWidth,
@@ -259,9 +295,37 @@ function PosterManager() {
       .then((s) => {
         const key = (s.tmdb_api_key || '').trim()
         setTmdbApiKeyConfigured(key.length > 0)
+        try {
+          const parsed = s.asset_renamer_include ? JSON.parse(s.asset_renamer_include) : null
+          if (Array.isArray(parsed)) {
+            const loaded = parsed.map((v) => String(v))
+            setAssetInclude(loaded)
+            setOriginalAssetInclude(loaded)
+          }
+        } catch { /* keep default */ }
+        setAssetIncludeLoaded(true)
       })
-      .catch(() => {})
+      .catch(() => setAssetIncludeLoaded(true))
   }, [])
+
+  const handleToggleAssetInclude = (assetType: string, checked: boolean) => {
+    setAssetInclude((prev) => (checked
+      ? Array.from(new Set([...prev, assetType]))
+      : prev.filter((t) => t !== assetType)))
+  }
+
+  const assetIncludeDirty =
+    [...assetInclude].sort().join(',') !== [...originalAssetInclude].sort().join(',')
+
+  const handleSaveAssetRenamerSettings = async () => {
+    try {
+      await saveBulkSettings({ asset_renamer_include: JSON.stringify(assetInclude) })
+      setOriginalAssetInclude([...assetInclude])
+    } catch {
+      showToast('Failed to save Include selection', 'error')
+    }
+    await saveRenameSettings()
+  }
 
   useEffect(() => {
     if (activeTab === 'priority') {
@@ -282,6 +346,7 @@ function PosterManager() {
     hasUnsavedPriorityChanges,
     hasUnsavedBorderChanges,
     hasUnsavedLibraryChanges,
+    hasUnsavedIncludeChanges: assetIncludeDirty,
   })
 
   const formatPercent = (percent: number): string => {
@@ -293,9 +358,16 @@ function PosterManager() {
     return percent.toFixed(1)
   }
 
+  // Artwork stats/detection for the Unmatched view. Its library + ignore settings are the
+  // shared ones below, so only the stats and the detect run change with the asset type.
+  const isPosterScope = unmatchedScope === 'posters'
+  const artworkUnmatched = useArtworkUnmatched(isPosterScope ? 'logo' : unmatchedScope)
+  const activeUnmatchedStats = isPosterScope ? unmatchedStats : artworkUnmatched.stats
+
   const { downloadCompleteReport } = usePosterManagerUnmatchedReports({
-    unmatchedStats,
+    unmatchedStats: activeUnmatchedStats,
     showToast,
+    typeNoun: UNMATCHED_TYPE_NOUN[unmatchedScope],
   })
 
   const {
@@ -316,10 +388,9 @@ function PosterManager() {
 
   const {
     handleDetectUnmatched,
-    handleStartRename,
+    handleStartAssetRename,
     handleRunBorderReplacer,
   } = usePosterManagerActions({
-    config,
     borderReplacerConfigured,
     setRenaming,
     setDetectingUnmatched,
@@ -363,6 +434,7 @@ function PosterManager() {
     } else if (activeTab === 'rename') {
       resetLibrarySettingsToOriginal()
       resetBorderSettingsToOriginal()
+      setAssetInclude([...originalAssetInclude])
     } else if (activeTab === 'unmatched') {
       resetLibrarySettingsToOriginal()
     }
@@ -383,6 +455,7 @@ function PosterManager() {
     locationState: location.state,
     activeTab,
     setActiveTab,
+    setUnmatchedScope: chooseUnmatchedScope,
     config,
     originalConfigRef,
     setHasUnsavedChanges,
@@ -438,8 +511,8 @@ function PosterManager() {
     <CommunityClaimStatusProvider>
     <div className="page-container poster-manager">
       <div className="poster-manager-header">
-        <h1>Poster Manager</h1>
-        <p>Organize and rename poster files from multiple sources</p>
+        <h1>Asset Manager</h1>
+        <p>Rename, organize and upload posters and artwork</p>
       </div>
 
       <PosterManagerTabs
@@ -461,37 +534,47 @@ function PosterManager() {
       )}
 
       {activeTab === 'priority' && (
-        <PriorityTab
-          hasUnsavedPriorityChanges={hasUnsavedPriorityChanges}
-          saving={saving}
-          onSavePriority={savePriority}
-          enabledStyles={enabledStyles}
-          onToggleStyle={(style) => toggleStyle(style)}
-          drives={drives}
-          priorityList={priorityList}
-          draggedDrive={draggedDrive}
-          dragOverIndex={dragOverIndex}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragOverStart={handleDragOverStart}
-          onDragEnd={handleDragEnd}
-          onDropInAvailable={handleDropInAvailable}
-          onDragOverCard={handleDragOverCard}
-          onDropInPriority={handleDropInPriority}
-          onDragOverEnd={handleDragOverEnd}
-          onDragLeave={handleDragLeave}
-          onDriveTouchStart={handleDriveTouchStart}
-          onRemoveFromPriority={handleRemoveFromPriority}
-          onAddAllStyle={handleAddAllStyle}
-          onRemoveAllStyle={handleRemoveAllStyle}
-          styleStats={styleStats}
-          tmdbApiKeyConfigured={tmdbApiKeyConfigured}
-        />
+        <>
+          {priorityScope === 'artwork' ? (
+            <ArtworkPriorityTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} />
+          ) : (
+            <PriorityTab
+              scope={priorityScope}
+              onScopeChange={handlePriorityScopeChange}
+              hasUnsavedPriorityChanges={hasUnsavedPriorityChanges}
+              saving={saving}
+              onSavePriority={savePriority}
+              enabledStyles={enabledStyles}
+              onToggleStyle={(style) => toggleStyle(style)}
+              drives={drives}
+              priorityList={priorityList}
+              draggedDrive={draggedDrive}
+              dragOverIndex={dragOverIndex}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragOverStart={handleDragOverStart}
+              onDragEnd={handleDragEnd}
+              onDropInAvailable={handleDropInAvailable}
+              onDragOverCard={handleDragOverCard}
+              onDropInPriority={handleDropInPriority}
+              onDragOverEnd={handleDragOverEnd}
+              onDragLeave={handleDragLeave}
+              onDriveTouchStart={handleDriveTouchStart}
+              onRemoveFromPriority={handleRemoveFromPriority}
+              onAddAllStyle={handleAddAllStyle}
+              onRemoveAllStyle={handleRemoveAllStyle}
+              styleStats={styleStats}
+              tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+            />
+          )}
+        </>
       )}
 
+      {/* One Unmatched view for every asset type — the scope only swaps the stats and
+          the detection run; library selection and ignore rules are shared. */}
       {activeTab === 'unmatched' && (
         <UnmatchedTab
-          unmatchedStats={unmatchedStats}
+          unmatchedStats={activeUnmatchedStats}
           hasUnsavedLibraryChanges={hasUnsavedLibraryChanges}
           saving={saving}
           detectingUnmatched={detectingUnmatched}
@@ -499,6 +582,11 @@ function PosterManager() {
           selectedLibraries={selectedLibraries}
           cardPreviewLimit={CARD_PREVIEW_LIMIT}
           formatPercent={formatPercent}
+          scope={unmatchedScope}
+          onScopeChange={chooseUnmatchedScope}
+          settingsActive={showUnmatchedSettings}
+          onShowSettings={() => setShowUnmatchedSettings(true)}
+          typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
           onSaveSettings={saveRenameSettings}
           onDetectUnmatched={handleDetectUnmatched}
           onDownloadReport={downloadCompleteReport}
@@ -514,17 +602,19 @@ function PosterManager() {
         />
       )}
 
-      {showUnmatchedModal && (
+      {showUnmatchedModal && activeUnmatchedStats && (
         <UnmatchedItemsModal
           modalType={showUnmatchedModal}
-          unmatchedStats={unmatchedStats}
+          unmatchedStats={activeUnmatchedStats}
           modalDisplayLimit={MODAL_DISPLAY_LIMIT}
           tmdbApiKeyConfigured={tmdbApiKeyConfigured}
           onClose={() => setShowUnmatchedModal(null)}
+          hideCommunity={!isPosterScope}
+          typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
         />
       )}
 
-      {/* Flow Tab */}
+      {/* Asset Renamer Tab */}
       {activeTab === 'rename' && (
         <RenamerTab
           hasUnsavedLibraryChanges={hasUnsavedLibraryChanges}
@@ -534,8 +624,13 @@ function PosterManager() {
           autoRunBorder={autoRunBorder}
           autoRunCleanup={autoRunCleanup}
           cleanupDeleteUnknown={cleanupDeleteUnknown}
+          settingsLoaded={borderSettingsLoaded}
           libraryConfigs={libraryConfigs}
           selectedLibraries={selectedLibraries}
+          include={assetInclude}
+          includeLoaded={assetIncludeLoaded}
+          hasUnsavedInclude={assetIncludeDirty}
+          onToggleInclude={handleToggleAssetInclude}
           manualEntries={manualEntries}
           formTitle={formTitle}
           formYear={formYear}
@@ -546,8 +641,8 @@ function PosterManager() {
           formTvdbId={formTvdbId}
           formImdbId={formImdbId}
           adding={adding}
-          onSaveSettings={saveRenameSettings}
-          onRunRename={handleStartRename}
+          onSaveSettings={handleSaveAssetRenamerSettings}
+          onRunRename={handleStartAssetRename}
           onSetAutoRunBorder={setAutoRunBorder}
           onSetAutoRunCleanup={setAutoRunCleanup}
           onSetCleanupDeleteUnknown={setCleanupDeleteUnknown}
@@ -571,6 +666,7 @@ function PosterManager() {
           hasUnsavedBorderChanges={hasUnsavedBorderChanges}
           saving={saving}
           runningBorderReplacer={runningBorderReplacer}
+          settingsLoaded={borderSettingsLoaded}
           borderWidth={borderWidth}
           bandWidth={bandWidth}
           borderMode={borderMode}

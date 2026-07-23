@@ -83,6 +83,7 @@ describe('GDrives', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
   })
 
   it('loads and renders drives', async () => {
@@ -94,7 +95,11 @@ describe('GDrives', () => {
     expect(mockGetDrives).toHaveBeenCalled()
   })
 
-  it('subscribes when subscribe button is clicked', async () => {
+  // ConfirmDialog is mocked to null in this file, so drive the two outcomes via the
+  // remembered preference (which skips the popup) — this verifies the add-to-priority
+  // flag is threaded through subscribe correctly.
+  it('subscribes without adding to priority when preference is "never"', async () => {
+    localStorage.setItem('posterflow.subscribeAddToPriority.poster', 'never')
     const user = userEvent.setup()
     mockGetDrives.mockResolvedValue([buildDrive({ id: 42, subscribed: false })])
     mockSubscribeDrive.mockResolvedValue({})
@@ -105,7 +110,23 @@ describe('GDrives', () => {
     await user.click(screen.getByRole('button', { name: 'Subscribe' }))
 
     await waitFor(() => {
-      expect(mockSubscribeDrive).toHaveBeenCalledWith(42)
+      expect(mockSubscribeDrive).toHaveBeenCalledWith(42, false)
+    })
+  })
+
+  it('subscribes and adds to priority when preference is "always"', async () => {
+    localStorage.setItem('posterflow.subscribeAddToPriority.poster', 'always')
+    const user = userEvent.setup()
+    mockGetDrives.mockResolvedValue([buildDrive({ id: 42, subscribed: false })])
+    mockSubscribeDrive.mockResolvedValue({ added_to_priority: true })
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Test Drive')
+    await user.click(screen.getByRole('button', { name: 'Subscribe' }))
+
+    await waitFor(() => {
+      expect(mockSubscribeDrive).toHaveBeenCalledWith(42, true)
     })
   })
 

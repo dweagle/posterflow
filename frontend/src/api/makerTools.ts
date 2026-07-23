@@ -205,6 +205,154 @@ export const getTmdbOriginCountry = async (tmdb_id: number, media_type: string):
   return data.countries ?? []
 }
 
+export type ArtworkSubtype = 'logo' | 'background' | 'squareart'
+// 'poster' is a listable/crop source, not a savable subtype.
+export type ArtworkListType = ArtworkSubtype | 'poster'
+
+export interface ArtworkCandidate {
+  source: 'tmdb' | 'gracenote'
+  ref: string
+  width: number | null
+  height: number | null
+  off_white_pct?: number | null   // logos only, when evaluated
+  is_white?: boolean | null
+}
+
+export interface ArtworkCandidatesResponse {
+  logos: ArtworkCandidate[]
+  backgrounds: ArtworkCandidate[]
+  squareart: ArtworkCandidate[]
+  posters: ArtworkCandidate[]
+  plex_available: boolean          // false = no Plex token → no square art from Plex
+}
+
+export interface ArtworkItemRef {
+  tmdb_id: number
+  media_type: 'movie' | 'tv' | 'collection'
+  title: string
+  year?: string | number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+}
+
+export const getArtworkCandidates = async (
+  item: ArtworkItemRef,
+  types: ArtworkListType[] = ['logo', 'background', 'squareart', 'poster'],
+  evaluateWhite = true,
+): Promise<ArtworkCandidatesResponse> => {
+  const params = new URLSearchParams({
+    tmdb_id: String(item.tmdb_id),
+    media_type: item.media_type,
+    title: item.title,
+    types: types.join(','),
+    evaluate_white: String(evaluateWhite),
+  })
+  if (item.year) params.set('year', String(item.year))
+  if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
+  if (item.imdb_id) params.set('imdb_id', item.imdb_id)
+  return getData<ArtworkCandidatesResponse>(`/api/artwork-finder/candidates?${params.toString()}`)
+}
+
+export interface AddArtworkRequest extends ArtworkItemRef {
+  sync_target_index: number
+  subtype: ArtworkSubtype
+  source: 'tmdb' | 'gracenote'
+  ref: string
+  make_white?: boolean
+  confirm_overwrite?: boolean   // set true after the user confirms overwriting an existing file
+}
+
+export interface AddArtworkResponse {
+  success: boolean
+  status: 'added' | 'exists'    // 'exists' = a same-named file is already there, needs confirm
+  written: string
+  subfolder: string
+  archived: boolean
+  source_dir: string
+}
+
+export const addArtwork = async (req: AddArtworkRequest): Promise<AddArtworkResponse> => {
+  return postData<AddArtworkResponse>('/api/artwork-finder/add', req)
+}
+
+export interface CropArtworkRequest extends ArtworkItemRef {
+  sync_target_index: number
+  source: 'tmdb' | 'gracenote'
+  ref: string
+  x: number       // crop rect in the SOURCE image's own pixels
+  y: number
+  size: number    // square side
+  confirm_overwrite?: boolean
+}
+
+/** Crop a chosen image (poster/background) to a square and save it as the item's square art. */
+export const cropArtworkSquare = async (req: CropArtworkRequest): Promise<AddArtworkResponse> => {
+  return postData<AddArtworkResponse>('/api/artwork-finder/crop-square', req)
+}
+
+export type ArtworkPullSource = 'poster_drives' | 'libraries' | 'scope' | 'list'
+
+export interface ArtworkPullRequest {
+  sync_target_index: number
+  source: ArtworkPullSource
+  drive_ids?: number[]
+  paste?: string
+  types: ArtworkSubtype[]
+  min_backdrop_width?: number
+  make_white_logos?: boolean
+  skip_unreleased?: boolean
+  force_refetch?: boolean
+  sync_after_run?: boolean
+  dry_run?: boolean
+}
+
+/** Queue a background job that pulls missing artwork for a set of items into the scope. */
+export const startArtworkPull = async (req: ArtworkPullRequest): Promise<{ job_id: number; message: string }> => {
+  return postData<{ job_id: number; message: string }>('/api/artwork-finder/batch-pull', req)
+}
+
+export interface ArtworkScopeItem {
+  title: string
+  year: number | null
+  media_type: 'movie' | 'tv' | 'collection'
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  missing: ArtworkSubtype[]
+}
+
+/** Enumerate the scope's items with what each is missing (the browsable scope-backfill view). */
+export const getArtworkScopeItems = async (syncTargetIndex: number): Promise<{ items: ArtworkScopeItem[]; total: number; scope_label: string }> => {
+  return getData(`/api/artwork-finder/scope-items?sync_target_index=${syncTargetIndex}`)
+}
+
+/** Proxy URL for previewing a Gracenote (*.plex.tv) image (square art / clear logo). */
+export const getGracenoteImageProxyUrl = (url: string): string => {
+  return `/api/artwork-finder/gracenote-image-proxy?url=${encodeURIComponent(url)}`
+}
+
+/** Download a TMDB gallery image with a canonical `Title (Year) {ids}[ - Season N][ - tag].ext`
+ * filename (built server-side by IDarr's writer). role: poster | backdrop | logo. */
+export const getArtworkTaggedDownloadUrl = (
+  filePath: string,
+  role: 'poster' | 'backdrop' | 'logo',
+  item: { tmdb_id: number; media_type: string; title: string; year?: string | number | null; tvdb_id?: number | null; imdb_id?: string | null },
+  season?: number | null,
+): string => {
+  const params = new URLSearchParams({
+    path: filePath,
+    role: role === 'backdrop' ? 'background' : role,
+    title: item.title,
+    media_type: item.media_type,
+    tmdb_id: String(item.tmdb_id),
+  })
+  if (item.year) params.set('year', String(item.year))
+  if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
+  if (item.imdb_id) params.set('imdb_id', item.imdb_id)
+  if (season != null) params.set('season', String(season))
+  return `/api/artwork-finder/tmdb-download?${params.toString()}`
+}
+
 export interface PsdExportRequest {
   title: string
   year: string
@@ -353,25 +501,19 @@ const ensurePpListener = (): void => {
   })
 }
 
-// Per-document save context, stashed on Photopea's writable Document.source. The plugin reads the
-// ACTIVE doc's source at click time, so 💾/JPG always target whatever doc is in front — that's what
-// makes same-tab (many docs, one plugin) route saves to the right PSD/style.
-const buildPflctx = (saveUrl: string, docName: string, style: string): string =>
-  'pflctx:' + JSON.stringify({ save: saveUrl, name: docName, style })
-
 /**
  * Open the exported PSD in TOP-LEVEL Photopea with the Posterflow "Seasons" plugin attached.
  *
  * New-tab mode (sameTab=false, default): each export opens its own Photopea tab. Photopea fetches
  * the PSD itself (files:[url]) and opens it on startup; a launch `script` renames the doc to the
- * full filename and stamps its save context onto Document.source; the plugin panel
- * (environment.plugins) provides the season buttons, the PSD save, and the JPG export.
+ * full filename; the plugin panel (environment.plugins) provides the season buttons, the PSD save,
+ * and the JPG export.
  *
  * Same-tab mode (sameTab=true): the FIRST export launches Photopea exactly as above but the window
  * handle is retained; every later export postMessages a script telling that live Photopea to
- * `app.open(psdUrl)` as a NEW document in the same tab (de-duping if that exact poster is already
- * open). This reuses the local-network permission granted at first launch — no new tab, no new
- * prompt — so two styles of one title sit side by side as separate docs.
+ * `app.open(psdUrl)` as a NEW document in the same tab. This reuses the local-network permission
+ * granted at first launch — no new tab, no new prompt — so two styles of one title (or a re-exported
+ * title with freshly added images) sit side by side as separate docs.
  *
  * Needs the user to allow Photopea's "local network access" prompt (public photopea.com reaching
  * the LAN/localhost server) + CORS on the PSD GET. Photopea API: https://www.photopea.com/api/
@@ -387,19 +529,22 @@ export const openPhotopeaWithPsd = (
   // style rides on the save URL so the 💾 save-back and JPG export land in the SAME style's folder
   // the PSD was exported to.
   const saveUrl = `${window.location.origin}/api/maker-tools/psd-exports/${encodeURIComponent(filename)}?style=${encodeURIComponent(style)}`
-  const pflctx = buildPflctx(saveUrl, docName, style)
 
   // ── Same-tab reuse: add a document to the already-open Photopea ──
   if (sameTab && ppWin && !ppWin.closed) {
     ppOnError = onError ?? null
     // Reuse the session's granted LNA + CORS: Photopea fetches the URL itself, just like files:[url]
-    // did for the first doc. Set name + source on the new doc so the plugin can route its save. If
-    // the exact poster (same source) is already open, just bring it to front instead of duplicating.
+    // did for the first doc. Always open a NEW doc — never re-activate an already-open copy: Use
+    // Existing regenerates the file server-side, so a matching open doc is STALE and must reload.
+    // Saves route off Photopea's own Document.source (the URL, holding the full filename + style), so
+    // we don't set source. The name set here is BEST-EFFORT — app.open fetches async, so the doc often
+    // isn't loaded yet, and Photopea re-derives the name from the %-encoded URL basename as it loads.
+    // The plugin's ~1.2s watcher re-asserts the real name from Document.source; that's the reliable fix.
     const openScript = `try{`
-      + `var want=${JSON.stringify(pflctx)};var found=null;`
-      + `for(var i=0;i<app.documents.length;i++){try{if((app.documents[i].source||'')==want){found=app.documents[i];break;}}catch(_e){}}`
-      + `if(found){app.activeDocument=found;app.echoToOE('PFLOPENED:dup');}`
-      + `else{var d=app.open(${JSON.stringify(psdUrl)},null,false);try{d.name=${JSON.stringify(docName)};}catch(_n){}try{d.source=want;}catch(_s){}app.echoToOE('PFLOPENED:new');}`
+      + `var nm=${JSON.stringify(docName)};`
+      + `var d=app.open(${JSON.stringify(psdUrl)},null,false);`
+      + `try{if(d&&d.name!==nm)d.name=nm;}catch(_n){}`
+      + `app.echoToOE('PFLOPENED:new');`
       + `}catch(e){app.echoToOE('PFLOPENERR:'+e);}`
     ppWin.postMessage(openScript, '*')
     ppWin.focus()
@@ -416,16 +561,17 @@ export const openPhotopeaWithPsd = (
   // w/h: fix the panel to 184px wide — fits 5 season chips per row.
   const icon = pluginIcon
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
-  // editor boots. Photopea trims the doc name out of the URL (dropping the "(year) {ids}" part), so
-  // we pass a launch `script` (runs once after the file loads) that renames the doc to the full
-  // export filename AND stamps its save context onto Document.source — the tab, the JPG export, and
-  // the plugin's per-doc save all rely on these. Requires the user to ALLOW Photopea's "local
-  // network access" prompt + CORS on the PSD GET (we send it). On a password-protected instance
-  // psd_url carries a signed, file-scoped ?token= the GET validates, since Photopea can't send the
-  // app Bearer header.
+  // editor boots. Photopea names the doc from the URL basename (trimmed + now %-encoded since the path
+  // is quoted), so the launch `script` renames it to the full filename. That set is BEST-EFFORT
+  // (Photopea can re-derive/clobber the name post-load); the plugin's ~1.2s watcher re-asserts the real
+  // name from Document.source, which is what reliably fixes the tab (Photopea-side timers can't loop a
+  // rename past the clobber). Save routing rides on Photopea's own Document.source (the URL), so we
+  // don't set source here. Requires the user to ALLOW Photopea's "local network access" prompt + CORS
+  // on the PSD GET (we send it). On a password-protected instance psd_url carries a signed, file-scoped
+  // ?token= the GET validates, since Photopea can't send the app Bearer header.
   const config = {
     files: [psdUrl],
-    script: `try{if(app.documents.length>0){var d=app.activeDocument;try{d.name=${JSON.stringify(docName)};}catch(_n){}try{d.source=${JSON.stringify(pflctx)};}catch(_s){}}}catch(e){}`,
+    script: `try{var d=app.activeDocument;if(d&&d.name!==${JSON.stringify(docName)})d.name=${JSON.stringify(docName)};}catch(e){}`,
     environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 184, h: 420 }] },
   }
   const w = window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')

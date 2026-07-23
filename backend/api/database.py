@@ -12,8 +12,22 @@ import os
 from database import get_db
 from models.poster import Poster
 from models.drive import Drive
+from models.artwork import Artwork
+from models.artwork_drive import ArtworkDrive
 from models.schedule import Schedule
 from core.logging import LogTags, log_info, log_success, log_warning, log_user_action
+
+
+def _orphan_reason(drive: Any, fallback_id: str | None) -> tuple[str, str]:
+    """Classify why a record whose file is gone is orphaned, based on its drive's state.
+    Shared by posters and artwork so both report identical reasons."""
+    if drive is None:
+        return (fallback_id or "Unknown", "Drive record missing")
+    if not drive.subscribed:
+        return (drive.name, "Drive unsubscribed")
+    if getattr(drive, "is_deprecated", False):
+        return (drive.name, "Drive deprecated")
+    return (drive.name, "File deleted from disk")
 
 router = APIRouter(prefix="/api/database", tags=["database"])
 
@@ -39,29 +53,23 @@ def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> Dict[s
         # Exclude internal tracking records (e.g. border replacer cache entries).
         # These are not real poster inventory and are managed separately.
         all_records = db.query(Poster).filter(Poster.drive_id != "border_processed").all()
-        
+
+        # Artwork rows are scanned against their own ArtworkDrive state, same rules.
+        artwork_drives = db.query(ArtworkDrive).all()
+        artwork_drive_map: Dict[str, ArtworkDrive] = {d.drive_id: d for d in artwork_drives}
+        artwork_records = db.query(Artwork).all()
+
         orphaned = []
         by_drive_name: Dict[str, int] = {}
-        
+
         # Check each record
         for poster in all_records:
             if not os.path.exists(poster.file_path):
                 drive = drive_id_to_drive.get(poster.drive_id)
-
-                if drive is None:
-                    drive_name = poster.drive_id or "Unknown"
-                    reason = "Drive record missing"
-                elif not drive.subscribed:
-                    drive_name = drive.name
-                    reason = "Drive unsubscribed"
-                elif drive.is_deprecated:
-                    drive_name = drive.name
-                    reason = "Drive deprecated"
-                else:
-                    drive_name = drive.name
-                    reason = "File deleted from disk"
+                drive_name, reason = _orphan_reason(drive, poster.drive_id)
                 orphaned.append({
                     'id': poster.id,
+                    'asset_type': 'poster',
                     'file_name': os.path.basename(poster.file_path),
                     'file_path': poster.file_path,
                     'drive_id': poster.drive_id,
@@ -71,16 +79,34 @@ def preview_cleanup(full: bool = False, db: Session = Depends(get_db)) -> Dict[s
                     'last_processed': poster.last_processed.isoformat() if poster.last_processed else None
                 })
                 by_drive_name[drive_name] = by_drive_name.get(drive_name, 0) + 1
-        
+
+        for art in artwork_records:
+            if not os.path.exists(art.file_path):
+                drive = artwork_drive_map.get(art.artwork_drive_id)
+                drive_name, reason = _orphan_reason(drive, art.artwork_drive_id)
+                orphaned.append({
+                    'id': art.id,
+                    'asset_type': 'artwork',
+                    'file_name': os.path.basename(art.file_path),
+                    'file_path': art.file_path,
+                    'drive_id': art.artwork_drive_id,
+                    'drive_name': drive_name,
+                    'reason': reason,
+                    'downloaded_at': art.downloaded_at.isoformat() if art.downloaded_at else None,
+                    'last_processed': art.last_processed.isoformat() if art.last_processed else None
+                })
+                by_drive_name[drive_name] = by_drive_name.get(drive_name, 0) + 1
+
+        total_records = len(all_records) + len(artwork_records)
         log_info(
             LogTags.DATABASE,
             f"Found {len(orphaned)} orphaned records",
-            total=len(all_records),
+            total=total_records,
             orphaned=len(orphaned)
         )
         
         result = {
-            'total_records': len(all_records),
+            'total_records': total_records,
             'orphaned_count': len(orphaned),
             'by_location': by_drive_name,
             'by_drive': by_drive_name,
@@ -126,17 +152,20 @@ def execute_cleanup(
         
         # Exclude internal tracking records — they are not user poster inventory
         all_records = db.query(Poster).filter(Poster.drive_id != "border_processed").all()
-        
+
         deleted_ids = []
         deleted_paths = []
         by_location = {}
-        
-        # Check each record and delete if orphaned
+        poster_deleted = 0
+        artwork_deleted = 0
+
+        # Check each poster record and delete if orphaned
         for poster in all_records:
             if not os.path.exists(poster.file_path):
                 deleted_ids.append(poster.id)
                 deleted_paths.append(poster.file_path)
-                
+                poster_deleted += 1
+
                 # Categorize
                 if poster.file_path.startswith('/posters/gdrive/'):
                     location = '/posters/gdrive/'
@@ -146,29 +175,41 @@ def execute_cleanup(
                     location = '/posters/assets/'
                 else:
                     location = 'other'
-                
+
                 by_location[location] = by_location.get(location, 0) + 1
-                
+
                 # Delete the record
                 db.delete(poster)
-        
+
+        # Same for orphaned artwork records (source file gone from the artwork drive mirror).
+        for art in db.query(Artwork).all():
+            if not os.path.exists(art.file_path):
+                deleted_ids.append(art.id)
+                deleted_paths.append(art.file_path)
+                artwork_deleted += 1
+                by_location['artwork'] = by_location.get('artwork', 0) + 1
+                db.delete(art)
+
         # Commit all deletions
         db.commit()
-        
+
+        total_deleted = poster_deleted + artwork_deleted
         log_success(
             LogTags.DATABASE,
-            f"Cleanup complete: deleted {len(deleted_ids)} orphaned records",
-            deleted=len(deleted_ids),
+            f"Cleanup complete: deleted {total_deleted} orphaned records ({poster_deleted} poster, {artwork_deleted} artwork)",
+            deleted=total_deleted,
             by_location=by_location
         )
-        log_user_action("Database cleanup completed", deleted_count=len(deleted_ids))
-        
+        log_user_action("Database cleanup completed", deleted_count=total_deleted)
+
         return {
             'success': True,
-            'deleted_count': len(deleted_ids),
+            'deleted_count': total_deleted,
+            'poster_records_deleted': poster_deleted,
+            'artwork_records_deleted': artwork_deleted,
             'deleted_ids': deleted_ids[:100],  # First 100 IDs
             'by_location': by_location,
-            'message': f'Successfully deleted {len(deleted_ids)} orphaned poster records'
+            'message': f'Successfully deleted {total_deleted} orphaned records ({poster_deleted} poster, {artwork_deleted} artwork)'
         }
         
     except Exception as e:

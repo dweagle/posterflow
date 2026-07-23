@@ -25,6 +25,7 @@ export interface DriveSubscriptionResponse {
   drive: Drive
   removed_from_priority?: boolean
   restored_to_priority?: boolean
+  added_to_priority?: boolean
   scan_job_id?: number | null
 }
 
@@ -32,8 +33,8 @@ export const getDrives = async (): Promise<Drive[]> => {
   return getData('/api/drives/')
 }
 
-export const subscribeDrive = async (driveId: number): Promise<DriveSubscriptionResponse> => {
-  return postData(`/api/drives/${driveId}/subscribe`)
+export const subscribeDrive = async (driveId: number, addToPriority = false): Promise<DriveSubscriptionResponse> => {
+  return postData(`/api/drives/${driveId}/subscribe?add_to_priority=${addToPriority}`)
 }
 
 export const unsubscribeDrive = async (driveId: number): Promise<DriveSubscriptionResponse> => {

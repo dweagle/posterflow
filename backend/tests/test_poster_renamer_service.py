@@ -1,5 +1,213 @@
+import os
+
 from models.setting import Setting, get_setting
 from services.poster_renamer import PosterRenameService
+
+
+# ---------------------------------------------------------------------------
+# Placement characterization — pins the EXACT current rename_files output so the
+# upcoming "walk slots" migration can be proven byte-identical. Behavior probed,
+# not assumed (incl. the no-space "Season01" skip and first-source-wins dedup).
+# ---------------------------------------------------------------------------
+
+
+def _seed(src, names):
+    src.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (src / n).write_bytes(b"x")
+    return {n: str(src / n) for n in names}
+
+
+def _matched(movies=None, series=None, collections=None):
+    return {"collections": collections or [], "movies": movies or [], "series": series or []}
+
+
+def test_placement_movie_nested_and_flat(test_db, tmp_path):
+    f = _seed(tmp_path / "src", ["Inception (2010).jpg"])
+    m = _matched(movies=[{"title": "Inception", "year": 2010, "folder": "Inception (2010)", "files": [f["Inception (2010).jpg"]]}])
+    svc = PosterRenameService(test_db)
+
+    nested = tmp_path / "nested"; nested.mkdir()
+    svc.rename_files(m, str(nested), action_type="copy", asset_folders=True, dry_run=False)
+    assert (nested / "Inception (2010)" / "poster.jpg").is_file()
+
+    flat = tmp_path / "flat"; flat.mkdir()
+    svc.rename_files(m, str(flat), action_type="copy", asset_folders=False, dry_run=False)
+    assert (flat / "Inception (2010).jpg").is_file()
+
+
+def test_placement_series_seasons_and_specials(test_db, tmp_path):
+    f = _seed(tmp_path / "src", [
+        "Show - Season 01.jpg",   # -> Season01.jpg
+        "Show - Season01.jpg",    # no space -> SKIPPED (number regex needs the space)
+        "Show - Specials.jpg",    # -> Season00.jpg
+        "Show.jpg",               # -> poster.jpg
+    ])
+    files = [f["Show - Season 01.jpg"], f["Show - Season01.jpg"], f["Show - Specials.jpg"], f["Show.jpg"]]
+    m = _matched(series=[{"title": "Show", "year": 2020, "folder": "Show (2020)", "files": files}])
+    svc = PosterRenameService(test_db)
+
+    nested = tmp_path / "nested"; nested.mkdir()
+    svc.rename_files(m, str(nested), action_type="copy", asset_folders=True, dry_run=False)
+    item = nested / "Show (2020)"
+    assert sorted(p.name for p in item.iterdir()) == ["Season00.jpg", "Season01.jpg", "poster.jpg"]
+
+    flat = tmp_path / "flat"; flat.mkdir()
+    svc.rename_files(m, str(flat), action_type="copy", asset_folders=False, dry_run=False)
+    assert sorted(os.listdir(flat)) == ["Show (2020).jpg", "Show (2020)_Season00.jpg", "Show (2020)_Season01.jpg"]
+
+
+def test_placement_collection_nested(test_db, tmp_path):
+    f = _seed(tmp_path / "src", ["Marvel Collection.jpg"])
+    m = _matched(collections=[{"title": "Marvel Collection", "year": None, "folder": "Marvel Collection", "files": [f["Marvel Collection.jpg"]]}])
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+    svc.rename_files(m, str(dest), action_type="copy", asset_folders=True, dry_run=False)
+    assert (dest / "Marvel Collection" / "poster.jpg").is_file()
+
+
+def test_placement_first_source_wins_on_dest_collision(test_db, tmp_path):
+    # Two non-season files for one item both target poster.jpg; the FIRST wins, second skipped.
+    f = _seed(tmp_path / "src", ["Show first.jpg", "Show second.jpg"])
+    (tmp_path / "src" / "Show first.jpg").write_bytes(b"AAA")
+    (tmp_path / "src" / "Show second.jpg").write_bytes(b"BBB")
+    m = _matched(movies=[{"title": "Show", "year": 2020, "folder": "Show (2020)",
+                          "files": [f["Show first.jpg"], f["Show second.jpg"]]}])
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+    svc.rename_files(m, str(dest), action_type="copy", asset_folders=True, dry_run=False)
+    assert (dest / "Show (2020)" / "poster.jpg").read_bytes() == b"AAA"
+
+
+def test_placement_places_artwork_alongside_poster(test_db, tmp_path):
+    # The unified proof: one rename_files call places the poster AND the item's logo/background/
+    # square through the same loop — they are slots on ONE matched box, not a second lookup.
+    from util.data.construct import build_slots
+    from util.data.normalization import normalize_titles
+
+    src = tmp_path / "src"; _seed(src, ["Inception (2010).jpg"])
+    art = tmp_path / "art"; _seed(art, ["logo.png", "background.jpg", "square.jpg"])
+    poster = str(src / "Inception (2010).jpg")
+    box = {
+        "title": "Inception", "year": 2010, "tmdb_id": 27205, "tvdb_id": None, "imdb_id": None,
+        "normalized_title": normalize_titles("Inception"), "type": "movies",
+        "slots": build_slots(poster=poster, logo=str(art / "logo.png"),
+                             background=str(art / "background.jpg"), square=str(art / "square.jpg")),
+    }
+    m = _matched(movies=[{"title": "Inception", "year": 2010, "tmdb_id": 27205,
+                          "folder": "Inception (2010)", "files": [poster], "asset_ref": box}])
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+    svc.rename_files(m, str(dest), action_type="copy", asset_folders=True, dry_run=False)
+
+    item = dest / "Inception (2010)"
+    assert sorted(p.name for p in item.iterdir()) == ["background.jpg", "logo.png", "poster.jpg", "square.jpg"]
+
+
+def test_placement_places_artwork_without_a_poster(test_db, tmp_path):
+    # "Place artwork anyway": an item with artwork but NO poster still gets its logo/square.
+    # Now it needs no special case — an artwork-only box simply matches as itself.
+    from util.data.construct import build_slots
+    from util.data.normalization import normalize_titles
+
+    art = tmp_path / "art"; _seed(art, ["logo.png", "square.jpg"])
+    files = [str(art / "logo.png"), str(art / "square.jpg")]
+    box = {
+        "title": "Loki", "year": 2021, "tmdb_id": None, "tvdb_id": 84958, "imdb_id": None,
+        "normalized_title": normalize_titles("Loki"), "type": None,
+        "slots": build_slots(logo=str(art / "logo.png"), square=str(art / "square.jpg")),
+        "files": files,
+    }
+    matched = _matched(series=[{"title": "Loki", "year": 2021, "tvdb_id": 84958,
+                                "folder": "Loki (2021)", "files": files, "asset_ref": box}])
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+    svc.rename_files(matched, str(dest), action_type="copy", asset_folders=True, dry_run=False)
+
+    item = dest / "Loki (2021)"
+    assert sorted(p.name for p in item.iterdir()) == ["logo.png", "square.jpg"]
+
+
+def test_rename_posters_places_poster_and_artwork_and_counts(test_db, tmp_path, monkeypatch):
+    # End-to-end poster pass: one rename_posters run places the poster AND the item's artwork
+    # off a single matched box, and reports the artwork tally in stats.
+    from util.data.construct import build_slots
+    from util.data.normalization import normalize_titles
+
+    posrc = tmp_path / "Movie One.jpg"; posrc.write_bytes(b"p")
+    art = tmp_path / "art"; _seed(art, ["logo.png", "square.jpg"])
+    box = {"title": "Movie One", "year": 2024, "tmdb_id": 123, "tvdb_id": None, "imdb_id": None,
+           "normalized_title": normalize_titles("Movie One"), "type": "movies",
+           "files": [str(posrc)],
+           "slots": build_slots(poster=str(posrc), logo=str(art / "logo.png"), square=str(art / "square.jpg"))}
+    matched = {
+        "collections": [], "series": [],
+        "movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123,
+                    "folder": "Movie One (2024)", "files": [str(posrc)], "asset_ref": box}],
+    }
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123, "folder": "Movie One (2024)"}],
+             "series": [], "collections": []}
+
+    service = PosterRenameService(test_db)
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [str(posrc)]}], {"m": []}))
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    result = service.rename_posters(source_dirs=["/x"], destination_dir=str(dest), asset_folders=True,
+                                    dry_run=False, media_dict=media, artwork_boxes=[box])
+
+    item = dest / "Movie One (2024)"
+    assert (item / "poster.jpg").is_file()
+    assert (item / "logo.png").is_file()
+    assert (item / "square.jpg").is_file()
+    assert result["success"] is True
+    assert result["stats"]["artwork"] == 2
+    # Artwork stays OUT of poster-only stats: one poster matched, and style counts (which feed
+    # community-list reconcile) tally only the poster, not the 2 artwork files.
+    assert result["stats"]["total_matched"] == 1
+    assert sum(result["stats"]["style_counts"].values()) == 1
+
+
+def test_artwork_bypasses_tmp_staging(test_db, tmp_path, monkeypatch):
+    """With tmp/ staging on, the poster is staged in tmp/ but artwork goes straight to the real
+    destination — so the border replacer (which only processes tmp/) never sees the artwork."""
+    from util.data.construct import build_slots
+    from util.data.normalization import normalize_titles
+
+    posrc = tmp_path / "Movie One.jpg"; posrc.write_bytes(b"p")
+    art = tmp_path / "art"; _seed(art, ["logo.png"])
+    box = {"title": "Movie One", "year": 2024, "tmdb_id": 123, "tvdb_id": None, "imdb_id": None,
+           "normalized_title": normalize_titles("Movie One"), "type": "movies",
+           "files": [str(posrc)],
+           "slots": build_slots(poster=str(posrc), logo=str(art / "logo.png"))}
+    matched = {"collections": [], "series": [],
+               "movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123,
+                           "folder": "Movie One (2024)", "files": [str(posrc)], "asset_ref": box}]}
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123, "folder": "Movie One (2024)"}], "series": [], "collections": []}
+
+    service = PosterRenameService(test_db)
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [str(posrc)]}], {"m": []}))
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    service.rename_posters(source_dirs=["/x"], destination_dir=str(dest), asset_folders=True,
+                           dry_run=False, use_temp_folder=True, media_dict=media, artwork_boxes=[box])
+
+    item = "Movie One (2024)"
+    assert (dest / "tmp" / item / "poster.jpg").is_file()   # poster staged in tmp/
+    assert (dest / item / "logo.png").is_file()             # artwork in the REAL dest
+    assert not (dest / "tmp" / item / "logo.png").exists()  # never staged in tmp/
+
+
+def test_placement_without_artwork_index_is_poster_only(test_db, tmp_path):
+    # No artwork index -> unchanged poster-only behavior (the default path).
+    src = tmp_path / "src"; f = _seed(src, ["Inception (2010).jpg"])
+    m = _matched(movies=[{"title": "Inception", "year": 2010, "folder": "Inception (2010)", "files": [f["Inception (2010).jpg"]]}])
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+    svc.rename_files(m, str(dest), action_type="copy", asset_folders=True, dry_run=False)
+    item = dest / "Inception (2010)"
+    assert [p.name for p in item.iterdir()] == ["poster.jpg"]
 
 
 class _FakeTmdbResponse:
@@ -83,7 +291,7 @@ def test_enrich_collections_with_tmdb_noops_without_api_key(test_db, monkeypatch
 def test_rename_posters_fails_when_no_assets_found(test_db, monkeypatch):
     service = PosterRenameService(test_db)
 
-    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, logger: ([], {}))
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: ([], {}))
 
     result = service.rename_posters(
         source_dirs=["/tmp/source"],
@@ -107,8 +315,8 @@ def test_rename_posters_fails_when_no_media_found(test_db, monkeypatch):
         }
     ]
 
-    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, logger: (assets, {"m": assets}))
-    monkeypatch.setattr(service, "get_media_from_instances", lambda: {"movies": [], "series": [], "collections": []})
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: (assets, {"m": assets}))
+    monkeypatch.setattr(service, "get_media_from_instances", lambda **kwargs: {"movies": [], "series": [], "collections": []})
 
     result = service.rename_posters(
         source_dirs=["/tmp/source"],
@@ -137,11 +345,11 @@ def test_rename_posters_fails_when_no_assets_match_media(test_db, monkeypatch):
         "collections": [],
     }
 
-    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, logger: (assets, {"m": assets}))
-    monkeypatch.setattr(service, "get_media_from_instances", lambda: media)
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: (assets, {"m": assets}))
+    monkeypatch.setattr(service, "get_media_from_instances", lambda **kwargs: media)
     monkeypatch.setattr(
         "services.poster_renamer.match_assets_to_media",
-        lambda media_dict, prefix_index, strict_folder_match=False: {"movies": [], "series": [], "collections": []},
+        lambda media_dict, prefix_index, strict_folder_match=False, **k: {"movies": [], "series": [], "collections": []},
     )
 
     result = service.rename_posters(
@@ -183,20 +391,22 @@ def test_rename_posters_successful_flow_returns_stats(test_db, monkeypatch):
         "collections": [],
     }
 
-    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, logger: (assets, {"m": assets}))
-    monkeypatch.setattr(service, "get_media_from_instances", lambda: media)
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: (assets, {"m": assets}))
+    monkeypatch.setattr(service, "get_media_from_instances", lambda **kwargs: media)
     monkeypatch.setattr(
         "services.poster_renamer.match_assets_to_media",
-        lambda media_dict, prefix_index, strict_folder_match=False: matched_assets,
+        lambda media_dict, prefix_index, strict_folder_match=False, **k: matched_assets,
     )
     monkeypatch.setattr(
         service,
         "rename_files",
-        lambda matched_assets, destination_dir, action_type, asset_folders, dry_run, progress_callback=None: (
+        lambda matched_assets, destination_dir, action_type, asset_folders, dry_run, progress_callback=None, artwork_index=None, artwork_destination=None, artwork_slot_filter=None: (
             {"movies": [{"title": "Movie One", "year": 2024, "folder": "Movie One (2024)", "messages": ["renamed"]}], "series": [], "collections": []},
             ["/tmp/dest/Movie One (2024)/poster.jpg"],
             ["/tmp/source/Movie One.jpg"],
             {"/tmp/dest/Movie One (2024)/poster.jpg": ("/tmp/source/Movie One.jpg", "Movie One", 2024, "movie", None, 27205, None, "tt0000001", "https://image.tmdb.org/t/p/original/x.jpg", True)},
+            {"total": 0, "by_media": {"movies": 0, "series": 0, "collections": 0},
+             "by_type": {"logo": 0, "background": 0, "squareart": 0}},  # artwork written this run
         ),
     )
 
@@ -290,3 +500,37 @@ def test_filter_assets_for_target_respects_series_season_scope(test_db):
 
     assert len(filtered_assets) == 1
     assert filtered_assets[0]["title"] == "The Show"
+
+
+def test_artwork_stat_counts_files_written_not_matched_slots(test_db, tmp_path):
+    """A re-run where everything is already in place must report 0 artwork placed — the stat
+    used to sum resolved slots, so a no-op run claimed it had placed the whole library."""
+    from util.data.construct import build_slots
+    from util.data.normalization import normalize_titles
+
+    art = tmp_path / "art"; _seed(art, ["logo.png", "square.jpg"])
+    files = [str(art / "logo.png"), str(art / "square.jpg")]
+    box = {
+        "title": "Loki", "year": 2021, "tmdb_id": None, "tvdb_id": 84958, "imdb_id": None,
+        "normalized_title": normalize_titles("Loki"), "type": None, "files": files,
+        "slots": build_slots(logo=str(art / "logo.png"), square=str(art / "square.jpg")),
+    }
+    def _artwork_matched():
+        return _matched(series=[{"title": "Loki", "year": 2021, "tvdb_id": 84958,
+                                 "folder": "Loki (2021)", "files": files, "asset_ref": box}])
+
+    svc = PosterRenameService(test_db)
+    dest = tmp_path / "dest"; dest.mkdir()
+
+    *_, first_written = svc.rename_files(_artwork_matched(), str(dest), action_type="copy", asset_folders=True,
+                                         dry_run=False)
+    # Second run over the same destination: the files are already in place.
+    *_, second_written = svc.rename_files(_artwork_matched(), str(dest), action_type="copy", asset_folders=True,
+                                          dry_run=False)
+
+    assert first_written["total"] == 2, "first run actually writes the logo + square"
+    assert second_written["total"] == 0, "a no-op re-run must not report artwork as newly placed"
+
+    # Broken down like the poster counts (by media type) plus by artwork type.
+    assert first_written["by_media"] == {"movies": 0, "series": 2, "collections": 0}
+    assert first_written["by_type"] == {"logo": 1, "background": 0, "squareart": 1}

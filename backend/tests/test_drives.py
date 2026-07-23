@@ -1,6 +1,33 @@
 import json
 from models.drive import Drive
-from models.setting import Setting
+from models.setting import Setting, get_setting
+
+def test_subscribe_drive_adds_to_priority_when_requested(client, test_db):
+    """Subscribing with add_to_priority=true appends the drive to the bottom of poster priority."""
+    drive = Drive(name="P Drive", drive_id="p-prio", style_type="MM2K", subscribed=False)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/drives/{drive.id}/subscribe?add_to_priority=true")
+    assert response.status_code == 200
+    assert response.json()["added_to_priority"] is True
+
+    setting = get_setting(test_db, "poster_drive_priority")
+    assert setting is not None
+    assert drive.id in json.loads(setting.value)["drive_ids"]
+
+
+def test_subscribe_drive_default_does_not_add_to_priority(client, test_db):
+    drive = Drive(name="P Drive2", drive_id="p-noprio", style_type="MM2K", subscribed=False)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/drives/{drive.id}/subscribe")
+    assert response.status_code == 200
+    assert response.json()["added_to_priority"] is False
+
 
 def test_subscribe_drive(client, test_db):
     """Test subscribing to a drive"""

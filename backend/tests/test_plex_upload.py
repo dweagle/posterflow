@@ -4056,12 +4056,6 @@ def test_prepare_webhook_context_falls_back_to_full_index_on_empty_targeted(test
         title_results=[],
     )
     full_movie = _SimplePlex("movie", "Some Other Movie", key="999")
-    full_section = _FakePlexSection(
-        section_type="movie",
-        title="Movies",
-        guid_results=[],
-        title_results=[],
-    )
 
     import plexapi.server as plexapi_server
     monkeypatch.setattr(
@@ -5144,3 +5138,132 @@ def test_webhook_retry_skips_arr_reconnect_when_availability_complete(test_db, m
 def test_webhook_retry_rebuilds_arr_when_availability_was_incomplete(test_db, monkeypatch):
     # A prior incomplete build -> retry invalidates (1) + end-of-job cleanup (1) = 2.
     assert _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete=True) == 2
+
+
+# ---------------------------------------------------------------------------
+# Manual settings: upload_artwork
+# ---------------------------------------------------------------------------
+
+
+def _manual_payload(**overrides):
+    payload = {
+        "dry_run": True,
+        "reapply": False,
+        "remove_overlay_label": False,
+        "sync_before_upload": False,
+        "rename_before_upload": True,
+        "border_before_upload": False,
+        "upload_delay_ms": 50,
+        "upload_artwork": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_manual_settings_round_trip_upload_artwork(client, test_db):
+    """upload_artwork saves with the other manual options instead of its own endpoint,
+    so the one toggle that used to save on click now rides the shared Save button."""
+    response = client.post("/api/posterflow/plex-upload/manual-settings", json=_manual_payload(upload_artwork=True))
+    assert response.status_code == 200
+    assert response.json()["upload_artwork"] is True
+
+    setting = test_db.query(Setting).filter(Setting.key == "plex_upload_artwork").first()
+    assert setting.value == "true"
+
+    assert client.get("/api/posterflow/plex-upload/manual-settings").json()["upload_artwork"] is True
+
+
+def test_manual_settings_upload_artwork_defaults_off(client):
+    assert client.get("/api/posterflow/plex-upload/manual-settings").json()["upload_artwork"] is False
+
+
+def test_manual_settings_upload_artwork_can_be_turned_off(client, test_db):
+    test_db.add(Setting(key="plex_upload_artwork", value="true"))
+    test_db.commit()
+
+    response = client.post("/api/posterflow/plex-upload/manual-settings", json=_manual_payload(upload_artwork=False))
+
+    assert response.json()["upload_artwork"] is False
+    test_db.expire_all()
+    assert test_db.query(Setting).filter(Setting.key == "plex_upload_artwork").first().value == "false"
+
+
+def test_manual_settings_does_not_touch_the_webhook_artwork_toggle(test_db, client):
+    """The webhook keeps its own artwork setting — manual/workflow and per-event uploads
+    are configured separately on purpose."""
+    test_db.add(Setting(key="plex_webhook_artwork", value="true"))
+    test_db.commit()
+
+    client.post("/api/posterflow/plex-upload/manual-settings", json=_manual_payload(upload_artwork=False))
+
+    test_db.expire_all()
+    assert test_db.query(Setting).filter(Setting.key == "plex_webhook_artwork").first().value == "true"
+
+
+def test_webhook_unknown_instance_token_recorded_in_stats(client, test_db, monkeypatch):
+    """A ?instance= token matching no configured arr instance is recorded in webhook
+    stats (stale webhook URL after a rename); a matching token records nothing, and
+    the stats reset clears the notice."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+
+    test_db.add(Setting(key="radarr_instances", value=json.dumps([
+        {"name": "Radarr 1080p", "url": "http://radarr:7878", "api_key": "key"},
+    ])))
+    test_db.commit()
+
+    assert client.post(
+        "/api/posterflow/plex-upload/webhook-settings", json={"enabled": True}
+    ).status_code == 200
+
+    response = client.post(
+        "/api/posterflow/plex-upload/webhook?instance=Radarr%20HD",
+        json={
+            "eventType": "Download",
+            "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+        },
+    )
+    assert response.status_code == 200
+
+    stats = client.get("/api/posterflow/plex-upload/webhook-stats").json()
+    token = stats["unknown_instance_tokens"]["Radarr HD"]
+    assert token["count"] == 1
+    assert token["source"] == "radarr"
+    assert token["last_seen"]
+
+    # A token that matches a configured instance records nothing new.
+    response = client.post(
+        "/api/posterflow/plex-upload/webhook?instance=Radarr%201080p",
+        json={
+            "eventType": "Download",
+            "movie": {"title": "Inception", "year": 2010, "tmdbId": 27205},
+        },
+    )
+    assert response.status_code == 200
+    stats = client.get("/api/posterflow/plex-upload/webhook-stats").json()
+    assert list(stats["unknown_instance_tokens"].keys()) == ["Radarr HD"]
+
+    reset = client.post("/api/posterflow/plex-upload/webhook-stats/reset")
+    assert reset.status_code == 200
+    stats = client.get("/api/posterflow/plex-upload/webhook-stats").json()
+    assert stats["unknown_instance_tokens"] == {}
+
+
+def test_webhook_instance_token_ignored_when_no_instances_configured(client, monkeypatch):
+    """Pre-setup installs (no arr instances at all) must not accumulate warnings."""
+    monkeypatch.setattr("api.plex_upload.job_queue.submit", lambda *args, **kwargs: None)
+
+    assert client.post(
+        "/api/posterflow/plex-upload/webhook-settings", json={"enabled": True}
+    ).status_code == 200
+
+    response = client.post(
+        "/api/posterflow/plex-upload/webhook?instance=Whatever",
+        json={
+            "eventType": "Download",
+            "movie": {"title": "The Matrix", "year": 1999, "tmdbId": 603},
+        },
+    )
+    assert response.status_code == 200
+
+    stats = client.get("/api/posterflow/plex-upload/webhook-stats").json()
+    assert stats["unknown_instance_tokens"] == {}

@@ -336,3 +336,198 @@ def test_sync_local_only_drive_finds_new_files_without_rclone(test_db, monkeypat
     }
     assert names == {"existing.jpg", "brand_new.jpg"}
 
+
+
+# ---------------------------------------------------------------------------
+# Characterization: self-healing fast path (single-drive) + batch method.
+# Pinned before the sync-engine merge so the shared engine can't drift.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime  # noqa: E402
+
+
+def test_sync_fast_path_skips_db_update_when_nothing_changed(test_db, monkeypatch, tmp_path):
+    """rclone transfers 0 files, the DB already has rows, and a sampled file still matches
+    disk (mtime) → the fast path returns 'No changes detected' and never touches the row."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    local_dir = tmp_path / "posters" / "MM2K" / "FastPath"
+    local_dir.mkdir(parents=True)
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    drive, job = _make_drive_and_job(test_db, drive_id="sync-fast-1", name="FastPath")
+    drive.sync_enabled = True
+    test_db.commit()
+
+    poster_path = local_dir / "poster.jpg"
+    poster_path.write_bytes(b"stable")
+    st = poster_path.stat()
+    stamp = datetime(2020, 1, 1)  # DB stores naive datetimes
+    p = Poster(drive_id=drive.drive_id, file_name="poster.jpg", file_path=str(poster_path),
+               file_size=st.st_size, file_mtime=st.st_mtime, last_processed=stamp)
+    test_db.add(p)
+    test_db.commit()
+
+    service = PosterSyncService(test_db)
+    monkeypatch.setattr(service.rclone, "sync_folder",
+        lambda drive_id, local_path, drive_name=None, progress_callback=None: {"success": True, "files_transferred": 0})
+
+    result = service.sync_drive(drive_id=drive.id, job_id=job.id)
+
+    assert result == {"success": True, "added": 0, "updated": 0, "deleted": 0}
+    test_db.refresh(job)
+    assert job.message == "No changes detected"
+    # The fast path must not reprocess the row.
+    test_db.refresh(p)
+    assert p.last_processed == stamp
+
+
+def test_sync_multiple_drives_adds_new_files_across_drives(test_db, monkeypatch, tmp_path):
+    """The batch engine scans each drive and inserts Poster rows for new files, aggregating
+    the added/deleted counts and drives_synced."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    d1, _ = _make_drive_and_job(test_db, drive_id="batch-1", name="BatchA")
+    d2, _ = _make_drive_and_job(test_db, drive_id="batch-2", name="BatchB")
+    job = Job(job_type="Sync All", status="pending", progress=0, message="queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    dir1 = tmp_path / "posters" / "MM2K" / "BatchA"
+    dir1.mkdir(parents=True)
+    dir2 = tmp_path / "posters" / "MM2K" / "BatchB"
+    dir2.mkdir(parents=True)
+    (dir1 / "a1.jpg").write_bytes(b"a1")
+    (dir2 / "b1.jpg").write_bytes(b"b1")
+    (dir2 / "b2.jpg").write_bytes(b"b2")
+
+    service = PosterSyncService(test_db)
+
+    def _fake_batch(tasks, max_workers=1, progress_callback=None):
+        return {t["result_key"]: {"success": True, "files_transferred": 1} for t in tasks}
+
+    monkeypatch.setattr(service.rclone, "sync_multiple_folders", _fake_batch)
+
+    result = service.sync_multiple_drives([d1.id, d2.id], job_id=job.id)
+
+    assert result["success"] is True
+    assert result["drives_synced"] == 2
+    assert result["added"] == 3
+    assert result["deleted"] == 0
+    assert test_db.query(Poster).filter(Poster.drive_id == d1.drive_id).count() == 1
+    assert test_db.query(Poster).filter(Poster.drive_id == d2.drive_id).count() == 2
+
+
+def test_sync_multiple_drives_self_heals_orphaned_records(test_db, monkeypatch, tmp_path):
+    """A file present at pre-sync but removed DURING the rclone sync is cleaned from the DB by
+    the batch engine's post-scan self-heal (deleted count)."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    drive, _ = _make_drive_and_job(test_db, drive_id="batch-heal-1", name="BatchHeal")
+    drive.sync_enabled = True  # remote drive, so the rclone batch mock runs
+    job = Job(job_type="Sync All", status="pending", progress=0, message="queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+
+    d = tmp_path / "posters" / "MM2K" / "BatchHeal"
+    d.mkdir(parents=True)
+    keep = d / "keep.jpg"
+    keep.write_bytes(b"keep")
+    kst = keep.stat()
+    gone = d / "gone.jpg"
+    gone.write_bytes(b"gone")
+    gst = gone.stat()
+    test_db.add(Poster(drive_id=drive.drive_id, file_name="keep.jpg", file_path=str(keep),
+                       file_size=kst.st_size, file_mtime=kst.st_mtime))
+    test_db.add(Poster(drive_id=drive.drive_id, file_name="gone.jpg", file_path=str(gone),
+                       file_size=gst.st_size, file_mtime=gst.st_mtime))
+    test_db.commit()
+
+    service = PosterSyncService(test_db)
+
+    def _fake_batch(tasks, max_workers=1, progress_callback=None):
+        gone.unlink()  # rclone removed it during the sync
+        return {t["result_key"]: {"success": True, "files_transferred": 0} for t in tasks}
+
+    monkeypatch.setattr(service.rclone, "sync_multiple_folders", _fake_batch)
+
+    result = service.sync_multiple_drives([drive.id], job_id=job.id)
+
+    assert result["success"] is True
+    assert result["deleted"] == 1
+    remaining = {p.file_name for p in test_db.query(Poster).filter(Poster.drive_id == drive.drive_id).all()}
+    assert remaining == {"keep.jpg"}
+
+
+# ---------------------------------------------------------------------------
+# Reconciled drift: single-drive sync now matches the batch path.
+# ---------------------------------------------------------------------------
+
+
+def test_sync_single_initial_metadata_fill_does_not_reprocess(test_db, monkeypatch, tmp_path):
+    """A legacy row with NULL file_mtime gets its metadata filled but is NOT marked stale
+    (last_processed preserved, not counted as 'updated') — matching the batch path."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    local_dir = tmp_path / "posters" / "MM2K" / "MetaFill"
+    local_dir.mkdir(parents=True)
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    drive, job = _make_drive_and_job(test_db, drive_id="sync-meta-1", name="MetaFill")
+    drive.sync_enabled = True
+    test_db.commit()
+
+    poster_path = local_dir / "p.jpg"
+    poster_path.write_bytes(b"data")
+    st = poster_path.stat()
+    stamp = datetime(2020, 1, 1)
+    p = Poster(drive_id=drive.drive_id, file_name="p.jpg", file_path=str(poster_path),
+               file_size=st.st_size, file_mtime=None, last_processed=stamp)  # NULL mtime = legacy row
+    test_db.add(p)
+    test_db.commit()
+
+    service = PosterSyncService(test_db)
+    monkeypatch.setattr(service.rclone, "sync_folder",
+        lambda drive_id, local_path, drive_name=None, progress_callback=None: {"success": True, "files_transferred": 0})
+
+    result = service.sync_drive(drive.id, job.id)
+
+    assert result["updated"] == 0  # metadata fill is not a real update
+    test_db.refresh(p)
+    assert p.file_mtime is not None       # mtime got populated
+    assert p.last_processed == stamp       # NOT reset → renamer won't needlessly reprocess
+
+
+def test_sync_single_manual_drive_skips_rclone(test_db, monkeypatch, tmp_path):
+    """Single-syncing a manual/local custom drive (drive_id 'manual-…') must skip rclone and
+    just scan local files — previously the skip only existed on the batch path."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    folder = tmp_path / "manual"
+    folder.mkdir()
+    (folder / "local.jpg").write_bytes(b"x")
+
+    drive = Drive(name="ManualDrive", drive_id="manual-xyz", style_type="Custom",
+                  subscribed=True, sync_enabled=True, is_custom=True, custom_path=str(folder))
+    job = Job(job_type="Sync: ManualDrive", status="pending", progress=0, message="q")
+    test_db.add(drive)
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(drive)
+    test_db.refresh(job)
+
+    service = PosterSyncService(test_db)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("rclone.sync_folder must not be called for a manual/local drive")
+
+    monkeypatch.setattr(service.rclone, "sync_folder", _boom)
+
+    result = service.sync_drive(drive.id, job.id)
+
+    assert result["success"] is True
+    assert result["added"] == 1
+    assert test_db.query(Poster).filter(Poster.drive_id == "manual-xyz").count() == 1

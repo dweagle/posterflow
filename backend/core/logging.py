@@ -55,7 +55,7 @@ class LogTags:
     WORKFLOW = "WORKFLOW"
     ARR = "ARR"
     IDARR = "IDARR"
-    ARTWORK_PULL = "ARTPULL"   # artwork-finder (removable)
+    ARTWORK_PULL = "ARTPULL"
     MONITOR = "MONITOR"
     CLEANUP = "CLEANUP"
 

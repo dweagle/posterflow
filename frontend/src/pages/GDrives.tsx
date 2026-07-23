@@ -5,10 +5,13 @@ import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink } from 'lucide-react'
+import ArtworkDrivesPanel from '../components/ArtworkDrivesPanel'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink, Image, Layers } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './GDrives.css'
+import Toolbar from '../components/Toolbar'
+import { getAddToPriorityPref, setAddToPriorityPref } from '../utils/priorityPrompt'
 
 // Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
 const driveFolderUrl = (driveId: string): string | null =>
@@ -28,6 +31,9 @@ function GDrives() {
   const navigate = useNavigate()
   const [drives, setDrives] = useState<Drive[]>([])
   const [loading, setLoading] = useState(true)
+  const [scope, setScope] = useState<'posters' | 'artwork'>(
+    () => (localStorage.getItem('posterflow.gdrives.scope') === 'artwork' ? 'artwork' : 'posters')
+  )
   const [filter, setFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('name-asc')
   const [syncingDrive, setSyncingDrive] = useState<number | null>(null)
@@ -36,6 +42,8 @@ function GDrives() {
   const [editingDrive, setEditingDrive] = useState<Drive | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{show: boolean, driveId: number | null, driveName: string, isDeprecated: boolean}>({show: false, driveId: null, driveName: '', isDeprecated: false})
+  const [priorityPrompt, setPriorityPrompt] = useState<{show: boolean, driveId: number | null, driveName: string}>({show: false, driveId: null, driveName: ''})
+  const [promptDontAsk, setPromptDontAsk] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
@@ -131,14 +139,25 @@ function GDrives() {
     }
   }
 
-  const handleSubscribe = async (driveId: number) => {
+  const handleSubscribe = (driveId: number) => {
+    const pref = getAddToPriorityPref('poster')
+    if (pref === 'always') { void doSubscribe(driveId, true); return }
+    if (pref === 'never') { void doSubscribe(driveId, false); return }
+    const drive = drives.find(d => d.id === driveId)
+    setPromptDontAsk(false)
+    setPriorityPrompt({ show: true, driveId, driveName: drive?.display_name || drive?.name || 'this drive' })
+  }
+
+  const doSubscribe = async (driveId: number, addToPriority: boolean) => {
     await fetchWithLogging(async () => {
-      const result = await subscribeDrive(driveId)
+      const result = await subscribeDrive(driveId, addToPriority)
       fetchDrives()
       if (result.restored_to_priority) {
-        showToast('Subscribed. This drive was restored to its previous position in Poster Manager → Drive Priority.', 'info')
+        showToast('Subscribed. This drive was restored to its previous position in Asset Manager → Drive Priority.', 'info')
+      } else if (result.added_to_priority) {
+        showToast('Subscribed and added to Asset Manager → Drive Priority.', 'info')
       } else {
-        showToast('Subscribed. Remember to add this drive to your list in Poster Manager → Drive Priority.', 'info')
+        showToast('Subscribed. Remember to add this drive to your list in Asset Manager → Drive Priority.', 'info')
       }
       if (result.scan_job_id) {
         showToast('Initial scan queued. Check Dashboard for progress.', 'info')
@@ -146,12 +165,19 @@ function GDrives() {
     }, 'Error subscribing:')
   }
 
+  const resolvePriorityPrompt = (add: boolean) => {
+    if (promptDontAsk) setAddToPriorityPref('poster', add ? 'always' : 'never')
+    const id = priorityPrompt.driveId
+    setPriorityPrompt({ show: false, driveId: null, driveName: '' })
+    if (id != null) void doSubscribe(id, add)
+  }
+
   const handleUnsubscribe = async (driveId: number) => {
     await fetchWithLogging(async () => {
       const result = await unsubscribeDrive(driveId)
       fetchDrives()
       if (result.removed_from_priority) {
-        showToast('Unsubscribed. This drive was removed from Poster Manager → Drive Priority.', 'info')
+        showToast('Unsubscribed. This drive was removed from Asset Manager → Drive Priority.', 'info')
       }
     }, 'Error unsubscribing:')
   }
@@ -174,10 +200,10 @@ function GDrives() {
       fetchDrives()
       showToast(`Subscribed to ${drivesToSubscribe.length} ${styleType} drives`)
       if (restoredCount > 0) {
-        showToast(`${restoredCount} drive(s) were restored to Poster Manager → Drive Priority`, 'info')
+        showToast(`${restoredCount} drive(s) were restored to Asset Manager → Drive Priority`, 'info')
       }
       if (newCount > 0) {
-        showToast(`Remember to add ${newCount} new drive(s) to your list in Poster Manager → Drive Priority`, 'info')
+        showToast(`Remember to add ${newCount} new drive(s) to your list in Asset Manager → Drive Priority`, 'info')
       }
     } catch (error) {
       console.error('Error bulk subscribing:', error)
@@ -202,7 +228,7 @@ function GDrives() {
       fetchDrives()
       showToast(`Unsubscribed from ${drivesToUnsubscribe.length} ${styleType} drives`)
       if (prunedCount > 0) {
-        showToast(`${prunedCount} drive(s) were also removed from Poster Manager → Drive Priority`, 'info')
+        showToast(`${prunedCount} drive(s) were also removed from Asset Manager → Drive Priority`, 'info')
       }
     } catch (error) {
       console.error('Error bulk unsubscribing:', error)
@@ -409,21 +435,38 @@ function GDrives() {
     <div className="page-container gdrives">
       <div className="gdrives-header">
         <h1>Google Drives</h1>
-        <p>Subscribe to community poster collections</p>
+        <p>{scope === 'artwork' ? 'Logo, backdrop & square-art drives' : 'Subscribe to community poster collections'}</p>
       </div>
 
-      <div className="toolbar">
-        <div className="toolbar-title">
-          <h2>Google Drives</h2>
-          <div className="toolbar-info">
-            <Info size={16} />
-            <div className="toolbar-tooltip">
-              Subscribe to community poster collections from Google Drive. Use <strong>Scheduling</strong> to automate syncs, <strong>Configure</strong> to set your local storage path, and <strong>Reload</strong> to refresh the community drive list.
-            </div>
-          </div>
-        </div>
+      <div className="gdrives-tabs">
+        <button
+          className={scope === 'posters' ? 'active' : ''}
+          onClick={() => { setScope('posters'); localStorage.setItem('posterflow.gdrives.scope', 'posters') }}
+        >
+          <Image size={16} className="tab-icon" />
+          Posters
+        </button>
+        <button
+          className={scope === 'artwork' ? 'active' : ''}
+          onClick={() => { setScope('artwork'); localStorage.setItem('posterflow.gdrives.scope', 'artwork') }}
+        >
+          <Layers size={16} className="tab-icon" />
+          Artwork
+        </button>
+      </div>
 
-        <div className="action-buttons">
+      {scope === 'artwork' ? (
+        <ArtworkDrivesPanel />
+      ) : (
+      <>
+      <Toolbar
+        title="Poster Drives"
+        description={
+          <>
+            Subscribe to community poster collections from Google Drive. Use <strong>Scheduling</strong> to automate syncs, <strong>Configure</strong> to set your local storage path, and <strong>Reload</strong> to refresh the community drive list.
+          </>
+        }
+      >
           <div className="btn-pair">
             <button
               className="btn-toolbar btn-toolbar-link"
@@ -462,18 +505,15 @@ function GDrives() {
           >
             <Plus size={16} /> Custom
           </button>
-          {subscribedCount > 0 && (
-            <button 
-              className="btn-toolbar btn-sync-all" 
-              onClick={handleSyncAll}
-              disabled={syncingAll}
-              title={`Sync all ${subscribedCount} subscribed drives`}
-            >
-              {syncingAll ? 'Syncing...' : (<><RefreshCw size={16} /> Sync ({subscribedCount})</>)}
-            </button>
-          )}
-        </div>
-      </div>
+          <button
+            className="btn-toolbar btn-sync-all"
+            onClick={handleSyncAll}
+            disabled={syncingAll || subscribedCount === 0}
+            title={subscribedCount > 0 ? `Sync all ${subscribedCount} subscribed drives` : 'No subscribed drives to sync'}
+          >
+            {syncingAll ? 'Syncing...' : (<><RefreshCw size={16} /> Sync All{subscribedCount > 0 ? ` (${subscribedCount})` : ''}</>)}
+          </button>
+      </Toolbar>
 
       {/* Bulk Actions */}
       <div className="bulk-actions">
@@ -860,6 +900,22 @@ function GDrives() {
       )}
 
       <ConfirmDialog
+        isOpen={priorityPrompt.show}
+        title="Add to Drive Priority?"
+        message={`Also add "${priorityPrompt.driveName}" to your Drive Priority list so it's used for matching? You can reorder or remove it anytime in Asset Manager → Drive Priority.`}
+        confirmText="Add to Priority"
+        cancelText="Just Subscribe"
+        variant="info"
+        onConfirm={() => resolvePriorityPrompt(true)}
+        onCancel={() => resolvePriorityPrompt(false)}
+      >
+        <label className="delete-files-checkbox">
+          <input type="checkbox" checked={promptDontAsk} onChange={(e) => setPromptDontAsk(e.target.checked)} />
+          <span>Don't ask again for poster drives</span>
+        </label>
+      </ConfirmDialog>
+
+      <ConfirmDialog
         isOpen={deleteConfirm.show}
         title={deleteConfirm.isDeprecated ? "Delete Deprecated Drive" : "Delete Custom Drive"}
         message={deleteConfirm.isDeprecated 
@@ -884,6 +940,8 @@ function GDrives() {
           <span>Also delete all poster files from disk (cannot be undone)</span>
         </label>
       </ConfirmDialog>
+      </>
+      )}
     </div>
   )
 }

@@ -16,27 +16,6 @@ export interface PlexUploadRunResponse {
   message: string
 }
 
-export interface PlexUploadSourceSearchItem {
-  media_type: 'movie' | 'series' | 'collection'
-  title: string
-  year: number | null
-  season_number: number | null
-  tmdb_id: number | null
-  tvdb_id: number | null
-  imdb_id: string | null
-  source_file: string
-  source_file_name: string
-  preview_url: string
-  drive_name: string
-  drive_type: 'cl2k' | 'mm2k' | 'custom' | string
-}
-
-export interface PlexUploadSourceSearchResponse {
-  query: string
-  count: number
-  items: PlexUploadSourceSearchItem[]
-}
-
 export interface PlexSingleUploadPayload {
   media_type: 'movie' | 'series' | 'collection'
   title: string
@@ -75,6 +54,7 @@ export interface PlexSearchResponse {
 export interface PlexWebhookSettings {
   enabled: boolean
   remove_overlay_label: boolean
+  artwork: boolean
   rename_then_upload: boolean
   adopt_existing_processed: boolean
   retry_attempts: number
@@ -85,6 +65,7 @@ export interface PlexWebhookSettings {
 export interface PlexWebhookSettingsPayload {
   enabled: boolean
   remove_overlay_label: boolean
+  artwork: boolean
   rename_then_upload: boolean
   adopt_existing_processed: boolean
   retry_attempts: number
@@ -100,6 +81,8 @@ export interface PlexManualSettings {
   rename_before_upload: boolean
   border_before_upload: boolean
   upload_delay_ms: number
+  /** Also governs the workflow's upload step; the webhook has its own artwork toggle. */
+  upload_artwork: boolean
 }
 
 export interface PlexManualSettingsPayload {
@@ -110,6 +93,13 @@ export interface PlexManualSettingsPayload {
   rename_before_upload: boolean
   border_before_upload: boolean
   upload_delay_ms: number
+  upload_artwork: boolean
+}
+
+export interface PlexWebhookUnknownInstanceToken {
+  count: number
+  source: string
+  last_seen: string | null
 }
 
 export interface PlexWebhookStats {
@@ -125,6 +115,8 @@ export interface PlexWebhookStats {
   last_event_at: string | null
   last_queued_at: string | null
   last_error: string | null
+  // Webhook ?instance= names that match no configured arr instance (stale URL after a rename)
+  unknown_instance_tokens?: Record<string, PlexWebhookUnknownInstanceToken>
 }
 
 export interface PlexWebhookDedupeClearPayload {
@@ -254,17 +246,6 @@ export const runPlexUpload = async (options?: PlexUploadRunOptions): Promise<Ple
       }
     : undefined
   return postData('/api/posterflow/plex-upload/run', payload)
-}
-
-export const searchPlexUploadSourcePosters = async (
-  query: string,
-  limit: number = 300,
-): Promise<PlexUploadSourceSearchResponse> => {
-  const params = new URLSearchParams({
-    q: query,
-    limit: String(limit),
-  })
-  return getData(`/api/posterflow/plex-upload/source-search?${params.toString()}`)
 }
 
 export const runPlexSingleUpload = async (payload: PlexSingleUploadPayload): Promise<PlexUploadRunResponse> => {

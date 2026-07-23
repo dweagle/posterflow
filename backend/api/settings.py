@@ -67,12 +67,15 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "plex_instances",
     "sonarr_instances",
     "radarr_instances",
-    # Poster Renamer / Unmatched
+    # Asset Renamer / Unmatched — one library selection + one set of ignore
+    # rules shared across posters and every artwork type.
     "poster_renamer_libraries",
     "unmatched_assets_libraries",
     "unmatched_ignore_root_folders",
     "unmatched_ignore_collections",
     "unmatched_ignore_unmonitored",
+    "asset_renamer_libraries",
+    "asset_renamer_include",
     "tmdb_api_key",
     # Border Replacer
     "border_replacer_colors",
@@ -111,12 +114,15 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_rule_run_types",
     "border_replacer_rule_libraries",
     "auto_run_border",
+    # Plex Upload
+    "plex_upload_artwork",
     # Asset Cleanup
     "auto_run_cleanup",
     "cleanup_delete_unknown",
     "asset_cleanup_ignore",
     # GDrive storage path
     "gdrive_storage_path",
+    "artwork_gdrive_storage_path",
     # PSD export
     "psd_export_folder",
     "psd_image_export_folder",
@@ -206,14 +212,23 @@ def _unmask_setting_value(key: str, incoming_value: str, db: Session) -> str:
             return incoming_value
 
         if isinstance(incoming_parsed, list) and isinstance(existing_parsed, list):
-            # Build a lookup by `name` field so order changes are handled safely
+            # Build a lookup by `name` field so order changes are handled safely.
+            # URL is the fallback identity: a renamed instance keeps its URL, and
+            # without it a rename would replace the masked key with "".
             existing_by_name = {
                 item.get("name", ""): item for item in existing_parsed if isinstance(item, dict)
             }
+            existing_by_url = {}
+            for item in existing_parsed:
+                if isinstance(item, dict) and str(item.get("url") or "").strip():
+                    existing_by_url.setdefault(str(item.get("url")).strip().rstrip("/").lower(), item)
             for item in incoming_parsed:
                 if not isinstance(item, dict):
                     continue
-                existing_item = existing_by_name.get(item.get("name", ""), {})
+                existing_item = existing_by_name.get(item.get("name", ""))
+                if existing_item is None:
+                    url = str(item.get("url") or "").strip().rstrip("/").lower()
+                    existing_item = existing_by_url.get(url, {}) if url else {}
                 for field in sensitive_fields:
                     if item.get(field) == MASKED_VALUE:
                         item[field] = existing_item.get(field, "")
@@ -228,6 +243,236 @@ def _unmask_setting_value(key: str, incoming_value: str, db: Session) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Plex instance rename/removal migration
+# Several settings key Plex library selections by the instance's display NAME:
+#   - plex_library_config / plex_upload_library_override: [{instance_name, libraries}]
+#   - plex_upload_instance_library_map: values reference {"plex_instance": <name>}
+#   - "<name>:<library key>" string lists (renamer/unmatched/border rule selections)
+# Renaming a server in Media Servers would orphan all of them (stale old-name entries
+# plus silently-detached selections), so saving plex_instances migrates them here.
+# ---------------------------------------------------------------------------
+
+PLEX_PREFIXED_LIBRARY_SETTINGS = (
+    "poster_renamer_libraries",
+    "asset_renamer_libraries",
+    "unmatched_assets_libraries",
+    "border_replacer_rule_libraries",
+)
+
+
+def _normalize_instance_url(url: Any) -> str:
+    return str(url or "").strip().rstrip("/").lower()
+
+
+def _instance_names(instances: List[Any]) -> set[str]:
+    return {
+        str(item.get("name", "")).strip()
+        for item in instances
+        if isinstance(item, dict) and str(item.get("name", "")).strip()
+    }
+
+
+def _detect_instance_renames(old_instances: List[Any], new_instances: List[Any]) -> Dict[str, str]:
+    """Map old name -> new name for instances whose URL is unchanged but name differs.
+    A URL shared by multiple instances on either side is ambiguous and skipped, as is a
+    name swap/reuse (old name still configured, or new name previously configured)."""
+    def by_url(instances: List[Any]) -> Dict[str, List[Dict[str, Any]]]:
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for item in instances:
+            if isinstance(item, dict) and _normalize_instance_url(item.get("url")):
+                grouped.setdefault(_normalize_instance_url(item.get("url")), []).append(item)
+        return grouped
+
+    old_by_url = by_url(old_instances)
+    new_by_url = by_url(new_instances)
+    old_names = _instance_names(old_instances)
+    new_names = _instance_names(new_instances)
+
+    renames: Dict[str, str] = {}
+    for url, new_items in new_by_url.items():
+        old_items = old_by_url.get(url)
+        if not old_items or len(old_items) != 1 or len(new_items) != 1:
+            continue
+        old_name = str(old_items[0].get("name", "")).strip()
+        new_name = str(new_items[0].get("name", "")).strip()
+        if not old_name or not new_name or old_name == new_name:
+            continue
+        if old_name in new_names or new_name in old_names:
+            continue
+        renames[old_name] = new_name
+    return renames
+
+
+def _rekey_library_configs(
+    configs: List[Any], renames: Dict[str, str], valid_names: set[str]
+) -> List[Dict[str, Any]]:
+    """Apply renames to a [{instance_name, ...}] list, then drop entries that don't match
+    any configured instance. If a config already exists under the new name (user re-saved
+    libraries after renaming), that newer config wins and the old-name one is dropped."""
+    existing_names = {
+        str(cfg.get("instance_name", "")).strip() for cfg in configs if isinstance(cfg, dict)
+    }
+    result: List[Dict[str, Any]] = []
+    for cfg in configs:
+        if not isinstance(cfg, dict):
+            continue
+        name = str(cfg.get("instance_name", "")).strip()
+        target = renames.get(name)
+        if target and target not in existing_names:
+            cfg = {**cfg, "instance_name": target}
+            name = target
+        if name in valid_names:
+            result.append(cfg)
+    return result
+
+
+def _load_json_setting_value(db: Session, key: str) -> Any:
+    setting = get_setting(db, key)
+    if not setting or not setting.value:
+        return None
+    try:
+        return json.loads(setting.value)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None:
+    """Called when plex_instances is being saved (before the upsert). Migrates renamed
+    instances across every name-keyed setting and prunes entries for removed instances."""
+    try:
+        new_instances = json.loads(new_instances_json)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(new_instances, list):
+        return
+
+    old_instances = _load_json_setting_value(db, "plex_instances")
+    if not isinstance(old_instances, list):
+        old_instances = []
+
+    renames = _detect_instance_renames(old_instances, new_instances)
+    valid_names = _instance_names(new_instances)
+    for old_name, new_name in renames.items():
+        log_info(
+            LogTags.API,
+            f"Plex instance renamed '{old_name}' -> '{new_name}'; migrating library selections",
+        )
+
+    # plex_library_config: [{instance_name, libraries}]
+    configs = _load_json_setting_value(db, "plex_library_config")
+    if isinstance(configs, list):
+        rekeyed = _rekey_library_configs(configs, renames, valid_names)
+        if rekeyed != configs:
+            dropped = len(configs) - len(rekeyed)
+            if dropped:
+                log_info(LogTags.API, f"Pruned {dropped} stale Plex library config entr{'y' if dropped == 1 else 'ies'}")
+            upsert_setting(db, "plex_library_config", json.dumps(rekeyed))
+
+    # plex_upload_library_override: {"enabled": bool, "configs": [{instance_name, ...}]}
+    override = _load_json_setting_value(db, "plex_upload_library_override")
+    if isinstance(override, dict) and isinstance(override.get("configs"), list):
+        rekeyed = _rekey_library_configs(override["configs"], renames, valid_names)
+        if rekeyed != override["configs"]:
+            upsert_setting(
+                db,
+                "plex_upload_library_override",
+                json.dumps({**override, "configs": rekeyed}),
+            )
+
+    # plex_upload_instance_library_map: {"<arr>": [{plex_instance, library_key}]}
+    routing = _load_json_setting_value(db, "plex_upload_instance_library_map")
+    if isinstance(routing, dict):
+        new_routing: Dict[str, List[Dict[str, Any]]] = {}
+        for arr_name, entries in routing.items():
+            if not isinstance(entries, list):
+                continue
+            kept = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                plex_name = str(entry.get("plex_instance", "")).strip()
+                plex_name = renames.get(plex_name, plex_name)
+                if plex_name in valid_names:
+                    kept.append({**entry, "plex_instance": plex_name})
+            if kept:
+                new_routing[arr_name] = kept
+        if new_routing != routing:
+            upsert_setting(db, "plex_upload_instance_library_map", json.dumps(new_routing))
+
+    # "<name>:<library key>" selections: rename only — entries for removed servers are
+    # inert and revive if the server is re-added, so they are deliberately not pruned.
+    if renames:
+        for key in PLEX_PREFIXED_LIBRARY_SETTINGS:
+            selection = _load_json_setting_value(db, key)
+            if not isinstance(selection, list):
+                continue
+            rewritten: List[str] = []
+            seen: set[str] = set()
+            for item in selection:
+                value = str(item)
+                prefix, sep, rest = value.partition(":")
+                if sep and prefix in renames:
+                    value = f"{renames[prefix]}:{rest}"
+                if value not in seen:
+                    seen.add(value)
+                    rewritten.append(value)
+            if rewritten != selection:
+                upsert_setting(db, key, json.dumps(rewritten))
+
+
+def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_json: str) -> None:
+    """Called when radarr_instances/sonarr_instances is being saved (before the upsert).
+    The Plex Upload routing map is keyed by arr instance NAME, so a renamed instance
+    gets its routing row re-keyed. Rows for removed instances are left alone — they're
+    not shown in the UI, inert at runtime, and revive if the instance is re-added."""
+    try:
+        new_instances = json.loads(new_instances_json)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(new_instances, list):
+        return
+    old_instances = _load_json_setting_value(db, setting_key)
+    if not isinstance(old_instances, list):
+        return
+
+    renames = _detect_instance_renames(old_instances, new_instances)
+    if not renames:
+        return
+
+    routing = _load_json_setting_value(db, "plex_upload_instance_library_map")
+    if not isinstance(routing, dict):
+        return
+    new_routing: Dict[str, Any] = {}
+    for arr_name, entries in routing.items():
+        target = renames.get(arr_name)
+        if target is None:
+            new_routing[arr_name] = entries
+        elif target in routing:
+            # Routing was already re-configured under the new name — that row wins.
+            continue
+        else:
+            log_info(
+                LogTags.API,
+                f"Arr instance renamed '{arr_name}' -> '{target}'; migrating Plex Upload routing",
+            )
+            new_routing[target] = entries
+    if new_routing != routing:
+        upsert_setting(db, "plex_upload_instance_library_map", json.dumps(new_routing))
+
+
+def cleanup_stale_plex_name_keys(db: Session) -> None:
+    """Startup cleanup for installs that renamed a Plex server before renames were
+    migrated: re-runs the prune against the currently configured instances (no rename
+    to detect, so this only drops orphaned entries). No-op when no instances are
+    configured, so a pre-setup install never has its configs wiped. Does not commit."""
+    setting = get_setting(db, "plex_instances")
+    if not setting or not setting.value:
+        return
+    instances = _load_json_setting_value(db, "plex_instances")
+    if not isinstance(instances, list) or not _instance_names(instances):
+        return
+    _sync_plex_name_keyed_settings(db, setting.value)
+
 
 class PlexLibraryConfig(BaseModel):
     instance_name: str
@@ -625,6 +870,11 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
 
     for key, value in allowed.items():
         resolved = _unmask_setting_value(key, value, db)
+        if key == "plex_instances":
+            # Must run before the upsert below so the old names are still readable.
+            _sync_plex_name_keyed_settings(db, resolved)
+        elif key in ("radarr_instances", "sonarr_instances"):
+            _sync_arr_name_keyed_settings(db, key, resolved)
         upsert_setting(db, key, resolved)
 
     try:
@@ -853,7 +1103,7 @@ def save_gdrive_storage_path(
     if raw:
         # Validate: must be an absolute path, no traversal
         try:
-            resolved = _Path(raw).resolve()
+            _Path(raw).resolve()
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid path")
         if ".." in _Path(raw).parts:
@@ -880,4 +1130,54 @@ def save_gdrive_storage_path(
     new_dir.mkdir(parents=True, exist_ok=True)
 
     log_user_action("Updated GDrive storage path", path=str(new_dir))
+    return {"path": str(new_dir)}
+
+
+@router.get("/artwork-gdrive-storage")
+def get_artwork_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
+    """Return the current GDrive artwork (logo/backdrop/squareart) storage path setting."""
+    setting = get_setting(db, "artwork_gdrive_storage_path")
+    current_path = setting.value.strip() if setting and setting.value else ""
+    return {"path": current_path}
+
+
+@router.post("/artwork-gdrive-storage")
+def save_artwork_gdrive_storage_path(
+    payload: GdriveStoragePathRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Persist the GDrive artwork storage path and apply it immediately."""
+    from pathlib import Path as _Path
+    from core.config import settings as app_settings
+
+    raw = payload.path.strip()
+
+    if raw:
+        try:
+            _Path(raw).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path")
+        if ".." in _Path(raw).parts:
+            raise HTTPException(status_code=400, detail="Path traversal not allowed")
+        if not _Path(raw).is_absolute():
+            raise HTTPException(status_code=400, detail="Path must be absolute")
+        save_value = raw
+        new_dir = _Path(raw)
+    else:
+        save_value = ""
+        new_dir = _Path("/config/artwork/gdrive")
+
+    upsert_setting(db, "artwork_gdrive_storage_path", save_value)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.API, f"Failed to save artwork_gdrive_storage_path: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save setting")
+
+    # Apply immediately (without restart)
+    app_settings.artwork_gdrive_dir = new_dir
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    log_user_action("Updated GDrive artwork storage path", path=str(new_dir))
     return {"path": str(new_dir)}

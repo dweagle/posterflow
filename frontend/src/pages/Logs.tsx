@@ -130,7 +130,7 @@ function Logs() {
     border_replacer: [],
     unmatched_assets: [],
     idarr: [],
-    artwork_pull: [],   // artwork-finder (removable)
+    artwork_pull: [],
   })
   const [jobLogsLoading, setJobLogsLoading] = useState(false)
   const [selectedLog, setSelectedLog] = useState<{ type: string; file: JobLogFile } | null>(null)
@@ -149,7 +149,7 @@ function Logs() {
     border_replacer: true,
     unmatched_assets: true,
     idarr: true,
-    artwork_pull: true,   // artwork-finder (removable)
+    artwork_pull: true,
   })
 
   // Live-tail state
@@ -202,7 +202,7 @@ function Logs() {
           border_replacer: true,
           unmatched_assets: true,
           idarr: true,
-          artwork_pull: true,   // artwork-finder (removable)
+          artwork_pull: true,
           [section]: false
         }
       } else {
@@ -373,7 +373,7 @@ function Logs() {
           ...data,
           poster_renamer: data.poster_renamer ?? [],
           idarr: data.idarr ?? [],
-          artwork_pull: data.artwork_pull ?? [],   // artwork-finder (removable)
+          artwork_pull: data.artwork_pull ?? [],
         })
       } catch (error) {
         console.error('Failed to fetch job logs:', error)
@@ -1144,7 +1144,6 @@ function Logs() {
                 )}
               </div>
 
-              {/* --- artwork-finder (removable) --- */}
               <div className="log-section">
                 <h2 onClick={() => toggleSection('artwork_pull')}>
                   <span>Artwork Pull</span>
@@ -1193,7 +1192,6 @@ function Logs() {
                   </div>
                 )}
               </div>
-              {/* --- /artwork-finder --- */}
 
               <div className="log-section">
                 <h2 onClick={() => toggleSection('plex_upload')}>

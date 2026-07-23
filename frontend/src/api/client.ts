@@ -10,6 +10,28 @@ export {
 } from './drives'
 
 export {
+  type ArtworkUnmatchedStats,
+  type ArtworkType,
+  getArtworkUnmatchedStats,
+} from './artwork_unmatched'
+
+export {
+  type ArtworkDrive,
+  type ArtworkDrivePriority,
+  createCustomArtworkDrive,
+  deleteArtworkDrive,
+  getArtworkDrives,
+  reloadArtworkDrives,
+  subscribeArtworkDrive,
+  unsubscribeArtworkDrive,
+  updateArtworkDrive,
+  syncArtworkDrive,
+  syncAllArtworkDrives,
+  getArtworkDrivePriority,
+  saveArtworkDrivePriority,
+} from './artwork_drives'
+
+export {
   type Job,
   type JobLogFile,
   type JobLogs,
@@ -112,6 +134,7 @@ export {
 } from './schedules'
 
 export {
+  DEFAULT_POSTER_DESTINATION,
   type FlowConfig,
   type FlowResult,
   type IdarrFlowJobConfig,
@@ -134,6 +157,7 @@ export {
   savePosterConfig,
   searchPosters,
   searchUnmatchedTmdb,
+  startAssetRename,
   startPosterRename,
   startUnmatchedDetection,
   updateWorkflow,
@@ -202,6 +226,24 @@ export {
   runMakerMonitor,
   saveMakerMonitorConfig,
   searchTmdb,
+  type ArtworkSubtype,
+  type ArtworkListType,
+  type ArtworkCandidate,
+  type ArtworkCandidatesResponse,
+  type ArtworkItemRef,
+  type AddArtworkRequest,
+  type AddArtworkResponse,
+  type CropArtworkRequest,
+  type ArtworkPullSource,
+  type ArtworkPullRequest,
+  type ArtworkScopeItem,
+  getArtworkScopeItems,
+  getArtworkCandidates,
+  addArtwork,
+  cropArtworkSquare,
+  startArtworkPull,
+  getGracenoteImageProxyUrl,
+  getArtworkTaggedDownloadUrl,
 } from './makerTools'
 
 export {
@@ -250,15 +292,18 @@ export const getWebSocketUrl = () => {
 }
 
 const JOB_TYPE_LABELS: Record<string, string> = {
-  gdrive_sync: 'Drive Sync',
-  sync: 'Drive Sync',
-  sync_all: 'Drive Sync (All)',
+  gdrive_sync: 'Poster Drive Sync',
+  sync: 'Poster Drive Sync',
+  sync_all: 'Poster Drive Sync (All)',
+  artwork_sync: 'Artwork Drive Sync',
   poster_workflow: 'Poster Workflow',
-  poster_renamer: 'Poster Renamer',
+  poster_renamer: 'Asset Renamer',
+  'Poster Renamer': 'Asset Renamer',
   idarr: 'IDarr',
   maker_monitor: 'Maker Monitor',
   unmatched_assets: 'Unmatched Assets',
   border_replacer: 'Border Replacer',
+  artwork_pull: 'Artwork Pull',
 }
 
 export const formatJobType = (jobType: string): string =>

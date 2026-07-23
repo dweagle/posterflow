@@ -51,7 +51,7 @@ export interface SeasonStyle {
 // Default border-style options — the single source of truth for the main border,
 // season custom style, new holidays, and resetBorderSettingsToDefaults, so no
 // default can drift between the initial state and a reset.
-export const DEFAULT_BORDER_STYLE: SeasonStyle = {
+const DEFAULT_BORDER_STYLE: SeasonStyle = {
   style: 'solid',
   overlayImage: '',
   removeExisting: false,
@@ -111,7 +111,7 @@ interface UsePosterManagerBorderParams {
 }
 
 // SeasonStyle <-> the snake_case shape the backend reads (for season + holidays).
-export const styleToSnake = (s: SeasonStyle) => ({
+const styleToSnake = (s: SeasonStyle) => ({
   style: s.style,
   overlay_image: s.overlayImage,
   remove_existing: s.removeExisting,
@@ -124,7 +124,7 @@ export const styleToSnake = (s: SeasonStyle) => ({
   fade_width: s.fadeWidth,
 })
 
-export const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImage?: string): SeasonStyle => {
+const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImage?: string): SeasonStyle => {
   const r = raw || {}
   const num = (v: unknown, d: number) => parseIntOr(v, d)
   const styleVal = String(r.style || (legacyBorderImage ? 'image' : 'solid'))
@@ -200,6 +200,7 @@ export const usePosterManagerBorder = ({
   const [autoRunBorder, setAutoRunBorder] = useState(false)
   const [autoRunCleanup, setAutoRunCleanup] = useState(true)
   const [cleanupDeleteUnknown, setCleanupDeleteUnknown] = useState(false)
+  const [borderSettingsLoaded, setBorderSettingsLoaded] = useState(false)
   const [holidaySchedules, setHolidaySchedules] = useState<BorderHolidaySchedule[]>([])
   const [removeBorders, setRemoveBorders] = useState(false)
   const [seasonMode, setSeasonMode] = useState<SeasonMode>('inherit')
@@ -431,6 +432,8 @@ export const usePosterManagerBorder = ({
       }
     } catch (error) {
       console.error('Error fetching border settings:', error)
+    } finally {
+      setBorderSettingsLoaded(true)
     }
   }
 
@@ -646,6 +649,7 @@ export const usePosterManagerBorder = ({
     autoRunBorder,
     autoRunCleanup,
     cleanupDeleteUnknown,
+    borderSettingsLoaded,
     holidaySchedules,
     removeBorders,
     seasonMode,

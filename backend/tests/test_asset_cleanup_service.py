@@ -1,10 +1,7 @@
 """Tests for AssetCleanupService — the reverse-renamer assets-folder cleanup."""
 
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-import pytest
 
 from models.plex_upload import PlexUploadRecord
 from models.poster import Poster
@@ -295,3 +292,69 @@ def test_missing_destination_is_noop(test_db, tmp_path):
     result = _run(test_db, tmp_path / "does-not-exist", {"movies": [_movie("X", 2000, "/m/X (2000)")]}, dry_run=False)
     assert result["error"] is not None
     assert result["counts"]["removed_orphans"] == 0
+
+
+def test_flat_series_not_deleted_when_sonarr_down(test_db, tmp_path):
+    """A lone flat series main poster ('Show (Year).jpg', no season marker / tvdb) classifies
+    as a movie. With Sonarr down it must not be deleted, since the destination shows series
+    exist (evidence from another show's season poster)."""
+    dest = tmp_path / "assets"
+    dest.mkdir()
+    (dest / "Living Show (2015)_Season01.jpg").write_bytes(b"img")   # a series' season poster → evidence
+    (dest / "Breaking Bad (2008).jpg").write_bytes(b"img")           # lone main poster → classifies as movie
+    (dest / "The Matrix (1999).jpg").write_bytes(b"img")            # genuine live movie
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [],  # Sonarr down
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "Breaking Bad (2008).jpg").exists()            # ambiguous → protected
+    assert (dest / "The Matrix (1999).jpg").exists()             # live → kept
+    assert "series" in result["skipped_types"]
+
+
+def test_movie_only_library_still_cleans_orphans_with_no_series(test_db, tmp_path):
+    """A movie-only user always has an empty series list; that must NOT freeze movie-orphan
+    cleanup (no series evidence in the destination → no over-protection)."""
+    dest = tmp_path / "assets"
+    dest.mkdir()
+    (dest / "The Matrix (1999).jpg").write_bytes(b"img")   # live movie
+    (dest / "Old Movie (2001).jpg").write_bytes(b"img")    # genuine orphan movie
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [],  # user has no series at all
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "The Matrix (1999).jpg").exists()
+    assert not (dest / "Old Movie (2001).jpg").exists()   # still cleaned — no series evidence
+    assert result["counts"]["removed_orphans"] == 1
+
+
+def test_flat_series_artwork_not_deleted_when_sonarr_down(test_db, tmp_path):
+    """The flagged case: 'Show (Year) - logo.png' classifies as a movie, so a down Sonarr
+    would have deleted it. Protected while the destination shows series exist."""
+    dest = tmp_path / "assets"
+    dest.mkdir()
+    (dest / "Breaking Bad (2008)_Season01.jpg").write_bytes(b"img")   # series evidence
+    (dest / "Breaking Bad (2008) - logo.png").write_bytes(b"img")     # flat series artwork
+    (dest / "Breaking Bad (2008) - background.jpg").write_bytes(b"img")
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [],  # Sonarr down
+        "collections": [_collection("Marvel")],
+    }
+    (dest / "The Matrix (1999).jpg").write_bytes(b"img")
+
+    _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "Breaking Bad (2008) - logo.png").exists()
+    assert (dest / "Breaking Bad (2008) - background.jpg").exists()

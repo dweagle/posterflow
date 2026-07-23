@@ -78,6 +78,7 @@ export interface JobLogs {
   border_replacer: JobLogFile[]
   unmatched_assets: JobLogFile[]
   idarr: JobLogFile[]
+  artwork_pull: JobLogFile[]
 }
 
 export const getJobLogs = async (): Promise<JobLogs> => {

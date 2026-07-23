@@ -1,22 +1,27 @@
 import { useState, useEffect, type MouseEvent } from 'react'
-import { getGdriveStoragePath, saveGdriveStoragePath } from '../api/settings'
+import { getGdriveStoragePath, saveGdriveStoragePath, getArtworkGdriveStoragePath, saveArtworkGdriveStoragePath } from '../api/settings'
 import { useToast } from './Toast'
 import './GdriveStorageModal.css'
 
-const DEFAULT_PATH = '/config/posters/gdrive'
-
 interface GdriveStorageModalProps {
   onClose: () => void
+  variant?: 'posters' | 'artwork'
 }
 
-function GdriveStorageModal({ onClose }: GdriveStorageModalProps) {
+function GdriveStorageModal({ onClose, variant = 'posters' }: GdriveStorageModalProps) {
+  const isArtwork = variant === 'artwork'
+  const DEFAULT_PATH = isArtwork ? '/config/artwork/gdrive' : '/config/posters/gdrive'
+  const getStoragePath = isArtwork ? getArtworkGdriveStoragePath : getGdriveStoragePath
+  const saveStoragePath = isArtwork ? saveArtworkGdriveStoragePath : saveGdriveStoragePath
+  const assetNoun = isArtwork ? 'artwork' : 'poster'
+
   const [path, setPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
 
   useEffect(() => {
-    getGdriveStoragePath()
+    getStoragePath()
       .then((data) => setPath(data.path))
       .catch(() => setPath(''))
       .finally(() => setLoading(false))
@@ -25,7 +30,7 @@ function GdriveStorageModal({ onClose }: GdriveStorageModalProps) {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const result = await saveGdriveStoragePath(path)
+      const result = await saveStoragePath(path)
       showToast(`Storage path saved: ${result.path}`, 'success')
       onClose()
     } catch (error: unknown) {
@@ -44,7 +49,7 @@ function GdriveStorageModal({ onClose }: GdriveStorageModalProps) {
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content schedule-modal gdrive-storage-modal">
         <div className="modal-header">
-          <h2>GDrive Storage Location</h2>
+          <h2>{isArtwork ? 'Artwork Storage Location' : 'GDrive Storage Location'}</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
@@ -54,7 +59,7 @@ function GdriveStorageModal({ onClose }: GdriveStorageModalProps) {
           ) : (
             <>
               <p className="gdrive-storage-description">
-                Set the base folder where synced poster files will be stored on disk.
+                Set the base folder where synced {assetNoun} files will be stored on disk.
                 Leave blank to use the default location inside the <code>/config</code> volume.
               </p>
 
@@ -70,14 +75,13 @@ function GdriveStorageModal({ onClose }: GdriveStorageModalProps) {
                 <small>
                   Default: <code>{DEFAULT_PATH}</code>
                   {' '}— lives inside your <code>/config</code> volume mount.
-                  Set a custom absolute path (e.g. <code>/posters/gdrive</code>) if you
-                  mount a separate <code>/posters</code> volume.
+                  Set a custom absolute path if you mount a separate volume.
                 </small>
               </div>
 
               <div className="gdrive-storage-note">
-                <strong>Note:</strong> The new path takes effect immediately. Existing poster
-                files at the old location are <em>not</em> moved automatically.
+                <strong>Note:</strong> The new path takes effect immediately. Existing {assetNoun}
+                {' '}files at the old location are <em>not</em> moved automatically.
               </div>
             </>
           )}

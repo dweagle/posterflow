@@ -30,7 +30,7 @@ function MaintenanceSection({
       <div className="backup-section">
         <div className="backup-item">
           <h3>Database Cleanup</h3>
-          <p>Remove database records for poster files that have been deleted from disk. This helps keep your database clean and improves performance.</p>
+          <p>Remove database records for poster and artwork files that have been deleted from disk (including files from unsubscribed or deprecated drives). This only prunes stale records — it never deletes files or touches your renamed destination folders.</p>
 
           {!databaseStats && !loadingStats && (
             <button className="btn-secondary" onClick={onFetchStats} style={{ marginTop: '1rem' }}>
@@ -91,9 +91,14 @@ function MaintenanceSection({
                         .slice(0, -1)
                         .join('/')
                       return (
-                        <div key={record.id} className="orphaned-record-row">
+                        <div key={`${record.asset_type ?? 'poster'}-${record.id}`} className="orphaned-record-row">
                           <div className="orphaned-record-file-cell">
-                            <span className="orphaned-record-file" title={record.file_path}>{record.file_name}</span>
+                            <span className="orphaned-record-file" title={record.file_path}>
+                              <span className={`orphaned-asset-type orphaned-asset-type--${record.asset_type ?? 'poster'}`}>
+                                {record.asset_type === 'artwork' ? 'Artwork' : 'Poster'}
+                              </span>
+                              {record.file_name}
+                            </span>
                             <span className="orphaned-record-path" title={record.file_path}>{parentDir}</span>
                           </div>
                           <div className="orphaned-record-drive-cell">

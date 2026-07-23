@@ -2,6 +2,8 @@ from pathlib import Path
 
 from util.posters.scanner import (
     _is_asset_folders,
+    artwork_type_of,
+    is_artwork_file,
     parse_file_group,
     parse_folder_group,
     process_files,
@@ -79,6 +81,76 @@ def test_scan_flat_folder_groups_multiple_files_for_same_title(tmp_path):
     results = scan_files_in_flat_folder(str(tmp_path))
     # Both files belong to the same title → one group
     assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# is_artwork_file / exclude_artwork
+# ---------------------------------------------------------------------------
+
+
+def test_is_artwork_file_nested_names():
+    assert is_artwork_file("logo.png")
+    assert is_artwork_file("background.jpg")
+    assert is_artwork_file("square.jpg")           # Kometa-compatible square art name
+    assert not is_artwork_file("squareart.jpg")    # not a name we write or detect
+    assert not is_artwork_file("poster.jpg")
+
+
+def test_is_artwork_file_flat_names():
+    assert is_artwork_file("Inception (2010) {tmdb-27205}-logo.png")
+    assert is_artwork_file("Inception (2010) {tmdb-27205}-square.jpg")
+    assert not is_artwork_file("Inception (2010) {tmdb-27205}.jpg")
+
+
+def test_artwork_type_of_maps_square_to_squareart():
+    """'square' (Kometa name) resolves to the internal 'squareart' type."""
+    assert artwork_type_of("square.png") == "squareart"
+    assert artwork_type_of("Inception (2010)-square.jpg") == "squareart"
+    assert artwork_type_of("logo.png") == "logo"
+    assert artwork_type_of("poster.jpg") is None
+
+
+def test_flat_folder_excludes_artwork_keeps_poster(tmp_path):
+    (tmp_path / "Inception (2010) {tmdb-27205}.jpg").write_bytes(b"img")
+    (tmp_path / "Inception (2010) {tmdb-27205}-logo.png").write_bytes(b"img")
+    (tmp_path / "Inception (2010) {tmdb-27205}-background.jpg").write_bytes(b"img")
+    results = scan_files_in_flat_folder(str(tmp_path), exclude_artwork=True)
+    assert len(results) == 1
+    assert [Path(f).name for f in results[0]["files"]] == ["Inception (2010) {tmdb-27205}.jpg"]
+
+
+def test_nested_folder_excludes_artwork_keeps_poster(tmp_path):
+    movie_dir = tmp_path / "Inception (2010) {tmdb-27205}"
+    movie_dir.mkdir()
+    (movie_dir / "poster.jpg").write_bytes(b"img")
+    (movie_dir / "logo.png").write_bytes(b"img")
+    (movie_dir / "background.jpg").write_bytes(b"img")
+    results = scan_files_in_nested_folders(str(tmp_path), exclude_artwork=True)
+    assert len(results) == 1
+    assert [Path(f).name for f in results[0]["files"]] == ["poster.jpg"]
+
+
+def test_nested_folder_artwork_only_is_dropped_when_excluded(tmp_path):
+    # A folder with only artwork (no poster) must not read as "has a poster".
+    movie_dir = tmp_path / "Inception (2010) {tmdb-27205}"
+    movie_dir.mkdir()
+    (movie_dir / "logo.png").write_bytes(b"img")
+    (movie_dir / "background.jpg").write_bytes(b"img")
+    results = scan_files_in_nested_folders(str(tmp_path), exclude_artwork=True)
+    assert results == []
+
+
+def test_cleanup_default_sees_artwork_only_folder(tmp_path):
+    # Default (exclude_artwork=False) must still scan an artwork-only folder as one asset
+    # so cleanup can remove the whole folder (folder-level rmtree) when media is orphaned.
+    movie_dir = tmp_path / "Inception (2010) {tmdb-27205}"
+    movie_dir.mkdir()
+    (movie_dir / "logo.png").write_bytes(b"img")
+    (movie_dir / "background.jpg").write_bytes(b"img")
+    results = scan_files_in_nested_folders(str(tmp_path))
+    assert len(results) == 1
+    # The representative file lives inside the item folder → cleanup rmtrees the folder.
+    assert Path(results[0]["files"][0]).parent == movie_dir
 
 
 # ---------------------------------------------------------------------------

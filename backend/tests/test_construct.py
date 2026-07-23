@@ -1,8 +1,10 @@
 from util.data.construct import (
+    build_slots,
     create_collection,
     create_movie,
     create_series,
     generate_title_variants,
+    slot_dest_name,
 )
 
 
@@ -177,3 +179,72 @@ def test_create_series_tmdb_id_defaults_none():
         "Show", 2020, 99, "tt123", "show", ["/Season 01.jpg"]
     )
     assert result["tmdb_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# slots (the box) — item-level poster/logo/background/square + seasons
+# ---------------------------------------------------------------------------
+
+
+def test_build_slots_defaults_are_empty():
+    slots = build_slots()
+    assert slots == {"poster": None, "logo": None, "background": None, "square": None, "seasons": {}}
+
+
+def test_movie_box_has_poster_slot_and_empty_artwork_slots():
+    result = create_movie("Inception", 2010, 27205, None, "inception", ["/a.jpg", "/inception.jpg"])
+    slots = result["slots"]
+    assert slots["poster"] == "/inception.jpg"  # same file the flat list points at
+    assert slots["logo"] is None and slots["background"] is None and slots["square"] is None
+    assert slots["seasons"] == {}
+
+
+def test_collection_box_has_poster_slot():
+    result = create_collection("Avengers", 131292, "avengers", ["/x.jpg", "/avengers.jpg"])
+    assert result["slots"]["poster"] == "/avengers.jpg"
+    assert result["slots"]["seasons"] == {}
+
+
+def test_series_box_separates_main_poster_from_seasons():
+    result = create_series(
+        "Show", 2020, 99, "tt123", "show",
+        ["/Show - Season01.jpg", "/Show - Specials.jpg", "/Show.jpg"],
+    )
+    slots = result["slots"]
+    assert slots["poster"] == "/Show.jpg"       # the non-season file is the main poster
+    assert slots["seasons"] == {1: "/Show - Season01.jpg", 0: "/Show - Specials.jpg"}
+    assert slots["logo"] is None
+
+
+def test_box_is_additive_flat_files_still_present():
+    # The old flat structure stays so match/placement are untouched for now.
+    result = create_movie("Inception", 2010, 27205, None, "inception", ["/inception.jpg"])
+    assert result["files"] == ["/inception.jpg"]
+    assert "slots" in result
+
+
+# ---------------------------------------------------------------------------
+# slot_dest_name — the one source of truth for output filenames (must match
+# the existing on-disk conventions exactly)
+# ---------------------------------------------------------------------------
+
+FOLDER = "Inception (2010) {tmdb-27205}"
+
+
+def test_slot_dest_name_poster_nested_and_flat():
+    assert slot_dest_name("poster", ".jpg", FOLDER, True) == "poster.jpg"
+    assert slot_dest_name("poster", ".jpg", FOLDER, False) == f"{FOLDER}.jpg"
+
+
+def test_slot_dest_name_artwork_nested_and_flat():
+    assert slot_dest_name("logo", ".png", FOLDER, True) == "logo.png"
+    assert slot_dest_name("logo", ".png", FOLDER, False) == f"{FOLDER}-logo.png"
+    assert slot_dest_name("background", ".jpg", FOLDER, True) == "background.jpg"
+    assert slot_dest_name("square", ".jpg", FOLDER, False) == f"{FOLDER}-square.jpg"
+
+
+def test_slot_dest_name_season_zero_pads_nested_and_flat():
+    assert slot_dest_name("season", ".jpg", FOLDER, True, season=1) == "Season01.jpg"
+    assert slot_dest_name("season", ".jpg", FOLDER, False, season=1) == f"{FOLDER}_Season01.jpg"
+    assert slot_dest_name("season", ".jpg", FOLDER, True, season=0) == "Season00.jpg"
+    assert slot_dest_name("season", ".jpg", FOLDER, True, season=12) == "Season12.jpg"

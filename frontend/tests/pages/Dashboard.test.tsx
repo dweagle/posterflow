@@ -50,6 +50,7 @@ vi.mock('../../src/api/client', () => ({
   startPosterRename: vi.fn(),
   getPosterConfig: vi.fn(),
   getPosterActivityStats: vi.fn().mockResolvedValue({ items: [] }),
+  getArtworkUnmatchedStats: vi.fn().mockResolvedValue({ logo: null, background: null, squareart: null, last_run: null }),
   getApiErrorMessage: vi.fn(() => 'error'),
 }))
 
@@ -119,6 +120,8 @@ describe('Dashboard', () => {
     await screen.findByRole('button', { name: 'View Details →' })
     await user.click(screen.getByRole('button', { name: 'View Details →' }))
 
-    expect(mockNavigate).toHaveBeenCalledWith('/poster-manager', { state: { activeTab: 'unmatched' } })
+    // Dashboard shows poster coverage, so the link pins the poster sub-tab regardless of
+    // which asset type the Unmatched view was last left on.
+    expect(mockNavigate).toHaveBeenCalledWith('/poster-manager', { state: { activeTab: 'unmatched', unmatchedScope: 'posters' } })
   })
 })

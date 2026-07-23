@@ -8,14 +8,13 @@ from database import SessionLocal
 from core.logging import (
     LogTags,
     log_info,
-    log_warning,
     log_error,
     log_section_start,
     log_section_end,
     add_job_log_handler,
     remove_job_log_handler,
 )
-from models.setting import get_setting_value
+from util.poster_settings import get_poster_destination
 from models.job import (
     Job,
     JOB_STATUS_RUNNING,
@@ -92,9 +91,7 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
         season_width = run_settings["season_border_width"]
         exclusions = run_settings["exclusion_list"]
 
-        poster_dest = get_setting_value(db, "poster_destination")
-        if not poster_dest:
-            raise Exception("No destination directory configured. Please configure in Poster Manager settings.")
+        poster_dest = get_poster_destination(db)
 
         if not os.path.exists(poster_dest):
             raise Exception(f"Poster destination directory does not exist: {poster_dest}")

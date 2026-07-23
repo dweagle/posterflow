@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from services.discord_notifications import (
     DISCORD_NOTIFICATION_FEATURES,
     _format_title,
@@ -327,3 +325,186 @@ def test_send_major_error_notification_uses_system_errors_feature():
 
     assert result is True
     mock_post.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Artwork reporting: artwork must reach Discord everywhere posters do —
+# especially artwork-only runs, which used to be completely silent.
+# ---------------------------------------------------------------------------
+
+from models.artwork_drive import ArtworkDrive
+from models.job import Job, JOB_STATUS_PENDING
+
+
+def _job(test_db, job_type="Test Job"):
+    job = Job(job_type=job_type, status=JOB_STATUS_PENDING, progress=0, message="")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+    return job
+
+
+def _fake_artwork_service(result):
+    class _Svc:
+        def __init__(self, db):
+            pass
+
+        def sync_multiple_drives(self, *args, **kwargs):
+            return result
+
+    return _Svc
+
+
+def test_artwork_sync_all_success_reports_same_fields_as_posters(test_db, monkeypatch):
+    import modules.sync as sync_module
+    import services.artwork_sync as art_sync
+
+    test_db.add(ArtworkDrive(name="Art", drive_id="a1", subscribed=True))
+    test_db.commit()
+    job = _job(test_db, "Artwork Sync All")
+
+    monkeypatch.setattr(art_sync, "ArtworkSyncService", _fake_artwork_service(
+        {"success": True, "drives_synced": 2, "added": 5, "updated": 3, "deleted": 1}))
+    sent: list = []
+    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+
+    sync_module._sync_all_artwork_drives(test_db, job.id)
+
+    assert len(sent) == 1
+    note = sent[0]
+    assert note["title"] == "Artwork Drive Sync Summary"
+    values = {f["name"]: f["value"] for f in note["fields"]}
+    assert values == {"New": "5", "Replaced": "3", "Deleted": "1"}
+
+
+def test_artwork_sync_all_failure_is_not_silent(test_db, monkeypatch):
+    """The regression that mattered: an artwork-only sync failure reported nothing."""
+    import modules.sync as sync_module
+    import services.artwork_sync as art_sync
+
+    test_db.add(ArtworkDrive(name="Art", drive_id="a1", subscribed=True))
+    test_db.commit()
+    job = _job(test_db, "Artwork Sync All")
+
+    monkeypatch.setattr(art_sync, "ArtworkSyncService", _fake_artwork_service(
+        {"success": False, "error": "rclone exploded"}))
+    sent: list = []
+    errors: list = []
+    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+    monkeypatch.setattr(sync_module, "send_major_error_notification", lambda *a, **k: errors.append(k))
+
+    sync_module._sync_all_artwork_drives(test_db, job.id)
+
+    assert any(n["title"] == "Artwork Drive Sync Failed" for n in sent)
+    assert any("rclone exploded" in str(n.get("description", "")) for n in sent)
+    assert errors and errors[0]["source"] == "sync.all.artwork"
+
+
+def test_artwork_sync_all_respects_skip_discord(test_db, monkeypatch):
+    """Inside a workflow the embed reports it, so the sub-module must stay quiet."""
+    import modules.sync as sync_module
+    import services.artwork_sync as art_sync
+
+    test_db.add(ArtworkDrive(name="Art", drive_id="a1", subscribed=True))
+    test_db.commit()
+    job = _job(test_db, "Artwork Sync All")
+
+    monkeypatch.setattr(art_sync, "ArtworkSyncService", _fake_artwork_service({"success": True, "drives_synced": 1}))
+    sent: list = []
+    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+
+    sync_module._sync_all_artwork_drives(test_db, job.id, skip_discord=True)
+
+    assert sent == []
+
+
+def _unmatched_result(with_posters=True, with_artwork=True):
+    result = {}
+    if with_posters:
+        result["summary"] = {
+            "grand_total": {"unmatched": 3, "total": 10, "percent_complete": 70.0},
+            "movies": {"unmatched": 2}, "series": {"unmatched": 1},
+            "seasons": {"unmatched": 0}, "collections": {"unmatched": 0},
+        }
+        result["unmatched"] = {}
+    if with_artwork:
+        result["artwork"] = {
+            "logo": {"summary": {"grand_total": {"unmatched": 4, "total": 10}}},
+            "background": {"summary": {"grand_total": {"unmatched": 6, "total": 10}}},
+        }
+    return result
+
+
+def _patch_unmatched(monkeypatch, result):
+    import modules.unmatched as um
+
+    class _Svc:
+        def __init__(self, db):
+            pass
+
+        def detect_unmatched(self, *args, **kwargs):
+            return result
+
+    monkeypatch.setattr(um, "UnmatchedAssetsService", _Svc)
+    monkeypatch.setattr(um, "reconcile_community_lists", lambda *a, **k: None)
+    sent: list = []
+    monkeypatch.setattr(um, "send_discord_notification", lambda *a, **k: sent.append(k))
+    return um, sent
+
+
+def test_unmatched_notification_includes_artwork_per_type(test_db, monkeypatch):
+    um, sent = _patch_unmatched(monkeypatch, _unmatched_result())
+    job = _job(test_db, "Unmatched Detection")
+
+    um._run_detection(test_db, job, job.id, {}, "/tmp/dest", False,
+                      check_posters=True, artwork_types=["logo", "background"], asset_folders=True)
+
+    assert len(sent) == 1
+    note = sent[0]
+    names = [f["name"] for f in note["fields"]]
+    # Poster fields preserved...
+    for expected in ("Total", "Movies", "Shows", "Seasons", "Collections"):
+        assert expected in names
+    # ...plus one field per artwork type.
+    assert "Logo" in names and "Background" in names
+    values = {f["name"]: f["value"] for f in note["fields"]}
+    assert values["Logo"] == "4 missing of 10"
+    assert "missing posters" in note["description"] and "missing artwork" in note["description"]
+
+
+def test_unmatched_artwork_only_run_still_notifies(test_db, monkeypatch):
+    """Artwork-only detection used to send nothing at all."""
+    um, sent = _patch_unmatched(monkeypatch, _unmatched_result(with_posters=False))
+    job = _job(test_db, "Unmatched Detection")
+
+    um._run_detection(test_db, job, job.id, {}, "/tmp/dest", False,
+                      check_posters=False, artwork_types=["logo", "background"], asset_folders=True)
+
+    assert len(sent) == 1
+    names = [f["name"] for f in sent[0]["fields"]]
+    assert names == ["Logo", "Background"]
+    assert "missing artwork" in sent[0]["description"]
+
+
+def test_webhook_accumulates_artwork_across_targets():
+    """Artwork is nested, so the webhook's flat-int aggregation loop skipped it entirely —
+    this exercises the real accumulator that now sums it per target."""
+    from modules.upload import _accumulate_artwork_stats
+
+    aggregated = {"scanned": 0, "uploaded": 0, "by_type": {}}
+    for target_stats in [
+        {"uploaded": 2, "artwork": {"scanned": 3, "uploaded": 2, "by_type": {"logo": 1, "background": 1}}},
+        {"uploaded": 1, "artwork": {"scanned": 2, "uploaded": 1, "by_type": {"logo": 1}}},
+    ]:
+        _accumulate_artwork_stats(aggregated, target_stats)
+
+    assert aggregated == {"scanned": 5, "uploaded": 3, "by_type": {"logo": 2, "background": 1}}
+
+
+def test_webhook_artwork_accumulator_ignores_targets_without_artwork():
+    from modules.upload import _accumulate_artwork_stats
+
+    aggregated = {"scanned": 0, "uploaded": 0, "by_type": {}}
+    _accumulate_artwork_stats(aggregated, {"uploaded": 4})           # artwork disabled
+    _accumulate_artwork_stats(aggregated, {"uploaded": 1, "artwork": {}})
+    assert aggregated == {"scanned": 0, "uploaded": 0, "by_type": {}}

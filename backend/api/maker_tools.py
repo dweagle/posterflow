@@ -1825,6 +1825,39 @@ def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h:
     return new_w, new_h, pos_left, pos_top
 
 
+def _place_poster(pil: Image.Image, canvas_w: int, canvas_h: int, fit_within_border: bool) -> tuple[Image.Image, int, int]:
+    """Resize a poster exactly as the PSD export places it. Returns (image, left, top)."""
+    if fit_within_border:
+        # Scale to the bordered width, top-aligned and centered.
+        new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(pil.width, pil.height, canvas_w, canvas_h)
+        return pil.resize((new_w, new_h), Image.LANCZOS), pos_left, pos_top
+    # Default behavior: cover-fill to full canvas, then center-crop.
+    scale = max(canvas_w / pil.width, canvas_h / pil.height)
+    new_w, new_h = round(pil.width * scale), round(pil.height * scale)
+    pil = pil.resize((new_w, new_h), Image.LANCZOS)
+    crop_left, crop_top = (new_w - canvas_w) // 2, (new_h - canvas_h) // 2
+    return pil.crop((crop_left, crop_top, crop_left + canvas_w, crop_top + canvas_h)), 0, 0
+
+
+def _place_backdrop(pil: Image.Image, canvas_w: int, canvas_h: int) -> tuple[Image.Image, int]:
+    """Fit-to-height (no crop), centred horizontally (may overhang the canvas). Returns (image, left)."""
+    scale = canvas_h / pil.height
+    new_w = round(pil.width * scale)
+    return pil.resize((new_w, canvas_h), Image.LANCZOS), (canvas_w - new_w) // 2
+
+
+def _place_logo(pil: Image.Image, canvas_w: int, canvas_h: int) -> tuple[Image.Image, int, int, float]:
+    """Density-size the logo and convert it to pure white keeping alpha, exactly as the export does.
+    Returns (image, left, top, density)."""
+    density = _measure_logo_density(pil)
+    w, h, left, top = compute_logo_geometry(pil.width, pil.height, canvas_w, canvas_h, density)
+    pil = pil.resize((w, h), Image.LANCZOS)
+    _, _, _, alpha = pil.split()
+    white = Image.new("RGBA", pil.size, (255, 255, 255, 255))
+    white.putalpha(alpha)
+    return white, left, top, density
+
+
 def _build_psd(
     poster_bytes_list: list[bytes],
     logo_bytes_list: list[bytes],
@@ -1882,27 +1915,14 @@ def _build_psd(
         orig_idx = len(poster_bytes_list) - 1 - idx
         tag = _names[orig_idx].strip() if orig_idx < len(_names) else ""
         layer_name = tag if tag else (base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}")
-        poster_pil = Image.open(BytesIO(poster_bytes)).convert("RGB")
-
-        if fit_within_border:
-            # Scale to the bordered width, top-aligned and centered.
-            new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(
-                poster_pil.width, poster_pil.height, canvas_w, canvas_h)
-            poster_pil = poster_pil.resize((new_w, new_h), Image.LANCZOS)
-        else:
-            # Default behavior: cover-fill to full canvas, then center-crop.
-            scale = max(canvas_w / poster_pil.width, canvas_h / poster_pil.height)
-            new_w = round(poster_pil.width * scale)
-            new_h = round(poster_pil.height * scale)
-            poster_pil = poster_pil.resize((new_w, new_h), Image.LANCZOS)
-            crop_left = (new_w - canvas_w) // 2
-            crop_top = (new_h - canvas_h) // 2
-            poster_pil = poster_pil.crop((crop_left, crop_top, crop_left + canvas_w, crop_top + canvas_h))
-
-            pos_left = 0
-            pos_top = 0
+        poster_pil, pos_left, pos_top = _place_poster(
+            Image.open(BytesIO(poster_bytes)).convert("RGB"), canvas_w, canvas_h, fit_within_border)
 
         poster_layer = PixelLayer.frompil(poster_pil, psd, name=layer_name, top=pos_top, left=pos_left)
+        # frompil bypasses psd-tools' macroman guard for the legacy name field, so a non-macroman
+        # title (★, em dash, CJK) crashes on save; the .name setter routes through the guard,
+        # keeping the real title as the Unicode layer name that Photoshop/Photopea display.
+        poster_layer.name = layer_name
 
         if template_path is not None:
             poster_group = psd.find("POSTER")
@@ -1927,15 +1947,10 @@ def _build_psd(
         orig_idx = bd_count - 1 - idx
         tag = _bd_names[orig_idx].strip() if orig_idx < len(_bd_names) else ""
         layer_name = tag if tag else (f"{base_name} - Backdrop" if bd_count == 1 else f"{base_name} - Backdrop {bd_count - idx}")
-        bg_pil = Image.open(BytesIO(backdrop_bytes)).convert("RGB")
-        # Scale so height == canvas_h, preserve aspect ratio — no crop
-        scale = canvas_h / bg_pil.height
-        new_w = round(bg_pil.width * scale)
-        bg_pil = bg_pil.resize((new_w, canvas_h), Image.LANCZOS)
-        # Centre horizontally (may extend outside canvas bounds on wide images)
-        left = (canvas_w - new_w) // 2
+        bg_pil, left = _place_backdrop(Image.open(BytesIO(backdrop_bytes)).convert("RGB"), canvas_w, canvas_h)
 
         bg_layer = PixelLayer.frompil(bg_pil, psd, name=layer_name, top=0, left=left)
+        bg_layer.name = layer_name  # macroman guard for non-latin titles (see poster note)
 
         if template_path is not None:
             poster_group = psd.find("POSTER")
@@ -1962,21 +1977,13 @@ def _build_psd(
             log_warning(LogTags.API, f"Skipping unreadable logo image #{logo_idx + 1}: {img_exc}")
             continue
 
-        # Measure density and size/place the logo with the shared formula. The Photopea
-        # plugin's Place Logo button mirrors this formula client-side (it can't reach this
-        # http API from inside HTTPS Photopea) — keep the two in sync.
-        logo_density = _measure_logo_density(logo_pil)
+        # Density-size + whiten with the shared formula (_place_logo). The Photopea plugin's
+        # Place Logo button mirrors this formula client-side (it can't reach this http API
+        # from inside HTTPS Photopea) — keep the two in sync.
+        src_w, src_h = logo_pil.width, logo_pil.height
+        logo_pil, logo_left, logo_top, logo_density = _place_logo(logo_pil, canvas_w, canvas_h)
         density_label = "sparse" if logo_density < 0.30 else ("dense" if logo_density > 0.60 else "normal")
-        log_debug(LogTags.API, f"Logo source: {logo_pil.width}x{logo_pil.height}px  density={logo_density:.3f} ({density_label})")
-        logo_w, logo_h, logo_left, logo_top = compute_logo_geometry(
-            logo_pil.width, logo_pil.height, canvas_w, canvas_h, logo_density)
-        logo_pil = logo_pil.resize((logo_w, logo_h), Image.LANCZOS)
-
-        # Convert logo to pure white, preserving the original alpha channel
-        _, _, _, alpha = logo_pil.split()
-        white = Image.new("RGBA", logo_pil.size, (255, 255, 255, 255))
-        white.putalpha(alpha)
-        logo_pil = white
+        log_debug(LogTags.API, f"Logo source: {src_w}x{src_h}px  density={logo_density:.3f} ({density_label})")
 
         logo_count = len(logo_bytes_list)
         layer_name = f"{base_name} - Logo" if logo_count == 1 else f"{base_name} - Logo {logo_count - logo_idx}"
@@ -1990,6 +1997,7 @@ def _build_psd(
                 log_warning(LogTags.API, "LOGO group not found in template; inserting at root")
 
         logo_layer = PixelLayer.frompil(logo_pil, parent, name=layer_name, top=logo_top, left=logo_left)
+        logo_layer.name = layer_name  # macroman guard for non-latin titles (see poster note)
         if insert_front:
             # frompil appends at the end; logos belong at the front of the group
             parent.remove(logo_layer)
@@ -2242,7 +2250,8 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         # When a password is set, Photopea fetches the PSD via files:[url] and can't send the
         # Bearer header — append a signed, file-scoped, expiring token it can use instead.
         # style rides along so the serve/save/JPG round-trip resolves the same style's folder.
-        psd_url = f"/api/maker-tools/psd-exports/{output_filename}"
+        # quote the filename: an unencoded "&" in a title collides with the query separators below and truncates it
+        psd_url = f"/api/maker-tools/psd-exports/{quote(output_filename)}"
         token_pair = mint_psd_access_token(db, output_filename)
         if token_pair is not None:
             sig, exp = token_pair

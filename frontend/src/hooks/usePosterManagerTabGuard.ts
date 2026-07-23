@@ -9,6 +9,7 @@ interface UsePosterManagerTabGuardParams {
   hasUnsavedPriorityChanges: boolean
   hasUnsavedBorderChanges: boolean
   hasUnsavedLibraryChanges: boolean
+  hasUnsavedIncludeChanges: boolean
 }
 
 export const usePosterManagerTabGuard = ({
@@ -19,6 +20,7 @@ export const usePosterManagerTabGuard = ({
   hasUnsavedPriorityChanges,
   hasUnsavedBorderChanges,
   hasUnsavedLibraryChanges,
+  hasUnsavedIncludeChanges,
 }: UsePosterManagerTabGuardParams) => {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false)
   const [pendingTabChange, setPendingTabChange] = useState<PosterManagerTab | null>(null)
@@ -29,7 +31,7 @@ export const usePosterManagerTabGuard = ({
     else if (activeTab === 'flow') hasCurrentTabUnsavedChanges = hasUnsavedFlowChanges
     else if (activeTab === 'priority') hasCurrentTabUnsavedChanges = hasUnsavedPriorityChanges
     else if (activeTab === 'border') hasCurrentTabUnsavedChanges = hasUnsavedBorderChanges
-    else if (activeTab === 'rename') hasCurrentTabUnsavedChanges = hasUnsavedLibraryChanges || hasUnsavedBorderChanges
+    else if (activeTab === 'rename') hasCurrentTabUnsavedChanges = hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedIncludeChanges
     else if (activeTab === 'unmatched') hasCurrentTabUnsavedChanges = hasUnsavedLibraryChanges
 
     if (hasCurrentTabUnsavedChanges) {

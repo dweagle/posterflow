@@ -44,6 +44,55 @@ def generate_title_variants(title: str) -> Dict[str, List[str]]:
     }
 
 
+# ── The box: a media item's files in named slots ────────────────────────────
+# Instead of a flat file list whose meaning is re-derived at placement time, an
+# item carries explicit slots. Item-level slots (poster/logo/background/square)
+# are one file each, matched by the item and dropped in its folder; season
+# posters live under `seasons`, keyed by number (0 = specials). poster/seasons
+# come from the poster drives; logo/background/square from the artwork drives —
+# all the same item, just different slots.
+SLOT_POSTER = "poster"
+SLOT_LOGO = "logo"
+SLOT_BACKGROUND = "background"
+SLOT_SQUARE = "square"
+ITEM_SLOTS = (SLOT_POSTER, SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE)
+
+
+SLOT_SEASON = "season"  # pseudo-slot used only for naming a season poster
+
+
+def build_slots(
+    poster: Optional[str] = None,
+    logo: Optional[str] = None,
+    background: Optional[str] = None,
+    square: Optional[str] = None,
+    seasons: Optional[Dict[int, str]] = None,
+) -> Dict[str, Any]:
+    """One media item's source files in named slots (the 'box' everything hangs off)."""
+    return {
+        SLOT_POSTER: poster,
+        SLOT_LOGO: logo,
+        SLOT_BACKGROUND: background,
+        SLOT_SQUARE: square,
+        "seasons": dict(seasons) if seasons else {},
+    }
+
+
+def slot_dest_name(slot: str, ext: str, folder: str, asset_folders: bool, season: Optional[int] = None) -> str:
+    """The destination filename for a slot — the single source of truth for output naming,
+    shared by every placer. Nested (asset_folders=True) drops a bare name in the item folder;
+    flat prefixes the folder name with the slot's separator (poster: none, season: '_Season',
+    logo/background/square: '-<slot>'). These reproduce the existing on-disk conventions.
+    """
+    if slot == SLOT_SEASON:
+        nn = f"{int(season):02d}"
+        return f"Season{nn}{ext}" if asset_folders else f"{folder}_Season{nn}{ext}"
+    if slot == SLOT_POSTER:
+        return f"poster{ext}" if asset_folders else f"{folder}{ext}"
+    # logo / background / square keep their slot name as the base (Kometa-compatible; no spaces).
+    return f"{slot}{ext}" if asset_folders else f"{folder}-{slot}{ext}"
+
+
 def create_collection(
     title: str,
     tmdb_id: int,
@@ -71,6 +120,7 @@ def create_collection(
         "year": None,
         "normalized_title": normalized_title,
         "files": [files[-1]],
+        "slots": build_slots(poster=files[-1] if files else None),
         "alternate_titles": variants["alternate_titles"],
         "normalized_alternate_titles": variants["normalized_alternate_titles"],
         "tmdb_id": tmdb_id,
@@ -131,6 +181,7 @@ def create_series(
         "normalized_title": normalized_title,
         "files": final_files,
         "season_numbers": season_numbers,
+        "slots": build_slots(poster=series_poster, seasons=season_numbers_dict),
         "folder": parent_folder,
         "media_folder": media_folder,
     }
@@ -168,6 +219,7 @@ def create_movie(
         "imdb_id": imdb_id,
         "normalized_title": normalized_title,
         "files": [files[-1]],
+        "slots": build_slots(poster=files[-1] if files else None),
         "folder": parent_folder,
         "media_folder": media_folder,
     }

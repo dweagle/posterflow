@@ -7,10 +7,11 @@ from database import Base
 
 
 JOB_TYPE_POSTER_WORKFLOW = "Poster Workflow"
-JOB_TYPE_POSTER_RENAMER = "Poster Renamer"
+JOB_TYPE_POSTER_RENAMER = "Poster Renamer"  # internal id kept; displayed as "Asset Renamer"
 JOB_TYPE_BORDER_REPLACER = "Border Replacer"
 JOB_TYPE_UNMATCHED_DETECTION = "Unmatched Detection"
 JOB_TYPE_IDARR = "idarr"
+JOB_TYPE_ARTWORK_PULL = "artwork_pull"   # batch artwork pull
 JOB_TYPE_MAKER_MONITOR = "maker_monitor"
 JOB_TYPE_PLEX_UPLOAD = "Plex Upload"
 JOB_TYPE_PLEX_UPLOAD_SINGLE = "Plex Upload Single"

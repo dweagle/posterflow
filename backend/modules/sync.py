@@ -80,7 +80,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
                 db,
                 feature_key="sync",
                 event_type="success",
-                title="Google Drive Sync Summary",
+                title="Poster Drive Sync Summary",
                 description=f"{drive_name}",
                 fields=[
                     {"name": "New", "value": str(int(result.get("added", 0))), "inline": True},
@@ -96,7 +96,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
                 db,
                 feature_key="sync",
                 event_type="error",
-                title="Google Drive Sync Failed",
+                title="Poster Drive Sync Failed",
                 description=error_message,
                 fields=[
                     {"name": "Drive", "value": drive_name, "inline": True},
@@ -122,7 +122,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
             db,
             feature_key="sync",
             event_type="error",
-            title="Google Drive Sync Failed",
+            title="Poster Drive Sync Failed",
             description=str(e),
             fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
             color=0xF44336,
@@ -139,101 +139,190 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
         raise
     finally:
         run_post_job_hook(HOOK_KEY_SYNC_ONE, success=success, triggered_by=triggered_by, db=db)
-        remove_job_log_handler(handler_id)
+        remove_job_log_handler(handler_id, "sync_one", success=success)
         db.close()
 
 
-def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str = "manual") -> dict[str, Any]:
-    """
-    Sync all subscribed drives.
-    Shared orchestration used by both manual API jobs and scheduler-triggered jobs.
-    Args:
-        skip_discord: When True, suppresses individual Discord notifications (e.g. when called from workflow).
-    """
-    handler_id = add_job_log_handler("sync_all", job_id)
-    success = False
+def _sync_all_poster_drives(db: Session, job_id: int, skip_discord: bool) -> dict[str, Any]:
+    """Sync every subscribed POSTER drive (unchanged engine). Returns the sync result."""
+    log_debug(LogTags.SCHEDULER, f"Starting sync for all drives (job_id={job_id})")
 
-    db = SessionLocal()
-    try:
-        log_debug(LogTags.SCHEDULER, f"Starting sync for all drives (job_id={job_id})")
+    drives = db.query(Drive).filter(Drive.subscribed == True).all()
 
-        drives = db.query(Drive).filter(Drive.subscribed == True).all()
+    if not drives:
+        log_info(LogTags.SCHEDULER, "No subscribed drives to sync")
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100, message="No subscribed drives found")
+        return {"success": True, "message": "No subscribed drives"}
 
-        if not drives:
-            log_info(LogTags.SCHEDULER, "No subscribed drives to sync")
-            job = db.query(Job).filter(Job.id == job_id).first()
-            if job:
-                update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100, message="No subscribed drives found")
-            return {"success": True, "message": "No subscribed drives"}
+    drive_ids = [drive.id for drive in drives]
+    log_debug(LogTags.SCHEDULER, f"Syncing {len(drive_ids)} subscribed drives")
 
-        drive_ids = [drive.id for drive in drives]
-        log_debug(LogTags.SCHEDULER, f"Syncing {len(drive_ids)} subscribed drives")
+    sync_service = PosterSyncService(db)
+    result = sync_service.sync_multiple_drives(
+        drive_ids,
+        job_id,
+        max_workers=1,  # Must stay 1: shared Session isn't thread-safe and progress slicing assumes sequential drives
+        progress_callback=_build_progress_callback(db, job_id, LogTags.SCHEDULER),
+    )
 
-        sync_service = PosterSyncService(db)
-        result = sync_service.sync_multiple_drives(
-            drive_ids,
-            job_id,
-            max_workers=1,
-            progress_callback=_build_progress_callback(db, job_id, LogTags.SCHEDULER),
-        )
-
-        if result.get('success'):
-            success = True
-            log_debug(LogTags.SCHEDULER, f"Completed sync: {result.get('message', 'Done')}")
-            if not skip_discord:
-                send_discord_notification(
-                    db,
-                    feature_key="sync",
-                    event_type="success",
-                    title="Google Drive Sync Summary",
-                    description=f"{int(result.get('drives_synced', 0))} drive(s) processed",
-                    fields=[
-                        {"name": "New", "value": str(int(result.get("added", 0))), "inline": True},
-                        {"name": "Replaced", "value": str(int(result.get("updated", 0))), "inline": True},
-                        {"name": "Deleted", "value": str(int(result.get("deleted", 0))), "inline": True},
-                    ],
-                    color=0x4CAF50,
-                )
-        else:
-            log_warning(LogTags.SCHEDULER, f"Sync failed: {result.get('message', 'Error')}")
-            error_message = str(result.get("error") or result.get("message") or "Sync failed")
-            if not skip_discord:
-                send_discord_notification(
-                    db,
-                    feature_key="sync",
-                    event_type="error",
-                    title="Google Drive Sync Failed",
-                    description=error_message,
-                    fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
-                    color=0xF44336,
-                )
-                send_major_error_notification(
-                    db,
-                    source="sync.all",
-                    message=error_message,
-                    job_id=job_id,
-                )
-
-        return result
-    except JobCancelled:
-        # User stopped the job — re-raise so the caller finalizes it as
-        # 'cancelled' (the task wrapper for direct runs, or the workflow parent).
-        raise
-    except Exception as e:
-        log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
+    if result.get('success'):
+        log_debug(LogTags.SCHEDULER, f"Completed sync: {result.get('message', 'Done')}")
+        if not skip_discord:
+            send_discord_notification(
+                db,
+                feature_key="sync",
+                event_type="success",
+                title="Poster Drive Sync Summary",
+                description=f"{int(result.get('drives_synced', 0))} drive(s) processed",
+                fields=[
+                    {"name": "New", "value": str(int(result.get("added", 0))), "inline": True},
+                    {"name": "Replaced", "value": str(int(result.get("updated", 0))), "inline": True},
+                    {"name": "Deleted", "value": str(int(result.get("deleted", 0))), "inline": True},
+                ],
+                color=0x4CAF50,
+            )
+    else:
+        log_warning(LogTags.SCHEDULER, f"Sync failed: {result.get('message', 'Error')}")
+        error_message = str(result.get("error") or result.get("message") or "Sync failed")
         if not skip_discord:
             send_discord_notification(
                 db,
                 feature_key="sync",
                 event_type="error",
-                title="Google Drive Sync Failed",
-                description=str(e),
+                title="Poster Drive Sync Failed",
+                description=error_message,
                 fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
                 color=0xF44336,
             )
             send_major_error_notification(
                 db,
                 source="sync.all",
+                message=error_message,
+                job_id=job_id,
+            )
+
+    return result
+
+
+def _sync_all_artwork_drives(db: Session, job_id: int, skip_discord: bool = False) -> dict[str, Any]:
+    """Sync every subscribed ARTWORK drive (unchanged engine). Returns the sync result.
+    Reports to Discord with the same fields as the poster sync."""
+    # Lazy imports keep modules.sync free of an artwork import cycle.
+    from models.artwork_drive import ArtworkDrive
+    from services.artwork_sync import ArtworkSyncService
+
+    log_debug(LogTags.SYNC, f"Starting artwork sync for all drives (job_id={job_id})")
+
+    drives = db.query(ArtworkDrive).filter(ArtworkDrive.subscribed == True).all()
+
+    if not drives:
+        log_info(LogTags.SYNC, "No subscribed artwork drives to sync")
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job:
+            update_job_state(db, job, status=JOB_STATUS_COMPLETED, progress=100, message="No subscribed artwork drives found")
+        return {"success": True, "message": "No subscribed artwork drives"}
+
+    drive_ids = [drive.id for drive in drives]
+    log_debug(LogTags.SYNC, f"Syncing {len(drive_ids)} subscribed artwork drives")
+
+    service = ArtworkSyncService(db)
+    result = service.sync_multiple_drives(
+        drive_ids,
+        job_id,
+        progress_callback=_build_progress_callback(db, job_id, LogTags.SYNC),
+    )
+
+    if result.get('success'):
+        log_debug(LogTags.SYNC, f"Completed artwork sync: {result.get('message', 'Done')}")
+        if not skip_discord:
+            send_discord_notification(
+                db,
+                feature_key="sync",
+                event_type="success",
+                title="Artwork Drive Sync Summary",
+                description=f"{int(result.get('drives_synced', 0))} artwork drive(s) processed",
+                fields=[
+                    {"name": "New", "value": str(int(result.get("added", 0))), "inline": True},
+                    {"name": "Replaced", "value": str(int(result.get("updated", 0))), "inline": True},
+                    {"name": "Deleted", "value": str(int(result.get("deleted", 0))), "inline": True},
+                ],
+                color=0x4CAF50,
+            )
+    else:
+        log_warning(LogTags.SYNC, f"Artwork sync failed: {result.get('message', 'Error')}")
+        error_message = str(result.get("error") or result.get("message") or "Artwork sync failed")
+        if not skip_discord:
+            send_discord_notification(
+                db,
+                feature_key="sync",
+                event_type="error",
+                title="Artwork Drive Sync Failed",
+                description=error_message,
+                fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
+                color=0xF44336,
+            )
+            send_major_error_notification(
+                db,
+                source="sync.all.artwork",
+                message=error_message,
+                job_id=job_id,
+            )
+
+    return result
+
+
+def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str = "manual", sync_posters: bool = True, sync_artwork: bool = False) -> dict[str, Any]:
+    """
+    Sync all subscribed drives — poster and/or artwork, per the selection. One entrypoint for
+    both drive types (the two engines are reused as-is). Shared by manual API jobs, the
+    scheduler, and the workflow.
+
+    Args:
+        skip_discord: When True, suppresses individual Discord notifications (e.g. from workflow).
+        sync_posters: Sync subscribed poster drives.
+        sync_artwork: Sync subscribed artwork drives.
+    """
+    # Poster + artwork sync both log through the unified "sync_all" group.
+    handler_id = add_job_log_handler("sync_all", job_id)
+    success = False
+
+    db = SessionLocal()
+    try:
+        poster_result = _sync_all_poster_drives(db, job_id, skip_discord) if sync_posters else None
+        artwork_result = _sync_all_artwork_drives(db, job_id, skip_discord) if sync_artwork else None
+
+        success = all(r.get("success") for r in (poster_result, artwork_result) if r is not None)
+
+        # A single-type run returns that engine's result verbatim (back-compat); a combined
+        # run returns both under one dict.
+        if artwork_result is None:
+            return poster_result or {"success": True, "message": "Nothing selected to sync"}
+        if poster_result is None:
+            return artwork_result
+        return {"success": success, "posters": poster_result, "artwork": artwork_result}
+    except JobCancelled:
+        # User stopped the job — re-raise so the caller finalizes it as
+        # 'cancelled' (the task wrapper for direct runs, or the workflow parent).
+        raise
+    except Exception as e:
+        log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
+        # Report regardless of which side ran — an artwork-only failure must not be silent.
+        if not skip_discord:
+            artwork_only = sync_artwork and not sync_posters
+            send_discord_notification(
+                db,
+                feature_key="sync",
+                event_type="error",
+                title="Artwork Drive Sync Failed" if artwork_only else "Poster Drive Sync Failed",
+                description=str(e),
+                fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
+                color=0xF44336,
+            )
+            send_major_error_notification(
+                db,
+                source="sync.all.artwork" if artwork_only else "sync.all",
                 message=str(e),
                 job_id=job_id,
             )
@@ -242,8 +331,9 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str 
 
         raise
     finally:
-        run_post_job_hook(HOOK_KEY_SYNC_ALL, success=success, triggered_by=triggered_by, db=db)
-        remove_job_log_handler(handler_id)
+        if sync_posters:
+            run_post_job_hook(HOOK_KEY_SYNC_ALL, success=success, triggered_by=triggered_by, db=db)
+        remove_job_log_handler(handler_id, "sync_all", success=success)
         db.close()
 
 
@@ -306,7 +396,7 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered
         result = sync_service.sync_multiple_drives(
             drive_ids,
             job.id,
-            max_workers=1,
+            max_workers=1,  # Must stay 1: shared Session isn't thread-safe and progress slicing assumes sequential drives
             progress_callback=_build_progress_callback(db, job.id, LogTags.SCHEDULER),
         )
 

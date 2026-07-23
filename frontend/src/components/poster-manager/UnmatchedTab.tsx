@@ -1,11 +1,12 @@
-import { AlertCircle, Download, List, RefreshCw, Save, Search } from 'lucide-react'
+import { AlertCircle, List } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig, UnmatchedStats } from '../../api/client'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import LibrarySelectGrid from './LibrarySelectGrid'
-import Toolbar from './Toolbar'
+import UnmatchedHeader from './UnmatchedHeader'
+import { UnmatchedScope } from './UnmatchedTypeSelector'
 
 type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null }
 
@@ -19,6 +20,13 @@ type UnmatchedTabProps = {
   selectedLibraries: Set<string>
   cardPreviewLimit: number
   formatPercent: (percent: number) => string
+  scope: UnmatchedScope
+  onScopeChange: (scope: UnmatchedScope) => void
+  /** True when the shared Detection Settings view replaces the stats. */
+  settingsActive: boolean
+  onShowSettings: () => void
+  /** Asset noun used in card labels ("Posters", "Logos", …). */
+  typeNoun?: string
   onSaveSettings: () => void
   onDetectUnmatched: () => void
   onDownloadReport: () => void
@@ -42,6 +50,11 @@ function UnmatchedTab({
   selectedLibraries,
   cardPreviewLimit,
   formatPercent,
+  scope,
+  onScopeChange,
+  settingsActive,
+  onShowSettings,
+  typeNoun = 'Posters',
   onSaveSettings,
   onDetectUnmatched,
   onDownloadReport,
@@ -65,61 +78,31 @@ function UnmatchedTab({
   // Red "M" indicator when the item is tracked in *arr but not downloaded.
   const arrBadge = (item: PreviewItem) => <ArrMissingBadge available={item.available} />
 
-  const openSchedulingSettings = () => {
-    localStorage.setItem('posterflow.settings.activeTab', 'scheduling')
-    navigate('/settings')
-  }
-
-  const openNotificationSettings = () => {
-    localStorage.setItem('posterflow.settings.activeTab', 'notifications')
-    navigate('/settings')
-  }
-
   const hasUnsavedChanges = hasUnsavedLibraryChanges || hasUnsavedUnmatchedSettings
+
+  // Artwork has no season dimension (its seasons stats are zeroed), so the seasons card
+  // drops out on its own and the series card reads plainly as "Series".
+  const hasSeasons = Boolean(unmatchedStats?.summary?.seasons && unmatchedStats.summary.seasons.total > 0)
+  const seriesHeading = hasSeasons ? `Series (Main ${typeNoun})` : 'Series'
 
   return (
     <>
-      <Toolbar title="Unmatched Assets" description="Media in your library without matching posters in the organized folder">
-        <div className="btn-pair">
-          <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
-            Scheduling
-          </button>
-          <button className="btn-toolbar btn-toolbar-link" onClick={openNotificationSettings}>
-            Discord
-          </button>
-        </div>
-        <button
-          className={`btn-toolbar ${hasUnsavedChanges ? 'btn-unsaved' : ''}`}
-          onClick={onSaveSettings}
-          disabled={saving || !hasUnsavedChanges}
-          title={hasUnsavedChanges ? 'Save changes' : 'No changes to save'}
-        >
-          <Save size={16} />
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
-        <button className="btn-toolbar btn-primary" onClick={onDetectUnmatched} disabled={detectingUnmatched}>
-          <RefreshCw size={16} />
-          {detectingUnmatched ? 'Detecting...' : 'Detect Unmatched'}
-        </button>
-        {unmatchedStats && unmatchedStats.last_run && (
-          <>
-            <button
-              className="btn-toolbar btn-primary"
-              onClick={() => onOpenModal('all')}
-              title="View and search missing items"
-            >
-              <Search size={16} />
-              View / Search
-            </button>
-            <button className="btn-toolbar" onClick={onDownloadReport} title="Download complete report of all unmatched items">
-              <Download size={16} />
-              Download Report
-            </button>
-          </>
-        )}
-      </Toolbar>
+      <UnmatchedHeader
+        scope={scope}
+        onScopeChange={onScopeChange}
+        settingsActive={settingsActive}
+        onShowSettings={onShowSettings}
+        saving={saving}
+        hasUnsavedChanges={hasUnsavedChanges}
+        detecting={detectingUnmatched}
+        hasResults={Boolean(unmatchedStats && unmatchedStats.last_run)}
+        onSaveSettings={onSaveSettings}
+        onDetect={onDetectUnmatched}
+        onViewSearch={() => onOpenModal('all')}
+        onDownloadReport={onDownloadReport}
+      />
 
-      {unmatchedStats && unmatchedStats.last_run ? (
+      {!settingsActive && (unmatchedStats && unmatchedStats.last_run ? (
         <div className="unmatched-tab-content">
           <div className="unmatched-grid">
             {unmatchedStats.summary.movies && unmatchedStats.summary.movies.total > 0 && (
@@ -136,7 +119,7 @@ function UnmatchedTab({
                     <span>{unmatchedStats.summary.movies.total}</span>
                   </div>
                   <div className="stat-row">
-                    <span>With Posters:</span>
+                    <span>With {typeNoun}:</span>
                     <span>{unmatchedStats.summary.movies.total - unmatchedStats.summary.movies.unmatched}</span>
                   </div>
                   <div className="progress-bar">
@@ -146,7 +129,7 @@ function UnmatchedTab({
                 </div>
                 {unmatchedStats.unmatched.movies && unmatchedStats.unmatched.movies.length > 0 && (
                   <div className="card-list">
-                    <div className="list-header">Missing Posters:</div>
+                    <div className="list-header">Missing {typeNoun}:</div>
                     {unmatchedStats.unmatched.movies.slice(0, cardPreviewLimit).map((item, idx: number) => (
                       <div key={idx} className="list-item">
                         <span>{item.title}</span>
@@ -175,7 +158,7 @@ function UnmatchedTab({
             {unmatchedStats.summary.series && unmatchedStats.summary.series.total > 0 && (
               <div className="unmatched-card">
                 <div className="card-header">
-                  <h3>Series (Main Posters)</h3>
+                  <h3>{seriesHeading}</h3>
                   <span className={`badge ${unmatchedStats.summary.series.unmatched > 0 ? 'badge-warning' : 'badge-success'}`}>
                     {unmatchedStats.summary.series.unmatched} missing
                   </span>
@@ -186,7 +169,7 @@ function UnmatchedTab({
                     <span>{unmatchedStats.summary.series.total}</span>
                   </div>
                   <div className="stat-row">
-                    <span>With Posters:</span>
+                    <span>With {typeNoun}:</span>
                     <span>{unmatchedStats.summary.series.total - unmatchedStats.summary.series.unmatched}</span>
                   </div>
                   <div className="progress-bar">
@@ -196,7 +179,7 @@ function UnmatchedTab({
                 </div>
                 {unmatchedStats.unmatched.series && unmatchedStats.unmatched.series.filter((s) => s.missing_main_poster).length > 0 && (
                   <div className="card-list">
-                    <div className="list-header">Missing Main Posters:</div>
+                    <div className="list-header">Missing Main {typeNoun}:</div>
                     {unmatchedStats.unmatched.series
                       .filter((s) => s.missing_main_poster)
                       .slice(0, cardPreviewLimit)
@@ -239,7 +222,7 @@ function UnmatchedTab({
                     <span>{unmatchedStats.summary.seasons.total}</span>
                   </div>
                   <div className="stat-row">
-                    <span>With Posters:</span>
+                    <span>With {typeNoun}:</span>
                     <span>{unmatchedStats.summary.seasons.total - unmatchedStats.summary.seasons.unmatched}</span>
                   </div>
                   <div className="progress-bar">
@@ -297,7 +280,7 @@ function UnmatchedTab({
                     <span>{unmatchedStats.summary.collections.total}</span>
                   </div>
                   <div className="stat-row">
-                    <span>With Posters:</span>
+                    <span>With {typeNoun}:</span>
                     <span>{unmatchedStats.summary.collections.total - unmatchedStats.summary.collections.unmatched}</span>
                   </div>
                   <div className="progress-bar">
@@ -307,7 +290,7 @@ function UnmatchedTab({
                 </div>
                 {unmatchedStats.unmatched.collections && unmatchedStats.unmatched.collections.length > 0 && (
                   <div className="card-list">
-                    <div className="list-header">Missing Posters:</div>
+                    <div className="list-header">Missing {typeNoun}:</div>
                     {unmatchedStats.unmatched.collections.slice(0, cardPreviewLimit).map((item, idx: number) => (
                       <div key={idx} className="list-item">
                         <span>{item.title}</span>
@@ -337,14 +320,15 @@ function UnmatchedTab({
         <div className="empty-state">
           <AlertCircle size={48} />
           <h3>No Unmatched Detection Results</h3>
-          <p>Click "Detect Unmatched" to check which media items are missing posters</p>
+          <p>Click "Detect Unmatched" to check which media items are missing {typeNoun.toLowerCase()}</p>
         </div>
-      )}
+      ))}
 
-      <div className="renamer-layout-row" style={{ marginTop: '2rem' }}>
+      {settingsActive && (
+      <div className="renamer-layout-row">
         <div className="settings-section renamer-config-card">
           <h2>Detection Settings</h2>
-          <p className="section-description">Configure which items to include or exclude from unmatched detection.</p>
+          <p className="section-description">Configure which items to include or exclude from unmatched detection. Shared across all asset types.</p>
 
           <div className="field-group">
             <textarea
@@ -391,7 +375,7 @@ function UnmatchedTab({
 
         <div className="settings-section renamer-library-card">
           <h2>Library Selection</h2>
-          <p className="section-description">Select which Plex libraries to scan for missing posters.</p>
+          <p className="section-description">Select which Plex libraries to scan. Shared across all asset types.</p>
 
           <div className="field-group">
             {libraryConfigs.length === 0 ? (
@@ -405,10 +389,11 @@ function UnmatchedTab({
                 onToggle={(instance, key) => onToggleLibrarySelection(instance, key)}
               />
             )}
-            <small>Only media from selected libraries will be scanned for missing posters</small>
+            <small>Only media from selected libraries will be scanned</small>
           </div>
         </div>
       </div>
+      )}
     </>
   )
 }

@@ -13,8 +13,14 @@ from core.logging import LogTags, log_section_start, log_section_end, log_succes
 from models.setting import get_setting, upsert_setting
 from util.constants import season_pattern
 from util.posters.assets import get_assets_files
+from util.posters.scanner import _is_asset_folders
 from util.posters.index import search_matches
-from util.posters.match import collection_title_variants, is_match, media_source_refs
+from util.posters.match import (
+    collection_title_variants, is_match, match_assets_to_media, media_source_refs,
+)
+from services.artwork_scan import (
+    scan_destination_artwork, build_artwork_index, assets_from_names, ARTWORK_TYPES,
+)
 
 
 class UnmatchedAssetsService:
@@ -296,40 +302,354 @@ class UnmatchedAssetsService:
         media_dict: Dict[str, List[Dict[str, Any]]],
         source_dirs: List[str],
         progress_callback: ProgressCallback | None = None,
+        check_posters: bool = True,
+        artwork_types: List[str] | None = None,
+        asset_folders: bool = True,
     ) -> Dict[str, Any]:
-        """
-        Detect unmatched media by comparing media from instances against organized poster assets.
-        
-        This checks the DESTINATION folder (e.g., /posters/assets/) where renamed posters
-        are stored, NOT the source gdrive folders. The goal is to find media items in your library
-        that don't have organized posters after running Poster Renamer.
+        """Unmatched detection over the organized DESTINATION in ONE walk + ONE pass, scoped to
+        the asset types the user enabled: posters if ``check_posters``, and only the
+        ``artwork_types`` given (subset of logo/background/square). Returns the poster result
+        (when check_posters) plus ``artwork`` (when any artwork_types)."""
+        return self._detect_combined(media_dict, source_dirs, progress_callback, check_posters, artwork_types, asset_folders)
 
-        Args:
-            media_dict: Dictionary with media from Plex/Radarr/Sonarr.
-            source_dirs: List containing the organized/assets destination directory to scan.
-            progress_callback: Optional callback function(phase, current, total, message) for progress updates.
+    def _match_poster_item(self, media: Dict[str, Any], media_type: str, prefix_index: Dict[str, Any],
+                           unmatched: Dict[str, List[Dict[str, Any]]], match_stats: Dict[str, Any]) -> None:
+        """Poster per-item match — moved verbatim from the old poster loop (logging unchanged).
+        Assumes eligibility already passed; mutates ``unmatched`` / ``match_stats``."""
+        match_stats[media_type]["processed"] += 1
 
-        Returns:
-            Dictionary with unmatched statistics and details.
-        """
+        # Look for matching assets
+        found = False
+        match_method = None
+        tmdb_id = media.get("tmdb_id")
+        tvdb_id = media.get("tvdb_id")
+
+        # Try ID-based search first
+        if tmdb_id or tvdb_id:
+            try:
+                id_assets = search_matches(
+                    prefix_index,
+                    media.get("title", ""),
+                    tmdb_id=tmdb_id,
+                    tvdb_id=tvdb_id,
+                )
+            except Exception as e:
+                log_error(LogTags.UNMATCHED, f"Search failed for '{media.get('title')}': {e}",
+                         title=media.get('title'), error=str(e))
+                id_assets = []
+
+            # Verify ID bucket hits via is_match before trusting
+            verified_id_asset = (
+                next(
+                    (ia for ia in id_assets if is_match(ia, media)[0]),
+                    None,
+                )
+                if id_assets else None
+            )
+            if verified_id_asset:
+                asset = verified_id_asset
+                found = True
+                match_method = f"ID ({tmdb_id or tvdb_id})"
+
+                # For series, check for missing seasons or main poster
+                if media_type == "series":
+                    media_seasons = [
+                        s["season_number"]
+                        for s in media.get("seasons", [])
+                        if s.get("season_has_episodes")
+                    ]
+                    asset_seasons = asset.get("season_numbers", [])
+                    missing_seasons = [
+                        s for s in media_seasons if s not in asset_seasons
+                    ]
+
+                    # Check if main poster exists (no season number in filename)
+                    has_main_poster = any(
+                        not season_pattern.search(os.path.basename(f))
+                        for f in asset.get("files", [])
+                    )
+
+                    if missing_seasons or not has_main_poster:
+                        match_stats[media_type]["partial"] += 1
+                        log_debug(
+                            LogTags.UNMATCHED,
+                            f"  ⚠ Partial match: {media['title']} ({media.get('year')}) - "
+                            f"missing {len(missing_seasons)} seasons, main poster: {has_main_poster}",
+                            title=media['title'],
+                            missing_seasons=missing_seasons,
+                            has_main=has_main_poster
+                        )
+                        unmatched[media_type].append({
+                            "title": media.get("title"),
+                            "year": media.get("year"),
+                            "missing_seasons": missing_seasons,
+                            "missing_main_poster": not has_main_poster,
+                            "instance": media.get("instance", "Unknown"),
+                            **media_source_refs(media),
+                        })
+                    else:
+                        match_stats[media_type]["matched"] += 1
+                        log_debug(
+                            LogTags.UNMATCHED,
+                            f"  ✓ Matched: {media['title']} ({media.get('year')}) via {match_method}",
+                            title=media['title'],
+                            year=media.get('year'),
+                            method=match_method
+                        )
+                else:
+                    # For movies and collections, simple match
+                    match_stats[media_type]["matched"] += 1
+                    log_debug(
+                        LogTags.UNMATCHED,
+                        f"  ✓ Matched: {media['title']} ({media.get('year')}) via {match_method}",
+                        title=media['title'],
+                        year=media.get('year'),
+                        method=match_method
+                    )
+
+        # If no ID match, try title-based search
+        if not found:
+            base_title = media.get("title") or ""
+            if media_type == "collections":
+                titles_to_try = collection_title_variants(base_title) + media.get("alternate_titles", [])
+            else:
+                titles_to_try = [base_title] + media.get("alternate_titles", [])
+            for title in titles_to_try:
+                try:
+                    candidates = search_matches(prefix_index, title)
+                except Exception as e:
+                    log_error(LogTags.UNMATCHED, f"Title search failed for '{title}': {e}",
+                             title=title, error=str(e))
+                    continue
+
+                for candidate in candidates:
+                    is_matched, reason = is_match(candidate, media)
+                    if is_matched:
+                        found = True
+                        match_method = reason
+                        log_debug(
+                            LogTags.UNMATCHED,
+                            f"  ✓ Matched {reason}: {media['title']} ({media.get('year')})",
+                            title=media['title'],
+                            year=media.get('year'),
+                            method=reason
+                        )
+
+                        # For series, check seasons (following DAPS logic: only add if missing seasons)
+                        if media_type == "series":
+                            media_seasons = [
+                                s["season_number"]
+                                for s in media.get("seasons", [])
+                                if s.get("season_has_episodes")
+                            ]
+                            asset_seasons = candidate.get("season_numbers", [])
+                            missing_seasons = [
+                                s for s in media_seasons if s not in asset_seasons
+                            ]
+                            # Following DAPS: only add to unmatched if there are missing seasons
+                            if missing_seasons:
+                                match_stats[media_type]["partial"] += 1
+                                has_main_poster = any(
+                                    not season_pattern.search(os.path.basename(f))
+                                    for f in candidate.get("files", [])
+                                )
+                                log_debug(
+                                    LogTags.UNMATCHED,
+                                    f"  ⚠ Partial match: {media['title']} - missing {len(missing_seasons)} seasons",
+                                    missing_seasons=missing_seasons
+                                )
+                                unmatched[media_type].append({
+                                    "title": media.get("title"),
+                                    "year": media.get("year"),
+                                    "missing_seasons": missing_seasons,
+                                    "missing_main_poster": not has_main_poster,
+                                    "instance": media.get("instance", "Unknown"),
+                                    **media_source_refs(media),
+                                })
+                            else:
+                                match_stats[media_type]["matched"] += 1
+                        else:
+                            match_stats[media_type]["matched"] += 1
+                        break
+                if found:
+                    break
+
+        # If still not found, add to unmatched
+        if not found:
+            match_stats[media_type]["unmatched"] += 1
+            log_debug(
+                LogTags.UNMATCHED,
+                f"  ✗ No match: {media['title']} ({media.get('year')})",
+                title=media['title'],
+                year=media.get('year'),
+                instance=media.get('instance')
+            )
+            if media_type == "series":
+                unmatched[media_type].append({
+                    "title": media.get("title"),
+                    "year": media.get("year"),
+                    "missing_seasons": [
+                        s["season_number"]
+                        for s in media.get("seasons", [])
+                        if s.get("season_has_episodes")
+                    ],
+                    "missing_main_poster": True,
+                    "instance": media.get("instance", "Unknown"),
+                    **media_source_refs(media),
+                })
+            else:
+                unmatched[media_type].append({
+                    "title": media.get("title"),
+                    "year": media.get("year"),
+                    "instance": media.get("instance", "Unknown"),
+                    **media_source_refs(media),
+                })
+
+    def _match_artwork_item(self, media: Dict[str, Any], media_type: str, matches: Dict[int, str],
+                            unmatched: Dict[str, List[Dict[str, Any]]], stats: Dict[str, int]) -> tuple:
+        """Artwork per-item match for ONE type; mutates ``unmatched``/``stats`` (no per-item log —
+        the driver logs the combined artwork line). Returns ``(matched, reason)``.
+
+        ``matches`` is the pre-computed {id(media): reason} from the shared matcher, so artwork
+        matches exactly the way posters do instead of through a parallel implementation."""
+        reason = matches.get(id(media))
+        asset = reason is not None
+        if asset:
+            stats["matched"] += 1
+            return True, reason
+        stats["unmatched"] += 1
+        entry = {
+            "title": media.get("title"),
+            "year": media.get("year"),
+            "instance": media.get("instance", "Unknown"),
+            **media_source_refs(media),
+        }
+        if media_type == "series":
+            # No season concept for artwork: the whole show is the "main".
+            entry["missing_seasons"] = []
+            entry["missing_main_poster"] = True
+        unmatched[media_type].append(entry)
+        return False, reason
+
+    def _artwork_item_line(self, media: Dict[str, Any], matched_types: List[str], missing_types: List[str],
+                           reason: str | None, compact: bool) -> str:
+        """One artwork line per item. Compact (indented, no title) when a poster line is above it;
+        self-contained (title + via-reason) for an artwork-only run."""
+        matched_str = ", ".join(matched_types) if matched_types else "none"
+        missing_str = ", ".join(missing_types) if missing_types else "none"
+        if compact:
+            return f"      ↳ artwork — matched: {matched_str} · missing: {missing_str}"
+        title = media.get("title") or "unknown"
+        year = f" ({media['year']})" if isinstance(media.get("year"), int) else ""
+        # Shared-matcher reasons read "by tmdb_id"; "via by tmdb_id" is clumsy.
+        via = f" via {reason.removeprefix('by ')}" if reason else ""
+        return f"{title}{year}{via} — matched: {matched_str} · missing: {missing_str}"
+
+    def _build_combined_stats_table_lines(self, summaries: Dict[str, Dict[str, Any]]) -> List[str]:
+        """One ASCII stats table with a column per asset type (same box style as the poster
+        table). ``summaries`` maps a column label (e.g. 'Poster'/'Logo') -> that type's summary.
+        Cells are ``complete/total``; the Seasons row is poster-only (``—`` for artwork)."""
+        columns = list(summaries.keys())
+        has_poster = "Poster" in columns
+        any_collections = any(s.get("collections", {}).get("total", 0) > 0 for s in summaries.values())
+        row_defs = [("movies", "Movies"), ("series", "Series"), ("seasons", "Seasons"),
+                    ("collections", "Collections"), ("grand_total", "Grand Total")]
+
+        def cell(col: str, key: str) -> str:
+            if key == "seasons" and col != "Poster":
+                return "—"
+            sec = summaries[col].get(key) or {}
+            total = int(sec.get("total", 0))
+            unm = int(sec.get("unmatched", 0))
+            return f"{total - unm:,}/{total:,}"
+
+        rows: List[Tuple[str, List[str]]] = []
+        for key, label in row_defs:
+            if key == "collections" and not any_collections:
+                continue
+            if key == "seasons" and not has_poster:
+                continue
+            rows.append((label, [cell(col, key) for col in columns]))
+
+        # Overall completion per asset type, closing out the table.
+        rows.append((
+            "Percent",
+            [self._format_percent(float((summaries[col].get("grand_total") or {}).get("percent_complete", 100.0)))
+             for col in columns],
+        ))
+
+        type_width = max([len("Type")] + [len(r[0]) for r in rows])
+        col_widths = [max([len(col)] + [len(r[1][i]) for r in rows]) for i, col in enumerate(columns)]
+
+        def border() -> str:
+            return "|" + f"{'-' * (type_width + 2)}|" + "".join(f"{'-' * (w + 2)}|" for w in col_widths)
+
+        header = f"| {'Type':<{type_width}} " + "".join(f"| {col:>{w}} " for col, w in zip(columns, col_widths)) + "|"
+        lines = ["Statistics", border(), header, border()]
+        for label, cells in rows:
+            lines.append(f"| {label:<{type_width}} " + "".join(f"| {c:>{w}} " for c, w in zip(cells, col_widths)) + "|")
+            lines.append(border())
+        return lines
+
+    def _log_combined_by_library(self, summaries: Dict[str, Dict[str, Any]]) -> None:
+        """One 'Statistics by library instance' block spanning all asset-type columns."""
+        columns = list(summaries.keys())
+        order: Dict[str, Dict[str, Any]] = {}
+        for col in columns:
+            for inst, inst_stats in (summaries[col].get("by_library") or {}).items():
+                order.setdefault(inst, inst_stats)
+        if not order:
+            return
+        log_info(LogTags.UNMATCHED, "Statistics by library instance:")
+        for inst, inst_stats in order.items():
+            for media_type in ["movies", "series", "collections"]:
+                if media_type not in inst_stats:
+                    continue
+                segs = []
+                for col in columns:
+                    ts = (summaries[col].get("by_library") or {}).get(inst, {}).get(media_type)
+                    if ts:
+                        segs.append(f"{col.lower()} {ts['total'] - ts['unmatched']}/{ts['total']}")
+                if segs:
+                    log_info(LogTags.UNMATCHED, f"  {inst} ({media_type}): " + " · ".join(segs))
+
+    def _detect_combined(
+        self,
+        media_dict: Dict[str, List[Dict[str, Any]]],
+        source_dirs: List[str],
+        progress_callback: ProgressCallback | None = None,
+        check_posters: bool = True,
+        artwork_types: List[str] | None = None,
+        asset_folders: bool = True,
+    ) -> Dict[str, Any]:
+        """One destination walk + one library pass covering posters and/or artwork. Poster
+        results and per-artwork-type results are computed and stored exactly as before; only the
+        scan plumbing and per-item/aggregate logging are unified."""
+        start_time = time.time()
+        enabled_art = [t for t in ARTWORK_TYPES if t in (artwork_types or [])]
+        destination_dir = source_dirs[0] if source_dirs else ""
+
         try:
-            start_time = time.time()
-            log_section_start(LogTags.UNMATCHED, "Unmatched Assets Detection Starting")
-            log_info(LogTags.UNMATCHED, "Starting unmatched assets detection", 
-                        source_dirs=source_dirs, 
-                        media_counts={k: len(v) for k, v in media_dict.items()})
+            if check_posters:
+                log_section_start(LogTags.UNMATCHED, "Unmatched Assets Detection Starting")
+            log_info(
+                LogTags.UNMATCHED,
+                "Starting unmatched detection",
+                source_dirs=source_dirs,
+                check_posters=check_posters,
+                artwork_types=enabled_art,
+                media_counts={k: len(v) for k, v in media_dict.items()},
+            )
 
             ignore_root_folders = self._get_list_setting("unmatched_ignore_root_folders")
             ignore_collections = self._get_list_setting("unmatched_ignore_collections")
             ignore_unmonitored = self._get_bool_setting("unmatched_ignore_unmonitored", default=False)
-
             media_dict = self._apply_unmatched_filters(
                 media_dict,
                 ignore_root_folders=ignore_root_folders,
                 ignore_collections=ignore_collections,
                 ignore_unmonitored=ignore_unmonitored,
             )
-
             log_info(
                 LogTags.UNMATCHED,
                 "Unmatched filters loaded",
@@ -338,381 +658,254 @@ class UnmatchedAssetsService:
                 ignore_unmonitored=ignore_unmonitored,
                 filtered_media_counts={k: len(v) for k, v in media_dict.items()},
             )
-            
-            # Phase 1: Scan for poster assets (0-20%)
+
+            # --- One walk ---
+            # both  → poster walk (get_assets_files) also collects artwork names (single traversal)
+            # posters-only → poster walk, no artwork
+            # artwork-only → scan_destination_artwork (its own single walk); no poster walk
             if progress_callback:
-                progress_callback("scanning", 0, 100, "Scanning poster assets...")
-            
-            log_step(LogTags.UNMATCHED, 1, 3, "Scanning poster assets...")
-            scan_start = time.time()
-            
+                progress_callback("scanning", 0, 100, "Scanning destination assets...")
+            log_step(LogTags.UNMATCHED, 1, 2, "Scanning destination assets...")
+            poster_assets: List[Dict[str, Any]] = []
+            prefix_index: Dict[str, Any] | None = None
+            names: Dict[str, List[str]] | None = {t: [] for t in ARTWORK_TYPES} if (enabled_art and check_posters) else None
             try:
-                assets_dict, prefix_index = get_assets_files(source_dirs, merge=False)
+                if check_posters:
+                    poster_assets, prefix_index = get_assets_files(
+                        source_dirs, merge=False, exclude_artwork=True, artwork_out=names,
+                    )
+                    poster_assets = poster_assets or []
             except Exception as e:
-                log_error(LogTags.UNMATCHED, f"Failed to scan poster assets: {e}", 
-                         source_dirs=source_dirs, error=str(e))
+                log_error(LogTags.UNMATCHED, f"Failed to scan destination assets: {e}", source_dirs=source_dirs, error=str(e))
                 if progress_callback:
                     progress_callback("error", 0, 100, f"Scan failed: {e}")
-                empty = self._empty_result()
-                try:
-                    self._save_results(empty["summary"], empty["unmatched"])
-                except Exception as e:
-                    log_debug(LogTags.UNMATCHED, f"Failed to persist empty result after scan error: {e}")
-                return empty
-            
-            scan_time = time.time() - scan_start
+                return self._combined_failure(check_posters, bool(enabled_art))
 
-            if not assets_dict:
-                log_warning(LogTags.UNMATCHED, "No assets found in source directories — destination folder is empty or missing", 
-                          source_dirs=source_dirs)
-                empty = self._empty_result()
-                try:
-                    self._save_results(empty["summary"], empty["unmatched"])
-                except Exception as e:
-                    log_debug(LogTags.UNMATCHED, f"Failed to persist empty result when no assets found: {e}")
-                if progress_callback:
-                    progress_callback("completed", 100, 100, "No poster assets found in destination folder")
-                return empty
+            poster_match_active = check_posters and bool(poster_assets)
 
-            # assets_dict is a list of asset dictionaries, not a dict
-            total_assets = len(assets_dict)
-            log_success(LogTags.UNMATCHED, f"Found {total_assets:,} organized poster assets", 
-                        count=total_assets, 
-                        scan_time_sec=f"{scan_time:.2f}")
-            
-            if progress_callback:
-                progress_callback("scanning", 20, 100, f"Found {total_assets:,} poster assets")
-            
-            # Initialize tracking
-            unmatched: Dict[str, List[Dict[str, Any]]] = {
-                "movies": [],
-                "series": [],
-                "collections": [],
-            }
-            
+            # Artwork indexes: from the shared walk when posters ran (fallback re-scan on structure
+            # mismatch), else its own walk for an artwork-only run.
+            artwork_indexes: Dict[str, Any] = {}
+            artwork_unmatched: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+            artwork_log_stats: Dict[str, Dict[str, Dict[str, int]]] = {}
+            artwork_by_type: Dict[str, List[Dict[str, Any]]] = {}
+            if enabled_art:
+                if names is not None and _is_asset_folders(destination_dir) == asset_folders:
+                    artwork_by_type = assets_from_names(names)
+                else:
+                    artwork_by_type = scan_destination_artwork(destination_dir, asset_folders)
+                # ONE combined index over every placed type (an item's logo/background/square
+                # share its identity, so one box carries which types are placed) and ONE match
+                # through the SAME matcher posters use — not one full-library pass per type.
+                _combined: Dict[str, Dict[str, Any]] = {}
+                for t in enabled_art:
+                    for it in artwork_by_type.get(t, []):
+                        key = "|".join(str(it.get(k)) for k in ("normalized_title", "year", "tmdb_id", "tvdb_id", "imdb_id"))
+                        box = _combined.setdefault(key, {**it, "_placed_types": set()})
+                        box["_placed_types"].add(t)
+                _idx = build_artwork_index(list(_combined.values()))
+                _matched_placed = match_assets_to_media(media_dict, _idx, label="placed artwork", report_near_misses=False)
+                for t in enabled_art:
+                    artwork_indexes[t] = {
+                        id(it["media_ref"]): (it.get("match_reason") or "")
+                        for items in _matched_placed.values()
+                        for it in items
+                        if it.get("media_ref") is not None
+                        and t in ((it.get("asset_ref") or {}).get("_placed_types") or set())
+                    }
+                    artwork_unmatched[t] = {"movies": [], "series": [], "collections": []}
+                    artwork_log_stats[t] = {mt: {"matched": 0, "unmatched": 0, "skipped": 0} for mt in ["movies", "series", "collections"]}
+
+            if check_posters:
+                if poster_assets:
+                    log_success(LogTags.UNMATCHED, f"Found {len(poster_assets):,} organized poster assets", count=len(poster_assets))
+                else:
+                    log_warning(LogTags.UNMATCHED, "No poster assets found in destination folder")
+            if enabled_art:
+                total_art = sum(len(artwork_by_type.get(t, [])) for t in enabled_art)
+                log_success(LogTags.UNMATCHED, f"Found {total_art:,} artwork asset(s) on disk across {len(enabled_art)} type(s)", count=total_art)
+
+            unmatched: Dict[str, List[Dict[str, Any]]] = {"movies": [], "series": [], "collections": []}
             match_stats = {
                 "movies": {"processed": 0, "matched": 0, "unmatched": 0, "skipped": 0},
                 "series": {"processed": 0, "matched": 0, "unmatched": 0, "partial": 0, "skipped": 0},
                 "collections": {"processed": 0, "matched": 0, "unmatched": 0, "skipped": 0},
             }
-            
-            # Phase 2: Compare media to poster assets (20-90%)
-            if progress_callback:
-                progress_callback("matching", 20, 100, "Comparing media to poster assets...")
-            
-            log_step(LogTags.UNMATCHED, 2, 3, "Comparing media to poster assets...")
 
-            # Calculate total media items for progress tracking
-            total_media_items = sum(len(media_dict.get(media_type, [])) for media_type in ["movies", "series", "collections"])
-            processed_count = 0
-            
-            # Process each media type
-            for media_type in ["movies", "series", "collections"]:
-                type_start = time.time()
-                media_list = media_dict.get(media_type, [])
-                
-                if not media_list:
-                    log_info(LogTags.UNMATCHED, f"  {media_type.title()}: No items to process - skipping")
-                    continue
-                
-                log_info(LogTags.UNMATCHED, f"  Processing {media_type}: {len(media_list):,} items...")
-
-                for idx, media in enumerate(media_list, 1):
-                    processed_count += 1
-                    
-                    # Update progress periodically (every 10 items or at completion)
-                    if progress_callback and (processed_count % 10 == 0 or processed_count == total_media_items):
-                        # Map processed items to 20-90% range
-                        progress_pct = 20 + int((processed_count / total_media_items) * 70)
-                        progress_callback(
-                            "matching", 
-                            progress_pct, 
-                            100, 
-                            f"Matching {media_type}: {idx}/{len(media_list)}"
-                        )
-                    # Skip media without required fields
-                    if not media.get("title"):
-                        match_stats[media_type]["skipped"] += 1
+            # --- One pass over the library ---
+            run_loop = poster_match_active or bool(enabled_art)
+            if run_loop:
+                if progress_callback:
+                    progress_callback("matching", 20, 100, "Comparing media to destination assets...")
+                log_step(LogTags.UNMATCHED, 2, 2, "Comparing media to destination assets...")
+                total_media_items = sum(len(media_dict.get(mt, [])) for mt in ["movies", "series", "collections"])
+                processed_count = 0
+                for media_type in ["movies", "series", "collections"]:
+                    type_start = time.time()
+                    # Process/log items alphabetically by title (matches the scanner's ordering).
+                    media_list = sorted(media_dict.get(media_type, []), key=lambda m: (m.get("title") or "").lower())
+                    if not media_list:
+                        log_info(LogTags.UNMATCHED, f"  {media_type.title()}: No items to process - skipping")
                         continue
-                        
-                    # Skip media with no poster expected yet (not released and not in the
-                    # library). Downloaded items are always checked regardless of status.
-                    if media_type in ["series", "movies"] and not self._should_have_poster(media, media_type):
-                        match_stats[media_type]["skipped"] += 1
-                        log_debug(LogTags.UNMATCHED, f"    Skipping {media['title']} ({media.get('year')}) - status: {(media.get('status') or '').lower()}, not in library")
-                        continue
-                        
-                    match_stats[media_type]["processed"] += 1
+                    log_info(LogTags.UNMATCHED, f"  Processing {media_type}: {len(media_list):,} items...")
 
-                    # Look for matching assets
-                    found = False
-                    match_method = None
-                    tmdb_id = media.get("tmdb_id")
-                    tvdb_id = media.get("tvdb_id")
+                    for idx, media in enumerate(media_list, 1):
+                        processed_count += 1
+                        if progress_callback and (processed_count % 10 == 0 or processed_count == total_media_items):
+                            progress_pct = 20 + int((processed_count / total_media_items) * 70)
+                            progress_callback("matching", progress_pct, 100, f"Matching {media_type}: {idx}/{len(media_list)}")
 
-                    # Try ID-based search first
-                    if tmdb_id or tvdb_id:
-                        try:
-                            id_assets = search_matches(
-                                prefix_index,
-                                media.get("title", ""),
-                                tmdb_id=tmdb_id,
-                                tvdb_id=tvdb_id,
-                            )
-                        except Exception as e:
-                            log_error(LogTags.UNMATCHED, f"Search failed for '{media.get('title')}': {e}", 
-                                     title=media.get('title'), error=str(e))
-                            id_assets = []
-                        
-                        # Verify ID bucket hits via is_match before trusting
-                        verified_id_asset = (
-                            next(
-                                (ia for ia in id_assets if is_match(ia, media)[0]),
-                                None,
-                            )
-                            if id_assets else None
-                        )
-                        if verified_id_asset:
-                            asset = verified_id_asset
-                            found = True
-                            match_method = f"ID ({tmdb_id or tvdb_id})"
+                        if not media.get("title"):
+                            if poster_match_active:
+                                match_stats[media_type]["skipped"] += 1
+                            for t in enabled_art:
+                                artwork_log_stats[t][media_type]["skipped"] += 1
+                            continue
 
-                            # For series, check for missing seasons or main poster
-                            if media_type == "series":
-                                media_seasons = [
-                                    s["season_number"]
-                                    for s in media.get("seasons", [])
-                                    if s.get("season_has_episodes")
-                                ]
-                                asset_seasons = asset.get("season_numbers", [])
-                                missing_seasons = [
-                                    s for s in media_seasons if s not in asset_seasons
-                                ]
+                        if media_type in ["series", "movies"] and not self._should_have_poster(media, media_type):
+                            if poster_match_active:
+                                match_stats[media_type]["skipped"] += 1
+                            for t in enabled_art:
+                                artwork_log_stats[t][media_type]["skipped"] += 1
+                            log_debug(LogTags.UNMATCHED, f"  Skipping {media['title']} ({media.get('year')}) - status: {(media.get('status') or '').lower()}, not in library")
+                            continue
 
-                                # Check if main poster exists (no season number in filename)
-                                has_main_poster = any(
-                                    not season_pattern.search(os.path.basename(f))
-                                    for f in asset.get("files", [])
-                                )
+                        if poster_match_active:
+                            self._match_poster_item(media, media_type, prefix_index, unmatched, match_stats)
 
-                                if missing_seasons or not has_main_poster:
-                                    match_stats[media_type]["partial"] += 1
-                                    log_debug(
-                                        LogTags.UNMATCHED,
-                                        f"    ⚠ Partial match: {media['title']} ({media.get('year')}) - "
-                                        f"missing {len(missing_seasons)} seasons, main poster: {has_main_poster}",
-                                        title=media['title'],
-                                        missing_seasons=missing_seasons,
-                                        has_main=has_main_poster
-                                    )
-                                    unmatched[media_type].append({
-                                        "title": media.get("title"),
-                                        "year": media.get("year"),
-                                        "missing_seasons": missing_seasons,
-                                        "missing_main_poster": not has_main_poster,
-                                        "instance": media.get("instance", "Unknown"),
-                                        **media_source_refs(media),
-                                    })
-                                else:
-                                    match_stats[media_type]["matched"] += 1
-                                    log_debug(
-                                        LogTags.UNMATCHED,
-                                        f"    ✓ Matched: {media['title']} ({media.get('year')}) via {match_method}",
-                                        title=media['title'],
-                                        year=media.get('year'),
-                                        method=match_method
-                                    )
-                            else:
-                                # For movies and collections, simple match
-                                match_stats[media_type]["matched"] += 1
-                                log_debug(
-                                    LogTags.UNMATCHED,
-                                    f"    ✓ Matched: {media['title']} ({media.get('year')}) via {match_method}",
-                                    title=media['title'],
-                                    year=media.get('year'),
-                                    method=match_method
-                                )
+                        if enabled_art:
+                            matched_types: List[str] = []
+                            missing_types: List[str] = []
+                            item_reason: str | None = None
+                            for t in enabled_art:
+                                matched, reason = self._match_artwork_item(media, media_type, artwork_indexes[t], artwork_unmatched[t], artwork_log_stats[t][media_type])
+                                (matched_types if matched else missing_types).append(t)
+                                if matched and item_reason is None and reason:
+                                    item_reason = reason
+                            log_debug(LogTags.UNMATCHED, self._artwork_item_line(media, matched_types, missing_types, item_reason, compact=poster_match_active))
 
-                    # If no ID match, try title-based search
-                    if not found:
-                        base_title = media.get("title") or ""
-                        if media_type == "collections":
-                            titles_to_try = collection_title_variants(base_title) + media.get("alternate_titles", [])
-                        else:
-                            titles_to_try = [base_title] + media.get("alternate_titles", [])
-                        for title in titles_to_try:
-                            try:
-                                candidates = search_matches(prefix_index, title)
-                            except Exception as e:
-                                log_error(LogTags.UNMATCHED, f"Title search failed for '{title}': {e}", 
-                                         title=title, error=str(e))
-                                continue
-                            
-                            for candidate in candidates:
-                                is_matched, reason = is_match(candidate, media)
-                                if is_matched:
-                                    found = True
-                                    match_method = reason
-                                    log_debug(
-                                        LogTags.UNMATCHED,
-                                        f"    ✓ Matched {reason}: {media['title']} ({media.get('year')})",
-                                        title=media['title'],
-                                        year=media.get('year'),
-                                        method=reason
-                                    )
-                                    
-                                    # For series, check seasons (following DAPS logic: only add if missing seasons)
-                                    if media_type == "series":
-                                        media_seasons = [
-                                            s["season_number"]
-                                            for s in media.get("seasons", [])
-                                            if s.get("season_has_episodes")
-                                        ]
-                                        asset_seasons = candidate.get("season_numbers", [])
-                                        missing_seasons = [
-                                            s for s in media_seasons if s not in asset_seasons
-                                        ]
-                                        # Following DAPS: only add to unmatched if there are missing seasons
-                                        if missing_seasons:
-                                            match_stats[media_type]["partial"] += 1
-                                            has_main_poster = any(
-                                                not season_pattern.search(os.path.basename(f))
-                                                for f in candidate.get("files", [])
-                                            )
-                                            log_debug(
-                                                LogTags.UNMATCHED,
-                                                f"    ⚠ Partial match: {media['title']} - missing {len(missing_seasons)} seasons",
-                                                missing_seasons=missing_seasons
-                                            )
-                                            unmatched[media_type].append({
-                                                "title": media.get("title"),
-                                                "year": media.get("year"),
-                                                "missing_seasons": missing_seasons,
-                                                "missing_main_poster": not has_main_poster,
-                                                "instance": media.get("instance", "Unknown"),
-                                                **media_source_refs(media),
-                                            })
-                                        else:
-                                            match_stats[media_type]["matched"] += 1
-                                    else:
-                                        match_stats[media_type]["matched"] += 1
-                                    break
-                            if found:
-                                break
-
-                    # If still not found, add to unmatched
-                    if not found:
-                        match_stats[media_type]["unmatched"] += 1
-                        log_debug(
+                    if poster_match_active:
+                        stats = match_stats[media_type]
+                        type_time = time.time() - type_start
+                        partial_str = f", {stats['partial']:,} partial" if media_type == 'series' else ''
+                        log_success(
                             LogTags.UNMATCHED,
-                            f"    ✗ No match: {media['title']} ({media.get('year')})",
-                            title=media['title'],
-                            year=media.get('year'),
-                            instance=media.get('instance')
+                            f"  {media_type.title()} complete: {stats['matched']:,} matched, {stats['unmatched']:,} unmatched{partial_str}, {stats['skipped']:,} skipped | {type_time:.2f}s",
+                            media_type=media_type, **stats, time_sec=f"{type_time:.2f}",
                         )
-                        if media_type == "series":
-                            unmatched[media_type].append({
-                                "title": media.get("title"),
-                                "year": media.get("year"),
-                                "missing_seasons": [
-                                    s["season_number"]
-                                    for s in media.get("seasons", [])
-                                    if s.get("season_has_episodes")
-                                ],
-                                "missing_main_poster": True,
-                                "instance": media.get("instance", "Unknown"),
-                                **media_source_refs(media),
-                            })
-                        else:
-                            unmatched[media_type].append({
-                                "title": media.get("title"),
-                                "year": media.get("year"),
-                                "instance": media.get("instance", "Unknown"),
-                                **media_source_refs(media),
-                            })
-                
-                # Log summary for this media type
-                type_time = time.time() - type_start
-                stats = match_stats[media_type]
-                
-                # Build the log message with conditional partial count
-                partial_str = f", {stats['partial']:,} partial" if media_type == 'series' else ''
-                log_success(
-                    LogTags.UNMATCHED,
-                    f"  {media_type.title()} complete: "
-                    f"{stats['matched']:,} matched, {stats['unmatched']:,} unmatched"
-                    f"{partial_str}, "
-                    f"{stats['skipped']:,} skipped | {type_time:.2f}s",
-                    media_type=media_type,
-                    **stats,
-                    time_sec=f"{type_time:.2f}"
-                )
 
-            # Phase 3: Calculate statistics (90-100%)
             if progress_callback:
                 progress_callback("calculating", 90, 100, "Calculating statistics...")
-            
-            log_step(LogTags.UNMATCHED, 3, 3, "Calculating statistics...")
-            stats = self._calculate_stats(unmatched, media_dict)
 
-            # Log statistics by library instance
-            if stats.get("by_library"):
-                log_info(LogTags.UNMATCHED, "Statistics by library instance:")
-                for instance_name, instance_stats in stats["by_library"].items():
+            # --- Poster finalize (store) ---
+            poster_result: Dict[str, Any] = {}
+            poster_summary = None
+            if check_posters:
+                if poster_match_active:
+                    poster_summary = self._calculate_stats(unmatched, media_dict)
+                    try:
+                        self._save_results(poster_summary, unmatched)
+                    except Exception as e:
+                        log_error(LogTags.UNMATCHED, f"Failed to save results to database: {e}", error=str(e))
+                    poster_result = {"summary": poster_summary, "unmatched": unmatched, "last_run": datetime.now(timezone.utc).isoformat()}
+                else:
+                    empty = self._empty_result()
+                    try:
+                        self._save_results(empty["summary"], empty["unmatched"])
+                    except Exception as e:
+                        log_debug(LogTags.UNMATCHED, f"Failed to persist empty poster result: {e}")
+                    poster_result = empty
+
+            # --- Artwork finalize (store) + per-type complete lines ---
+            artwork_payload: Dict[str, Any] | None = None
+            artwork_summaries: Dict[str, Dict[str, Any]] = {}
+            if enabled_art:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                artwork_payload = self.get_cached_artwork_results()
+                artwork_payload["last_run"] = now_iso
+                for t in enabled_art:
+                    summary = self._calculate_artwork_stats(artwork_unmatched[t], media_dict)
+                    artwork_payload[t] = {"summary": summary, "unmatched": artwork_unmatched[t], "last_run": now_iso}
+                    artwork_summaries[t] = summary
+                try:
+                    self._save_artwork_results(artwork_payload)
+                except Exception as e:
+                    log_error(LogTags.UNMATCHED, f"Failed to save artwork results to database: {e}", error=str(e))
+                for t in enabled_art:
                     for media_type in ["movies", "series", "collections"]:
-                        if media_type in instance_stats:
-                            type_stats = instance_stats[media_type]
-                            log_info(
-                                LogTags.UNMATCHED,
-                                f"  {instance_name} ({media_type}): "
-                                f"{type_stats['total'] - type_stats['unmatched']}/{type_stats['total']} complete "
-                                f"({type_stats['percent_complete']:.2f}%)",
-                                instance=instance_name,
-                                media_type=media_type,
-                                total=type_stats['total'],
-                                matched=type_stats['total'] - type_stats['unmatched'],
-                                unmatched=type_stats['unmatched']
-                            )
+                        st = artwork_log_stats[t][media_type]
+                        log_success(LogTags.UNMATCHED, f"  {media_type.title()} complete ({t}): {st['matched']:,} matched, {st['unmatched']:,} missing, {st['skipped']:,} skipped")
 
-            # Save to database (95%)
-            if progress_callback:
-                progress_callback("saving", 95, 100, "Saving results...")
-            
-            try:
-                self._save_results(stats, unmatched)
-            except Exception as e:
-                log_error(LogTags.UNMATCHED, f"Failed to save results to database: {e}", error=str(e))
-                # Continue anyway to return results to user
-            
-            # Completion (100%)
+            # --- Combined stats output ---
+            if enabled_art:
+                columns: Dict[str, Dict[str, Any]] = {}
+                if poster_summary is not None:
+                    columns["Poster"] = poster_summary
+                for t in enabled_art:
+                    columns[t.capitalize()] = artwork_summaries[t]
+                self._log_combined_by_library(columns)
+            elif poster_summary is not None:
+                if poster_summary.get("by_library"):
+                    log_info(LogTags.UNMATCHED, "Statistics by library instance:")
+                    for instance_name, instance_stats in poster_summary["by_library"].items():
+                        for media_type in ["movies", "series", "collections"]:
+                            if media_type in instance_stats:
+                                ts = instance_stats[media_type]
+                                log_info(
+                                    LogTags.UNMATCHED,
+                                    f"  {instance_name} ({media_type}): {ts['total'] - ts['unmatched']}/{ts['total']} complete ({ts['percent_complete']:.2f}%)",
+                                    instance=instance_name, media_type=media_type, total=ts['total'],
+                                    matched=ts['total'] - ts['unmatched'], unmatched=ts['unmatched'],
+                                )
+
             total_time = time.time() - start_time
-            grand = stats['grand_total']
-            
-            completion_msg = f"Complete: {grand['total'] - grand['unmatched']:,}/{grand['total']:,} matched ({grand['percent_complete']:.2f}%)"
+            # Completion message carries the counts (HEAD parity), one part per asset type.
+            parts = []
+            if poster_summary is not None:
+                g = poster_summary["grand_total"]
+                parts.append(f"posters {g['total'] - g['unmatched']:,}/{g['total']:,} ({g['percent_complete']:.2f}%)")
+            for t in enabled_art:
+                g = (artwork_summaries.get(t) or {}).get("grand_total") or {}
+                parts.append(f"{t} {g.get('total', 0) - g.get('unmatched', 0):,}/{g.get('total', 0):,}")
+            completion_msg = f"Complete: {', '.join(parts)} matched" if parts else "Detection complete"
             if progress_callback:
                 progress_callback("completed", 100, 100, completion_msg)
-            
-            log_section_end(LogTags.UNMATCHED, "Detection Complete")
-            log_success(
-                LogTags.UNMATCHED,
-                f"Detection complete in {total_time:.2f}s",
-                total_time_sec=f"{total_time:.2f}"
-            )
-            for table_line in self._build_stats_table_lines(stats):
-                log_info(LogTags.UNMATCHED, table_line)
+            if check_posters:
+                log_section_end(LogTags.UNMATCHED, "Detection Complete")
+            log_success(LogTags.UNMATCHED, f"Detection complete in {total_time:.2f}s", total_time_sec=f"{total_time:.2f}")
 
-            return {
-                "summary": stats,
-                "unmatched": unmatched,
-                "last_run": datetime.now(timezone.utc).isoformat(),
-            }
-        
+            if enabled_art:
+                for line in self._build_combined_stats_table_lines(columns):
+                    log_info(LogTags.UNMATCHED, line)
+            elif poster_summary is not None:
+                for line in self._build_stats_table_lines(poster_summary):
+                    log_info(LogTags.UNMATCHED, line)
+
+            result: Dict[str, Any] = poster_result if check_posters else {}
+            if enabled_art:
+                result = {**result, "artwork": artwork_payload}
+            return result
+
         except Exception as e:
             log_error(LogTags.UNMATCHED, f"Unmatched detection failed: {e}", error=str(e))
-            log_section_end(LogTags.UNMATCHED, "Detection Failed")
+            if check_posters:
+                log_section_end(LogTags.UNMATCHED, "Detection Failed")
             if progress_callback:
                 progress_callback("error", 0, 100, f"Detection failed: {e}")
-            return self._empty_result()
+            return self._combined_failure(check_posters, bool(enabled_art))
+
+    def _combined_failure(self, check_posters: bool, has_artwork: bool) -> Dict[str, Any]:
+        """Failure fallback: empty poster result (if checked) + cached artwork (if checked)."""
+        result: Dict[str, Any] = self._empty_result() if check_posters else {}
+        if check_posters:
+            # Persist the empty result so stored stats zero out instead of going stale.
+            try:
+                self._save_results(result["summary"], result["unmatched"])
+            except Exception as e:
+                log_debug(LogTags.UNMATCHED, f"Failed to persist empty result after scan error: {e}")
+        if has_artwork:
+            result = {**result, "artwork": self.get_cached_artwork_results()}
+        return result
 
     @staticmethod
     def _should_have_poster(media: Dict[str, Any], media_type: str) -> bool:
@@ -998,3 +1191,78 @@ class UnmatchedAssetsService:
             },
             "last_run": None
         }
+
+    # ── Artwork (logo/background/squareart) unmatched detection ──────────────────
+    # Artwork is just another asset: the SAME detector, sharing the poster path's
+    # filters/eligibility/by-library stats. It differs only in scanning the destination
+    # per artwork type and having no season dimension (artwork is per-title).
+
+    SETTING_ARTWORK_UNMATCHED_STATS = "artwork_unmatched_stats"
+
+    def _calculate_artwork_stats(self, unmatched: Dict[str, List[Dict[str, Any]]], media_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+        eligible_movies = [m for m in media_dict.get("movies", []) if self._should_have_poster(m, "movies")]
+        eligible_series = [s for s in media_dict.get("series", []) if self._should_have_poster(s, "series")]
+
+        unmatched_movies = len(unmatched.get("movies", []))
+        total_movies = len(eligible_movies)
+        percent_movies = ((total_movies - unmatched_movies) / total_movies * 100) if total_movies else 100.0
+        movies_released = sum(1 for m in media_dict.get("movies", []) if (m.get("status") or "").lower() in ("released", "physicalrelease", "incinemas"))
+        movies_unreleased = sum(1 for m in media_dict.get("movies", []) if (m.get("status") or "").lower() in ("announced", "upcoming", "tba"))
+
+        unmatched_series = sum(1 for s in unmatched.get("series", []) if s.get("missing_main_poster", False))
+        total_series = len(eligible_series)
+        percent_series = ((total_series - unmatched_series) / total_series * 100) if total_series else 100.0
+        series_continuing = sum(1 for s in media_dict.get("series", []) if (s.get("status") or "").lower() in ("continuing", "ended"))
+        series_upcoming = sum(1 for s in media_dict.get("series", []) if (s.get("status") or "").lower() in ("upcoming",))
+
+        unmatched_collections = len(unmatched.get("collections", []))
+        total_collections = len(media_dict.get("collections", []))
+        percent_collections = ((total_collections - unmatched_collections) / total_collections * 100) if total_collections else 100.0
+
+        grand_total = total_movies + total_series + total_collections
+        grand_unmatched = unmatched_movies + unmatched_series + unmatched_collections
+        grand_percent = ((grand_total - grand_unmatched) / grand_total * 100) if grand_total else 100.0
+
+        return {
+            "movies": {"total": total_movies, "unmatched": unmatched_movies, "percent_complete": percent_movies, "released": movies_released, "unreleased": movies_unreleased},
+            "series": {"total": total_series, "unmatched": unmatched_series, "percent_complete": percent_series, "continuing": series_continuing, "upcoming": series_upcoming},
+            # Artwork has no season dimension — zeroed so the shared UI hides the Seasons card.
+            "seasons": {"total": 0, "unmatched": 0, "percent_complete": 100.0},
+            "collections": {"total": total_collections, "unmatched": unmatched_collections, "percent_complete": percent_collections},
+            "grand_total": {"total": grand_total, "unmatched": grand_unmatched, "percent_complete": grand_percent},
+            "by_library": self._calculate_stats_by_library(unmatched, media_dict),
+        }
+
+    @staticmethod
+    def _empty_artwork_type_result() -> Dict[str, Any]:
+        empty_bucket = {"total": 0, "unmatched": 0, "percent_complete": 100.0}
+        return {
+            "summary": {
+                "movies": {**empty_bucket, "released": 0, "unreleased": 0},
+                "series": {**empty_bucket, "continuing": 0, "upcoming": 0},
+                "seasons": dict(empty_bucket),
+                "collections": dict(empty_bucket),
+                "grand_total": dict(empty_bucket),
+                "by_library": {},
+            },
+            "unmatched": {"movies": [], "series": [], "collections": []},
+            "last_run": None,
+        }
+
+    def _empty_artwork_payload(self) -> Dict[str, Any]:
+        payload = {t: self._empty_artwork_type_result() for t in ARTWORK_TYPES}
+        payload["last_run"] = None
+        return payload
+
+    def _save_artwork_results(self, payload: Dict[str, Any]) -> None:
+        upsert_setting(self.db, self.SETTING_ARTWORK_UNMATCHED_STATS, json.dumps(payload))
+        self.db.commit()
+
+    def get_cached_artwork_results(self) -> Dict[str, Any]:
+        try:
+            setting = get_setting(self.db, self.SETTING_ARTWORK_UNMATCHED_STATS)
+            if setting and setting.value:
+                return json.loads(setting.value)
+        except Exception as e:
+            log_error(LogTags.DATABASE, f"Failed to read artwork_unmatched_stats: {e}")
+        return self._empty_artwork_payload()

@@ -1,5 +1,5 @@
 .gdrives-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .gdrives-header h1 {
@@ -12,74 +12,10 @@
   margin-bottom: 0;
 }
 
-/* Toolbar with filters and action buttons */
+/* Toolbar styling lives in styles/globals.css. This bar carries more buttons than
+   most, so it's allowed to wrap. */
 .gdrives .toolbar {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  padding: 0.5rem 0.75rem;
-  background-color: #3D4556;
-  border-radius: 8px;
   flex-wrap: wrap;
-}
-
-.gdrives .toolbar-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.gdrives .toolbar-title h2 {
-  color: #64b5f6;
-  margin: 0;
-  font-size: 1.25rem;
-  white-space: nowrap;
-}
-
-.gdrives .toolbar-info {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: help;
-  color: #888;
-  transition: color 0.2s;
-}
-
-.gdrives .toolbar-info:hover {
-  color: #64b5f6;
-}
-
-.gdrives .toolbar-info svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.gdrives .toolbar-tooltip {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  background: #252525;
-  border: 1px solid #424242;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  color: #ccc;
-  font-size: 0.85rem;
-  width: 300px;
-  max-width: 90vw;
-  line-height: 1.4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 100;
-  white-space: normal;
-}
-
-.gdrives .toolbar-info:hover .toolbar-tooltip {
-  opacity: 1;
 }
 
 .gdrives .toolbar-filters,
@@ -87,12 +23,6 @@
 .gdrives .filter-buttons,
 .gdrives .toolbar-divider {
   display: none; /* No longer used in toolbar */
-}
-
-.gdrives .action-buttons {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 /* Drives controls bar: filter pills + sort, sits above the drive cards */
@@ -215,46 +145,6 @@
   transform: scale(0.98);
 }
 
-.gdrives .btn-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.5rem 1rem;
-  min-width: 185px;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-  white-space: nowrap;
-  color: #fff;
-}
-
-.gdrives .btn-pair {
-  display: flex;
-  gap: 0.5rem;
-  width: 185px;
-  flex-shrink: 0;
-}
-
-.gdrives .btn-toolbar.btn-toolbar-link {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  border: 1px solid #4b5563;
-  border-radius: 6px;
-  background: #424242;
-  color: #fff;
-  padding: 0.45rem 0.25rem;
-  font-size: 0.85rem;
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-}
-
-.gdrives .btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
-  background: #555;
-}
-
 .gdrives .btn-toolbar.btn-reload {
   display: flex;
   align-items: center;
@@ -298,45 +188,8 @@
   cursor: not-allowed;
 }
 
-/* Collapse toolbar to column on medium screens */
-@media (max-width: 1100px) {
-  .gdrives .toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.6rem;
-  }
-
-  .gdrives .action-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 185px);
-    justify-content: start;
-    width: 100%;
-  }
-
-  .gdrives .btn-pair {
-    width: 185px;
-  }
-}
-
 /* Mobile: full-width single column */
 @media (max-width: 550px) {
-  .gdrives .toolbar {
-    padding: 0.5rem;
-  }
-
-  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
-  .gdrives .toolbar-tooltip {
-    display: none;
-  }
-
-  .gdrives .action-buttons {
-    grid-template-columns: 1fr;
-  }
-
-  .gdrives .btn-pair {
-    width: 100%;
-  }
-
   .gdrives .drives-controls {
     gap: 0.5rem;
   }
@@ -820,4 +673,47 @@
   color: #e5e7eb;
   letter-spacing: 0.02em;
   border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
+/* Posters | Artwork top tabs (shares styling with .poster-manager-tabs via globals.css) */
+.gdrives-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0;
+}
+
+/* Artwork drives */
+.drive-badge-artwork {
+  background-color: rgba(245, 158, 11, 0.16);
+  color: #e5e7eb;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.artwork-type-counts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  font-size: 0.72rem;
+  color: #9aa0a6;
+  margin: 0;
+}
+
+.artwork-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  color: #888;
+  padding: 3rem 1rem;
+}
+
+.artwork-empty code {
+  background-color: #2a2a2a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
 }

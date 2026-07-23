@@ -2063,6 +2063,30 @@ details[open] .feature-events-summary::before {
   border: 1px solid rgba(244, 67, 54, 0.25);
 }
 
+.orphaned-asset-type {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.4rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.orphaned-asset-type--poster {
+  background: rgba(149, 117, 205, 0.15);
+  color: #b39ddb;
+  border: 1px solid rgba(149, 117, 205, 0.3);
+}
+
+.orphaned-asset-type--artwork {
+  background: rgba(77, 182, 172, 0.15);
+  color: #4db6ac;
+  border: 1px solid rgba(77, 182, 172, 0.3);
+}
+
 
 /* Library Selection Styles (used in modals) */
 .library-list {

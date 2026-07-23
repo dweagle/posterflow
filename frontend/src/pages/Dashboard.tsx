@@ -1,11 +1,20 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, type Job } from '../api/client'
+import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, getArtworkUnmatchedStats, type ArtworkUnmatchedStats, type ArtworkType, type UnmatchedStats, type Job } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X, CircleStop } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './Dashboard.css'
+
+// Coverage card scopes — posters stays the default; the rest are the artwork types.
+type CoverageScope = 'posters' | ArtworkType
+const COVERAGE_SCOPES: { key: CoverageScope; label: string; title: string; noun: string }[] = [
+  { key: 'posters', label: 'Posters', title: 'Poster Coverage', noun: 'posters' },
+  { key: 'logo', label: 'Logos', title: 'Logo Coverage', noun: 'logos' },
+  { key: 'background', label: 'Backgrounds', title: 'Background Coverage', noun: 'backgrounds' },
+  { key: 'squareart', label: 'Square Art', title: 'Square Art Coverage', noun: 'square art' },
+]
 
 // Drive-sync jobs use dynamic type strings (see backend models/job.py job_type_sync_* helpers)
 const isDriveSyncJobType = (jobType: string): boolean =>
@@ -32,6 +41,8 @@ function Dashboard() {
   const [flowRunning, setFlowRunning] = useState(false)
   const [borderRunning, setBorderRunning] = useState(false)
   const [unmatchedRunning, setUnmatchedRunning] = useState(false)
+  const [artworkUnmatched, setArtworkUnmatched] = useState<ArtworkUnmatchedStats | null>(null)
+  const [coverageScope, setCoverageScope] = useState<CoverageScope>('posters')
   const [renameRunning, setRenameRunning] = useState(false)
   const [queuePopoverOpen, setQueuePopoverOpen] = useState(false)
   const [displayJobProgress, setDisplayJobProgress] = useState(0)
@@ -56,24 +67,34 @@ function Dashboard() {
     fetchIdarrTargets()
     fetchRecentPosters()
     fetchActivityStats()
+    getArtworkUnmatchedStats().then(setArtworkUnmatched).catch(() => {})
     return undefined
   }, [])
 
   // Refresh the recently-synced carousel when a workflow or drive sync finishes
   useEffect(() => {
     let shouldRefresh = false
+    let shouldRefreshArtwork = false
     jobs.forEach(job => {
       const key = `${job.job_type}_${job.id}`
       const previousStatus = lastSyncJobStatusRef.current[key]
       const isTerminal = job.status === 'completed' || job.status === 'failed'
-      if (isTerminal && previousStatus && previousStatus !== job.status &&
-          (job.job_type === 'Poster Workflow' || isDriveSyncJobType(job.job_type))) {
-        shouldRefresh = true
+      if (isTerminal && previousStatus && previousStatus !== job.status) {
+        if (job.job_type === 'Poster Workflow' || isDriveSyncJobType(job.job_type)) {
+          shouldRefresh = true
+        }
+        // The unified detection refreshes artwork coverage too.
+        if (job.job_type === 'Poster Workflow' || job.job_type === 'Unmatched Detection') {
+          shouldRefreshArtwork = true
+        }
       }
       lastSyncJobStatusRef.current[key] = job.status
     })
     if (shouldRefresh) {
       fetchRecentPosters()
+    }
+    if (shouldRefreshArtwork) {
+      getArtworkUnmatchedStats().then(setArtworkUnmatched).catch(() => {})
     }
   }, [jobs])
 
@@ -189,11 +210,11 @@ function Dashboard() {
         const config = await getPosterConfig()
         const result = await startPosterRename(config)
         if (result.job_id) {
-          showToast('Poster Renamer started!', 'success')
+          showToast('Asset Renamer started!', 'success')
         }
       } catch (error) {
-        console.error('Error starting Poster Renamer:', error)
-        showToast(getApiErrorMessage(error, 'Failed to start Poster Renamer'), 'error')
+        console.error('Error starting Asset Renamer:', error)
+        showToast(getApiErrorMessage(error, 'Failed to start Asset Renamer'), 'error')
       }
     })
   }
@@ -428,6 +449,21 @@ function Dashboard() {
     .sort((a, b) => a.id - b.id)
   const displayJob = runningJobs[0] || queuedJobs[0] || null
 
+  // Coverage card: posters is front-and-center; the switch buttons swap in the artwork types.
+  const activeScope = COVERAGE_SCOPES.find(s => s.key === coverageScope) ?? COVERAGE_SCOPES[0]
+  const activeCoverage: UnmatchedStats | null = coverageScope === 'posters'
+    ? (unmatchedStats ?? null)
+    : (artworkUnmatched ? artworkUnmatched[coverageScope] : null)
+  const coverageAvailable = Boolean(unmatchedStats?.last_run) || Boolean(artworkUnmatched?.last_run)
+  const coverageRows = activeCoverage?.summary
+    ? [
+        { label: 'Movies', s: activeCoverage.summary.movies },
+        { label: 'Series', s: activeCoverage.summary.series },
+        { label: 'Seasons', s: activeCoverage.summary.seasons },
+        { label: 'Collections', s: activeCoverage.summary.collections },
+      ].filter(r => r.s && r.s.total > 0)
+    : []
+
   const sortedSchedules = [...schedules].sort((a, b) => {
     // Sort chronologically by next_run, nulls (disabled/no schedule) at end
     const aTime = a.next_run ? new Date(a.next_run).getTime() : Number.POSITIVE_INFINITY
@@ -500,7 +536,7 @@ function Dashboard() {
           </button>
           <button className="quick-action-btn" onClick={handleRunPosterRename} disabled={renameRunning}>
             <FolderSync size={18} className="icon-rename" />
-            <span className="action-title">Poster Renamer</span>
+            <span className="action-title">Asset Renamer</span>
           </button>
           <button className="quick-action-btn" onClick={handleRunBorderReplacer} disabled={borderRunning}>
             <Play size={18} className="icon-border" />
@@ -513,72 +549,65 @@ function Dashboard() {
         </div>
       </div>
 
-      {unmatchedStats && unmatchedStats.summary && unmatchedStats.last_run && (
+      {coverageAvailable && (
         <div className="poster-coverage-card">
+          <div className="coverage-tabs" role="tablist" aria-label="Coverage type">
+            {COVERAGE_SCOPES.map(s => (
+              <button
+                key={s.key}
+                role="tab"
+                aria-selected={coverageScope === s.key}
+                className={`coverage-scope-btn ${coverageScope === s.key ? 'active' : ''}`}
+                onClick={() => setCoverageScope(s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
           <div className="card-header">
             <div className="coverage-header-left">
-              <h2>Poster Coverage</h2>
-              <p className="last-checked">Last checked: {new Date(unmatchedStats.last_run).toLocaleString()}</p>
+              <h2>{activeScope.title}</h2>
+              <p className="last-checked">
+                {activeCoverage?.last_run ? `Last checked: ${new Date(activeCoverage.last_run).toLocaleString()}` : 'Not checked yet'}
+              </p>
             </div>
             <div className="coverage-header-center">
-              <div className="coverage-total-inline">
-                <div className="total-percent">{formatPercent(unmatchedStats.summary.grand_total.percent_complete)}%</div>
-                <div className="total-stats">
-                  <span>{unmatchedStats.summary.grand_total.total - unmatchedStats.summary.grand_total.unmatched} / {unmatchedStats.summary.grand_total.total} items</span>
+              {activeCoverage?.summary && (
+                <div className="coverage-total-inline">
+                  <div className="total-percent">{formatPercent(activeCoverage.summary.grand_total.percent_complete)}%</div>
+                  <div className="total-stats">
+                    <span>{activeCoverage.summary.grand_total.total - activeCoverage.summary.grand_total.unmatched} / {activeCoverage.summary.grand_total.total} items</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="coverage-header-right">
               <button
                 className="view-details-link"
-                onClick={() => navigate('/poster-manager', { state: { activeTab: 'unmatched' } })}
+                onClick={() => navigate('/poster-manager', { state: { activeTab: 'unmatched', unmatchedScope: coverageScope } })}
               >
                 View Details →
               </button>
             </div>
           </div>
-          <div className="coverage-grid">
-            {unmatchedStats.summary.movies && unmatchedStats.summary.movies.total > 0 && (
-              <div className="coverage-item">
-                <div className="coverage-label">Movies</div>
-                <div className="coverage-bar"><div className="coverage-fill" style={{ width: `${unmatchedStats.summary.movies.percent_complete}%` }} /></div>
-                <div className="coverage-stats">
-                  <span className="matched">{unmatchedStats.summary.movies.total - unmatchedStats.summary.movies.unmatched} with posters</span>
-                  <span className="missing">{unmatchedStats.summary.movies.unmatched} missing</span>
+          {coverageRows.length > 0 ? (
+            <div className="coverage-grid">
+              {coverageRows.map(r => (
+                <div key={r.label} className="coverage-item">
+                  <div className="coverage-label">{r.label}</div>
+                  <div className="coverage-bar"><div className="coverage-fill" style={{ width: `${r.s.percent_complete}%` }} /></div>
+                  <div className="coverage-stats">
+                    <span className="matched">{r.s.total - r.s.unmatched} with {activeScope.noun}</span>
+                    <span className="missing">{r.s.unmatched} missing</span>
+                  </div>
                 </div>
-              </div>
-            )}
-            {unmatchedStats.summary.series && unmatchedStats.summary.series.total > 0 && (
-              <div className="coverage-item">
-                <div className="coverage-label">Series</div>
-                <div className="coverage-bar"><div className="coverage-fill" style={{ width: `${unmatchedStats.summary.series.percent_complete}%` }} /></div>
-                <div className="coverage-stats">
-                  <span className="matched">{unmatchedStats.summary.series.total - unmatchedStats.summary.series.unmatched} with posters</span>
-                  <span className="missing">{unmatchedStats.summary.series.unmatched} missing</span>
-                </div>
-              </div>
-            )}
-            {unmatchedStats.summary.seasons && unmatchedStats.summary.seasons.total > 0 && (
-              <div className="coverage-item">
-                <div className="coverage-label">Seasons</div>
-                <div className="coverage-bar"><div className="coverage-fill" style={{ width: `${unmatchedStats.summary.seasons.percent_complete}%` }} /></div>
-                <div className="coverage-stats">
-                  <span className="matched">{unmatchedStats.summary.seasons.total - unmatchedStats.summary.seasons.unmatched} with posters</span>
-                  <span className="missing">{unmatchedStats.summary.seasons.unmatched} missing</span>
-                </div>
-              </div>
-            )}
-            {unmatchedStats.summary.collections && unmatchedStats.summary.collections.total > 0 && (
-              <div className="coverage-item">
-                <div className="coverage-label">Collections</div>
-                <div className="coverage-bar"><div className="coverage-fill" style={{ width: `${unmatchedStats.summary.collections.percent_complete}%` }} /></div>
-                <div className="coverage-stats">
-                  <span className="matched">{unmatchedStats.summary.collections.total - unmatchedStats.summary.collections.unmatched} with posters</span>
-                  <span className="missing">{unmatchedStats.summary.collections.unmatched} missing</span>
-                </div>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="coverage-empty">
+              No {activeScope.label.toLowerCase()} coverage yet — enable {activeScope.label} in the Asset Renamer's Include, then run Detect Unmatched.
+            </div>
+          )}
         </div>
       )}
 

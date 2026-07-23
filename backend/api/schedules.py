@@ -17,6 +17,7 @@ IDARR_SCOPE_PATTERN = re.compile(r"^idarr_target_(\d+)$")
 VALID_JOB_TYPES = {
     "gdrive_sync",
     "sync",  # backward compatibility
+    "artwork_sync",  # artwork drives sync separately from poster drives
     "poster_workflow",
     "poster_renamer",
     "unmatched_assets",

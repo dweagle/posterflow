@@ -144,6 +144,7 @@ export interface MakerIdarrConfig {
   limit: number | null
   frequency_days: number
   tvdb_frequency: number
+  duplicates_retention_days: number
   force_sync_after_run: boolean
   show_in_workflow: boolean
 }
@@ -227,6 +228,7 @@ export interface MakerIdarrPendingItem {
   conflict_files?: string[] | null
   conflict_file_previews?: (string | null)[] | null
   conflict_file_tracked?: boolean[] | null
+  conflict_target_name?: string | null
   suggested_ids?: {
     tmdb_id?: number | null
     tvdb_id?: number | null
@@ -379,6 +381,14 @@ export const getGdriveStoragePath = async (): Promise<{ path: string }> => {
 
 export const saveGdriveStoragePath = async (path: string): Promise<{ path: string }> => {
   return postData('/api/settings/gdrive-storage', { path })
+}
+
+export const getArtworkGdriveStoragePath = async (): Promise<{ path: string }> => {
+  return getData('/api/settings/artwork-gdrive-storage')
+}
+
+export const saveArtworkGdriveStoragePath = async (path: string): Promise<{ path: string }> => {
+  return postData('/api/settings/artwork-gdrive-storage', { path })
 }
 
 export const getMakerIdarrConfig = async (): Promise<MakerIdarrConfig> => {

@@ -1,11 +1,11 @@
 """Tests for util/posters/match.py"""
-import pytest
-
 from util.posters.index import build_search_index, create_new_empty_index
 from util.posters.match import (
     NO_SHARED_ID,
+    YEAR_MISMATCH,
     compare_strings,
     collection_title_variants,
+    handle_series_match,
     is_match,
     match_assets_to_media,
     match_tmdb_collection,
@@ -135,6 +135,31 @@ class TestIsMatchByIds:
         media = self._base_media(tmdb_id=99999)
         matched, _ = is_match(asset, media)
         assert matched is False
+
+    def test_tv_artwork_never_tmdb_matches_a_movie(self):
+        """TMDB movie and TV ids are separate namespaces: movie 114478 is Starship Troopers
+        Invasion, tv 114478 is Star Wars Visions. A type-less artwork box carrying a tvdb id
+        is TV, so its tmdb must not match the movie."""
+        artwork = self._base_asset(title="Star Wars Visions", normalized_title="starwarsvisions",
+                                   tmdb_id=114478, tvdb_id=393190, imdb_id="tt13622982", type=None)
+        movie = self._base_media(title="Starship Troopers Invasion", normalized_title="starshiptroopersinvasion",
+                                 tmdb_id=114478, imdb_id="tt2085930", type="movies", year=2012)
+        matched, _ = is_match(artwork, movie)
+        assert matched is False
+
+        series = self._base_media(title="Star Wars Visions", normalized_title="starwarsvisions",
+                                  tmdb_id=None, tvdb_id=393190, type="series", year=2021)
+        matched, reason = is_match(artwork, series)
+        assert matched is True
+        assert "tvdb_id" in reason
+
+    def test_tvdbless_artwork_still_tmdb_matches_a_movie(self):
+        """No tvdb id on the artwork means its namespace is unknown — keep matching movies."""
+        artwork = self._base_asset(tmdb_id=2567, imdb_id="tt0338751", type=None)
+        movie = self._base_media(tmdb_id=2567, type="movies")
+        matched, reason = is_match(artwork, movie)
+        assert matched is True
+        assert "tmdb_id" in reason
 
     def test_matches_by_tvdb_id(self):
         asset = {"title": "A", "tvdb_id": 888, "normalized_title": "a"}
@@ -408,3 +433,148 @@ class TestNoSharedId:
 
         assert len(result["series"]) == 1
         assert "share no id" not in logged
+
+
+# ---------------------------------------------------------------------------
+# collection tmdb_id_ref: usable by artwork, not by posters
+# ---------------------------------------------------------------------------
+
+class TestCollectionRefIsArtworkOnly:
+    """A collection's tmdb sits on tmdb_id_ref so collection POSTERS stay title-matched.
+    Artwork (a type-less asset) may use it: its filename carries the id and its title
+    deliberately won't fuzzy-match ("Naked Gun" vs "The Naked Gun Collection")."""
+
+    def _media(self):
+        return {"type": "collections", "title": "Naked Gun", "tmdb_id_ref": 37139,
+                "folder": "Naked Gun", "normalized_title": "nakedgun"}
+
+    def _asset(self, asset_type):
+        return {"type": asset_type, "title": "The Naked Gun Collection", "year": None,
+                "tmdb_id": 37139, "tvdb_id": None, "imdb_id": None,
+                "normalized_title": "thenakedguncollection"}
+
+    def test_artwork_matches_the_collection_by_ref(self):
+        matched, reason = is_match(self._asset(None), self._media())
+        assert matched is True
+        assert reason == "by tmdb_id"
+
+    def test_collection_poster_does_not_match_by_ref(self):
+        # A typed asset must NOT reach the id branch off tmdb_id_ref — otherwise the id lock
+        # engages for collections and their title fallback stops running.
+        matched, _ = is_match(self._asset("collections"), self._media())
+        assert matched is False
+
+    def test_collection_poster_still_matches_by_title(self):
+        asset = self._asset("collections")
+        asset["title"] = "Naked Gun"
+        asset["normalized_title"] = "nakedgun"
+        asset["tmdb_id"] = None
+        matched, _ = is_match(asset, self._media())
+        assert matched is True
+
+    def test_disagreeing_ref_falls_back_to_titles(self):
+        """The Jungle Book loop: enrichment stored a different collection ref than the artwork's
+        tmdb. The ref is a hint, not a lock — titles must still get their say, or cleanup's
+        artwork-only pass rejects what the renamer's typed-box pass title-matched and placed."""
+        media = {"type": "collections", "title": "The Jungle Book", "tmdb_id_ref": 12345,
+                 "folder": "The Jungle Book", "normalized_title": "thejunglebook",
+                 "alternate_titles": ["The Jungle Book Collection"]}
+        artwork = {"type": None, "title": "The Jungle Book Collection", "year": None,
+                   "tmdb_id": 97459, "tvdb_id": None, "imdb_id": None,
+                   "normalized_title": "thejunglebookcollection"}
+        matched, reason = is_match(artwork, media)
+        assert matched is True
+        assert "alternate title" in reason
+
+
+# ---------------------------------------------------------------------------
+# season pruning keeps files and slots in step
+# ---------------------------------------------------------------------------
+
+class TestHandleSeriesMatchPrunesSlots:
+    """files and slots must agree after a match, so walking either places the same seasons."""
+
+    def _series_box(self):
+        from util.data.construct import create_series
+        return create_series(
+            title="Show", year=2020, tmdb_id=None, tvdb_id=99, imdb_id=None,
+            normalized_title="show",
+            files=[f"/d/Show (2020){s}.jpg" for s in ("", " - Season 01", " - Season 02")],
+            parent_folder="/d/Show (2020)",
+        )
+
+    def test_slots_lose_the_seasons_files_lose(self):
+        box = self._series_box()
+        handle_series_match(box, [1], box["season_numbers"])
+        assert sorted(box["slots"]["seasons"]) == [1]
+        assert not any("Season 02" in f for f in box["files"])
+
+    def test_kept_seasons_survive_in_both(self):
+        box = self._series_box()
+        handle_series_match(box, [1, 2], box["season_numbers"])
+        assert sorted(box["slots"]["seasons"]) == [1, 2]
+        assert len(box["files"]) == 3
+
+    def test_poster_slot_is_untouched_by_pruning(self):
+        box = self._series_box()
+        handle_series_match(box, [], box["season_numbers"])
+        assert box["slots"]["seasons"] == {}
+        assert box["slots"]["poster"] == "/d/Show (2020).jpg"
+
+
+# ---------------------------------------------------------------------------
+# year near miss (YEAR_MISMATCH)
+# ---------------------------------------------------------------------------
+
+class TestYearMismatch(TestNoSharedId):
+    """A title agreed but no year lined up. Usually the *arr path lacks "(year)", so
+    folder_year can't corroborate and every title criterion dies."""
+
+    def test_yearless_poster_vs_dated_library_is_near_miss(self):
+        asset = self._series(year=None, files=["/p/RIPLEY.jpg"])
+        media = self._series(folder="/tv/RIPLEY")
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == YEAR_MISMATCH
+
+    def test_matching_year_is_not_near_miss(self):
+        asset = self._series(files=["/p/RIPLEY (2024).jpg"])
+        media = self._series(folder="/tv/RIPLEY (2024)")
+        matched, reason = is_match(asset, media)
+        assert matched is True
+
+    def test_dated_arr_folder_rescues_a_stale_primary_year(self):
+        # folder_year is a third chance: the *arr "year" field disagrees but the path agrees.
+        asset = self._series(year=2024)
+        media = self._series(year=2023, folder="/tv/RIPLEY (2024)")
+        matched, reason = is_match(asset, media)
+        assert matched is True
+
+    def test_different_titles_are_not_year_near_miss(self):
+        asset = self._series(title="Poirot", normalized_title="poirot", year=None)
+        media = self._series(folder="/tv/RIPLEY")
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ""
+
+    def test_year_near_miss_reported_with_yearless_path_note(self):
+        asset = self._series(year=None, files=["/p/RIPLEY.jpg"])
+        media = self._series(folder="/tv/RIPLEY")
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert result["series"] == []
+        assert "no year lined up" in logged
+        assert "poster  year=None" in logged
+        assert "library year=2024" in logged
+        assert "*arr path has no (year): RIPLEY" in logged
+
+    def test_id_match_still_wins_over_year_gap(self):
+        # Regression: an id-tagged poster must match regardless of the year gap.
+        asset = self._series(year=None, tvdb_id=372727, files=["/p/RIPLEY.jpg"])
+        media = self._series(tvdb_id=372727, folder="/tv/RIPLEY")
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert len(result["series"]) == 1
+        assert "no year lined up" not in logged

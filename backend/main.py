@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -12,6 +12,7 @@ from core.config import settings
 from core.scheduler import start_scheduler, stop_scheduler
 from database import get_db, SessionLocal
 from api.drives import router as drives_router, load_drives_from_json
+from api.artwork_drives import router as artwork_drives_router, load_artwork_drives_from_json
 from api.setup import router as setup_router
 from api.settings import router as settings_router
 from api.auth import router as auth_router
@@ -22,15 +23,19 @@ from api.jobs import router as jobs_router
 from api.job_logs import router as job_logs_router
 from api.schedules import router as schedules_router
 from api.poster_manager import router as poster_manager_router
+from api.artwork_unmatched import router as artwork_unmatched_router
+from api.asset_rename import router as asset_rename_router
 from api.plex_upload import router as plex_upload_router
 from api.backup import router as backup_router
 from api.database import router as database_router
 from api.idarr import router as idarr_router
 from api.maker_tools import router as maker_tools_router
+from api.artwork_finder import router as artwork_finder_router
 from api.stats import router as stats_router
 from api.scripts import router as scripts_router
 from api.community import router as community_router
 from services.drive_loader import load_drives_data
+from services.artwork_drive_loader import load_artwork_drives_data
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -242,10 +247,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _storage_db = SessionLocal()
             try:
                 storage_setting = _get_setting(_storage_db, "gdrive_storage_path")
-                if storage_setting and storage_setting.value and storage_setting.value.strip():
-                    custom_path = Path(storage_setting.value.strip())
-                    settings.gdrive_dir = custom_path
-                    log_info(LogTags.STARTUP, f"Using custom GDrive storage path: {custom_path}")
+                poster_custom = bool(storage_setting and storage_setting.value and storage_setting.value.strip())
+                if poster_custom:
+                    settings.gdrive_dir = Path(storage_setting.value.strip())
+
+                artwork_storage_setting = _get_setting(_storage_db, "artwork_gdrive_storage_path")
+                artwork_custom = bool(artwork_storage_setting and artwork_storage_setting.value and artwork_storage_setting.value.strip())
+                if artwork_custom:
+                    settings.artwork_gdrive_dir = Path(artwork_storage_setting.value.strip())
+
+                # Always report the effective storage paths so both poster and artwork show at startup.
+                log_info(LogTags.STARTUP, f"Poster storage path: {settings.gdrive_dir}{' (custom)' if poster_custom else ''}")
+                log_info(LogTags.STARTUP, f"Artwork storage path: {settings.artwork_gdrive_dir}{' (custom)' if artwork_custom else ''}")
             finally:
                 _storage_db.close()
         except Exception as e:
@@ -267,6 +280,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 persisted_db.close()
         except Exception as e:
             log_warning(LogTags.STARTUP, f"Could not restore persisted debug setting: {e}")
+
+        # Prune Plex library settings orphaned by server renames that predate the
+        # rename migration (stale instance_name entries showing in Library Targeting)
+        try:
+            from api.settings import cleanup_stale_plex_name_keys
+            cleanup_db = SessionLocal()
+            try:
+                cleanup_stale_plex_name_keys(cleanup_db)
+                cleanup_db.commit()
+            finally:
+                cleanup_db.close()
+        except Exception as e:
+            log_warning(LogTags.STARTUP, f"Could not clean up stale Plex library settings: {e}")
 
         # Clean up stale jobs from previous runs
         try:
@@ -307,9 +333,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             db = next(get_db())
             try:
                 result = load_drives_from_json(db, drives_data)
-                if result.get("success", True):
-                    log_success(LogTags.STARTUP, f"Drives synced: {result.get('added', 0)} added, {result.get('updated', 0)} updated, {result.get('deprecated', 0)} deprecated, {result.get('reactivated', 0)} reactivated")
-                else:
+                # load_drives_from_json already logs the sync summary (DRIVES tag); only flag failures here.
+                if not result.get("success", True):
                     log_warning(LogTags.STARTUP, f"Drive loading issues: {result}")
             finally:
                 db.close()
@@ -317,6 +342,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             log_error(LogTags.STARTUP, f"Failed to load drives: {e}\\n{traceback.format_exc()}")
             log_warning(LogTags.STARTUP, "Application will continue, but drives may not be available")
+
+        # Load artwork drives from hybrid source (remote with local fallback)
+        try:
+            log_info(LogTags.STARTUP, "Loading artwork drives configuration...")
+            artwork_drives_data = load_artwork_drives_data()
+
+            db = next(get_db())
+            try:
+                result = load_artwork_drives_from_json(db, artwork_drives_data)
+                # load_artwork_drives_from_json already logs the sync summary (DRIVES tag); only flag failures here.
+                if not result.get("success", True):
+                    log_warning(LogTags.STARTUP, f"Artwork drive loading issues: {result}")
+            finally:
+                db.close()
+
+        except Exception as e:
+            log_error(LogTags.STARTUP, f"Failed to load artwork drives: {e}\\n{traceback.format_exc()}")
+            log_warning(LogTags.STARTUP, "Application will continue, but artwork drives may not be available")
 
         # Start APScheduler for background jobs
         try:
@@ -440,6 +483,7 @@ async def allow_private_network_access(request: Request, call_next):
 # Include routers
 app.include_router(auth_router)
 app.include_router(drives_router)
+app.include_router(artwork_drives_router)
 app.include_router(setup_router)
 app.include_router(settings_router)
 app.include_router(test_router)
@@ -448,11 +492,14 @@ app.include_router(jobs_router)
 app.include_router(job_logs_router)
 app.include_router(schedules_router)
 app.include_router(poster_manager_router)
+app.include_router(artwork_unmatched_router)
+app.include_router(asset_rename_router)
 app.include_router(plex_upload_router)
 app.include_router(backup_router)
 app.include_router(database_router)
 app.include_router(idarr_router)
 app.include_router(maker_tools_router)
+app.include_router(artwork_finder_router)
 app.include_router(stats_router)
 app.include_router(scripts_router)
 app.include_router(community_router)

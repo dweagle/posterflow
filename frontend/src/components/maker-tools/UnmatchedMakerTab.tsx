@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, Info, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
+import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
 import {
   checkTmdbPosterAvailability,
   PosterAvailability,
@@ -11,6 +11,8 @@ import {
 } from '../../api/client'
 import TmdbItemCard, { PsdConfig } from './TmdbItemCard'
 import { useToast } from '../Toast'
+import Toolbar from '../Toolbar'
+import ArtworkUnmatchedMakerPanel from './ArtworkUnmatchedMakerPanel'
 
 type Category = 'movie' | 'series' | 'season' | 'collection'
 type FilterTab = 'all' | Category
@@ -69,7 +71,7 @@ const buildResult = (item: FlatItem, tmdbId: number, posterUrl: string | null, i
 
 // Flatten the unmatched detection result into one card per piece of missing work.
 // A series can yield both a "series" row (missing main poster) and a "season" row
-// (missing season posters), matching how the Poster Manager modal splits them.
+// (missing season posters), matching how the Asset Manager modal splits them.
 function flatten(stats: UnmatchedStats): FlatItem[] {
   const out: FlatItem[] = []
 
@@ -256,6 +258,14 @@ type UnmatchedMakerTabProps = {
 
 export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: UnmatchedMakerTabProps) {
   const navigate = useNavigate()
+  // Posters | Artwork sub-tabs
+  const [scope, setScope] = useState<'posters' | 'artwork'>(
+    () => (localStorage.getItem('posterflow.makerTools.unmatchedScope') === 'artwork' ? 'artwork' : 'posters'),
+  )
+  const selectScope = (next: 'posters' | 'artwork') => {
+    setScope(next)
+    localStorage.setItem('posterflow.makerTools.unmatchedScope', next)
+  }
   const [filter, setFilter] = useState<FilterTab>('all')
   const [query, setQuery] = useState('')
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
@@ -317,26 +327,32 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
 
   return (
     <div className="maker-tools-panel">
-      <div className="toolbar">
-        <div className="toolbar-title">
-          <h2>Unmatched Assets</h2>
-          <div className="toolbar-info">
-            <Info size={16} />
-            <div className="toolbar-tooltip">Your library items missing posters, from the last Unmatched Detection run. Work each one as a poster-maker card — browse images and export a PSD without leaving this page.</div>
-          </div>
-        </div>
-        <div className="action-buttons">
-          <button className="btn-toolbar" type="button" onClick={goToDetection} title="Run Unmatched Detection in Poster Manager">
-            <RefreshCw size={16} /> Detect Unmatched
-          </button>
-        </div>
+      <Toolbar
+        title="Unmatched Assets"
+        description="Your library items missing posters, from the last Unmatched Detection run. Work each one as a poster-maker card — browse images and export a PSD without leaving this page."
+      >
+        <button className="btn-toolbar" type="button" onClick={goToDetection} title="Run Unmatched Detection in Asset Manager">
+          <RefreshCw size={16} /> Detect Unmatched
+        </button>
+      </Toolbar>
+
+      {/* Posters | Artwork sub-tabs */}
+      <div className="maker-subtabs" role="tablist" aria-label="Unmatched scope">
+        <button type="button" role="tab" aria-selected={scope === 'posters'} className={scope === 'posters' ? 'active' : ''} onClick={() => selectScope('posters')}>
+          Posters
+        </button>
+        <button type="button" role="tab" aria-selected={scope === 'artwork'} className={scope === 'artwork' ? 'active' : ''} onClick={() => selectScope('artwork')}>
+          Artwork
+        </button>
       </div>
 
-      {!unmatchedStats || !unmatchedStats.last_run ? (
+      {scope === 'artwork' ? (
+        <ArtworkUnmatchedMakerPanel />
+      ) : !unmatchedStats || !unmatchedStats.last_run ? (
         <div className="unmatched-maker-empty">
           <AlertCircle size={44} />
           <h3>No unmatched detection results</h3>
-          <p>Run Unmatched Detection in Poster Manager to populate this list, then come back to make posters.</p>
+          <p>Run Unmatched Detection in Asset Manager to populate this list, then come back to make posters.</p>
           <button className="btn-toolbar btn-primary" type="button" onClick={goToDetection}>
             <RefreshCw size={16} /> Go to Detection
           </button>

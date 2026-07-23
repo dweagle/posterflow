@@ -3,7 +3,7 @@ import io
 import pytest
 
 from services.rclone import RcloneService
-from core.config import settings
+from core.config import Settings, settings
 
 
 def test_rclone_service_creates_minimal_config(monkeypatch, tmp_path):
@@ -346,6 +346,149 @@ class TestUploadFolderProgress:
         captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
         svc.upload_folder(src, "drive-123")
         assert "--check-first" in captured["args"]
+
+    def test_upload_tuning_flags_come_from_settings(self, monkeypatch, tmp_path):
+        """Upload throughput is latency-bound (~1s round-trip per small file), so it tracks
+        --transfers almost linearly. That makes it a knob rather than a constant: Google
+        documents ~3 sustained writes/sec but does not appear to enforce it, so the safe
+        move is a conservative default that can be raised by env and measured."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
+        svc.upload_folder(src, "drive-123")
+        args = captured["args"]
+
+        assert f"--drive-chunk-size={settings.rclone_upload_chunk_size}" in args
+        assert "--drive-stop-on-upload-limit" in args
+        assert f"--transfers={settings.rclone_upload_transfers}" in args
+
+    def test_upload_transfers_default_stays_conservative(self):
+        """The default ships to every user, on quotas we cannot see. Raising it is an opt-in
+        experiment via env, not a new baseline for everyone."""
+        assert Settings().rclone_upload_transfers == 4
+
+    def test_upload_rate_knobs_default_to_the_shared_download_values(self, monkeypatch, tmp_path):
+        """Unset upload knobs must not silently slow uploads below the shared setting."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        monkeypatch.setattr(settings, "rclone_tps_limit", 12)
+        monkeypatch.setattr(settings, "rclone_pacer_min_sleep", "60ms")
+        monkeypatch.setattr(settings, "rclone_upload_tps_limit", None)
+        monkeypatch.setattr(settings, "rclone_upload_pacer_min_sleep", None)
+        captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
+        svc.upload_folder(src, "drive-123")
+
+        assert "--tpslimit=12" in captured["args"]
+        assert "--drive-pacer-min-sleep=60ms" in captured["args"]
+
+    def test_upload_rate_knobs_override_without_touching_downloads(self, monkeypatch, tmp_path):
+        """Uploads cost 50 quota units vs 200 for a download, so they can run hotter. Raising
+        the upload knobs must not raise the download path along with them."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        monkeypatch.setattr(settings, "rclone_tps_limit", 12)
+        monkeypatch.setattr(settings, "rclone_pacer_min_sleep", "60ms")
+        monkeypatch.setattr(settings, "rclone_upload_tps_limit", 30)
+        monkeypatch.setattr(settings, "rclone_upload_pacer_min_sleep", "30ms")
+
+        captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
+        svc.upload_folder(src, "drive-123")
+        assert "--tpslimit=30" in captured["args"]
+        assert "--drive-pacer-min-sleep=30ms" in captured["args"]
+
+        # The download path must still be on the conservative shared numbers.
+        captured = self._make_popen(monkeypatch, ["There was nothing to transfer"], returncode=0)
+        svc.sync_folder("drive-123", tmp_path / "dst")
+        assert "--tpslimit=12" in captured["args"]
+        assert "--drive-pacer-min-sleep=60ms" in captured["args"]
+
+    def test_check_first_stats_do_not_report_uploading(self, monkeypatch, tmp_path):
+        """--check-first makes rclone print 'Transferred: 0 / 0 Bytes' every second while
+        it is still listing/checking. Reading that as a file count emits an uploading
+        phase at ratio 0, which pins the caller's monotonic progress bar at the uploading
+        floor for the whole run (the 'stuck on checking' bug)."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "poster.jpg").write_text("x")
+
+        output = [
+            "Transferred:   \t         0 / 0 Bytes, -, 0 Bytes/s, ETA -",
+            "Checks:                 0 / 0, -, Listed 1200",
+            "Transferred:   \t         0 / 0 Bytes, -, 0 Bytes/s, ETA -",
+            "Checks:              2142 / 9963, 21%, Listed 19926",
+        ]
+        self._make_popen(monkeypatch, output, returncode=0)
+
+        calls = []
+        svc.upload_folder(src, "drive-123", progress_callback=lambda *a: calls.append(a))
+
+        phases = [c[2] for c in calls]
+        assert "uploading_stats" not in phases, (
+            "nothing has transferred yet; an uploading phase here freezes the progress bar"
+        )
+        assert "listing" in phases and "checking" in phases
+
+    def test_stale_checks_line_stops_reporting_once_transfers_start(self, monkeypatch, tmp_path):
+        """After --check-first finishes, rclone keeps reprinting the final 'Checks:' line in
+        every stats block. Reporting it as the checking phase overwrites the live upload
+        message once a second, so the bar reads 'Checked 5,712/18,618' forever while files
+        are actually uploading."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "poster.jpg").write_text("x")
+
+        output = [
+            # still checking -- this one must report
+            "Checks:              5712 / 18618, 31%, Listed 19926",
+            "INFO  : Local file system at remote: Checks finished, now starting transfers",
+            "INFO  : squareart/Cats (1998) - squareart.jpg: Copied (new)",
+            # rclone keeps reprinting the finished Checks line alongside real transfers
+            "Transferred:            479 / 12906, 3%",
+            "Checks:              5712 / 18618, 31%, Listed 19926",
+            "Transferred:            960 / 12906, 7%",
+            "Checks:              5712 / 18618, 31%, Listed 19926",
+        ]
+        self._make_popen(monkeypatch, output, returncode=0)
+
+        calls = []
+        svc.upload_folder(src, "drive-123", progress_callback=lambda *a: calls.append(a))
+
+        phases = [c[2] for c in calls]
+        # The one real checking report (before transfers began) is fine.
+        assert phases.count("checking") == 1, f"stale Checks lines re-reported: {phases}"
+        # Nothing may report checking again once uploading has started.
+        first_upload = next(i for i, p in enumerate(phases) if p.startswith("uploading"))
+        assert "checking" not in phases[first_upload:], (
+            f"a stale Checks line clobbered the upload message: {phases}"
+        )
+
+    def test_byte_totals_are_not_mistaken_for_file_counts(self, monkeypatch, tmp_path):
+        """The byte line ('1.2 GiB / 5.6 GiB') and the count line ('123 / 456') both start
+        with 'Transferred:'. Only the count may drive progress."""
+        svc = self._service(monkeypatch, tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "poster.jpg").write_text("x")
+
+        output = [
+            "Transferred:   \t  1.2 GiB / 5.6 GiB, 21%, 10.5 MiB/s, ETA 7m",
+            "Transferred:            123 / 456, 27%",
+            "Transferred:   \t        512 / 1024 Bytes, 50%, 128 Bytes/s, ETA 4s",
+        ]
+        self._make_popen(monkeypatch, output, returncode=0)
+
+        calls = []
+        svc.upload_folder(src, "drive-123", progress_callback=lambda *a: calls.append(a))
+
+        stats = [c for c in calls if c[2] == "uploading_stats"]
+        assert stats, "a real file count must still report progress"
+        # Only the 123/456 count line qualifies -- never 1/5 (GiB) or 512/1024 (Bytes).
+        assert all((c[0], c[1]) == (123, 456) for c in stats)
 
 
 # ---------------------------------------------------------------------------

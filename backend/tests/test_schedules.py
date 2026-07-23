@@ -280,3 +280,70 @@ def test_update_schedule_rejects_invalid_drive_id(client, monkeypatch):
     )
     assert update_response.status_code == 400
     assert "Drive with ID 999999 not found" in update_response.json()["detail"]
+
+
+def test_create_schedule_accepts_artwork_sync_job_type(client, monkeypatch):
+    """Artwork drives sync separately from poster drives, so they schedule separately."""
+    import api.schedules as schedules_module
+
+    monkeypatch.setattr(schedules_module, "update_schedules", lambda: None)
+    monkeypatch.setattr(schedules_module, "get_schedule_next_run", lambda _id: None)
+
+    response = client.post(
+        "/api/schedules/",
+        json={
+            "job_type": "artwork_sync",
+            "name": "Nightly Artwork Sync",
+            "enabled": True,
+            "schedule_type": "daily",
+            "schedule_value": "04:00",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["job_type"] == "artwork_sync"
+
+
+def test_artwork_sync_schedules_are_not_returned_by_the_poster_sync_filter(client, monkeypatch):
+    """gdrive_sync/sync are aliases of each other; artwork_sync is its own type."""
+    import api.schedules as schedules_module
+
+    monkeypatch.setattr(schedules_module, "update_schedules", lambda: None)
+    monkeypatch.setattr(schedules_module, "get_schedule_next_run", lambda _id: None)
+
+    for job_type, name in (("artwork_sync", "Artwork"), ("gdrive_sync", "Posters")):
+        client.post("/api/schedules/", json={
+            "job_type": job_type, "name": name, "enabled": True,
+            "schedule_type": "daily", "schedule_value": "05:00",
+        })
+
+    poster_names = [s["name"] for s in client.get("/api/schedules/?job_type=gdrive_sync").json()]
+    artwork_names = [s["name"] for s in client.get("/api/schedules/?job_type=artwork_sync").json()]
+
+    assert poster_names == ["Posters"]
+    assert artwork_names == ["Artwork"]
+
+
+def test_scheduled_artwork_sync_queues_the_artwork_job(test_db, monkeypatch):
+    """The scheduler wrapper must queue the artwork sync job, not the poster one."""
+    import core.scheduler as scheduler_module
+    from models.artwork_drive import ArtworkDrive
+
+    test_db.add(ArtworkDrive(name="MakerA", drive_id="makerA", subscribed=True))
+    test_db.commit()
+
+    submitted = []
+    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: test_db)
+    monkeypatch.setattr(test_db, "close", lambda: None, raising=False)
+    monkeypatch.setattr(
+        scheduler_module.job_queue, "submit",
+        lambda runner, job_id, *a, **k: submitted.append((runner.__name__, job_id)),
+    )
+
+    scheduler_module.sync_all_artwork_drives_for_schedule()
+
+    assert len(submitted) == 1
+    assert submitted[0][0] == "sync_all_artwork_drives_job"
+
+    from models.job import Job
+    job = test_db.query(Job).filter(Job.id == submitted[0][1]).first()
+    assert job.job_type == "Artwork Sync All (1 drives)"

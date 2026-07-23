@@ -11,14 +11,23 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pathvalidate import is_valid_filename, sanitize_filename
 
-from core.logging import logger, LogTags, log_success, log_error, log_info, log_warning, log_debug, log_section_start, log_section_end
+from core.logging import logger, LogTags, log_success, log_error, log_info, log_warning, log_debug, log_phase, log_section_start, log_section_end
 from models.setting import get_setting, upsert_setting
 from sqlalchemy.orm import Session
 from util.arr.client import create_arr_client
 from util.constants import illegal_chars_regex
-from util.data.construct import generate_title_variants
+from util.data.construct import (
+    generate_title_variants,
+    build_slots,
+    slot_dest_name,
+    SLOT_POSTER,
+    SLOT_SEASON,
+    SLOT_LOGO,
+    SLOT_BACKGROUND,
+    SLOT_SQUARE,
+)
 from util.data.normalization import normalize_titles
-from util.posters.assets import get_assets_files
+from util.posters.assets import get_assets_files, merge_assets
 from util.posters.index import build_search_index, create_new_empty_index
 from util.posters.match import match_assets_to_media, match_tmdb_collection
 
@@ -26,6 +35,67 @@ MediaItem = Dict[str, Any]
 MediaDict = Dict[str, List[MediaItem]]
 RenameProgressCallback = Callable[[int, int, str], None]
 WorkflowProgressCallback = Callable[[str, int, int, str], None]
+
+
+def _slots_from_files(files: List[str]) -> Dict[str, Any]:
+    """Classify a matched item's (already-pruned) files into slots: first non-season file is the
+    poster (later poster variants are dropped), ' - Specials' is season 0, first source wins per slot."""
+    poster = None
+    seasons: Dict[int, str] = {}
+    for f in files:
+        name = os.path.basename(f)
+        if re.search(r" - Season| - Specials", name):
+            if "Season" in name:
+                m = re.search(r"Season (\d+)", name)
+                if not m:
+                    # Drive convention is "- Season 01" (space); the destination's "Season01"
+                    # form is written, never read here. Name it rather than dropping it silently.
+                    log_warning(
+                        LogTags.RENAMER,
+                        f"Skipping season poster with a non-standard name (expected '- Season NN'): {name}",
+                        file=name,
+                    )
+                    continue
+                n = int(m.group(1))
+            else:
+                n = 0  # ' - Specials'
+            if n not in seasons:
+                seasons[n] = f
+        elif poster is None:
+            poster = f
+    return build_slots(poster=poster, seasons=seasons)
+
+
+def _placements_from_files(
+    files: List[str], folder: str, asset_folders: bool, artwork_slots: Optional[Dict[str, str]] = None,
+    box_slots: Optional[Dict[str, Any]] = None,
+) -> List[tuple]:
+    """The ordered (source_path, dest_filename, season_num, slot) work-list for a matched item.
+    poster/seasons come from ``box_slots`` (authoritative — the scan already classified them, pruned
+    in step with ``files``) when given, else re-derived; logo/background/square come from
+    ``artwork_slots`` so artwork rides the same placement while staying out of poster-only stats."""
+    if box_slots:
+        slots = dict(box_slots)
+        slots["seasons"] = dict(box_slots.get("seasons") or {})
+    else:
+        slots = _slots_from_files(files)
+    # When given (even empty), artwork_slots is authoritative for logo/background/square —
+    # the Include filter applies to it, while box slots carry the full set for matching.
+    if artwork_slots is not None:
+        for slot in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE):
+            slots[slot] = artwork_slots.get(slot)
+    out: List[tuple] = []
+    if slots[SLOT_POSTER]:
+        p = slots[SLOT_POSTER]
+        out.append((p, slot_dest_name(SLOT_POSTER, os.path.splitext(p)[1], folder, asset_folders), None, SLOT_POSTER))
+    for n in sorted(slots["seasons"]):
+        p = slots["seasons"][n]
+        out.append((p, slot_dest_name(SLOT_SEASON, os.path.splitext(p)[1], folder, asset_folders, season=n), n, SLOT_SEASON))
+    for slot in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE):
+        p = slots.get(slot)
+        if p:
+            out.append((p, slot_dest_name(slot, os.path.splitext(p)[1], folder, asset_folders), None, slot))
+    return out
 
 
 class PosterRenameService:
@@ -155,7 +225,7 @@ class PosterRenameService:
         token: str, 
         media_dict: MediaDict,
         instance_name: str = "Plex",
-        log_tag: str = LogTags.POSTER_RENAMER,
+        log_tag: str = LogTags.RENAMER,
         selected_libraries: Optional[List[str]] = None
     ) -> None:
         """
@@ -222,7 +292,7 @@ class PosterRenameService:
         except Exception as e:
             log_error(log_tag, f"Error connecting to {instance_name}: {e}")
 
-    def _merge_duplicate_series(self, series_list: List[MediaItem], log_tag: str = LogTags.POSTER_RENAMER) -> List[MediaItem]:
+    def _merge_duplicate_series(self, series_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
         Merge duplicate series entries from multiple Sonarr instances.
         Combines season lists to include all seasons across all instances (DAPS behavior).
@@ -293,7 +363,7 @@ class PosterRenameService:
         
         return merged_list
 
-    def _merge_duplicate_movies(self, movies_list: List[MediaItem], log_tag: str = LogTags.POSTER_RENAMER) -> List[MediaItem]:
+    def _merge_duplicate_movies(self, movies_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
         Merge duplicate movie entries from multiple Radarr instances.
         
@@ -347,7 +417,7 @@ class PosterRenameService:
         
         return merged_list
 
-    def _merge_duplicate_collections(self, collections_list: List[MediaItem], log_tag: str = LogTags.POSTER_RENAMER) -> List[MediaItem]:
+    def _merge_duplicate_collections(self, collections_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
         Deduplicate collection entries from multiple Plex libraries.
 
@@ -418,7 +488,7 @@ class PosterRenameService:
             elif action_type == "symlink":
                 os.symlink(file, new_file_path)
         except OSError as e:
-            log_error(LogTags.POSTER_RENAMER, f"Error {action_type}ing file: {e}")
+            log_error(LogTags.RENAMER, f"Error {action_type}ing file: {e}")
 
     def rename_files(
         self,
@@ -428,7 +498,9 @@ class PosterRenameService:
         asset_folders: bool = True,
         dry_run: bool = False,
         progress_callback: Optional[RenameProgressCallback] = None,
-    ) -> Tuple[MediaDict, List[str], List[str], Dict[str, tuple]]:
+        artwork_destination: Optional[str] = None,
+        artwork_slot_filter: Optional[set] = None,
+    ) -> Tuple[MediaDict, List[str], List[str], Dict[str, tuple], Dict[str, Any]]:
         """
         Rename matched assets to Plex-compatible filenames and handle folder structure.
         
@@ -447,13 +519,32 @@ class PosterRenameService:
         """
         output: MediaDict = {}
         renamed_files = []  # Destination files that were copied/updated
+        # Of those, which were artwork — broken down the same way posters are (by media type),
+        # plus by artwork type, so the summary can show more than a bare total.
+        artwork_renamed: Dict[str, Any] = {
+            "total": 0,
+            "by_media": {"movies": 0, "series": 0, "collections": 0},
+            "by_type": {"logo": 0, "background": 0, "squareart": 0},
+        }
+
+        def _tally_artwork(media_type: str, slot: str) -> None:
+            artwork_renamed["total"] += 1
+            if media_type in artwork_renamed["by_media"]:
+                artwork_renamed["by_media"][media_type] += 1
+            # On disk the square slot is 'square'; the internal artwork type is 'squareart'.
+            slot_key = "squareart" if slot == SLOT_SQUARE else slot
+            if slot_key in artwork_renamed["by_type"]:
+                artwork_renamed["by_type"][slot_key] += 1
         processed_source_files = []  # Source files that were checked (copied or skipped if identical)
         # dest_path -> (source_file_path, title, year, tmdb_type, season_num)
         winning_source_files: Dict[str, tuple] = {}
         
         asset_types: List[str] = ["collections", "movies", "series"]
-        log_info(LogTags.POSTER_RENAMER, "Renaming assets, please wait...")
-        
+        log_info(LogTags.RENAMER, "Renaming assets, please wait...")
+
+        # Artwork with no poster needs no special case: an artwork box lives in the same asset
+        # index, so an item whose only source is artwork simply matches as itself.
+
         # Calculate total items to process
         total_items = sum(len(matched_assets[asset_type]) for asset_type in asset_types)
         current_item = 0
@@ -489,51 +580,52 @@ class PosterRenameService:
                                 os.makedirs(dest_dir)
                     else:
                         dest_dir = destination_dir
-                    
-                    # Rename each asset file
-                    for file in files:
+
+                    # Artwork goes straight to the real destination (never the tmp/ staging), so
+                    # the border replacer — which only processes tmp/ — never touches it.
+                    art_base = artwork_destination or destination_dir
+                    artwork_dest_dir = os.path.join(art_base, folder) if asset_folders else art_base
+
+                    # Artwork (logo/background/square) rides the same box as the poster — one
+                    # match filled both — so it needs no separate lookup here.
+                    # The matched box's slots are authoritative; artwork-only items have no box.
+                    box_slots = (item.get("asset_ref") or {}).get("slots")
+                    if "_artwork_slots" in item:
+                        artwork_slots = item["_artwork_slots"]
+                    else:
+                        artwork_slots = {
+                            s: (box_slots or {}).get(s)
+                            for s in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE)
+                            if (box_slots or {}).get(s)
+                        }
+                    # The Include selection filters here, at placement — matching sees the full
+                    # slot set so cleanup learns everything the drives source.
+                    if artwork_slot_filter is not None:
+                        artwork_slots = {s: p for s, p in artwork_slots.items() if s in artwork_slot_filter}
+                    if artwork_slots:
+                        item["_artwork_slots"] = artwork_slots  # let the caller tally artwork placed
+
+                    # Rename each asset file — walk the item's slots (poster/seasons + artwork).
+                    for file, new_file_name, _season_num, _slot in _placements_from_files(
+                        files, folder, asset_folders, artwork_slots, box_slots
+                    ):
                         file_name = os.path.basename(file)
-                        file_extension = os.path.splitext(file)[1]
-                        
-                        # Handle season posters
-                        _season_num: Optional[int] = None
-                        if re.search(r" - Season| - Specials", file_name):
-                            try:
-                                season_number = (
-                                    re.search(r"Season (\d+)", file_name).group(1)
-                                    if "Season" in file_name
-                                    else "00"
-                                ).zfill(2)
-                                _season_num = int(season_number)
-                            except AttributeError:
-                                log_debug(
-                                    LogTags.POSTER_RENAMER,
-                                    f"Error extracting season number from {file_name}"
-                                )
-                                continue
-                            
-                            if asset_folders:
-                                new_file_name = f"Season{season_number}{file_extension}"
-                            else:
-                                new_file_name = (
-                                    f"{folder}_Season{season_number}{file_extension}"
-                                )
-                            new_file_path = os.path.join(dest_dir, new_file_name)
-                        else:
-                            # Handle main posters
-                            if asset_folders:
-                                new_file_name = f"poster{file_extension}"
-                            else:
-                                new_file_name = f"{folder}{file_extension}"
-                            new_file_path = os.path.join(dest_dir, new_file_name)
-                        
+                        # Artwork (logo/background/square) is placed straight to the real dest and
+                        # kept out of poster-only tracking (rename messages / style stats); it's
+                        # tallied via _artwork_slots.
+                        is_artwork = _slot in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE)
+                        target_dir = artwork_dest_dir if is_artwork else dest_dir
+                        if is_artwork and asset_folders and not dry_run:
+                            os.makedirs(target_dir, exist_ok=True)
+                        new_file_path = os.path.join(target_dir, new_file_name)
+
                         # Skip if already written to this destination in this run (highest-priority entry wins)
                         if new_file_path in written_dest_paths:
                             src_drive = os.path.basename(os.path.dirname(os.path.dirname(file)))
                             src_folder = os.path.basename(os.path.dirname(file))
                             winning_file = written_dest_paths[new_file_path]
                             log_warning(
-                                LogTags.POSTER_RENAMER,
+                                LogTags.RENAMER,
                                 f"Skipping '{item_name}' from [{src_drive}/{src_folder}] — "
                                 f"'{new_file_name}' was already written by a higher-priority source this run. "
                                 f"This is normal when multiple sources with different file names match the same media. "
@@ -549,12 +641,12 @@ class PosterRenameService:
 
                         # Check if destination exists and is different
                         if os.path.lexists(new_file_path):
-                            existing_file = os.path.join(dest_dir, new_file_name)
+                            existing_file = os.path.join(target_dir, new_file_name)
                             try:
                                 # filecmp short-circuits on matching size+mtime (copy2 preserves mtime).
                                 # os.utime() below syncs mtime for unchanged files so next run is stat-only.
                                 if not filecmp.cmp(file, existing_file):
-                                    if file_name != new_file_name:
+                                    if file_name != new_file_name and not is_artwork:
                                         messages.append(
                                             f"{file_name} -renamed-> {new_file_name}"
                                         )
@@ -563,11 +655,13 @@ class PosterRenameService:
                                             os.remove(new_file_path)
                                         self.process_file(file, new_file_path, action_type)
                                         renamed_files.append(new_file_path)
+                                        if is_artwork:
+                                            _tally_artwork(asset_type, _slot)
                                         processed_source_files.append(file)
                                         item_had_changes = True
                                         # Log the file as it's being renamed
                                         log_info(
-                                            LogTags.POSTER_RENAMER,
+                                            LogTags.RENAMER,
                                             f"  → {file_name} → {new_file_name}",
                                             source=file_name, dest=new_file_name
                                         )
@@ -585,39 +679,44 @@ class PosterRenameService:
                                     os.remove(new_file_path)
                                     self.process_file(file, new_file_path, action_type)
                                     renamed_files.append(new_file_path)
+                                    if is_artwork:
+                                        _tally_artwork(asset_type, _slot)
                                     processed_source_files.append(file)
                                     item_had_changes = True
                                     # Log the file as it's being renamed
                                     log_info(
-                                        LogTags.POSTER_RENAMER,
+                                        LogTags.RENAMER,
                                         f"  → {file_name} → {new_file_name}",
                                         source=file_name, dest=new_file_name
                                     )
                         else:
                             # Destination doesn't exist - need to copy
-                            if file_name != new_file_name:
+                            if file_name != new_file_name and not is_artwork:
                                 messages.append(
                                     f"{file_name} -renamed-> {new_file_name}"
                                 )
                             if not dry_run:
                                 self.process_file(file, new_file_path, action_type)
                                 renamed_files.append(new_file_path)
+                                if is_artwork:
+                                    _tally_artwork(asset_type, _slot)
                                 processed_source_files.append(file)
                                 item_had_changes = True
                                 # Log the file as it's being renamed
                                 log_info(
-                                    LogTags.POSTER_RENAMER,
+                                    LogTags.RENAMER,
                                     f"  → {file_name} → {new_file_name}",
                                     source=file_name, dest=new_file_name
                                 )
 
                         written_dest_paths[new_file_path] = file_name
-                        _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
-                        winning_source_files[new_file_path] = (
-                            file, item["title"], item.get("year"), _tmdb_type, _season_num,
-                            item.get("tmdb_id"), item.get("tvdb_id"), item.get("imdb_id"), item.get("poster_url"),
-                            item.get("available"),
-                        )
+                        if not is_artwork:
+                            _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
+                            winning_source_files[new_file_path] = (
+                                file, item["title"], item.get("year"), _tmdb_type, _season_num,
+                                item.get("tmdb_id"), item.get("tvdb_id"), item.get("imdb_id"), item.get("poster_url"),
+                                item.get("available"),
+                            )
 
                     if progress_callback:
                         if item_had_changes:
@@ -635,11 +734,11 @@ class PosterRenameService:
                             }
                         )
             else:
-                log_debug(LogTags.POSTER_RENAMER, f"No {asset_type} to rename")
+                log_debug(LogTags.RENAMER, f"No {asset_type} to rename")
         
-        return output, renamed_files, processed_source_files, winning_source_files
+        return output, renamed_files, processed_source_files, winning_source_files, artwork_renamed
 
-    def _inject_manual_media(self, media_dict: MediaDict, log_tag: str = LogTags.POSTER_RENAMER) -> None:
+    def _inject_manual_media(self, media_dict: MediaDict, log_tag: str = LogTags.RENAMER) -> None:
         """
         Load manually added media entries from the database and inject them into
         *media_dict* so they participate in the normal poster-renaming pipeline.
@@ -744,12 +843,12 @@ class PosterRenameService:
         except Exception as exc:
             log_warning(log_tag, f"Failed to load manual media entries: {exc}")
 
-    def get_media_from_instances(self, log_tag: str = LogTags.POSTER_RENAMER, setting_key: str = "poster_renamer_libraries") -> MediaDict:
+    def get_media_from_instances(self, log_tag: str = LogTags.RENAMER, setting_key: str = "poster_renamer_libraries") -> MediaDict:
         """
         Get media from configured Plex/Radarr/Sonarr instances.
         
         Args:
-            log_tag: Tag to use for logging (LogTags constant, default: LogTags.POSTER_RENAMER)
+            log_tag: Tag to use for logging (LogTags constant, default: LogTags.RENAMER)
             setting_key: Settings key for library filter (default: "poster_renamer_libraries")
         
         Returns:
@@ -789,7 +888,7 @@ class PosterRenameService:
                         selected_libraries
                     )
             except Exception as e:
-                log_error(LogTags.POSTER_RENAMER, f"Error parsing plex_instances: {e}")
+                log_error(LogTags.RENAMER, f"Error parsing plex_instances: {e}")
         else:
             # Old format: separate url/token fields (single Plex server)
             plex_url_setting = get_setting(self.db, "plex_url")
@@ -873,7 +972,7 @@ class PosterRenameService:
         return media_dict
 
     def _enrich_collections_with_tmdb(
-        self, media_dict: MediaDict, log_tag: str = LogTags.POSTER_RENAMER
+        self, media_dict: MediaDict, log_tag: str = LogTags.RENAMER
     ) -> None:
         """Attach a TMDB id + poster to Plex collections via exact-title matching.
 
@@ -979,7 +1078,7 @@ class PosterRenameService:
         )
 
     def _search_tmdb_collection(
-        self, title: str, api_key: str, log_tag: str = LogTags.POSTER_RENAMER
+        self, title: str, api_key: str, log_tag: str = LogTags.RENAMER
     ) -> Optional[Dict[str, Any]]:
         """Query TMDB's collection search and return the exact-title match, if any."""
         try:
@@ -1015,9 +1114,19 @@ class PosterRenameService:
         target_tvdb_id: Optional[int] = None,
         target_imdb_id: Optional[str] = None,
         target_season_number: Optional[int] = None,
+        library_setting_key: str = "poster_renamer_libraries",
+        media_dict: Optional[MediaDict] = None,
+        artwork_boxes: Optional[List[Dict[str, Any]]] = None,
+        artwork_slot_filter: Optional[set] = None,
     ) -> Dict[str, Any]:
         """
         Main method to rename posters.
+
+        artwork_boxes: scanned artwork items, merged into the poster asset list so ONE match
+        covers an item's poster and its logo/background/square (they're slots on the same box).
+
+        media_dict: pre-fetched media to reuse (the merged Asset Renamer fetches once and
+        injects it into both passes); when None, this method fetches it itself.
         
         Args:
             source_dirs: List of source directories containing posters.
@@ -1033,13 +1142,13 @@ class PosterRenameService:
         """
         try:
             # Log section start
-            log_section_start(LogTags.POSTER_RENAMER, "Poster Renamer Starting")
+            log_section_start(LogTags.RENAMER, "Poster Renamer Starting")
             
             # If using temp folder (for border_replacer workflow), create tmp subdirectory
             actual_destination = destination_dir
             if use_temp_folder:
                 actual_destination = os.path.join(destination_dir, "tmp")
-                log_info(LogTags.POSTER_RENAMER, f"Using temp folder for border replacer workflow: {actual_destination}")
+                log_info(LogTags.RENAMER, f"Using temp folder for border replacer workflow: {actual_destination}")
             
             # Create destination directory if it doesn't exist
             if not os.path.exists(actual_destination):
@@ -1052,19 +1161,25 @@ class PosterRenameService:
                             f"Destination directory does not exist: {parent_dir}\n"
                             "Please ensure the destination folder is created and mounted correctly in Docker."
                         )
-                log_info(LogTags.POSTER_RENAMER, f"Creating destination directory: {actual_destination}")
+                log_info(LogTags.RENAMER, f"Creating destination directory: {actual_destination}")
                 if not dry_run:
                     os.makedirs(actual_destination, exist_ok=True)
             
             if dry_run:
-                log_info(LogTags.POSTER_RENAMER, "DRY RUN - NO CHANGES WILL BE MADE")
+                log_info(LogTags.RENAMER, "DRY RUN - NO CHANGES WILL BE MADE")
             
-            # Phase 1: Gather poster assets (0-20%)
+            # Phase 1: Gather poster assets (15-30%). The merged Asset Renamer job spends
+            # 0-15% on its media fetch + artwork scan before this method is entered.
             if progress_callback:
-                progress_callback("gathering", 0, 100, "Gathering poster files...")
-            
-            log_info(LogTags.POSTER_RENAMER, "Gathering all the posters, please wait...")
-            assets_dict, prefix_index = get_assets_files(source_dirs, self.logger)
+                progress_callback("gathering", 15, 100, "Gathering poster files...")
+
+            def _gather_progress(dir_index: int, dir_total: int, dir_name: str) -> None:
+                if progress_callback and dir_total > 0:
+                    progress = 15 + int((dir_index / dir_total) * 15)
+                    progress_callback("gathering", progress, 100, f"Gathering posters: {dir_name}")
+
+            log_info(LogTags.RENAMER, "Gathering all the posters, please wait...")
+            assets_dict, prefix_index = get_assets_files(source_dirs, per_dir_callback=_gather_progress)
             
             if not assets_dict:
                 return {
@@ -1091,17 +1206,34 @@ class PosterRenameService:
                     }
 
                 log_info(
-                    LogTags.POSTER_RENAMER,
+                    LogTags.RENAMER,
                     f"Webhook-targeted rename: narrowed scope to {len(assets_dict)} asset group(s)",
                     target_media_type=target_media_type,
                     target_title=target_title,
                     target_year=target_year,
                     target_season_number=target_season_number,
                 )
-                
+
+            # Artwork joins the SAME asset list and index, so match_assets_to_media runs once
+            # and a matched item's box carries its poster, seasons AND artwork slots. Artwork
+            # boxes are type-less and fill disjoint slots, so they never contest a poster.
+            if artwork_boxes:
+                if progress_callback:
+                    progress_callback("merging", 30, 100, "Merging artwork into the poster index...")
+                log_phase(LogTags.MERGE, f"Merging {len(artwork_boxes)} artwork item(s) into the poster index")
+                for box in artwork_boxes:
+                    # log_new=False: the artwork scan already logged each of these per item.
+                    merge_assets([box], assets_dict, prefix_index, log_new=False)
+                log_info(
+                    LogTags.RENAMER,
+                    f"Merged {len(artwork_boxes)} artwork item(s) into the asset index",
+                    artwork_items=len(artwork_boxes),
+                )
+
+
             # Phase 1.5: Prepare for processing (track all source files, let rename_files decide what to do)
             if progress_callback:
-                progress_callback("preparing", 15, 100, "Preparing files for evaluation...")
+                progress_callback("preparing", 35, 100, "Preparing files for evaluation...")
             
             # Collect all source file paths - we'll check each one during rename
             all_source_files = set()
@@ -1109,19 +1241,20 @@ class PosterRenameService:
                 all_source_files.update(asset['files'])
             
             total_files = len(all_source_files)
-            log_info(LogTags.POSTER_RENAMER, f"Found {total_files} source poster files", count=total_files)
+            log_info(LogTags.RENAMER, f"Found {total_files} source poster files", count=total_files)
             
             # Note: We don't filter assets_dict here based on DB status
             # Instead, we let rename_files check each destination file individually
             # This allows precise detection of missing/changed destination files
             
-            # Phase 2: Get media from instances (20-40%)
-            if progress_callback:
-                progress_callback("fetching", 20, 100, "Fetching media from configured instances...")
-            
-            log_info(LogTags.POSTER_RENAMER, "Fetching media from configured instances...")
-            media_dict = self.get_media_from_instances()
-            
+            # Phase 2: Get media from instances — only a real phase when media wasn't
+            # injected (the merged Asset Renamer fetches before calling this method).
+            if media_dict is None:
+                if progress_callback:
+                    progress_callback("fetching", 35, 100, "Fetching media from configured instances...")
+                log_info(LogTags.RENAMER, "Fetching media from configured instances...")
+                media_dict = self.get_media_from_instances(setting_key=library_setting_key)
+
             if not any(media_dict.values()):
                 return {
                     "success": False,
@@ -1132,7 +1265,7 @@ class PosterRenameService:
             if progress_callback:
                 progress_callback("matching", 40, 100, "Matching assets to media...")
             
-            log_info(LogTags.POSTER_RENAMER, "Matching assets to media, please wait...")
+            log_info(LogTags.RENAMER, "Matching assets to media, please wait...")
             
             # Log details before matching for debugging
             media_counts = {k: len(v) for k, v in media_dict.items() if v}
@@ -1140,7 +1273,7 @@ class PosterRenameService:
             total_assets = len(assets_dict)
             
             log_info(
-                LogTags.POSTER_RENAMER,
+                LogTags.RENAMER,
                 f"Matching {total_assets} assets against {total_media} media items "
                 f"(movies: {media_counts.get('movies', 0)}, series: {media_counts.get('series', 0)}, "
                 f"collections: {media_counts.get('collections', 0)})"
@@ -1150,21 +1283,22 @@ class PosterRenameService:
                 media_dict,
                 prefix_index,
                 strict_folder_match=False,
+                label="poster + artwork sources" if artwork_boxes else "poster sources",
             )
             
             if not matched_assets or not any(matched_assets.values()):
                 # Log detailed diagnostic information
-                log_error(LogTags.POSTER_RENAMER, "No assets matched to media - diagnostic info:")
-                log_error(LogTags.POSTER_RENAMER, f"  Assets found: {total_assets}")
-                log_error(LogTags.POSTER_RENAMER, f"  Media items: {total_media} total")
+                log_error(LogTags.RENAMER, "No assets matched to media - diagnostic info:")
+                log_error(LogTags.RENAMER, f"  Assets found: {total_assets}")
+                log_error(LogTags.RENAMER, f"  Media items: {total_media} total")
                 for media_type, count in media_counts.items():
-                    log_error(LogTags.POSTER_RENAMER, f"    - {media_type}: {count}")
+                    log_error(LogTags.RENAMER, f"    - {media_type}: {count}")
                 
                 # Show sample assets and media for debugging
                 if assets_dict and len(assets_dict) > 0:
                     sample_asset = assets_dict[0]
                     log_error(
-                        LogTags.POSTER_RENAMER,
+                        LogTags.RENAMER,
                         f"  Sample asset: '{sample_asset.get('title', 'N/A')}' "
                         f"(year: {sample_asset.get('year', 'N/A')}, "
                         f"type: {sample_asset.get('type', 'N/A')}, "
@@ -1175,7 +1309,7 @@ class PosterRenameService:
                     if media_dict.get(media_type) and len(media_dict[media_type]) > 0:
                         sample_media = media_dict[media_type][0]
                         log_error(
-                            LogTags.POSTER_RENAMER,
+                            LogTags.RENAMER,
                             f"  Sample {media_type}: '{sample_media.get('title', 'N/A')}' "
                             f"(year: {sample_media.get('year', 'N/A')}, "
                             f"tmdb: {sample_media.get('tmdb_id', 'N/A')}, "
@@ -1199,20 +1333,22 @@ class PosterRenameService:
                     progress = 50 + int((current / total) * 50)
                     progress_callback("renaming", progress, 100, status_message)
             
-            output, renamed_files, processed_source_files, winning_source_files = self.rename_files(
+            output, renamed_files, processed_source_files, winning_source_files, artwork_renamed = self.rename_files(
                 matched_assets,
                 actual_destination,  # Use actual_destination (may be tmp folder)
                 action_type,
                 asset_folders,
                 dry_run,
                 progress_callback=rename_progress,
+                artwork_destination=destination_dir,  # real dest, so artwork bypasses tmp/ + border
+                artwork_slot_filter=artwork_slot_filter,
             )
             
             # Log what actually happened
             files_copied = len(renamed_files)
             files_skipped = len(processed_source_files) - files_copied
             log_info(
-                LogTags.POSTER_RENAMER,
+                LogTags.RENAMER,
                 f"Results: {files_copied} files copied/updated, {files_skipped} already in place",
                 copied=files_copied, skipped=files_skipped
             )
@@ -1220,6 +1356,15 @@ class PosterRenameService:
             # Calculate stats
             total_renamed = sum(len(items) for items in output.values())
             
+            # "artwork" = files actually written this run, so it means the same thing as the
+            # poster counts (which only include items that changed). The resolved-slot total —
+            # how much artwork is matched for the library — is reported separately; conflating
+            # the two made a no-op run claim it had placed the whole library.
+            artwork_matched = sum(
+                len(it.get("_artwork_slots") or {})
+                for atype in matched_assets
+                for it in matched_assets[atype]
+            )
             stats = {
                 "total_assets": len(assets_dict),
                 "total_media": sum(len(v) for v in media_dict.values()),
@@ -1227,6 +1372,10 @@ class PosterRenameService:
                 "movies": len(output.get("movies", [])),
                 "series": len(output.get("series", [])),
                 "collections": len(output.get("collections", [])),
+                "artwork": artwork_renamed["total"],
+                "artwork_by_media": artwork_renamed["by_media"],
+                "artwork_by_type": artwork_renamed["by_type"],
+                "artwork_matched": artwork_matched,
             }
             
             # Build per-style breakdown from winning source files
@@ -1270,7 +1419,7 @@ class PosterRenameService:
                     progress_callback("finalizing", 95, 100, "Updating processing status...")
                 
                 log_info(
-                    LogTags.POSTER_RENAMER,
+                    LogTags.RENAMER,
                     f"Marking {len(processed_source_files)} source files as processed...",
                     count=len(processed_source_files)
                 )
@@ -1299,7 +1448,7 @@ class PosterRenameService:
                 self.db.commit()
                 
                 log_success(
-                    LogTags.POSTER_RENAMER,
+                    LogTags.RENAMER,
                     f"Marked {marked_count} files as processed across {len(drives_updated)} drives",
                     marked=marked_count, drives=len(drives_updated)
                 )
@@ -1307,15 +1456,18 @@ class PosterRenameService:
             # Log completion
             mode = "DRY RUN" if dry_run else action_type.upper()
             log_success(
-                LogTags.POSTER_RENAMER,
+                LogTags.RENAMER,
                 f"Completed: {stats['total_matched']} matched "
                 f"(Movies: {stats['movies']}, Series: {stats['series']}, Collections: {stats['collections']}) - Mode: {mode}",
                 matched=stats['total_matched'], movies=stats['movies'], 
                 series=stats['series'], collections=stats['collections'], mode=mode
             )
             
-            log_section_end(LogTags.POSTER_RENAMER, "Poster Renamer Complete")
+            log_section_end(LogTags.RENAMER, "Poster Renamer Complete")
             
+            # The match verdicts, for cleanup: which artwork types the drives source per item.
+            # Handing this across means one library match per run and no place/prune disagreement.
+            from services.artwork_scan import sourced_types_from_matched
             return {
                 "success": True,
                 "output": output,
@@ -1324,14 +1476,15 @@ class PosterRenameService:
                 "dry_run": dry_run,
                 "destination_dir": actual_destination,
                 "using_temp_folder": use_temp_folder,
+                "artwork_sourced": sourced_types_from_matched(matched_assets) if artwork_boxes else {},
             }
             
         except Exception as e:
             # Provide detailed error context
             error_msg = f"{type(e).__name__}: {str(e)}"
             error_detail = traceback.format_exc()
-            log_error(LogTags.POSTER_RENAMER, f"Error during poster renaming: {error_msg}\n{error_detail}")
-            log_section_end(LogTags.POSTER_RENAMER, "Poster Renamer Failed")
+            log_error(LogTags.RENAMER, f"Error during poster renaming: {error_msg}\n{error_detail}")
+            log_section_end(LogTags.RENAMER, "Poster Renamer Failed")
             return {
                 "success": False,
                 "error": error_msg

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { PlexLibraryConfig } from '../../api/client'
 import { ManualMediaEntry } from '../../api/posterManager'
 import LibrarySelectGrid from './LibrarySelectGrid'
-import Toolbar from './Toolbar'
+import Toolbar from '../Toolbar'
 
 type RenamerTabProps = {
   hasUnsavedLibraryChanges: boolean
@@ -13,8 +13,14 @@ type RenamerTabProps = {
   autoRunBorder: boolean
   autoRunCleanup: boolean
   cleanupDeleteUnknown: boolean
+  settingsLoaded: boolean
   libraryConfigs: PlexLibraryConfig[]
   selectedLibraries: Set<string>
+  // Asset types to include in the run
+  include: string[]
+  includeLoaded: boolean
+  hasUnsavedInclude: boolean
+  onToggleInclude: (assetType: string, checked: boolean) => void
   // Manual media
   manualEntries: ManualMediaEntry[]
   formTitle: string
@@ -52,8 +58,13 @@ function RenamerTab({
   autoRunBorder,
   autoRunCleanup,
   cleanupDeleteUnknown,
+  settingsLoaded,
   libraryConfigs,
   selectedLibraries,
+  include,
+  includeLoaded,
+  hasUnsavedInclude,
+  onToggleInclude,
   manualEntries,
   formTitle,
   formYear,
@@ -95,7 +106,7 @@ function RenamerTab({
 
   return (
     <>
-      <Toolbar title="Poster Renamer" description="Organize and rename poster files from multiple sources">
+      <Toolbar title="Asset Renamer" description="Rename and organize posters and artwork into your item folders">
         <div className="btn-pair">
           <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings}>
             Scheduling
@@ -105,60 +116,90 @@ function RenamerTab({
           </button>
         </div>
         <button
-          className={`btn-toolbar ${(hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'btn-unsaved' : ''}`}
+          className={`btn-toolbar ${(hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedInclude) ? 'btn-unsaved' : ''}`}
           onClick={onSaveSettings}
-          disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges) || saving || libraryConfigs.length === 0}
-          title={libraryConfigs.length === 0 ? 'Configure libraries in Settings first' : ((hasUnsavedLibraryChanges || hasUnsavedBorderChanges) ? 'Save changes' : 'No changes to save')}
+          disabled={(!hasUnsavedLibraryChanges && !hasUnsavedBorderChanges && !hasUnsavedInclude) || saving || libraryConfigs.length === 0}
+          title={libraryConfigs.length === 0 ? 'Configure libraries in Settings first' : ((hasUnsavedLibraryChanges || hasUnsavedBorderChanges || hasUnsavedInclude) ? 'Save changes' : 'No changes to save')}
         >
           <Save size={16} />
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
-        <button className="btn-toolbar" onClick={() => onRunRename(true)} disabled={renaming} title="Dry run poster renamer">
+        <button className="btn-toolbar" onClick={() => onRunRename(true)} disabled={renaming} title="Dry run asset renamer">
           <Eye size={16} />
           Dry Run
         </button>
         <button className="btn-toolbar btn-primary" onClick={() => onRunRename(false)} disabled={renaming}>
           <Play size={16} />
-          {renaming ? 'Starting...' : 'Rename Posters'}
+          {renaming ? 'Starting...' : 'Rename Assets'}
         </button>
       </Toolbar>
 
       <div className="renamer-layout-row">
         <div className="settings-section renamer-config-card">
           <h2>Rename Configuration</h2>
-          <p className="section-description">Configure border replacer options for standalone rename runs.</p>
+          <p className="section-description">Choose what to include, then set options for standalone rename runs.</p>
+
+          <div className="config-subgroup-heading">Assets</div>
+          <div className="field-group">
+            <label>Include</label>
+            {/* Render the toggles only once the saved state is loaded, so they mount in
+                their saved position instead of animating from the default on page load. */}
+            <div className="asset-include-toggles" aria-busy={!includeLoaded}>
+              {includeLoaded && ([['posters', 'Posters'], ['logo', 'Logos'], ['background', 'Backgrounds'], ['squareart', 'Square Art']] as const).map(([val, label]) => (
+                <div key={val} className="toggle-field asset-include-toggle">
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={include.includes(val)} onChange={(e) => onToggleInclude(val, e.target.checked)} />
+                    <span className="toggle-slider"></span>
+                  </label>
+                  <span className="toggle-label">{label}</span>
+                </div>
+              ))}
+            </div>
+            <small>Pick which asset types this run processes. Posters come from your poster drives; logos, backgrounds and square art come from your synced artwork drives. <strong style={{ color: '#f59e0b' }}>Unmatched detection checks only the selected asset types.</strong> Click <strong>Save Settings</strong> to apply.</small>
+          </div>
+
+          <div className="config-subgroup-heading config-subgroup-divider">
+            Standalone Run Options
+            <span className="config-subgroup-hint">Only affect standalone runs on this page — not the Workflow</span>
+          </div>
 
           <div className="field-group">
             <label>Auto-Run Border Replacer</label>
-            <div className="toggle-field">
-              <label className="toggle-switch">
-                <input type="checkbox" checked={autoRunBorder} onChange={(e) => onSetAutoRunBorder(e.target.checked)} />
-                <span className="toggle-slider"></span>
-              </label>
-              <span className="toggle-label">{autoRunBorder ? 'Enabled (Runs After Rename Standalone Run)' : 'Disabled'}</span>
+            <div className="toggle-field" aria-busy={!settingsLoaded}>
+              {settingsLoaded && (
+                <>
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={autoRunBorder} onChange={(e) => onSetAutoRunBorder(e.target.checked)} />
+                    <span className="toggle-slider"></span>
+                  </label>
+                  <span className="toggle-label">{autoRunBorder ? 'Enabled (Runs After Rename)' : 'Disabled'}</span>
+                </>
+              )}
             </div>
-            <small>When enabled, border replacer runs automatically after renaming posters (uses Poster Renamer incremental/full mode setting on Border Replacer page)</small>
-            <small className="standalone-warning">⚠️ Standalone runs only. To disable Border Replacer in the Workflow, toggle it off/on on the Workflow page.</small>
-            <small className="standalone-warning">⚠️ Plex Upload also uses this setting — if you want borders applied during Plex Upload runs, this must be enabled.</small>
+            <small>Runs Border Replacer automatically after a standalone rename (uses the incremental/full mode set on the Border Replacer page).</small>
+            <small className="standalone-warning">⚠️ Plex Upload also uses this setting — enable it if you want borders applied during Plex Upload runs.</small>
           </div>
 
           <div className="field-group">
             <label>Auto-Run Asset Cleanup</label>
-            <div className="toggle-field">
-              <label className="toggle-switch">
-                <input type="checkbox" checked={autoRunCleanup} onChange={(e) => onSetAutoRunCleanup(e.target.checked)} />
-                <span className="toggle-slider"></span>
-              </label>
-              <span className="toggle-label">{autoRunCleanup ? 'Enabled (Runs After Rename/Border)' : 'Disabled'}</span>
+            <div className="toggle-field" aria-busy={!settingsLoaded}>
+              {settingsLoaded && (
+                <>
+                  <label className="toggle-switch">
+                    <input type="checkbox" checked={autoRunCleanup} onChange={(e) => onSetAutoRunCleanup(e.target.checked)} />
+                    <span className="toggle-slider"></span>
+                  </label>
+                  <span className="toggle-label">{autoRunCleanup ? 'Enabled (Runs After Rename/Border)' : 'Disabled'}</span>
+                </>
+              )}
             </div>
-            <small>When enabled, removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
+            <small>Removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
             {autoRunCleanup && (
               <label className="checkbox-option" style={{ marginTop: '0.4rem' }}>
                 <input type="checkbox" checked={cleanupDeleteUnknown} onChange={(e) => onSetCleanupDeleteUnknown(e.target.checked)} />
                 <span>Also remove unknown/stray folders (no match, no ID — riskier)</span>
               </label>
             )}
-            <small className="standalone-warning">⚠️ For the Workflow, enable this on the Workflow page instead.</small>
           </div>
         </div>
 

@@ -208,8 +208,9 @@ function ScheduleEditModal({
               }}
             >
               <option value="poster_workflow">Poster Workflow</option>
-              <option value="gdrive_sync">Drive Sync</option>
-              <option value="poster_renamer">Poster Renamer</option>
+              <option value="gdrive_sync">Poster Drive Sync</option>
+              <option value="artwork_sync">Artwork Drive Sync</option>
+              <option value="poster_renamer">Asset Renamer</option>
               <option value="unmatched_assets">Unmatched Assets</option>
               <option value="border_replacer">Border Replacer</option>
               <option value="idarr">IDarr</option>

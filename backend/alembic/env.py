@@ -13,6 +13,8 @@ from database import Base
 # Import all models so Alembic can detect them for autogenerate
 from models.setting import Setting  # noqa: F401
 from models.drive import Drive  # noqa: F401
+from models.artwork_drive import ArtworkDrive  # noqa: F401
+from models.artwork import Artwork  # noqa: F401
 from models.poster import Poster  # noqa: F401
 from models.job import Job  # noqa: F401
 from models.schedule import Schedule  # noqa: F401

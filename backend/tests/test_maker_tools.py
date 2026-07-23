@@ -224,6 +224,40 @@ def test_content_disposition_ascii_name_uses_plain_filename():
     assert _content_disposition("attachment", "Movie.psd") == 'attachment; filename="Movie.psd"'
 
 
+# ---------------------------------------------------------------------------
+# _build_psd — layer names
+# ---------------------------------------------------------------------------
+
+
+def _png_bytes(color, size, mode="RGB"):
+    buf = BytesIO()
+    Image.new(mode, size, color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_build_psd_non_macroman_title_saves_and_keeps_unicode_name():
+    # Regression: psd-tools writes the legacy layer-name field as macroman, and
+    # PixelLayer.frompil bypasses the library's macroman guard. A title with a
+    # non-macroman glyph (★ U+2605, an em dash, CJK) crashed psd.save() with
+    # "'charmap' codec can't encode character". Re-assigning name via the setter
+    # keeps the real title as the Unicode layer name that editors display.
+    from psd_tools import PSDImage
+
+    data = _build_psd(
+        [_png_bytes((120, 30, 40), (300, 450))],
+        [_png_bytes((255, 255, 255, 200), (200, 80), mode="RGBA")],
+        backdrop_bytes_list=[_png_bytes((0, 0, 80), (800, 450))],
+        canvas_w=1000,
+        canvas_h=1500,
+        title="Classic★Stars",
+        year="2025",
+    )
+    assert data  # would have raised UnicodeEncodeError before the fix
+
+    names = [layer.name for layer in PSDImage.open(BytesIO(data)).descendants()]
+    assert any("Classic★Stars (2025)" in name for name in names)
+
+
 def test_get_maker_monitor_config_returns_defaults_when_no_setting(client):
     response = client.get("/api/maker-tools/monitor/config")
     assert response.status_code == 200
@@ -1063,10 +1097,10 @@ def test_psd_export_photopea_mode_saves_and_returns_json(client, test_db):
 
     poster_bytes = _make_jpeg_bytes(20, 30)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory():
         with patch("api.maker_tools._fetch_tmdb_image_bytes", return_value=poster_bytes), \
              patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"), \
-             patch("api.maker_tools.app_settings" if hasattr(__import__("api.maker_tools", fromlist=["app_settings"]), "app_settings") else "api.maker_tools.Path") as _unused, \
+             patch("api.maker_tools.app_settings" if hasattr(__import__("api.maker_tools", fromlist=["app_settings"]), "app_settings") else "api.maker_tools.Path"), \
              patch("api.maker_tools.get_setting_value", side_effect=lambda db, key: {
                  "psd_open_photopea": "true",
                  "psd_export_folder": "",

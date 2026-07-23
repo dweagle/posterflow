@@ -1,5 +1,4 @@
 import time
-from models.workflow import Workflow
 
 
 def test_create_list_and_default(client):
@@ -70,7 +69,7 @@ def test_run_flow_uses_selected_workflow_config(client, test_db, monkeypatch):
         "name": "OnlySync",
         "config": {
             "sync_drives": {"enabled": True, "stop_on_error": True},
-            "rename_posters": {"enabled": False, "stop_on_error": True},
+            "rename_assets": {"enabled": False, "stop_on_error": True},
             "border_replacer": {"enabled": False, "stop_on_error": True},
             "plex_upload": {"enabled": False, "stop_on_error": False},
             "detect_unmatched": {"enabled": False, "stop_on_error": False},
@@ -100,7 +99,7 @@ def test_run_flow_uses_selected_workflow_config(client, test_db, monkeypatch):
         override = captured.get("config_override")
         assert override is not None
         assert override["sync_drives"]["enabled"] is True
-        assert override["rename_posters"]["enabled"] is False
+        assert override["rename_assets"]["enabled"] is False
     finally:
         poster_manager_module._flow_running = False
         poster_manager_module._flow_started_at = None

@@ -48,6 +48,51 @@
   align-items: center;
 }
 
+/* Type tab bar across the top of the card: Posters (default) | Logos | Backgrounds |
+   Square Art — individual fixed-width buttons that each wrap on their own, sitting above
+   the header/stats they control. */
+.poster-coverage-card .coverage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid #2a2f3c;
+}
+
+.poster-coverage-card .coverage-scope-btn {
+  flex: none;
+  width: 6.25rem;
+  text-align: center;
+  background: transparent;
+  border: 1px solid #3a4150;
+  color: #9aa4b2;
+  font-size: 0.74rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.poster-coverage-card .coverage-scope-btn:hover {
+  color: #e5e7eb;
+  border-color: #64b5f6;
+}
+
+.poster-coverage-card .coverage-scope-btn.active {
+  background: #64b5f6;
+  border-color: #64b5f6;
+  color: #1e1e1e;
+  font-weight: 600;
+}
+
+.poster-coverage-card .coverage-empty {
+  color: #888;
+  font-size: 0.82rem;
+  padding: 0.4rem 0 0.2rem;
+}
+
 .poster-coverage-card .coverage-header-center {
   display: flex;
   justify-content: center;
@@ -96,7 +141,10 @@
 
 .poster-coverage-card .coverage-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Fill the card whatever the item count (4 for posters, 3 for artwork) and wrap on
+     narrower screens: auto-fit collapses empty tracks so the present items stretch edge
+     to edge, then reflow to fewer columns once they can't hold their min width. */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 0.85rem;
 }
 
@@ -456,14 +504,37 @@
   color: #E8ECEF;
 }
 
+/* Below the grid header's comfortable width, stack it: title on its own row, then the
+   total + switch + View Details reflow and wrap so nothing spills out of the card. */
+@media (max-width: 992px) {
+  .poster-coverage-card .card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+  }
+
+  .poster-coverage-card .coverage-header-left {
+    width: 100%;
+  }
+
+  .poster-coverage-card .coverage-header-center {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .poster-coverage-card .coverage-header-right {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 900px) {
   .dashboard-header-actions {
     grid-template-columns: repeat(2, 1fr);
   }
-
-  .poster-coverage-card .coverage-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  /* .coverage-grid wrapping is handled by auto-fit/minmax — no fixed column override. */
 }
 
 @media (max-width: 550px) {
@@ -489,30 +560,7 @@
   .action-title {
     font-size: clamp(0.75rem, 3.5vw, 0.9rem);
   }
-
-  /* Poster Coverage card header: title full width, then percent + View Details on same row */
-  .poster-coverage-card .card-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem 0.75rem;
-  }
-
-  .poster-coverage-card .coverage-header-left {
-    width: 100%;
-  }
-
-  .poster-coverage-card .coverage-header-center {
-    flex: 1;
-    justify-content: flex-start;
-  }
-
-  .poster-coverage-card .coverage-header-right {
-    justify-content: flex-end;
-    flex-shrink: 0;
-  }
-
-
+  /* Coverage card header reflow is handled by the max-width: 992px block above. */
 }
 
 .stat-card {

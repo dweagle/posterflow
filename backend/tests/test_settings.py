@@ -288,10 +288,296 @@ def test_setup_status_complete(client, test_db):
     setting = Setting(key="setup_complete", value="true")
     test_db.add(setting)
     test_db.commit()
-    
+
     response = client.get("/api/setup/status")
     assert response.status_code == 200
     data = response.json()
     assert data["setup_complete"] is True
+
+
+def _get_setting_json(test_db, key):
+    saved = test_db.query(Setting).filter(Setting.key == key).first()
+    assert saved is not None, f"{key} missing"
+    return json.loads(saved.value)
+
+
+def test_plex_rename_migrates_name_keyed_settings(client, test_db):
+    """Renaming a Plex server (same URL, new name) must migrate every setting keyed by
+    the instance name and preserve its masked api_key via the URL fallback."""
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([
+            {"name": "Old Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ])),
+        Setting(key="plex_library_config", value=json.dumps([
+            {"instance_name": "Old Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+                {"key": "2", "title": "TV", "type": "show", "enabled": False},
+            ]},
+        ])),
+        Setting(key="plex_upload_library_override", value=json.dumps({
+            "enabled": True,
+            "configs": [{"instance_name": "Old Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            ]}],
+        })),
+        Setting(key="plex_upload_instance_library_map", value=json.dumps({
+            "Radarr": [{"plex_instance": "Old Plex", "library_key": "1"}],
+        })),
+        Setting(key="poster_renamer_libraries", value=json.dumps(["Old Plex:1", "Old Plex:2"])),
+        Setting(key="border_replacer_rule_libraries", value=json.dumps(["Old Plex:1"])),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "plex_instances": json.dumps([
+            {"name": "New Plex", "url": "http://plex:32400", "api_key": MASKED_VALUE},
+        ]),
+    })
+    assert response.status_code == 200
+
+    instances = _get_setting_json(test_db, "plex_instances")
+    assert instances[0]["name"] == "New Plex"
+    assert instances[0]["api_key"] == "plex-token"
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert [c["instance_name"] for c in configs] == ["New Plex"]
+    # Selection preserved, not reset
+    assert {lib["key"]: lib["enabled"] for lib in configs[0]["libraries"]} == {"1": True, "2": False}
+
+    override = _get_setting_json(test_db, "plex_upload_library_override")
+    assert override["enabled"] is True
+    assert [c["instance_name"] for c in override["configs"]] == ["New Plex"]
+
+    routing = _get_setting_json(test_db, "plex_upload_instance_library_map")
+    assert routing == {"Radarr": [{"plex_instance": "New Plex", "library_key": "1"}]}
+
+    assert _get_setting_json(test_db, "poster_renamer_libraries") == ["New Plex:1", "New Plex:2"]
+    assert _get_setting_json(test_db, "border_replacer_rule_libraries") == ["New Plex:1"]
+
+
+def test_plex_rename_keeps_config_already_saved_under_new_name(client, test_db):
+    """If the user already re-saved libraries under the new name (the reported bug state:
+    old + new entries side by side), the newer config wins and the stale one is dropped."""
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([
+            {"name": "Old Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ])),
+        Setting(key="plex_library_config", value=json.dumps([
+            {"instance_name": "Old Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            ]},
+            {"instance_name": "New Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": False},
+            ]},
+        ])),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "plex_instances": json.dumps([
+            {"name": "New Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ]),
+    })
+    assert response.status_code == 200
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert [c["instance_name"] for c in configs] == ["New Plex"]
+    assert configs[0]["libraries"][0]["enabled"] is False
+
+
+def test_plex_instances_save_prunes_orphaned_library_configs(client, test_db):
+    """Saving plex_instances drops library configs for servers that no longer exist,
+    but leaves the inert 'name:key' selection lists alone so they revive on re-add."""
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([
+            {"name": "Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ])),
+        Setting(key="plex_library_config", value=json.dumps([
+            {"instance_name": "Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            ]},
+            {"instance_name": "Ghost", "libraries": [
+                {"key": "9", "title": "Old", "type": "movie", "enabled": True},
+            ]},
+        ])),
+        Setting(key="poster_renamer_libraries", value=json.dumps(["Ghost:9", "Plex:1"])),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "plex_instances": json.dumps([
+            {"name": "Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ]),
+    })
+    assert response.status_code == 200
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert [c["instance_name"] for c in configs] == ["Plex"]
+    assert _get_setting_json(test_db, "poster_renamer_libraries") == ["Ghost:9", "Plex:1"]
+
+
+def test_arr_rename_migrates_routing_map_key(client, test_db):
+    """Renaming a Radarr/Sonarr instance re-keys its Plex Upload routing row; rows for
+    other instances (including the other arr type) are untouched."""
+    test_db.add_all([
+        Setting(key="radarr_instances", value=json.dumps([
+            {"name": "Radarr HD", "url": "http://radarr:7878", "api_key": "radarr-key"},
+        ])),
+        Setting(key="sonarr_instances", value=json.dumps([
+            {"name": "Sonarr", "url": "http://sonarr:8989", "api_key": "sonarr-key"},
+        ])),
+        Setting(key="plex_upload_instance_library_map", value=json.dumps({
+            "Radarr HD": [{"plex_instance": "Plex", "library_key": "1"}],
+            "Sonarr": [{"plex_instance": "Plex", "library_key": "2"}],
+        })),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "radarr_instances": json.dumps([
+            {"name": "Radarr 1080p", "url": "http://radarr:7878", "api_key": MASKED_VALUE},
+        ]),
+    })
+    assert response.status_code == 200
+
+    # Masked key preserved across the rename via the URL fallback
+    instances = _get_setting_json(test_db, "radarr_instances")
+    assert instances[0] == {"name": "Radarr 1080p", "url": "http://radarr:7878", "api_key": "radarr-key"}
+
+    routing = _get_setting_json(test_db, "plex_upload_instance_library_map")
+    assert routing == {
+        "Radarr 1080p": [{"plex_instance": "Plex", "library_key": "1"}],
+        "Sonarr": [{"plex_instance": "Plex", "library_key": "2"}],
+    }
+
+
+def test_arr_rename_keeps_row_already_saved_under_new_name(client, test_db):
+    """If routing was already re-configured under the new arr name, that row wins."""
+    test_db.add_all([
+        Setting(key="sonarr_instances", value=json.dumps([
+            {"name": "Old Sonarr", "url": "http://sonarr:8989", "api_key": "sonarr-key"},
+        ])),
+        Setting(key="plex_upload_instance_library_map", value=json.dumps({
+            "Old Sonarr": [{"plex_instance": "Plex", "library_key": "1"}],
+            "New Sonarr": [{"plex_instance": "Plex", "library_key": "2"}],
+        })),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "sonarr_instances": json.dumps([
+            {"name": "New Sonarr", "url": "http://sonarr:8989", "api_key": "sonarr-key"},
+        ]),
+    })
+    assert response.status_code == 200
+
+    routing = _get_setting_json(test_db, "plex_upload_instance_library_map")
+    assert routing == {"New Sonarr": [{"plex_instance": "Plex", "library_key": "2"}]}
+
+
+def test_plex_rename_round_trip_restores_original_state(client, test_db):
+    """Rename to a temp name and back again — two saves — must land exactly where it
+    started: selections, routing, and the stored token all intact, no leftover entries."""
+    original_settings = {
+        "plex_instances": [{"name": "MyPlex", "url": "http://plex:32400", "api_key": "plex-token"}],
+        "plex_library_config": [{"instance_name": "MyPlex", "libraries": [
+            {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            {"key": "2", "title": "TV", "type": "show", "enabled": False},
+        ]}],
+        "plex_upload_instance_library_map": {"Radarr": [{"plex_instance": "MyPlex", "library_key": "1"}]},
+        "poster_renamer_libraries": ["MyPlex:1"],
+    }
+    test_db.add_all([Setting(key=k, value=json.dumps(v)) for k, v in original_settings.items()])
+    test_db.commit()
+
+    for name in ("test", "MyPlex"):
+        response = client.post("/api/settings/bulk", json={
+            "plex_instances": json.dumps([
+                {"name": name, "url": "http://plex:32400", "api_key": MASKED_VALUE},
+            ]),
+        })
+        assert response.status_code == 200
+
+    for key, expected in original_settings.items():
+        assert _get_setting_json(test_db, key) == expected, f"{key} did not round-trip"
+
+
+def test_startup_cleanup_prunes_orphans_without_a_save(test_db):
+    """Installs already carrying orphaned rename leftovers are healed at startup,
+    with no Media Servers save required."""
+    from api.settings import cleanup_stale_plex_name_keys
+
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([
+            {"name": "New Plex", "url": "http://plex:32400", "api_key": "plex-token"},
+        ])),
+        Setting(key="plex_library_config", value=json.dumps([
+            {"instance_name": "Old Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            ]},
+            {"instance_name": "New Plex", "libraries": [
+                {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+            ]},
+        ])),
+        Setting(key="plex_upload_instance_library_map", value=json.dumps({
+            "Radarr": [{"plex_instance": "Old Plex", "library_key": "1"}],
+        })),
+    ])
+    test_db.commit()
+
+    cleanup_stale_plex_name_keys(test_db)
+    test_db.commit()
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert [c["instance_name"] for c in configs] == ["New Plex"]
+    # Routing entries pointing at the vanished name are dropped too
+    saved_map = _get_setting_json(test_db, "plex_upload_instance_library_map")
+    assert saved_map == {}
+
+
+def test_startup_cleanup_noop_without_configured_instances(test_db):
+    """Before setup (no plex_instances), the cleanup must not touch existing configs."""
+    from api.settings import cleanup_stale_plex_name_keys
+
+    test_db.add(Setting(key="plex_library_config", value=json.dumps([
+        {"instance_name": "Plex", "libraries": [
+            {"key": "1", "title": "Movies", "type": "movie", "enabled": True},
+        ]},
+    ])))
+    test_db.commit()
+
+    cleanup_stale_plex_name_keys(test_db)
+    test_db.commit()
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert [c["instance_name"] for c in configs] == ["Plex"]
+
+
+def test_plex_name_swap_is_not_treated_as_rename(client, test_db):
+    """Two instances swapping names is ambiguous — selections must be left untouched."""
+    test_db.add_all([
+        Setting(key="plex_instances", value=json.dumps([
+            {"name": "A", "url": "http://plex-a:32400", "api_key": "key-a"},
+            {"name": "B", "url": "http://plex-b:32400", "api_key": "key-b"},
+        ])),
+        Setting(key="plex_library_config", value=json.dumps([
+            {"instance_name": "A", "libraries": [{"key": "1", "title": "M", "type": "movie", "enabled": True}]},
+            {"instance_name": "B", "libraries": [{"key": "2", "title": "T", "type": "show", "enabled": True}]},
+        ])),
+        Setting(key="poster_renamer_libraries", value=json.dumps(["A:1", "B:2"])),
+    ])
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={
+        "plex_instances": json.dumps([
+            {"name": "B", "url": "http://plex-a:32400", "api_key": "key-a"},
+            {"name": "A", "url": "http://plex-b:32400", "api_key": "key-b"},
+        ]),
+    })
+    assert response.status_code == 200
+
+    configs = _get_setting_json(test_db, "plex_library_config")
+    assert sorted(c["instance_name"] for c in configs) == ["A", "B"]
+    assert _get_setting_json(test_db, "poster_renamer_libraries") == ["A:1", "B:2"]
 
 

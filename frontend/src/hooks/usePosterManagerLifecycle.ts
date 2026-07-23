@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Drive, PosterConfig } from '../api/client'
 import { PosterManagerTab } from '../components/poster-manager/PosterManagerTabs'
+import { UnmatchedScope } from '../components/poster-manager/UnmatchedTypeSelector'
 import {
   BorderHolidaySchedule,
   BorderStyle,
@@ -16,6 +17,7 @@ interface UsePosterManagerLifecycleOptions {
   locationState: unknown
   activeTab: PosterManagerTab
   setActiveTab: React.Dispatch<React.SetStateAction<PosterManagerTab>>
+  setUnmatchedScope: (scope: UnmatchedScope) => void
   config: PosterConfig | null
   originalConfigRef: React.MutableRefObject<PosterConfig | null>
   setHasUnsavedChanges: React.Dispatch<React.SetStateAction<boolean>>
@@ -69,12 +71,14 @@ interface UsePosterManagerLifecycleOptions {
 
 type PosterManagerLocationState = {
   activeTab?: PosterManagerTab
+  unmatchedScope?: UnmatchedScope
 }
 
 export function usePosterManagerLifecycle({
   locationState,
   activeTab,
   setActiveTab,
+  setUnmatchedScope,
   config,
   originalConfigRef,
   setHasUnsavedChanges,
@@ -224,12 +228,21 @@ export function usePosterManagerLifecycle({
     setHasUnsavedLibraryChanges(hasChanged)
   }, [originalLibrarySelectionRef, selectedLibraries, setHasUnsavedLibraryChanges])
 
+  const appliedNavStateRef = useRef<unknown>(undefined)
+
   useEffect(() => {
+    // Apply each navigation payload once, or a re-render drags the user back to it.
+    if (locationState === appliedNavStateRef.current) return
+    appliedNavStateRef.current = locationState
+
     const navigationState = locationState as PosterManagerLocationState | null
     if (navigationState?.activeTab) {
       setActiveTab(navigationState.activeTab)
     }
-  }, [locationState, setActiveTab])
+    if (navigationState?.unmatchedScope) {
+      setUnmatchedScope(navigationState.unmatchedScope)
+    }
+  }, [locationState, setActiveTab, setUnmatchedScope])
 
   useEffect(() => {
     refreshStats()

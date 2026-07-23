@@ -22,13 +22,15 @@ import {
 } from '../api/client'
 import TmdbItemCard, { derivePsdConfig, type PsdConfig } from '../components/maker-tools/TmdbItemCard'
 import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
+import ArtworkFinderPanel from '../components/maker-tools/ArtworkFinderPanel'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './MakerTools.css'
+import Toolbar from '../components/Toolbar'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
-type MainTab = 'monitor' | 'tmdb-search' | 'unmatched'
+type MainTab = 'monitor' | 'tmdb-search' | 'unmatched' | 'artwork'
 
 const DEFAULT_MONITOR_CONFIG: MakerMonitorConfig = {
   tmdb_api_key: '',
@@ -536,6 +538,15 @@ function MakerTools() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === 'artwork'}
+          className={activeTab === 'artwork' ? 'active' : ''}
+          onClick={() => setActiveTab('artwork')}
+        >
+          <Paintbrush size={16} /> Artwork
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === 'monitor'}
           className={activeTab === 'monitor' ? 'active' : ''}
           onClick={() => setActiveTab('monitor')}
@@ -546,15 +557,10 @@ function MakerTools() {
 
       {activeTab === 'monitor' && (
       <div className="maker-tools-panel">
-        <div className="toolbar">
-          <div className="toolbar-title">
-            <h2>Season Premieres Monitor</h2>
-            <div className="toolbar-info">
-              <Info size={16} />
-              <div className="toolbar-tooltip">Tracks upcoming season premieres and highlights missing posters. Results appear below and persist after refresh.</div>
-            </div>
-          </div>
-          <div className="action-buttons">
+        <Toolbar
+          title="Season Premieres Monitor"
+          description="Tracks upcoming season premieres and highlights missing posters. Results appear below and persist after refresh."
+        >
             <div className="btn-pair">
               <button className="btn-toolbar btn-toolbar-link" type="button" onClick={openSchedulingSettings} disabled={saving || loading || running || isMonitorJobActive}>
                 Scheduling
@@ -569,8 +575,7 @@ function MakerTools() {
             <button className="btn-toolbar btn-primary" type="button" onClick={handleRunMonitor} disabled={saving || loading || running || isMonitorJobActive}>
               <Play size={16} /> {(running || isMonitorJobActive) ? 'Running...' : 'Run Monitor'}
             </button>
-          </div>
-        </div>
+        </Toolbar>
 
         {result && (
           <div className="maker-results">
@@ -762,20 +767,14 @@ function MakerTools() {
 
       {activeTab === 'tmdb-search' && (
         <div className="maker-tools-panel">
-          <div className="toolbar">
-            <div className="toolbar-title">
-              <h2>TMDB Search/PSD Export</h2>
-              <div className="toolbar-info">
-                <Info size={16} />
-                <div className="toolbar-tooltip">Search TMDB for movies, TV shows, and collections. Browse posters, logos, and backdrops, then export directly to PSD.</div>
-              </div>
-            </div>
-            <div className="action-buttons">
-              <button className="btn-toolbar" type="button" onClick={openPsdConfigModal}>
-                <SlidersHorizontal size={16} /> Configure
-              </button>
-            </div>
-          </div>
+          <Toolbar
+            title="TMDB Search/PSD Export"
+            description="Search TMDB for movies, TV shows, and collections. Browse posters, logos, and backdrops, then export directly to PSD."
+          >
+            <button className="btn-toolbar" type="button" onClick={openPsdConfigModal}>
+              <SlidersHorizontal size={16} /> Configure
+            </button>
+          </Toolbar>
           <div className="tmdb-search-panel">
             <div className="tmdb-search-help">
               <button
@@ -893,6 +892,8 @@ function MakerTools() {
           psdConfig={psdConfig}
         />
       )}
+
+      {activeTab === 'artwork' && <ArtworkFinderPanel />}
 
       {showPsdConfigModal && (
         <div className="modal-overlay">

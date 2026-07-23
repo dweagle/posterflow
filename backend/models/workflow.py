@@ -11,7 +11,7 @@ from database import Base
 DEFAULT_FLOW_CONFIG: Dict[str, Any] = {
     "idarr": {"enabled": False, "stop_on_error": False, "scope_indices": [], "sync_after_run": False},
     "sync_drives": {"enabled": True, "stop_on_error": True},
-    "rename_posters": {"enabled": True, "stop_on_error": True},
+    "rename_assets": {"enabled": True, "stop_on_error": True},
     "detect_unmatched": {"enabled": True, "stop_on_error": True},
     "border_replacer": {"enabled": False, "stop_on_error": True},
     "plex_upload": {"enabled": False, "stop_on_error": False},

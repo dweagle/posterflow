@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, UploadCloud, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop } from 'lucide-react'
+import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop, UploadCloud } from 'lucide-react'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
@@ -37,7 +37,7 @@ type SidebarItemConfig = {
 
 const NAV_ITEM_DEFS: NavItemDef[] = [
   { id: 'dashboard', label: 'Dashboard', to: '/', iconColor: '#ff8800', isEnd: true },
-  { id: 'poster-manager', label: 'Poster Manager', to: '/poster-manager', iconColor: '#a855f7', badge: 'unmatched' },
+  { id: 'poster-manager', label: 'Asset Manager', to: '/poster-manager', iconColor: '#a855f7', badge: 'unmatched' },
   { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4' },
   { id: 'poster-search', label: 'Poster Search', to: '/poster-search', iconColor: '#64b5f6' },
   { id: 'plex-upload', label: 'Plex Upload', to: '/plex-upload', iconColor: '#e5a00d' },
