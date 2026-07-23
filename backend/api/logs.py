@@ -5,11 +5,13 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from core.config import settings
 from core.logging import log_warning, log_error, log_user_action, LogTags
+from core.log_stream import hub
 from core.websocket import WebSocketConnectionManager, shutdown_event
 from database import get_db
 from models.setting import upsert_setting
 import re
 import asyncio
+from collections import deque
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -20,6 +22,49 @@ class LogEntry(BaseModel):
     timestamp: str
     level: str
     message: str
+
+
+LOG_LINE_PATTERN = r'(\d{2}[/:]\d{2}[/:]\d{2} \d{2}:\d{2}:\d{2}) \| (\w+)\s+\| (.+)'
+LOG_WINDOW_BYTES = 1_000_000
+LOG_WINDOW_MAX_LINES = 5000
+
+
+def read_log_window(end_offset: Optional[int] = None, max_lines: int = LOG_WINDOW_MAX_LINES) -> tuple[list[dict], int]:
+    """The newest `max_lines` parsed entries ending at byte `end_offset` (file end when None),
+    plus the byte cursor of the first returned line — pass it back as `end_offset` to page
+    further into history. Cursor 0 means the start of the file was reached.
+
+    Binary reads keep the cursor byte-accurate (log lines contain multi-byte glyphs)."""
+    log_file = Path(settings.log_file)
+    if not log_file.exists():
+        return [], 0
+    with open(log_file, 'rb') as f:
+        f.seek(0, 2)
+        file_end = f.tell()
+        end = file_end if end_offset is None else min(end_offset, file_end)
+        if end <= 0:
+            return [], 0
+        start = max(0, end - LOG_WINDOW_BYTES)
+        f.seek(start)
+        if start > 0:
+            f.readline()  # skip the partial line the window cut through
+        kept_start = f.tell()
+        raw = f.read(max(0, end - kept_start))
+
+    lines = raw.split(b'\n')
+    if lines and lines[-1] == b'':
+        lines.pop()  # the window ends on a line boundary; don't let '' consume max_lines
+    if len(lines) > max_lines:
+        dropped, lines = lines[:-max_lines], lines[-max_lines:]
+        kept_start += sum(len(line) + 1 for line in dropped)
+
+    entries = []
+    for line_bytes in lines:
+        match = re.match(LOG_LINE_PATTERN, line_bytes.decode('utf-8', errors='replace').strip())
+        if match:
+            timestamp, log_level, message = match.groups()
+            entries.append({'timestamp': timestamp, 'level': log_level, 'message': message})
+    return entries, kept_start
 
 class LogSettings(BaseModel):
     debug_enabled: bool
@@ -71,6 +116,38 @@ def get_logs(
         log_error(LogTags.LOGGING, f"Error reading logs: {str(e)}")
         return []
 
+@router.get("/search")
+def search_logs(q: str = Query(min_length=2), limit: int = Query(default=10000, le=10000)) -> dict:
+    """Case-insensitive substring search over the WHOLE log file (the page's live search
+    only covers loaded lines). Streams the file once; keeps the newest `limit` matches."""
+    log_file = Path(settings.log_file)
+    needle = q.strip().lower()
+    if not log_file.exists() or not needle:
+        return {"entries": [], "total": 0, "truncated": False}
+
+    matches: deque = deque(maxlen=limit)
+    total = 0
+    with open(log_file, 'rb') as f:
+        for line_bytes in f:
+            match = re.match(LOG_LINE_PATTERN, line_bytes.decode('utf-8', errors='replace').strip())
+            if not match:
+                continue
+            timestamp, log_level, message = match.groups()
+            if needle in message.lower():
+                total += 1
+                matches.append({'timestamp': timestamp, 'level': log_level, 'message': message})
+    return {"entries": list(matches), "total": total, "truncated": total > len(matches)}
+
+
+@router.get("/history")
+def get_log_history(end: int = Query(ge=0)) -> dict:
+    """Page backwards through the log file: `end` is the cursor a previous window returned
+    (the WS backlog frame carries the first one). Returns older entries plus the next cursor;
+    cursor 0 means the file start was reached."""
+    entries, cursor = read_log_window(end_offset=end)
+    return {"entries": entries, "cursor": cursor}
+
+
 @router.get("/debug-status")
 def get_debug_status() -> dict[str, bool]:
     """Get current debug mode status"""
@@ -117,97 +194,62 @@ def clear_logs(confirm: bool = False) -> dict[str, str]:
         raise HTTPException(status_code=500, detail="Failed to clear logs")
 @router.websocket("/ws")
 async def websocket_logs(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time log streaming"""
+    """Real-time log streaming: file replay for the backlog, then push from the loguru sink.
+
+    Live entries arrive from core.log_stream's broadcast hub — pushed the moment they are
+    logged, no file polling, no re-parsing. The log file is only read once per connection,
+    for the initial backlog.
+    """
     conn_id = _ws.next_conn_id()
-    
+
     await websocket.accept()
     _ws.active_connections.append(websocket)
     _ws.check_warning()
-    
-    log_file = Path(settings.log_file)
-    log_pattern = r'(\d{2}[/:]\d{2}[/:]\d{2} \d{2}:\d{2}:\d{2}) \| (\w+)\s+\| (.+)'
-    
+
+    # Subscribe BEFORE reading the backlog: lines logged during the file read may then
+    # appear twice at the seam, but none can be lost (the reverse order drops them).
+    queue = hub.subscribe()
     try:
         last_heartbeat_time = asyncio.get_running_loop().time()
 
-        # Send initial logs (last 1000 lines)
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                f.seek(0, 2)
-                end_pos = f.tell()
-                f.seek(max(0, end_pos - 200_000))
-                if end_pos > 200_000:
-                    f.readline()
-                recent_lines = f.readlines()[-1000:]
-                
-                for line in recent_lines:
-                    match = re.match(log_pattern, line.strip())
-                    if match:
-                        timestamp, log_level, message = match.groups()
-                        try:
-                            await websocket.send_json({
-                                'timestamp': timestamp,
-                                'level': log_level,
-                                'message': message
-                            })
-                            last_heartbeat_time = asyncio.get_running_loop().time()
-                        except Exception:
-                            # Client disconnected during initial send
-                            return
-        
-        # Tail log file for new entries
-        last_position = log_file.stat().st_size if log_file.exists() else 0
+        # Initial backlog as ONE batch frame, with the history cursor so the page can
+        # lazy-load older chunks via GET /api/logs/history when scrolled to the top.
+        entries, cursor = read_log_window()
+        if entries:
+            try:
+                await websocket.send_json({'type': 'batch', 'entries': entries, 'history_cursor': cursor})
+                last_heartbeat_time = asyncio.get_running_loop().time()
+            except Exception:
+                # Client disconnected during initial send
+                return
         
         while True:
-            # Sleep, but wake immediately if the server is shutting down
+            if shutdown_event.is_set():
+                return
             try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=0.5)
-                return  # Shutdown signaled — exit cleanly
+                first = await asyncio.wait_for(queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
-                pass  # Normal poll interval elapsed, continue
-            now = asyncio.get_running_loop().time()
-            
-            if not log_file.exists():
+                now = asyncio.get_running_loop().time()
                 if (now - last_heartbeat_time) >= LOG_WS_HEARTBEAT_INTERVAL_SECONDS:
                     await websocket.send_json({'type': 'heartbeat', 'heartbeat': int(now)})
                     last_heartbeat_time = now
                 continue
-                
-            current_size = log_file.stat().st_size
-            sent_log_entry = False
-            
-            # If file was truncated (cleared), reset position
-            if current_size < last_position:
-                last_position = 0
-            
-            # If file grew, read new lines
-            if current_size > last_position:
-                with open(log_file, 'r') as f:
-                    f.seek(last_position)
-                    new_lines = f.readlines()
-                    last_position = f.tell()
-                    
-                    for line in new_lines:
-                        match = re.match(log_pattern, line.strip())
-                        if match:
-                            timestamp, log_level, message = match.groups()
-                            try:
-                                await websocket.send_json({
-                                    'timestamp': timestamp,
-                                    'level': log_level,
-                                    'message': message
-                                })
-                                sent_log_entry = True
-                            except Exception:
-                                # Client disconnected during streaming
-                                return
 
-            if sent_log_entry:
-                last_heartbeat_time = now
-            elif (now - last_heartbeat_time) >= LOG_WS_HEARTBEAT_INTERVAL_SECONDS:
-                await websocket.send_json({'type': 'heartbeat', 'heartbeat': int(now)})
-                last_heartbeat_time = now
-    
+            # Coalesce a burst into one frame: brief window, then drain whatever queued.
+            await asyncio.sleep(0.25)
+            entries = [first]
+            while True:
+                try:
+                    entries.append(queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                await websocket.send_json({'type': 'batch', 'entries': entries})
+                last_heartbeat_time = asyncio.get_running_loop().time()
+            except Exception:
+                # Client disconnected during streaming
+                return
+
     except (WebSocketDisconnect, asyncio.CancelledError):
         # Client disconnected or server shutting down - this is normal, no logging needed
         return
@@ -215,6 +257,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
         # Silently handle errors during streaming - don't log to avoid recursion
         return
     finally:
+        hub.unsubscribe(queue)
         # ALWAYS remove connection from list, regardless of how we exit
         if websocket in _ws.active_connections:
             _ws.active_connections.remove(websocket)

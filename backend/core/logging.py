@@ -40,13 +40,13 @@ class LogTags:
     RCLONE = "RCLONE"
     DRIVES = "DRIVES"
     SCANNER = "SCANNER"
+    MERGE = "MERGE"
     MATCH = "MATCH"
     UNMATCHED = "UNMATCHED"
-    POSTER_RENAMER = "POSTER_RENAMER"
-    BORDER_REPLACER = "BORDER_REPLACER"
-    POSTER_STATS = "POSTER_STATS"
+    RENAMER = "RENAMER"  # merged Asset Renamer (posters + artwork) share one tag
+    BORDER_REPLACER = "BORDER"  # displayed tag; constant name kept for the many call sites
     BACKUP = "BACKUP"
-    USER_ACTION = "USER ACTION"
+    USER_ACTION = "ACTION"
     WEBSOCKET = "WEBSOCKET"
     LOGGING = "LOGGING"
     DATABASE = "DATABASE"
@@ -55,6 +55,7 @@ class LogTags:
     WORKFLOW = "WORKFLOW"
     ARR = "ARR"
     IDARR = "IDARR"
+    ARTWORK_PULL = "ARTPULL"   # artwork-finder (removable)
     MONITOR = "MONITOR"
     CLEANUP = "CLEANUP"
 
@@ -65,63 +66,79 @@ def log_separator(char: str = "=", length: int = 80) -> str:
     """Print a separator line"""
     return char * length
 
+def _structural_info(message: str) -> None:
+    """Separator rows have no tag, so mark them structural — the job-log filter passes these."""
+    logger.bind(log_structural=True).info(message)
+
+def _structural_blank() -> None:
+    """A true blank line in every sink (raw skips the timestamp prefix) — vertical space in the files."""
+    logger.bind(log_structural=True).opt(raw=True).info("\n")
+
 def log_section_start(tag: str, title: str, icon: str = LogIcons.START) -> None:
     """Log the start of a major section"""
-    logger.info(log_separator())
-    logger.info(f"[{tag:^15}] {icon} {title}")
-    logger.info(log_separator())
+    _structural_blank()
+    _structural_info(log_separator())
+    logger.info(f"[{tag:^9}] {icon} {title}")
+    _structural_info(log_separator())
 
 def log_section_end(tag: str, title: str, icon: str = LogIcons.STOP) -> None:
     """Log the end of a major section"""
-    logger.info(log_separator())
-    logger.info(f"[{tag:^15}] {icon} {title}")
-    logger.info(log_separator())
+    _structural_info(log_separator())
+    logger.info(f"[{tag:^9}] {icon} {title}")
+    _structural_info(log_separator())
+    _structural_blank()
+
+def log_phase(tag: str, title: str) -> None:
+    """Phase break WITHIN a job: blank line + separator + heavy rule, so activities read as separate chunks."""
+    _structural_blank()
+    _structural_info(log_separator())
+    logger.info(f"[{tag:^9}] ━━ {title} " + "━" * max(4, 60 - len(title)))
 
 def log_step(tag: str, step_num: int, total_steps: int, message: str, icon: str = LogIcons.PROGRESS) -> None:
     """Log a step in a multi-step process"""
-    logger.info(f"[{tag:^15}] {icon} Step {step_num}/{total_steps}: {message}")
+    logger.info(f"[{tag:^9}] {icon} Step {step_num}/{total_steps}: {message}")
 
 def log_success(tag: str, message: str, **context: Any) -> None:
     """Log a success message with context (uses INFO level)"""
     if context:
-        logger.bind(**context).info(f"[{tag:^15}] {LogIcons.SUCCESS} {message}")
+        logger.bind(**context).info(f"[{tag:^9}] {LogIcons.SUCCESS} {message}")
     else:
-        logger.info(f"[{tag:^15}] {LogIcons.SUCCESS} {message}")
+        logger.info(f"[{tag:^9}] {LogIcons.SUCCESS} {message}")
 
 def log_error(tag: str, message: str, **context: Any) -> None:
     """Log an error message with context"""
     if context:
-        logger.bind(**context).error(f"[{tag:^15}] {LogIcons.ERROR} {message}")
+        logger.bind(**context).error(f"[{tag:^9}] {LogIcons.ERROR} {message}")
     else:
-        logger.error(f"[{tag:^15}] {LogIcons.ERROR} {message}")
+        logger.error(f"[{tag:^9}] {LogIcons.ERROR} {message}")
 
 def log_warning(tag: str, message: str, **context: Any) -> None:
     """Log a warning message with context"""
     if context:
-        logger.bind(**context).warning(f"[{tag:^15}] {LogIcons.WARNING} {message}")
+        logger.bind(**context).warning(f"[{tag:^9}] {LogIcons.WARNING} {message}")
     else:
-        logger.warning(f"[{tag:^15}] {LogIcons.WARNING} {message}")
+        logger.warning(f"[{tag:^9}] {LogIcons.WARNING} {message}")
 
 def log_info(tag: str, message: str, **context: Any) -> None:
     """Log an info message with context"""
     if context:
-        logger.bind(**context).info(f"[{tag:^15}] {LogIcons.INFO} {message}")
+        logger.bind(**context).info(f"[{tag:^9}] {LogIcons.INFO} {message}")
     else:
-        logger.info(f"[{tag:^15}] {LogIcons.INFO} {message}")
+        logger.info(f"[{tag:^9}] {LogIcons.INFO} {message}")
 
 def log_debug(tag: str, message: str, **context: Any) -> None:
     """Log a debug message with context"""
     if context:
-        logger.bind(**context).debug(f"[{tag:^15}] {LogIcons.DEBUG} {message}")
+        logger.bind(**context).debug(f"[{tag:^9}] {LogIcons.DEBUG} {message}")
     else:
-        logger.debug(f"[{tag:^15}] {LogIcons.DEBUG} {message}")
+        logger.debug(f"[{tag:^9}] {LogIcons.DEBUG} {message}")
 
 def log_user_action(action: str, **context: Any) -> None:
     """Log a user action"""
     if context:
-        logger.bind(**context).info(f"[{LogTags.USER_ACTION:^15}] {LogIcons.USER} {action}")
+        logger.bind(**context).info(f"[{LogTags.USER_ACTION:^9}] {LogIcons.USER} {action}")
     else:
-        logger.info(f"[{LogTags.USER_ACTION:^15}] {LogIcons.USER} {action}")
+        logger.info(f"[{LogTags.USER_ACTION:^9}] {LogIcons.USER} {action}")
 
 def setup_logging(debug_enabled: Optional[bool] = None) -> None:
     """
@@ -129,7 +146,7 @@ def setup_logging(debug_enabled: Optional[bool] = None) -> None:
     Uses standardized format with aligned tags and icons.
     
     Date format: YY/MM/DD HH:MM:SS
-    Tags: Centered in 15-character field
+    Tags: Centered in 11-character field
     Icons: Plain white characters for visual markers
     """
     # Use provided debug setting or fall back to config
@@ -151,7 +168,7 @@ def setup_logging(debug_enabled: Optional[bool] = None) -> None:
     logger.add(
         sys.stdout,
         level="DEBUG",
-        format=f"<green>{{time:{LOGURU_TIMESTAMP_FORMAT}}}</green> │ <level>{{level: <8}}</level> │ <level>{{message}}</level>",
+        format=f"<green>{{time:{LOGURU_TIMESTAMP_FORMAT}}}</green> │ <level>{{level: <7}}</level> │ <level>{{message}}</level>",
         colorize=True
     )
     
@@ -159,11 +176,17 @@ def setup_logging(debug_enabled: Optional[bool] = None) -> None:
     logger.add(
         settings.log_file,
         level=file_level,
-        format=f"{{time:{LOGURU_TIMESTAMP_FORMAT}}} | {{level: <8}} | {{message}}",
+        format=f"{{time:{LOGURU_TIMESTAMP_FORMAT}}} | {{level: <7}} | {{message}}",
         rotation=settings.max_log_size,
         retention=settings.backup_count,
         compression="zip"
     )
+
+    # Live-stream sink - pushes records to connected Logs pages (see core/log_stream.py).
+    # Registered here (not at startup) so debug toggles, which re-run setup_logging and
+    # logger.remove() everything, re-install it at the right level alongside the file sink.
+    from core.log_stream import broadcast_sink
+    logger.add(broadcast_sink, level=file_level, format="{message}")
     
     log_info(LogTags.LOGGING, f"Logging system initialized (file level: {file_level})")
     log_info(LogTags.LOGGING, f"Log file: {settings.log_file}")
@@ -188,16 +211,17 @@ def add_job_log_handler(job_type: str, job_id: int, job_name: Optional[str] = No
         "sync_all": LogTags.SYNC_ALL,
         "plex_upload": LogTags.UPLOADER,
         "workflow": LogTags.WORKFLOW,
-        "poster_renamer": LogTags.POSTER_RENAMER,
+        "poster_renamer": LogTags.RENAMER,
         "border_replacer": LogTags.BORDER_REPLACER,
         "unmatched_assets": LogTags.UNMATCHED,
         "backup": LogTags.BACKUP,
         "idarr": LogTags.IDARR,
+        "artwork_pull": LogTags.ARTWORK_PULL,
     }
-    
+
     # Get the proper log tag for this job type
     log_tag = job_type_to_tag.get(job_type, job_type.upper())
-    
+
     # Create job logs directory
     job_logs_dir = Path(settings.log_file).parent / job_type
     job_logs_dir.mkdir(parents=True, exist_ok=True)
@@ -215,17 +239,18 @@ def add_job_log_handler(job_type: str, job_id: int, job_name: Optional[str] = No
     handler_id = logger.add(
         str(log_filename),
         level=job_log_level,
-        format=f"{{time:{LOGURU_TIMESTAMP_FORMAT}}} | {{level: <8}} | {{message}}",
+        format=f"{{time:{LOGURU_TIMESTAMP_FORMAT}}} | {{level: <7}} | {{message}}",
         filter=lambda record: _should_log_to_job(record, job_type)
     )
     
     # Write section header to job log
     job_display_name = job_name or job_type.replace("_", " ").title()
-    logger.debug(log_separator())
-    logger.info(f"[{log_tag:^15}] {LogIcons.START} JOB STARTED: {job_display_name}")
-    logger.debug(f"[{log_tag:^15}] {LogIcons.INFO} Job ID: {job_id}")
-    logger.debug(f"[{log_tag:^15}] {LogIcons.INFO} Started: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
-    logger.debug(log_separator())
+    _structural_blank()
+    _structural_info(log_separator())
+    logger.info(f"[{log_tag:^9}] {LogIcons.START} JOB STARTED: {job_display_name}")
+    logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Job ID: {job_id}")
+    logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Started: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
+    _structural_info(log_separator())
     
     log_debug(LogTags.LOGGING, f"Job log handler added: {log_filename.name}")
     
@@ -236,11 +261,15 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
     Filter function to determine if a log record should go to job log.
     Includes relevant tags based on job type.
     
-    Note: Tags are centered in 15-char fields like [   WORKFLOW   ]
+    Note: Tags are centered in 9-char fields like [WORKFLOW ]
     so we check if the tag name appears anywhere in the message.
     """
+    # Structural lines (separators / blank spacers) carry no tag but shape the file.
+    if record.get("extra", {}).get("log_structural"):
+        return True
+
     message = record.get("message", "")
-    
+
     # Common tags that always go to job logs (check for tag name, not formatted version)
     common_tags = ["WORKER", "ERROR"]
     
@@ -248,13 +277,14 @@ def _should_log_to_job(record: dict, job_type: str) -> bool:
     job_specific_tags = {
         "sync_one": ["SYNC", "RCLONE"],
         "sync_all": ["SYNC-ALL", "SYNC", "RCLONE"],
-        "plex_upload": ["UPLOADER", "DATABASE", "API", "POSTER_RENAMER", "BORDER_REPLACER", "SCANNER"],
-        "poster_renamer": ["POSTER_RENAMER", "SCANNER", "ARR", "CLEANUP"],
-        "border_replacer": ["BORDER_REPLACER"],
-        "unmatched_assets": ["UNMATCHED", "SCANNER", "ARR", "POSTER_RENAMER"],
-        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "POSTER_RENAMER", "BORDER_REPLACER", "UNMATCHED", "RCLONE", "SCANNER", "ARR", "UPLOADER", "CLEANUP"],
+        "plex_upload": ["UPLOADER", "DATABASE", "API", "RENAMER", "BORDER", "SCANNER", "MERGE"],
+        "poster_renamer": ["RENAMER", "SCANNER", "MERGE", "ARR", "MATCH", "CLEANUP"],
+        "border_replacer": ["BORDER"],
+        "unmatched_assets": ["UNMATCHED", "SCANNER", "MERGE", "ARR", "RENAMER"],
+        "workflow": ["WORKFLOW", "SYNC", "SYNC-ALL", "RENAMER", "BORDER", "UNMATCHED", "RCLONE", "SCANNER", "MERGE", "ARR", "MATCH", "UPLOADER", "CLEANUP"],
         "backup": ["BACKUP"],
         "idarr": ["IDARR", "RCLONE"],
+        "artwork_pull": ["ARTPULL"],
     }
     
     # Get tags for this job type
@@ -288,41 +318,31 @@ def remove_job_log_handler(handler_id: int, job_type: str = None, success: bool 
                 "sync_all": LogTags.SYNC_ALL,
                 "plex_upload": LogTags.UPLOADER,
                 "workflow": LogTags.WORKFLOW,
-                "poster_renamer": LogTags.POSTER_RENAMER,
+                "poster_renamer": LogTags.RENAMER,
                 "border_replacer": LogTags.BORDER_REPLACER,
                 "unmatched_assets": LogTags.UNMATCHED,
                 "backup": LogTags.BACKUP,
                 "idarr": LogTags.IDARR,
+                "artwork_pull": LogTags.ARTWORK_PULL,
             }
-            
+
             # Get the proper log tag for this job type
             log_tag = job_type_to_tag.get(job_type, job_type.upper())
             
             status_icon = LogIcons.SUCCESS if success else LogIcons.ERROR
             status_text = "COMPLETED SUCCESSFULLY" if success else "COMPLETED WITH ERRORS"
             
-            logger.debug(log_separator())
-            logger.info(f"[{log_tag:^15}] {status_icon} JOB {status_text}")
-            logger.debug(f"[{log_tag:^15}] {LogIcons.INFO} Ended: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
-            logger.debug(log_separator())
+            _structural_info(log_separator())
+            logger.info(f"[{log_tag:^9}] {status_icon} JOB {status_text}")
+            logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Ended: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
+            _structural_info(log_separator())
+            _structural_blank()
         
         logger.remove(handler_id)
         log_debug(LogTags.LOGGING, "Job log handler removed")
     except ValueError:
         # Handler already removed, ignore
         pass
-
-
-def cleanup_old_job_logs(job_type: str, keep: int = 10) -> None:
-    """
-    Remove old job log files, keeping only the most recent N logs.
-    This function is deprecated - use rotate_job_logs() instead.
-    
-    Args:
-        job_type: Type of job (e.g., "sync_one", "sync_all")
-        keep: Number of recent log files to keep (default: 10)
-    """
-    pass  # Now handled by rotate_job_logs
 
 
 def rotate_job_logs(job_type: str, keep: int = 10) -> None:

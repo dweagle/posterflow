@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/job-logs", tags=["job-logs"])
 JobLogFile = Dict[str, Any]
 JobLogsByType = Dict[str, List[JobLogFile]]
 
-PRIMARY_JOB_TYPES = ["sync_one", "sync_all", "plex_upload", "workflow", "poster_renamer", "border_replacer", "unmatched_assets", "idarr"]
+PRIMARY_JOB_TYPES = ["sync_one", "sync_all", "plex_upload", "workflow", "poster_renamer", "border_replacer", "unmatched_assets", "idarr", "artwork_pull"]
 
 
 def _extract_log_metadata(log_file: Path) -> tuple[Optional[int], Optional[str]]:

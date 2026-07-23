@@ -106,6 +106,36 @@
   position: relative;
 }
 
+/* System tab fits the viewport: the page is a column pinned to the visible height
+   (minus .content's 2rem paddings) and the log window flexes into what the header,
+   tabs, search, and controls leave over — no page scrollbar at full screen. */
+.logs-page-fill {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 4rem);
+}
+
+.logs-page-fill .logs-window {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.logs-page-fill .logs-container {
+  flex: 1;
+  height: auto;
+  /* Small windows: keep the log readable and let the page scroll instead. */
+  min-height: 240px;
+}
+
+/* .content padding switches to 4rem/1rem at this width (MainLayout.css). */
+@media (max-width: 550px) {
+  .logs-page-fill {
+    height: calc(100dvh - 5rem);
+  }
+}
+
 .btn-clear {
   padding: 0.5rem 1rem;
   background-color: #f44336;
@@ -155,8 +185,9 @@
   border: 1px solid #333;
   border-radius: 8px;
   padding: 1rem;
-  max-height: 70vh;
-  overflow-y: auto;
+  /* The log pane scrolls internally and needs a definite height to fill. */
+  height: 70vh;
+  overflow: hidden;
 }
 
 .btn-jump-latest-floating {
@@ -172,6 +203,115 @@
   font-size: 0.875rem;
 }
 
+.logs-search-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.logs-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* Counts/nav hang off the right via .logs-search-meta so the centered input never shifts. */
+  position: relative;
+}
+
+.logs-search-meta {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.logs-search input {
+  background-color: #252525;
+  border: 1px solid #444;
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  color: #eee;
+  padding: 0.55rem 2rem 0.55rem 0.75rem; /* room for the inner ✕ */
+  font-size: 0.9rem;
+  width: 420px;
+}
+
+.logs-search input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+/* Joined to the input's right edge. */
+.btn-log-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: -0.5rem;
+  background-color: #64b5f6;
+  border: 1px solid #64b5f6;
+  border-radius: 0 6px 6px 0;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+
+.btn-log-search:hover:not(:disabled) {
+  background-color: #82c4f8;
+  border-color: #82c4f8;
+}
+
+.btn-log-search:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.logs-search-box {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The ✕ lives INSIDE the input's right edge. */
+.logs-search-clear-inner {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: #777;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.logs-search-clear-inner:hover {
+  color: #ddd;
+}
+
+/* Arrows sit fixed next to the search box; the counter is rightmost, so its growth
+   extends into empty space and never moves anything. */
+.logs-match-counter {
+  color: #888;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.logs-history-note {
+  text-align: center;
+  color: #888;
+  font-size: 0.8rem;
+  padding: 0.5rem;
+}
+
 .log-entry {
   display: grid;
   grid-template-columns: 160px 72px 1fr;
@@ -179,10 +319,6 @@
   padding: 0.5rem;
   border-bottom: 1px solid #2a2a2a;
   align-items: start;
-}
-
-.log-entry:hover {
-  background-color: #2a2a2a;
 }
 
 .log-timestamp {
@@ -198,6 +334,9 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.45;
+  /* Hanging indent: wraps align past the [ TAG ] block (11ch + space) where the message starts. */
+  padding-left: 12ch;
+  text-indent: -12ch;
 }
 
 .no-logs {
@@ -277,7 +416,7 @@
 
 .job-logs-layout {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: 265px 1fr;
   gap: 1.5rem;
   height: calc(100vh - 250px);
 }
@@ -588,24 +727,96 @@
   color: #fff;
 }
 
-.live-viewer-content pre {
+.live-viewer-content .log-hang {
   color: #c8e6c9;
 }
 
 .log-viewer-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden; /* the log pane scrolls internally */
   padding: 1.5rem;
 }
 
-.log-viewer-content pre {
+.log-viewer-content .log-hang {
+  height: 100%;
+}
+
+/* Find-in-file bar in the viewer header. Fixed width with the nav space reserved,
+   so the input doesn't shift when the counter and arrows appear. */
+.log-viewer-find {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 1rem;
+  width: 380px;
+  flex-shrink: 0;
+}
+
+.log-viewer-find input {
+  background-color: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #eee;
+  padding: 0.35rem 1.7rem 0.35rem 0.6rem; /* room for the inner ✕ */
+  font-size: 0.85rem;
+  width: 200px;
+}
+
+.log-viewer-find input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+/* Search-match highlighting and match cycling. */
+.log-match {
+  background-color: rgba(100, 181, 246, 0.4);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.log-entry-active-match,
+.log-hang-line-active {
+  background-color: rgba(100, 181, 246, 0.14);
+}
+
+.logs-match-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-match-nav {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #aaa;
+  padding: 0.25rem;
+  cursor: pointer;
+}
+
+.btn-match-nav:hover {
+  color: #fff;
+  border-color: #555;
+}
+
+.log-viewer-content .log-hang {
   margin: 0;
   color: #e0e0e0;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.85rem;
   line-height: 1.5;
+}
+
+/* Hanging indent: wrapped continuations align under the message column (42ch =
+   timestamp + level + separators + the fixed-width [ TAG ] block). */
+.log-hang-line {
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding-left: 42ch;
+  text-indent: -42ch;
 }
 
 .log-viewer-loading {

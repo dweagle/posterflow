@@ -1,5 +1,13 @@
 import { vi, beforeEach, afterEach } from 'vitest'
 
+// jsdom lacks ResizeObserver; some components expect it to exist.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
 beforeEach(() => {
   const storage = new Map<string, string>()
   vi.stubGlobal('localStorage', {

@@ -28,9 +28,13 @@ export {
 
 export {
   type LogEntry,
+  type LogHistoryPage,
+  type LogSearchResult,
   clearLogs,
   getDebugStatus,
+  getLogHistory,
   getLogs,
+  searchLogs,
   toggleDebug,
 } from './logs'
 

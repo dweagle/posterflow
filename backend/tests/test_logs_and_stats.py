@@ -35,6 +35,67 @@ def test_get_logs_parses_entries_and_filters_by_level(client, tmp_path):
         settings.log_file = previous_log_file
 
 
+def test_log_history_pages_backwards_to_file_start(client, tmp_path):
+    """The /history cursor walks older windows without gaps or duplicates, byte-accurately
+    even with multi-byte glyphs, and reports 0 at the start of the file."""
+    import api.logs as logs_api
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "posterflow.log"
+    all_lines = [f"26/02/15 10:00:{i % 60:02d} | INFO    | [ TEST ] ✓ line {i}\n" for i in range(9)]
+    log_file.write_text("".join(all_lines), encoding="utf-8")
+
+    previous_log_file = settings.log_file
+    previous_max = logs_api.LOG_WINDOW_MAX_LINES
+    settings.log_file = str(log_file)
+    logs_api.LOG_WINDOW_MAX_LINES = 4  # small pages so the test walks several windows
+    try:
+        entries, cursor = logs_api.read_log_window(max_lines=4)
+        collected = [e["message"] for e in entries]
+        assert collected == [f"[ TEST ] ✓ line {i}" for i in (5, 6, 7, 8)]
+
+        seen_older = []
+        while cursor > 0:
+            response = client.get(f"/api/logs/history?end={cursor}")
+            assert response.status_code == 200
+            page = response.json()
+            seen_older = [e["message"] for e in page["entries"]] + seen_older
+            cursor = page["cursor"]
+        assert seen_older == [f"[ TEST ] ✓ line {i}" for i in range(5)]
+    finally:
+        settings.log_file = previous_log_file
+        logs_api.LOG_WINDOW_MAX_LINES = previous_max
+
+
+def test_log_search_scans_whole_file_case_insensitive(client, tmp_path):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "posterflow.log"
+    log_file.write_text(
+        "26/02/15 10:00:00 | INFO    | [ RENAMER ] ✓ Placed The Aviator (2004)\n"
+        "26/02/15 10:00:01 | DEBUG   | [ SCANNER ] ◆ something else entirely\n"
+        "26/02/15 10:00:02 | ERROR   | [ RENAMER ] ✗ aviator artwork failed\n",
+        encoding="utf-8",
+    )
+
+    previous_log_file = settings.log_file
+    settings.log_file = str(log_file)
+    try:
+        response = client.get("/api/logs/search?q=AVIATOR")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2 and data["truncated"] is False
+        assert [e["level"] for e in data["entries"]] == ["INFO", "ERROR"]
+
+        capped = client.get("/api/logs/search?q=aviator&limit=1").json()
+        assert capped["total"] == 2 and capped["truncated"] is True
+        assert len(capped["entries"]) == 1
+        assert capped["entries"][0]["level"] == "ERROR", "newest match is the one kept"
+    finally:
+        settings.log_file = previous_log_file
+
+
 def test_clear_logs_requires_confirm_and_truncates_file(client, tmp_path):
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
