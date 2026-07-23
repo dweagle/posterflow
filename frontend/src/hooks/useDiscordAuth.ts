@@ -56,24 +56,26 @@ function parseStoredToken(token: string): Omit<DiscordAuth, 'token'> | null {
   }
 }
 
+// Read synchronously so the first render already reflects a logged-in user
+// (an effect-based restore flashes the logged-out UI for one frame).
+function loadStoredAuth(): DiscordAuth | null {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) return null
+  try {
+    const parsed = JSON.parse(stored) as DiscordAuth
+    const fields = parseStoredToken(parsed.token)
+    if (fields) return { ...fields, token: parsed.token }
+  } catch {
+    // fall through to cleanup
+  }
+  localStorage.removeItem(STORAGE_KEY)
+  return null
+}
+
 export function useDiscordAuth() {
-  const [auth, setAuth] = useState<DiscordAuth | null>(null)
+  const [auth, setAuth] = useState<DiscordAuth | null>(loadStoredAuth)
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
-
-  // Load persisted auth on mount
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (!stored) return
-    try {
-      const parsed = JSON.parse(stored) as DiscordAuth
-      const fields = parseStoredToken(parsed.token)
-      if (fields) setAuth({ ...fields, token: parsed.token })
-      else localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      localStorage.removeItem(STORAGE_KEY)
-    }
-  }, [])
 
   // Persist the connected identity + token to the backend so headless scan jobs
   // can reconcile this user's own community-list items. Idempotent; fires on
@@ -159,6 +161,9 @@ export function useDiscordAuth() {
       const form = new FormData()
       form.append('token', auth.token)
       form.append('request_id', requestId)
+      // Send names separately — Deno's formData parser truncates a multipart filename
+      // at the first ";" (e.g. "ChäoS;HEAd"), so the edge function can't trust f.name.
+      form.append('filenames', JSON.stringify(files.map((f) => f.name)))
       for (const file of files) {
         form.append('file', file)
       }

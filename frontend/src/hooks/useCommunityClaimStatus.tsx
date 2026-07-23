@@ -78,7 +78,7 @@ const CommunityClaimStatusContext = createContext<CommunityClaimStatusValue>(def
 /**
  * Fetches community requests + list items ONCE and shares the claimed
  * (in_progress) / completed (fulfilled) index with every consumer below it (the
- * Poster Manager Unmatched tab and its modals), instead of each component
+ * Asset Manager Unmatched tab and its modals), instead of each component
  * fetching its own copy. fulfilled wins over in_progress. Best-effort: network
  * errors just yield no flags.
  */

@@ -498,8 +498,21 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
       }
       await saveBulkSettings(settingsToSave)
 
-      for (const instance of mediaSettings.plex_instances.filter(p => p.url && p.api_key)) {
-        const existingConfig = libraryConfigs.find(c => c.instance_name === instance.name)
+      // The bulk save migrates/prunes library configs on a server rename, so the
+      // page-load cache is stale here; re-fetch before deciding what to auto-configure
+      // or a renamed instance would get its migrated selection reset to all-enabled.
+      let freshConfigs: PlexLibraryConfig[] | null = null
+      try {
+        freshConfigs = (await getPlexLibraryConfigs()).configs
+      } catch (err) {
+        console.error('[AUTO-CONFIG] Skipping library auto-configuration; could not load current configs:', err)
+      }
+
+      const autoConfigInstances = freshConfigs === null
+        ? []
+        : mediaSettings.plex_instances.filter(p => p.url && p.api_key)
+      for (const instance of autoConfigInstances) {
+        const existingConfig = freshConfigs?.find(c => c.instance_name === instance.name)
 
         if (!existingConfig) {
           try {

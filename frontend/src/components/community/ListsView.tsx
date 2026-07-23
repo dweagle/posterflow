@@ -552,7 +552,7 @@ export default function ListsView() {
           <Globe size={48} />
           <p>No list items found</p>
           <p className="community-empty-sub">
-            Publish items from the <strong>Unmatched Assets</strong> tab or the <strong>Drive Priority</strong> style list in Poster Manager.
+            Publish items from the <strong>Unmatched Assets</strong> tab or the <strong>Drive Priority</strong> style list in Asset Manager.
           </p>
         </div>
       ) : (

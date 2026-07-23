@@ -404,7 +404,7 @@ export default function CommunityRequests() {
         </div>
         <p>
           Poster makers use this list to prioritize their work. Submit new requests using the{' '}
-          <strong>New Request</strong> button or from the <strong>Unmatched Assets</strong> tab in Poster Manager.
+          <strong>New Request</strong> button or from the <strong>Unmatched Assets</strong> tab in Asset Manager.
         </p>
       </div>
 
@@ -586,7 +586,7 @@ export default function CommunityRequests() {
           <p className="community-empty-sub">
             {ownerFilter === 'mine'
               ? 'Requests you submit will appear here.'
-              : 'Submit requests from the Unmatched Assets tab in Poster Manager.'}
+              : 'Submit requests from the Unmatched Assets tab in Asset Manager.'}
           </p>
         </div>
       ) : (

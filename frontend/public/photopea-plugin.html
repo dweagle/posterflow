@@ -901,7 +901,17 @@
   // Active-document watcher: the panel mirrors whatever doc is in front. In same-tab mode a new
   // export becomes the active doc; switching docs by hand also counts. Poll the active name (cheap)
   // and only re-read layers when it changes. Paused while a save/JPG/place op is mid-flight.
-  const POLL = 'try{app.echoToOE("PFLACT:"+(app.documents.length?app.activeDocument.name:""))}catch(e){}';
+  // It also SELF-HEALS tab titles: Photopea names a URL-opened doc from the %-encoded, truncated
+  // URL basename (e.g. "Mr. and Mrs. (1996) …" → "Mr."), so decode the real filename from each doc's
+  // Document.source and set it back — EVERY open doc, not just the active one, so background tabs
+  // heal too. This runs on the plugin's OWN interval — the reliable place to do it, since
+  // Photopea-side setTimeout can't loop a launch/open-script rename past the load clobber.
+  // Only our own /psd-exports/ docs are touched; a dragged-in doc keeps its name.
+  const POLL = 'try{var nm="";'
+    + 'for(var i=0;i<app.documents.length;i++){try{var dd=app.documents[i],s=""+(dd.source||""),m=s.match(/\\/psd-exports\\/([^/?#]+)/);'
+    + 'if(m){var w=decodeURIComponent(m[1]).replace(/\\.psd$/i,"");if(w&&dd.name!==w)dd.name=w;}}catch(_e){}}'
+    + 'if(app.documents.length)nm=app.activeDocument.name;'
+    + 'app.echoToOE("PFLACT:"+nm);}catch(e){}';
   setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)

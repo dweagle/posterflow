@@ -113,6 +113,14 @@ Deno.serve(async (req) => {
   const token = form.get('token') as string | null
   const requestId = form.get('request_id') as string | null
   const files = form.getAll('file') as File[]
+  // Deno's req.formData() truncates a multipart filename at the first ";" (it splits
+  // Content-Disposition without honoring the quotes), so f.name arrives mangled for
+  // names like "ChäoS;HEAd …". The client sends the real names in this field instead.
+  let providedNames: string[] = []
+  try {
+    const raw = form.get('filenames')
+    if (typeof raw === 'string') providedNames = JSON.parse(raw)
+  } catch { /* fall back to f.name below */ }
 
   if (!token || !requestId || files.length === 0) {
     return json({ error: 'Missing required fields: token, request_id, file' }, 400)
@@ -176,6 +184,11 @@ Deno.serve(async (req) => {
     ? `🖼️ Poster uploaded by **${payload.discord_username}**`
     : `🖼️ ${files.length} posters uploaded by **${payload.discord_username}**`
 
+  // Use the client-provided name (f.name is truncated by Deno at ";"). Send it to
+  // Discord as-is (Deno's serializer quotes it properly) to see how Discord itself
+  // handles it — reintroduce sanitizing here only if Discord mangles the real name.
+  const nameFor = (f: File, i: number) => providedNames[i] || f.name || `poster_${i + 1}.jpg`
+
   // Rebuilt per attempt — a FormData's file parts are consumed when streamed.
   const buildForm = () => {
     const form = new FormData()
@@ -183,11 +196,11 @@ Deno.serve(async (req) => {
       'payload_json',
       JSON.stringify({
         content: label,
-        attachments: files.map((f, i) => ({ id: i, filename: f.name || `poster_${i + 1}.jpg` })),
+        attachments: files.map((f, i) => ({ id: i, filename: nameFor(f, i) })),
       }),
     )
     files.forEach((f, i) => {
-      form.append(`files[${i}]`, f, f.name || `poster_${i + 1}.jpg`)
+      form.append(`files[${i}]`, f, nameFor(f, i))
     })
     return form
   }
