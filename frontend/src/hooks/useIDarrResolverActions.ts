@@ -24,7 +24,6 @@ interface UseIDarrResolverActionsParams {
   ) => Promise<void>
   loadCacheStats: () => Promise<void>
   loadIgnoredTitles: () => Promise<void>
-  isIdarrJobActive: () => boolean
 }
 
 export const useIDarrResolverActions = ({
@@ -39,10 +38,7 @@ export const useIDarrResolverActions = ({
   refreshPendingAndHandleResolverAdvance,
   loadCacheStats,
   loadIgnoredTitles,
-  isIdarrJobActive,
 }: UseIDarrResolverActionsParams) => {
-  const IDARR_BUSY_MESSAGE = 'An IDarr run is already in progress — wait for it to finish before resolving and renaming.'
-
   const handleResolvePending = async (options?: { forceAdvance?: boolean }) => {
     if (!resolverItem) {
       return
@@ -121,11 +117,6 @@ export const useIDarrResolverActions = ({
 
     const sourceFilenames = (resolverItem.source_filenames ?? []).filter(Boolean)
 
-    if (sourceFilenames.length > 0 && isIdarrJobActive()) {
-      showToast(IDARR_BUSY_MESSAGE, 'error')
-      return
-    }
-
     try {
       setResolving(true)
       await resolveMakerIdarrPendingMatch({
@@ -170,11 +161,6 @@ export const useIDarrResolverActions = ({
     const sourceFilenames = options?.andRename
       ? (resolverItem.source_filenames ?? []).filter(Boolean)
       : []
-
-    if (sourceFilenames.length > 0 && isIdarrJobActive()) {
-      showToast(IDARR_BUSY_MESSAGE, 'error')
-      return
-    }
 
     try {
       setResolving(true)

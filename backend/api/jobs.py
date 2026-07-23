@@ -34,7 +34,7 @@ from models.setting import get_setting
 from modules.sync import run_sync_one_job, run_sync_all_job
 from modules.idarr import run_idarr_background_job, run_idarr_sync_background_job
 from models.idarr import resolve_idarr_scope_token
-from core.logging import LogTags, log_debug, log_warning, log_error, log_user_action
+from core.logging import LogTags, log_debug, log_info, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
 from core.job_cancel import JobCancelled, request_cancel, clear_cancel
 
@@ -457,6 +457,7 @@ def start_sync_all_drives(db: Session = Depends(get_db)) -> JobSchema:
 @router.post("/idarr", response_model=JobSchema)
 def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_db)) -> JobSchema:
     """Start a native in-app idarr job from Maker Tools."""
+    source_filenames = _sanitize_source_filenames(request.source_filenames)
     existing_idarr_job = (
         db.query(Job)
         .filter(
@@ -467,16 +468,28 @@ def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_db)) -
         .first()
     )
     if existing_idarr_job:
-        log_warning(
-            LogTags.JOB,
-            f"Duplicate IDarr start blocked: job {existing_idarr_job.id} already {existing_idarr_job.status}",
-            existing_job_id=existing_idarr_job.id,
-            status=existing_idarr_job.status,
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=f"IDarr job {existing_idarr_job.id} is already {existing_idarr_job.status}. Wait for it to finish before starting a new run.",
-        )
+        # Targeted runs (resolve-and-rename / conflict Keep / quick-add) queue behind the
+        # active job — the single-worker job queue runs them in order. Only a duplicate
+        # full run is refused.
+        if source_filenames:
+            log_info(
+                LogTags.JOB,
+                f"Targeted IDarr job queued behind active job {existing_idarr_job.id} ({existing_idarr_job.status})",
+                existing_job_id=existing_idarr_job.id,
+                status=existing_idarr_job.status,
+                source_filenames_count=len(source_filenames),
+            )
+        else:
+            log_warning(
+                LogTags.JOB,
+                f"Duplicate IDarr start blocked: job {existing_idarr_job.id} already {existing_idarr_job.status}",
+                existing_job_id=existing_idarr_job.id,
+                status=existing_idarr_job.status,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"IDarr job {existing_idarr_job.id} is already {existing_idarr_job.status}. Wait for it to finish before starting a new run.",
+            )
 
     config_setting = get_setting(db, "maker_tools_idarr_config")
     if not config_setting or not config_setting.value:
@@ -522,8 +535,6 @@ def start_idarr_job(request: StartIdarrRequest, db: Session = Depends(get_db)) -
             status_code=400,
             detail="Selected sync target is missing a processing folder (source_dir).",
         )
-
-    source_filenames = _sanitize_source_filenames(request.source_filenames)
 
     config_data["dry_run"] = bool(request.dry_run)
     config_data["source_dir"] = source_dir

@@ -5,8 +5,10 @@ import hashlib
 import json
 import re
 import shutil
+import threading
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
@@ -21,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
 from core.logging import LogTags, log_debug, log_error, log_info, log_warning
+from core.rate_limiter import tmdb_bucket
 from models.idarr import (
     IdarrAssetCache,
     IdarrPendingMatch,
@@ -151,10 +154,10 @@ class IdarrRunner:
         self._scope_token: str | None = None
         self._pending_resolved_mid_run: int = 0
 
-    TMDB_MIN_INTERVAL_SECONDS = 0.10
     TMDB_MAX_RETRIES = 3
     TMDB_ABORT_AFTER_CONSECUTIVE_FAILURES = 8  # give up the run if TMDB fails this many times in a row
-    _tmdb_last_request_at = 0.0
+    _tmdb_bucket = tmdb_bucket  # process-wide; shared with the other TMDB callers
+    _tmdb_failure_lock = threading.Lock()
     _tmdb_consecutive_failures = 0
     _tmdb_last_failure_reason = ""
     CACHE_RENAME_HISTORY_MAX_ENTRIES = 20
@@ -218,6 +221,18 @@ class IdarrRunner:
             return (2, 0, str(label))
 
         return ", ".join(sorted(labels, key=_sort_key))
+
+    @staticmethod
+    def _format_artwork_subtypes(labels: set[str]) -> str:
+        order = {"logo": 0, "background": 1, "squareart": 2}
+        return ", ".join(sorted(labels, key=lambda s: order.get(s, 99)))
+
+    @staticmethod
+    def _grouped_scope_label(season_labels: set[str], subtype_labels: set[str]) -> str:
+        # Asset-drive items group by artwork type; poster items group by season.
+        if subtype_labels:
+            return f"artwork: {IdarrRunner._format_artwork_subtypes(subtype_labels)}"
+        return f"grouped posters: {IdarrRunner._format_season_labels(season_labels)}"
 
     @staticmethod
     def _normalize_with_aliases(value: str) -> str:
@@ -495,13 +510,9 @@ class IdarrRunner:
             "imdb_id": imdb_match.group(1) if imdb_match else None,
         }
 
-    def _scan_assets(self, source_dir: Path) -> list[dict[str, Any]]:
+    def _scan_assets(self, source_dir: Path, only_filenames: set[str] | None = None) -> list[dict[str, Any]]:
         assets: list[dict[str, Any]] = []
         grouped_indexes: dict[str, list[int]] = {}
-        cache_rows = self._load_all_cache_rows("index build")
-        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
-        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
-        tracked_now = self._current_tracked_filenames(cache_rows)
 
         for entry in sorted(source_dir.iterdir()):
             if not entry.is_file():
@@ -510,9 +521,10 @@ class IdarrRunner:
                 continue
             if entry.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
+            if only_filenames is not None and entry.name.strip().lower() not in only_filenames:
+                continue
 
             asset = self._parse_asset(entry)
-            asset["_previously_tracked"] = entry.name.strip().lower() in tracked_now
             assets.append(asset)
 
             group_title = SEASON_REGEX.split(entry.stem)[0].strip()
@@ -520,6 +532,16 @@ class IdarrRunner:
                 group_title = entry.stem
             group_key = self._normalize_with_aliases(group_title)
             grouped_indexes.setdefault(group_key, []).append(len(assets) - 1)
+
+        if only_filenames is None:
+            cache_rows = self._load_all_cache_rows("index build")
+        else:
+            cache_rows = self._load_cache_rows_for_selected(assets, grouped_indexes, only_filenames)
+        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
+        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
+        tracked_now = self._current_tracked_filenames(cache_rows)
+        for asset in assets:
+            asset["_previously_tracked"] = str(asset["file_path"].name).strip().lower() in tracked_now
 
         for indexes in grouped_indexes.values():
             if not indexes:
@@ -714,8 +736,8 @@ class IdarrRunner:
 
         return assets
 
-    def scan_files_in_flat_folder(self, source_dir: Path) -> list[dict[str, Any]]:
-        return self._scan_assets(source_dir)
+    def scan_files_in_flat_folder(self, source_dir: Path, only_filenames: set[str] | None = None) -> list[dict[str, Any]]:
+        return self._scan_assets(source_dir, only_filenames=only_filenames)
 
     @staticmethod
     def _parse_asset_no_season_hint(file_path: Path) -> dict[str, Any]:
@@ -773,17 +795,13 @@ class IdarrRunner:
             "has_id": has_id,
         }
 
-    def _scan_assets_for_asset_drive(self, source_dir: Path) -> list[dict[str, Any]]:
+    def _scan_assets_for_asset_drive(self, source_dir: Path, only_filenames: set[str] | None = None) -> list[dict[str, Any]]:
         """Scan a flat directory with asset-drive matching rules (no season-suffix hints).
 
         Applies cache hints per file for ID enrichment but skips season grouping
         entirely — each file is an independent logo or background for a single title.
         """
         assets: list[dict[str, Any]] = []
-        cache_rows = self._load_all_cache_rows("index build")
-        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
-        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
-        tracked_now = self._current_tracked_filenames(cache_rows)
 
         for entry in sorted(source_dir.iterdir()):
             if not entry.is_file():
@@ -792,9 +810,19 @@ class IdarrRunner:
                 continue
             if entry.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
-            parsed = self._parse_asset_no_season_hint(entry)
-            parsed["_previously_tracked"] = entry.name.strip().lower() in tracked_now
-            assets.append(parsed)
+            if only_filenames is not None and entry.name.strip().lower() not in only_filenames:
+                continue
+            assets.append(self._parse_asset_no_season_hint(entry))
+
+        if only_filenames is None:
+            cache_rows = self._load_all_cache_rows("index build")
+        else:
+            cache_rows = self._load_cache_rows_for_selected(assets, {}, only_filenames)
+        filename_cache_index = self._load_cache_filename_index(rows=cache_rows)
+        group_cache_hints = self._load_group_cache_hints(rows=cache_rows)
+        tracked_now = self._current_tracked_filenames(cache_rows)
+        for asset in assets:
+            asset["_previously_tracked"] = str(asset["file_path"].name).strip().lower() in tracked_now
 
         for asset in assets:
             title = str(asset.get("title") or "")
@@ -910,7 +938,7 @@ class IdarrRunner:
 
         return assets
 
-    def scan_asset_drive_subfolders(self, source_dir: Path) -> list[dict[str, Any]]:
+    def scan_asset_drive_subfolders(self, source_dir: Path, only_filenames: set[str] | None = None) -> list[dict[str, Any]]:
         """Scan logos/, backgrounds/ and squareart/ subfolders of an asset drive.
 
         Each returned asset dict includes an ``asset_subtype`` key set to
@@ -927,7 +955,7 @@ class IdarrRunner:
                     path=str(subfolder),
                 )
                 continue
-            subfolder_assets = self._scan_assets_for_asset_drive(subfolder)
+            subfolder_assets = self._scan_assets_for_asset_drive(subfolder, only_filenames=only_filenames)
             for asset in subfolder_assets:
                 asset["asset_subtype"] = subtype
             assets.extend(subfolder_assets)
@@ -937,6 +965,77 @@ class IdarrRunner:
                 path=str(subfolder),
             )
         return assets
+
+    def _load_cache_rows_for_selected(
+        self,
+        assets: list[dict[str, Any]],
+        grouped_indexes: dict[str, list[int]],
+        selected_filenames: set[str],
+    ) -> list[IdarrAssetCache]:
+        """Targeted cache fetch for single-item runs: only rows that could hint the selected
+        files (same title/ids, or holding one of their filenames) instead of parsing every
+        cached payload in the scope."""
+        wanted_titles: set[str] = set()
+        wanted_tmdb: set[int] = set()
+        wanted_tvdb: set[int] = set()
+        wanted_imdb: set[str] = set()
+
+        def _collect(title: Any, tmdb_id: Any, tvdb_id: Any, imdb_id: Any) -> None:
+            normalized = self._normalize_with_aliases(str(title or "").strip())
+            if normalized:
+                wanted_titles.add(normalized)
+            if isinstance(tmdb_id, int):
+                wanted_tmdb.add(tmdb_id)
+            if isinstance(tvdb_id, int):
+                wanted_tvdb.add(tvdb_id)
+            if isinstance(imdb_id, str) and imdb_id.strip():
+                wanted_imdb.add(imdb_id.strip().lower())
+
+        for asset in assets:
+            _collect(asset.get("title"), asset.get("tmdb_id"), asset.get("tvdb_id"), asset.get("imdb_id"))
+        # Group hints are looked up under the group's parsed title, which can differ from a
+        # member file's own title (e.g. season posters), so collect those keys too.
+        for indexes in grouped_indexes.values():
+            parsed_group = self.parse_file_group([assets[index] for index in indexes])
+            _collect(parsed_group.get("title"), parsed_group.get("tmdb_id"), parsed_group.get("tvdb_id"), parsed_group.get("imdb_id"))
+
+        try:
+            wanted_keys: set[str] = set()
+            projection = self._cache_query().with_entities(
+                IdarrAssetCache.asset_key,
+                IdarrAssetCache.title,
+                IdarrAssetCache.tmdb_id,
+                IdarrAssetCache.tvdb_id,
+                IdarrAssetCache.imdb_id,
+            ).all()
+            for asset_key, title, tmdb_id, tvdb_id, imdb_id in projection:
+                if (
+                    (isinstance(tmdb_id, int) and tmdb_id in wanted_tmdb)
+                    or (isinstance(tvdb_id, int) and tvdb_id in wanted_tvdb)
+                    or (isinstance(imdb_id, str) and imdb_id.strip().lower() in wanted_imdb)
+                    or self._normalize_with_aliases(str(title or "").strip()) in wanted_titles
+                ):
+                    wanted_keys.add(str(asset_key))
+
+            clauses = []
+            if wanted_keys:
+                clauses.append(IdarrAssetCache.asset_key.in_(sorted(wanted_keys)))
+            for name in selected_filenames:
+                escaped = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                clauses.append(IdarrAssetCache.payload_json.like(f"%{escaped}%", escape="\\"))
+            if not clauses:
+                return []
+            rows = self._cache_query().filter(or_(*clauses)).all()
+            log_info(
+                LogTags.IDARR,
+                f"Targeted cache lookup: loaded {len(rows)} relevant row(s) of {len(projection)} in scope",
+                loaded_rows=len(rows),
+                scope_rows=len(projection),
+            )
+            return rows
+        except Exception as exc:
+            log_warning(LogTags.IDARR, f"Targeted cache fetch failed, falling back to full load: {exc}")
+            return self._load_all_cache_rows("index build")
 
     def _load_cache_filename_index(self, rows: list | None = None) -> dict[str, dict[str, Any]]:
         index: dict[str, dict[str, Any]] = {}
@@ -1494,6 +1593,17 @@ class IdarrRunner:
         return deduped[:10]
 
     @classmethod
+    def _tmdb_note_success(cls) -> None:
+        with cls._tmdb_failure_lock:
+            cls._tmdb_consecutive_failures = 0
+
+    @classmethod
+    def _tmdb_note_failure(cls, reason: str) -> None:
+        with cls._tmdb_failure_lock:
+            cls._tmdb_consecutive_failures += 1
+            cls._tmdb_last_failure_reason = reason
+
+    @classmethod
     @sleep_and_notify
     def _tmdb_get_json(
         cls,
@@ -1507,31 +1617,26 @@ class IdarrRunner:
         query_params["api_key"] = api_key
 
         for attempt in range(cls.TMDB_MAX_RETRIES):
-            now = time.monotonic()
-            elapsed = now - cls._tmdb_last_request_at
-            if elapsed < cls.TMDB_MIN_INTERVAL_SECONDS:
-                time.sleep(cls.TMDB_MIN_INTERVAL_SECONDS - elapsed)
+            cls._tmdb_bucket.acquire()
 
             try:
                 response = requests.get(f"https://api.themoviedb.org/3{path}", params=query_params, timeout=20)
-                cls._tmdb_last_request_at = time.monotonic()
 
                 status_code = getattr(response, "status_code", None)
                 if allow_404 and status_code == 404:
-                    cls._tmdb_consecutive_failures = 0  # TMDB responded — it's up
+                    cls._tmdb_note_success()  # TMDB responded — it's up
                     return None
 
                 response.raise_for_status()
                 payload = response.json()
-                cls._tmdb_consecutive_failures = 0
+                cls._tmdb_note_success()
                 return payload if isinstance(payload, dict) else {}
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
                 # Transport-level outage (previously NOT retried). Retry, then count it as a hard failure.
                 if attempt < cls.TMDB_MAX_RETRIES - 1:
                     time.sleep(0.5 * (2 ** attempt))
                     continue
-                cls._tmdb_consecutive_failures += 1
-                cls._tmdb_last_failure_reason = (
+                cls._tmdb_note_failure(
                     "TMDB timed out" if isinstance(exc, requests.exceptions.Timeout)
                     else "couldn't reach TMDB (network/DNS)"
                 )
@@ -1552,10 +1657,9 @@ class IdarrRunner:
                     time.sleep(0.5 * (2 ** attempt))
                     continue
                 if allow_404 and status == 404:
-                    cls._tmdb_consecutive_failures = 0  # TMDB responded — it's up
+                    cls._tmdb_note_success()  # TMDB responded — it's up
                     return None
-                cls._tmdb_consecutive_failures += 1
-                cls._tmdb_last_failure_reason = f"TMDB returned HTTP {status}"
+                cls._tmdb_note_failure(f"TMDB returned HTTP {status}")
                 raise
 
         return None
@@ -1581,11 +1685,7 @@ class IdarrRunner:
         best_match: dict[str, Any] | None = None
         best_meta: dict[str, Any] | None = None
 
-        for query_title in IdarrRunner._query_transformations(title):
-            is_transformed_query = query_title != title
-            if bool(app_settings.debug) and query_title != title:
-                log_info(LogTags.IDARR, f"🔁 Retrying TMDB search with transformed title: '{query_title}'")
-
+        def _fetch_variant(query_title: str) -> dict[str, Any]:
             params: dict[str, Any] = {
                 "api_key": api_key,
                 "query": query_title,
@@ -1596,158 +1696,183 @@ class IdarrRunner:
                     params["year"] = year
                 elif endpoint == "tv":
                     params["first_air_date_year"] = year
+            return IdarrRunner._tmdb_get_json(path=f"/search/{endpoint}", api_key=api_key, params=params) or {}
 
-            payload = IdarrRunner._tmdb_get_json(path=f"/search/{endpoint}", api_key=api_key, params=params) or {}
-            results = payload.get("results", []) if isinstance(payload, dict) else []
-            if not isinstance(results, list) or not results:
-                continue
+        variants = IdarrRunner._query_transformations(title)
+        # Most titles resolve on the first variant, so fetch that one alone — no threads, no
+        # wasted calls. Only if it fails to settle it do we fetch the rest at once instead of
+        # one-at-a-time. Evaluation below still walks variants in order, so the winner is
+        # identical either way; we just overlap the waiting.
+        pending: dict[int, Any] = {}
+        pool: ThreadPoolExecutor | None = None
+        try:
+            for index, query_title in enumerate(variants):
+                if index == 0:
+                    payload = _fetch_variant(query_title)
+                else:
+                    if pool is None:
+                        pool = ThreadPoolExecutor(max_workers=min(8, len(variants) - 1))
+                        pending = {i: pool.submit(_fetch_variant, v) for i, v in enumerate(variants) if i > 0}
+                    payload = pending[index].result()
 
-            dict_results = [candidate for candidate in results if isinstance(candidate, dict)]
-            if not dict_results:
-                continue
+                is_transformed_query = query_title != title
+                if bool(app_settings.debug) and query_title != title:
+                    log_info(LogTags.IDARR, f"🔁 Retrying TMDB search with transformed title: '{query_title}'")
 
-            requested_normalized_title = IdarrRunner._normalize_with_aliases(title)
-            # Only run the ambiguity guard when we have no ID to disambiguate with.
-            # If tmdb_id / tvdb_id / imdb_id is already known the id_match path below
-            # will pick the right candidate, so returning "ambiguous" here would
-            # incorrectly block files that already have a TMDB ID embedded in their name.
-            has_known_id = bool(tmdb_id or tvdb_id or imdb_id)
-            exact_title_year_matches = 0
-            for candidate in dict_results:
-                candidate_title = str(candidate.get("title") or candidate.get("name") or "")
-                if IdarrRunner._normalize_with_aliases(candidate_title) != requested_normalized_title:
+                results = payload.get("results", []) if isinstance(payload, dict) else []
+                if not isinstance(results, list) or not results:
                     continue
-                candidate_year = IdarrRunner._candidate_year(candidate)
-                if isinstance(year, int) and isinstance(candidate_year, int) and candidate_year == year:
-                    exact_title_year_matches += 1
-                    if exact_title_year_matches > 1 and not has_known_id:
-                        return None, "ambiguous"
 
-            id_match = IdarrRunner._match_tmdb_candidate_by_id(
-                candidates=dict_results,
-                tmdb_id=tmdb_id,
-                tvdb_id=tvdb_id,
-                imdb_id=imdb_id,
-            )
-            if id_match:
-                selected = dict(id_match)
-                reason_label = "id_transform" if is_transformed_query else "id"
-                selected["_idarr_match"] = {
-                    "confidence": "high",
-                    "reason": reason_label,
-                    "score": 98,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
-                }
-                return selected, reason_label
+                dict_results = [candidate for candidate in results if isinstance(candidate, dict)]
+                if not dict_results:
+                    continue
 
-            exact_match = IdarrRunner._exact_tmdb_title_year_match(candidates=dict_results, title=title, year=year)
-            if exact_match:
-                selected = dict(exact_match)
-                reason_label = "exact_transform" if is_transformed_query else "exact"
-                selected["_idarr_match"] = {
-                    "confidence": "high",
-                    "reason": reason_label,
-                    "score": 95,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
-                }
-                return selected, reason_label
+                requested_normalized_title = IdarrRunner._normalize_with_aliases(title)
+                # Only run the ambiguity guard when we have no ID to disambiguate with.
+                # If tmdb_id / tvdb_id / imdb_id is already known the id_match path below
+                # will pick the right candidate, so returning "ambiguous" here would
+                # incorrectly block files that already have a TMDB ID embedded in their name.
+                has_known_id = bool(tmdb_id or tvdb_id or imdb_id)
+                exact_title_year_matches = 0
+                for candidate in dict_results:
+                    candidate_title = str(candidate.get("title") or candidate.get("name") or "")
+                    if IdarrRunner._normalize_with_aliases(candidate_title) != requested_normalized_title:
+                        continue
+                    candidate_year = IdarrRunner._candidate_year(candidate)
+                    if isinstance(year, int) and isinstance(candidate_year, int) and candidate_year == year:
+                        exact_title_year_matches += 1
+                        if exact_title_year_matches > 1 and not has_known_id:
+                            return None, "ambiguous"
 
-            original_match = IdarrRunner._tmdb_match_by_original_title(candidates=dict_results, title=title, year=year)
-            if original_match:
-                selected = dict(original_match)
-                reason_label = "original_transform" if is_transformed_query else "original_title"
-                _orig_candidate_year = IdarrRunner._candidate_year(selected)
-                # Exact year → high; year_close (±1 but not exact) → medium.
-                # A year-close original-title match is a weaker signal than a
-                # same-year primary-title match, so it should lose to one in the
-                # dual-search comparison (e.g. 2022 movie vs 2023 TV show).
-                _orig_year_exact = isinstance(year, int) and _orig_candidate_year == year
-                selected["_idarr_match"] = {
-                    "confidence": "high" if _orig_year_exact else "medium",
-                    "reason": reason_label,
-                    "score": 90 if _orig_year_exact else 80,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": _orig_candidate_year,
-                }
-                return selected, reason_label
+                id_match = IdarrRunner._match_tmdb_candidate_by_id(
+                    candidates=dict_results,
+                    tmdb_id=tmdb_id,
+                    tvdb_id=tvdb_id,
+                    imdb_id=imdb_id,
+                )
+                if id_match:
+                    selected = dict(id_match)
+                    reason_label = "id_transform" if is_transformed_query else "id"
+                    selected["_idarr_match"] = {
+                        "confidence": "high",
+                        "reason": reason_label,
+                        "score": 98,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": IdarrRunner._candidate_year(selected),
+                    }
+                    return selected, reason_label
 
-            IdarrRunner._hydrate_missing_alternate_titles(
-                api_key=api_key,
-                asset_type=asset_type,
-                candidates=dict_results,
-            )
+                exact_match = IdarrRunner._exact_tmdb_title_year_match(candidates=dict_results, title=title, year=year)
+                if exact_match:
+                    selected = dict(exact_match)
+                    reason_label = "exact_transform" if is_transformed_query else "exact"
+                    selected["_idarr_match"] = {
+                        "confidence": "high",
+                        "reason": reason_label,
+                        "score": 95,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": IdarrRunner._candidate_year(selected),
+                    }
+                    return selected, reason_label
 
-            alternate_match = IdarrRunner._tmdb_match_by_alternate_title(candidates=dict_results, title=title)
-            if alternate_match:
-                selected = dict(alternate_match)
-                reason_label = "alternate_transform" if is_transformed_query else "alternate_title"
-                selected["_idarr_match"] = {
-                    "confidence": "medium",
-                    "reason": reason_label,
-                    "score": 86,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
-                }
-                return selected, reason_label
+                original_match = IdarrRunner._tmdb_match_by_original_title(candidates=dict_results, title=title, year=year)
+                if original_match:
+                    selected = dict(original_match)
+                    reason_label = "original_transform" if is_transformed_query else "original_title"
+                    _orig_candidate_year = IdarrRunner._candidate_year(selected)
+                    # Exact year → high; year_close (±1 but not exact) → medium.
+                    # A year-close original-title match is a weaker signal than a
+                    # same-year primary-title match, so it should lose to one in the
+                    # dual-search comparison (e.g. 2022 movie vs 2023 TV show).
+                    _orig_year_exact = isinstance(year, int) and _orig_candidate_year == year
+                    selected["_idarr_match"] = {
+                        "confidence": "high" if _orig_year_exact else "medium",
+                        "reason": reason_label,
+                        "score": 90 if _orig_year_exact else 80,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": _orig_candidate_year,
+                    }
+                    return selected, reason_label
 
-            fuzzy_year_diff_match = IdarrRunner._tmdb_fuzzy_year_diff_single_match(
-                candidates=dict_results,
-                title=title,
-                year=year,
-            )
-            if fuzzy_year_diff_match:
-                selected = dict(fuzzy_year_diff_match)
-                reason_label = "fuzzy_transform" if is_transformed_query else "fuzzy_year_diff"
-                selected["_idarr_match"] = {
-                    "confidence": "medium",
-                    "reason": reason_label,
-                    "score": 80,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
-                }
-                return selected, reason_label
+                IdarrRunner._hydrate_missing_alternate_titles(
+                    api_key=api_key,
+                    asset_type=asset_type,
+                    candidates=dict_results,
+                )
 
-            fuzzy_alternate_match = IdarrRunner._tmdb_fuzzy_alternate_title_match(
-                candidates=dict_results,
-                title=title,
-                year=year,
-            )
-            if fuzzy_alternate_match:
-                selected = dict(fuzzy_alternate_match)
-                reason_label = "fuzzy_alternate_transform" if is_transformed_query else "fuzzy_alternate"
-                selected["_idarr_match"] = {
-                    "confidence": "medium",
-                    "reason": reason_label,
-                    "score": 76,
-                    "candidate_title": str(selected.get("title") or selected.get("name") or ""),
-                    "candidate_year": IdarrRunner._candidate_year(selected),
-                }
-                return selected, reason_label
+                alternate_match = IdarrRunner._tmdb_match_by_alternate_title(candidates=dict_results, title=title)
+                if alternate_match:
+                    selected = dict(alternate_match)
+                    reason_label = "alternate_transform" if is_transformed_query else "alternate_title"
+                    selected["_idarr_match"] = {
+                        "confidence": "medium",
+                        "reason": reason_label,
+                        "score": 86,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": IdarrRunner._candidate_year(selected),
+                    }
+                    return selected, reason_label
 
-            ranked = IdarrRunner._rank_tmdb_candidates(
-                title=title,
-                year=year,
-                candidates=dict_results,
-                query_title=query_title,
-            )
-            if not ranked:
-                continue
+                fuzzy_year_diff_match = IdarrRunner._tmdb_fuzzy_year_diff_single_match(
+                    candidates=dict_results,
+                    title=title,
+                    year=year,
+                )
+                if fuzzy_year_diff_match:
+                    selected = dict(fuzzy_year_diff_match)
+                    reason_label = "fuzzy_transform" if is_transformed_query else "fuzzy_year_diff"
+                    selected["_idarr_match"] = {
+                        "confidence": "medium",
+                        "reason": reason_label,
+                        "score": 80,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": IdarrRunner._candidate_year(selected),
+                    }
+                    return selected, reason_label
 
-            top = ranked[0]
+                fuzzy_alternate_match = IdarrRunner._tmdb_fuzzy_alternate_title_match(
+                    candidates=dict_results,
+                    title=title,
+                    year=year,
+                )
+                if fuzzy_alternate_match:
+                    selected = dict(fuzzy_alternate_match)
+                    reason_label = "fuzzy_alternate_transform" if is_transformed_query else "fuzzy_alternate"
+                    selected["_idarr_match"] = {
+                        "confidence": "medium",
+                        "reason": reason_label,
+                        "score": 76,
+                        "candidate_title": str(selected.get("title") or selected.get("name") or ""),
+                        "candidate_year": IdarrRunner._candidate_year(selected),
+                    }
+                    return selected, reason_label
 
-            if int(top.get("score") or 0) < 45:
-                continue
+                ranked = IdarrRunner._rank_tmdb_candidates(
+                    title=title,
+                    year=year,
+                    candidates=dict_results,
+                    query_title=query_title,
+                )
+                if not ranked:
+                    continue
 
-            if not best_meta or int(top.get("score") or 0) > int(best_meta.get("score") or 0):
-                best_meta = top
-                best_match = dict(top.get("candidate") or {})
+                top = ranked[0]
 
-            if query_title == title and str(top.get("reason") or "") in {"exact", "original_title"} and int(top.get("score") or 0) >= 85:
-                best_meta = top
-                best_match = dict(top.get("candidate") or {})
-                break
+                if int(top.get("score") or 0) < 45:
+                    continue
+
+                if not best_meta or int(top.get("score") or 0) > int(best_meta.get("score") or 0):
+                    best_meta = top
+                    best_match = dict(top.get("candidate") or {})
+
+                if query_title == title and str(top.get("reason") or "") in {"exact", "original_title"} and int(top.get("score") or 0) >= 85:
+                    best_meta = top
+                    best_match = dict(top.get("candidate") or {})
+                    break
+        finally:
+            if pool is not None:
+                # We matched (or bailed) before reading every variant — drop the ones still queued.
+                pool.shutdown(wait=False, cancel_futures=True)
 
         if not best_match or not best_meta:
             return None, None
@@ -2120,10 +2245,12 @@ class IdarrRunner:
             "cache_checkpoint_commits": 0,
             "match_reason_counts": {},
         }
+        external_ids_memo: dict[tuple[str, int], dict[str, Any]] = {}
         detail_rows: list[dict[str, Any]] = []
         cache_map = self._load_cache_map(assets)
         grouped_resolution_map: dict[str, dict[str, Any]] = {}
         grouped_season_labels_by_key: dict[str, set[str]] = {}
+        grouped_subtype_labels_by_key: dict[str, set[str]] = {}
         grouped_unresolved_map: dict[str, str] = {}
 
         for asset in assets:
@@ -2135,6 +2262,9 @@ class IdarrRunner:
             season_label = self._extract_season_label(str(asset.get("file_path") or ""))
             if season_label:
                 grouped_season_labels_by_key.setdefault(grouped_cache_key, set()).add(season_label)
+            _grp_subtype = str(asset.get("asset_subtype") or "").strip().lower()
+            if _grp_subtype in ("logo", "background", "squareart"):
+                grouped_subtype_labels_by_key.setdefault(grouped_cache_key, set()).add(_grp_subtype)
 
         total_items = len(assets)
         progress_interval = 25
@@ -2258,11 +2388,12 @@ class IdarrRunner:
                             if cache_key not in grouped_reuse_logged_keys:
                                 grouped_reuse_logged_keys.add(cache_key)
                                 season_labels = grouped_season_labels_by_key.get(cache_key, set())
+                                subtype_labels = grouped_subtype_labels_by_key.get(cache_key, set())
                                 log_info(
                                     LogTags.IDARR,
                                     (
                                         f"↪ Reusing grouped match for “{str(asset.get('title') or '')}” ({asset.get('year')}) "
-                                        f"— grouped posters: {self._format_season_labels(season_labels)}"
+                                        f"— {self._grouped_scope_label(season_labels, subtype_labels)}"
                                     ),
                                 )
 
@@ -2349,11 +2480,12 @@ class IdarrRunner:
                         if cache_key not in grouped_unresolved_logged_keys:
                             grouped_unresolved_logged_keys.add(cache_key)
                             season_labels = grouped_season_labels_by_key.get(cache_key, set())
+                            subtype_labels = grouped_subtype_labels_by_key.get(cache_key, set())
                             log_info(
                                 LogTags.IDARR,
                                 (
                                     f"↪ Grouped unresolved for “{str(asset.get('title') or '')}” ({asset.get('year')}) "
-                                    f"— grouped posters: {self._format_season_labels(season_labels)} [{unresolved_reason}] "
+                                    f"— {self._grouped_scope_label(season_labels, subtype_labels)} [{unresolved_reason}] "
                                     f"(still unmatched; skipping repeated TMDB searches for grouped duplicates)"
                                 ),
                             )
@@ -2640,7 +2772,16 @@ class IdarrRunner:
                                 ),
                             )
 
+                # An id tag on disk that disagrees with the authoritative cache row (e.g. an artwork
+                # filename imported with the wrong {imdb-...}) — re-fetch from TMDB and overwrite it.
+                _cache_imdb = str(getattr(cache_row, "imdb_id", "") or "").strip() if cache_row is not None else ""
+                _asset_imdb = str(asset.get("imdb_id") or "").strip()
+                _imdb_tag_conflicts = bool(_cache_imdb and _asset_imdb and _asset_imdb.lower() != _cache_imdb.lower())
+                _cache_tvdb = getattr(cache_row, "tvdb_id", None) if cache_row is not None else None
+                _tvdb_tag_conflicts = bool(isinstance(_cache_tvdb, int) and isinstance(asset.get("tvdb_id"), int) and asset["tvdb_id"] != _cache_tvdb)
+
                 should_fetch_external_ids = False
+                _stale_reverify = False
                 if isinstance(asset.get("tmdb_id"), int):
                     _asset_type = str(asset.get("type") or "").strip().lower()
                     _is_movie = _asset_type == "movie"
@@ -2653,45 +2794,73 @@ class IdarrRunner:
                         should_fetch_external_ids = True
                     if _is_tv_series and missing_tvdb and not tvdb_recent:
                         should_fetch_external_ids = True
+                    # A present-but-wrong tag beats freshness — re-derive it authoritatively.
+                    if (_is_movie or _is_tv_series) and (_imdb_tag_conflicts or _tvdb_tag_conflicts):
+                        should_fetch_external_ids = True
+                    # Present-and-consistent ids still go stale when TMDB relinks a title
+                    # upstream; once the freshness window lapses, re-verify them.
+                    # TV only — movie details already carry imdb_id, applied by the stale
+                    # verify pass above; /tv details do not, so TV needs external_ids here.
+                    if _is_tv_series and not should_fetch_external_ids and not general_recent:
+                        should_fetch_external_ids = True
+                        _stale_reverify = True
 
                 if should_fetch_external_ids and isinstance(asset.get("tmdb_id"), int):
                     is_tv_series_asset = str(asset.get("type") or "").strip().lower() == "tv_series"
+                    _memo_key = (str(asset.get("type") or "movie"), int(asset["tmdb_id"]))
+                    _memo_hit = _memo_key in external_ids_memo
                     if bool(app_settings.debug):
                         _rehydrate_title = str(asset.get("title") or "unknown")
                         _rehydrate_tmdb_id = str(asset.get("tmdb_id") or "?")
                         _rehydrate_type = str(asset.get("type") or "movie")
-                        _missing = []
+                        _need = []
                         if not bool(asset.get("imdb_id")):
-                            _missing.append("imdb_id")
+                            _need.append("imdb_id missing")
+                        elif _imdb_tag_conflicts:
+                            _need.append(f"imdb_id conflict (file {_asset_imdb} ≠ cache {_cache_imdb})")
                         if is_tv_series_asset and not bool(asset.get("tvdb_id")):
-                            _missing.append("tvdb_id")
+                            _need.append("tvdb_id missing")
+                        elif is_tv_series_asset and _tvdb_tag_conflicts:
+                            _need.append("tvdb_id conflict")
+                        if _stale_reverify:
+                            _need.append(f"periodic re-verify (unchecked in {frequency_days}d)")
+                        _fetch_verb = "Reusing this run's external IDs" if _memo_hit else "Fetching external IDs"
                         log_debug(
                             LogTags.IDARR,
-                            f"\U0001f504 Fetching external IDs for {_rehydrate_title} [{_rehydrate_tmdb_id}] ({_rehydrate_type}) — missing: {', '.join(_missing)}",
+                            f"\U0001f504 {_fetch_verb} for {_rehydrate_title} [{_rehydrate_tmdb_id}] ({_rehydrate_type}) — {', '.join(_need)}",
                         )
-                    enrichment_stats["tmdb_external_id_api_calls"] += 1
-                    external_ids = self._tmdb_external_ids(
-                        api_key=tmdb_api_key,
-                        tmdb_id=int(asset["tmdb_id"]),
-                        asset_type=str(asset.get("type") or "movie"),
-                    )
+                    external_ids = external_ids_memo.get(_memo_key)
+                    if external_ids is None:
+                        enrichment_stats["tmdb_external_id_api_calls"] += 1
+                        external_ids = self._tmdb_external_ids(
+                            api_key=tmdb_api_key,
+                            tmdb_id=int(asset["tmdb_id"]),
+                            asset_type=str(asset.get("type") or "movie"),
+                        )
+                        if external_ids.get("imdb_id") or external_ids.get("tvdb_id"):
+                            external_ids_memo[_memo_key] = external_ids
                     network_lookup_performed = True
-                    if not asset.get("imdb_id") and isinstance(external_ids.get("imdb_id"), str):
+                    if isinstance(external_ids.get("imdb_id"), str) and (not asset.get("imdb_id") or _imdb_tag_conflicts or _stale_reverify):
                         asset["imdb_id"] = external_ids["imdb_id"]
-                    if is_tv_series_asset and not asset.get("tvdb_id") and isinstance(external_ids.get("tvdb_id"), int):
+                    if is_tv_series_asset and isinstance(external_ids.get("tvdb_id"), int) and (not asset.get("tvdb_id") or _tvdb_tag_conflicts or _stale_reverify):
                         asset["tvdb_id"] = external_ids["tvdb_id"]
                     if is_tv_series_asset and not before_tvdb and isinstance(asset.get("tvdb_id"), int):
                         enrichment_stats["tvdb_rehydrate_calls"] += 1
                     if bool(app_settings.debug):
                         _resolved = []
-                        if not before_imdb and isinstance(asset.get("imdb_id"), str):
-                            _resolved.append(f"imdb_id={asset['imdb_id']}")
-                        if not before_tvdb and isinstance(asset.get("tvdb_id"), int):
-                            _resolved.append(f"tvdb_id={asset['tvdb_id']}")
+                        if isinstance(asset.get("imdb_id"), str) and asset.get("imdb_id") != before_imdb:
+                            _resolved.append(f"imdb_id={asset['imdb_id']}" + (f" (corrected from {before_imdb})" if before_imdb else ""))
+                        if isinstance(asset.get("tvdb_id"), int) and asset.get("tvdb_id") != before_tvdb:
+                            _resolved.append(f"tvdb_id={asset['tvdb_id']}" + (f" (corrected from {before_tvdb})" if before_tvdb else ""))
                         if _resolved:
                             log_debug(
                                 LogTags.IDARR,
                                 f"✓ Rehydrated external IDs for {str(asset.get('title') or 'unknown')} [{asset.get('tmdb_id')}]: {', '.join(_resolved)}",
+                            )
+                        elif _imdb_tag_conflicts or _tvdb_tag_conflicts:
+                            log_debug(
+                                LogTags.IDARR,
+                                f"✓ TMDB confirmed this file's tags for {str(asset.get('title') or 'unknown')} [{asset.get('tmdb_id')}]; cache row corrected to match",
                             )
                         else:
                             log_debug(
@@ -2723,9 +2892,10 @@ class IdarrRunner:
                             display_year = asset.get("year") if isinstance(asset.get("year"), int) else None
                             year_label = str(display_year) if isinstance(display_year, int) else "None"
                             season_labels = grouped_season_labels_by_key.get(cache_key, set())
+                            subtype_labels = grouped_subtype_labels_by_key.get(cache_key, set())
                             grouped_suffix = ""
-                            if season_labels:
-                                grouped_suffix = f" — grouped posters: {self._format_season_labels(season_labels)}"
+                            if subtype_labels or season_labels:
+                                grouped_suffix = f" — {self._grouped_scope_label(season_labels, subtype_labels)}"
 
                             has_tmdb_id = isinstance(_cached_tmdb_id, int)
                             has_tvdb_id = isinstance(_cached_tvdb_id, int)
@@ -2748,11 +2918,7 @@ class IdarrRunner:
 
                             log_debug(
                                 LogTags.IDARR,
-                                f"📦 Used cached metadata for {display_title} ({year_label}){id_suffix}{grouped_suffix} [{cache_state_label}]",
-                            )
-                            log_debug(
-                                LogTags.IDARR,
-                                f"NO UPSERT NEEDED: {display_title} ({year_label}){id_suffix} - {cache_state_label}.",
+                                f"📦 Cached metadata reused, no upsert needed: {display_title} ({year_label}){id_suffix}{grouped_suffix} [{cache_state_label}]",
                             )
 
                 after_tmdb = asset.get("tmdb_id")
@@ -3326,10 +3492,29 @@ class IdarrRunner:
                     resolved_tvdb_id = row.tvdb_id if isinstance(row.tvdb_id, int) else incoming_tvdb_id
                     resolved_imdb_id = row.imdb_id if isinstance(row.imdb_id, str) else incoming_imdb_id
 
+                    # Kept the stored identity; name the item, the disagreeing field(s), and the
+                    # offending file(s) so a bad on-disk id tag is identifiable (not just a key).
                     if bool(app_settings.debug):
+                        _raw = {
+                            "title": (row.title, incoming_title),
+                            "year": (row.year, incoming_year),
+                            "asset_type": (row.asset_type, incoming_asset_type),
+                            "tmdb_id": (row.tmdb_id, incoming_tmdb_id),
+                            "tvdb_id": (row.tvdb_id, incoming_tvdb_id),
+                            "imdb_id": (row.imdb_id, incoming_imdb_id),
+                        }
+                        _diffs = ", ".join(
+                            f"{_f} kept {_k!r} vs incoming {_i!r}"
+                            for _f, (_k, _i) in _raw.items()
+                            if identity_diffs[_f][0] != identity_diffs[_f][1]
+                        )
+                        _files = sorted(str(_n) for _n in entry.get("filenames", set()))
+                        _files_str = ", ".join(_files[:4]) + (f" (+{len(_files) - 4} more)" if len(_files) > 4 else "")
                         log_info(
                             LogTags.IDARR,
-                            f"Cache collision resolved by keeping existing identity for key '{key}'",
+                            f"Cache identity conflict — kept existing for “{row.title}” ({row.year}) "
+                            f"{{tmdb-{row.tmdb_id}}}: {_diffs}"
+                            + (f" | file(s): {_files_str}" if _files_str else ""),
                         )
 
             existing_current = existing_payload.get("current_filenames")
@@ -3729,6 +3914,7 @@ class IdarrRunner:
                     "conflict_files": raw_conflict_files if isinstance(raw_conflict_files, list) else None,
                     "conflict_file_paths": raw_conflict_file_paths if isinstance(raw_conflict_file_paths, list) else None,
                     "conflict_file_tracked": raw_conflict_file_tracked if isinstance(raw_conflict_file_tracked, list) else None,
+                    "conflict_target_name": str(item.get("conflict_target_name") or "").strip() or None,
                 }
             )
 
@@ -3798,6 +3984,11 @@ class IdarrRunner:
                 cache_payload["conflict_file_tracked"] = [bool(t) for t in conflict_file_tracked]
             else:
                 cache_payload.pop("conflict_file_tracked", None)
+            conflict_target_name = str(item.get("conflict_target_name") or "").strip()
+            if conflict_target_name:
+                cache_payload["conflict_target_name"] = conflict_target_name
+            else:
+                cache_payload.pop("conflict_target_name", None)
             cache_payload["pending_entry"] = pending_entry
             if not str(cache_payload.get("status") or "").strip():
                 cache_payload["status"] = "not_found"
@@ -4030,6 +4221,9 @@ class IdarrRunner:
                         "conflict_files": conflict_file_names,
                         "conflict_file_paths": conflict_file_paths,
                         "conflict_file_tracked": conflict_file_tracked,
+                        # The corrected name every file resolves to — lets the UI flag which
+                        # file's on-disk id tags are the wrong ones.
+                        "conflict_target_name": Path(str(row.get("target_path") or "")).name or None,
                     }
                 )
                 continue
@@ -4185,22 +4379,29 @@ class IdarrRunner:
     def _prune_orphaned_cache_entries(self, source_dir: Path) -> dict[str, int]:
         log_info(LogTags.IDARR, "\U0001f9f9 Starting prune operation for orphaned cache entries...")
         try:
+            # Recursive: asset drives keep files in subfolders (logos/, backgrounds/, ...);
+            # a top-level listing would see none of them and prune the whole scope.
             current_files = {
                 entry.name
-                for entry in source_dir.iterdir()
+                for entry in source_dir.rglob("*")
                 if entry.is_file() and not entry.name.startswith(".")
             }
         except Exception as exc:
             log_warning(LogTags.IDARR, f"Failed to list source directory for orphan prune: {exc}")
             return {"removed_cache": 0, "removed_pending": 0}
 
-        removed_keys: list[str] = []
-        removed_titles: list[str] = []
+        if not current_files:
+            log_warning(
+                LogTags.IDARR,
+                f"Orphan prune skipped: no files found under {source_dir} (drive unmounted or empty?)",
+            )
+            return {"removed_cache": 0, "removed_pending": 0}
 
         cache_rows = self._load_all_cache_rows("orphan prune")
         if not cache_rows:
             return {"removed_cache": 0, "removed_pending": 0}
 
+        orphan_rows: list[IdarrAssetCache] = []
         for row in cache_rows:
             payload: dict[str, Any] = {}
             if isinstance(row.payload_json, str) and row.payload_json.strip():
@@ -4222,7 +4423,24 @@ class IdarrRunner:
 
             if relevant_filenames and relevant_filenames & current_files:
                 continue
+            orphan_rows.append(row)
 
+        if not orphan_rows:
+            return {"removed_cache": 0, "removed_pending": 0}
+
+        # A partially-mounted drive looks like mass deletion; refuse rather than gut the
+        # scope's cache and trigger a full re-enrichment storm on the next run.
+        if len(cache_rows) >= 20 and len(orphan_rows) > 0.6 * len(cache_rows):
+            log_warning(
+                LogTags.IDARR,
+                f"Orphan prune skipped: {len(orphan_rows)}/{len(cache_rows)} cache rows have no file on disk — "
+                f"that looks like a missing/partial drive, not cleanup. Check {source_dir} or prune manually.",
+            )
+            return {"removed_cache": 0, "removed_pending": 0}
+
+        removed_keys: list[str] = []
+        removed_titles: list[str] = []
+        for row in orphan_rows:
             if isinstance(row.asset_key, str) and row.asset_key.strip():
                 removed_keys.append(str(row.asset_key))
             title = str(row.title or "").strip()
@@ -4275,6 +4493,13 @@ class IdarrRunner:
         if not cleaned_stem:
             return filename
         return f"{cleaned_stem}{path_obj.suffix}"
+
+    @staticmethod
+    def _asset_subtype_log_label(asset: dict[str, Any]) -> str:
+        # " [logo]"/" [background]"/" [squareart]" for asset-drive files, else "" — disambiguates the
+        # same title logged once per artwork type on asset drives.
+        subtype = str(asset.get("asset_subtype") or "").strip().lower()
+        return f" [{subtype}]" if subtype in ("logo", "background", "squareart") else ""
 
     @staticmethod
     def _generate_new_filename(asset: dict[str, Any], old_filename: str) -> str:
@@ -4360,6 +4585,50 @@ class IdarrRunner:
 
     def generate_new_filename(self, asset: dict[str, Any], old_filename: str) -> str:
         return self._generate_new_filename(asset, old_filename)
+
+    def _sync_asset_ids_from_cache(self, assets: list[dict[str, Any]]) -> int:
+        # A file whose tags agreed with the cache at scan time keeps stale ids when a later
+        # file's fetch corrects the item mid-run; realign so every file renames against the
+        # item's final ids and collisions surface as conflicts instead of no-oping.
+        wanted: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for asset in assets:
+            asset_type = str(asset.get("type") or "").strip().lower()
+            if asset_type in ("movie", "tv_series") and isinstance(asset.get("tmdb_id"), int):
+                wanted.setdefault((asset_type, int(asset["tmdb_id"])), []).append(asset)
+        if not wanted:
+            return 0
+        rows = (
+            self._cache_query()
+            .filter(IdarrAssetCache.matched == True)  # noqa: E712
+            .filter(IdarrAssetCache.tmdb_id.in_({tmdb for _, tmdb in wanted}))
+            .all()
+        )
+        realigned = 0
+        for row in rows:
+            row_type = str(getattr(row, "asset_type", "") or "").strip().lower()
+            row_tmdb = getattr(row, "tmdb_id", None)
+            if not isinstance(row_tmdb, int) or (row_type, row_tmdb) not in wanted:
+                continue
+            cache_imdb = str(getattr(row, "imdb_id", "") or "").strip() or None
+            cache_tvdb = getattr(row, "tvdb_id", None)
+            for asset in wanted[(row_type, row_tmdb)]:
+                changes: list[str] = []
+                asset_imdb = str(asset.get("imdb_id") or "").strip() or None
+                if cache_imdb and asset_imdb != cache_imdb:
+                    changes.append(f"imdb {asset_imdb or 'none'} → {cache_imdb}")
+                    asset["imdb_id"] = cache_imdb
+                if row_type == "tv_series" and isinstance(cache_tvdb, int) and asset.get("tvdb_id") != cache_tvdb:
+                    changes.append(f"tvdb {asset.get('tvdb_id') or 'none'} → {cache_tvdb}")
+                    asset["tvdb_id"] = cache_tvdb
+                if changes:
+                    realigned += 1
+                    if bool(app_settings.debug):
+                        _file_label = Path(asset["file_path"]).name if asset.get("file_path") else str(asset.get("title") or "?")
+                        log_debug(
+                            LogTags.IDARR,
+                            f"Realigned {_file_label} to final cache IDs ({', '.join(changes)})",
+                        )
+        return realigned
 
     def is_ignored(self, asset: dict[str, Any], ignored_asset_keys: set[str]) -> bool:
         asset_key = self._asset_key(
@@ -4655,6 +4924,16 @@ class IdarrRunner:
                     "action_mode": "rename",
                     "dry_run": str(dry_run).lower(),
                 }
+            )
+            _c_first = assets[_idxs[0]]
+            _c_title = str(_c_first.get("title") or "?")
+            _c_year = f" ({_c_first['year']})" if isinstance(_c_first.get("year"), int) else ""
+            _c_tmdb = f" [tmdb-{_c_first['tmdb_id']}]" if isinstance(_c_first.get("tmdb_id"), int) else ""
+            _c_files = ", ".join(Path(p).name for p in _src_paths)
+            log_warning(
+                LogTags.IDARR,
+                f"Same item, different IDs — {_c_title}{_c_year}{_c_tmdb}: {len(_idxs)} files map to one "
+                f"corrected name “{Path(_norm_target).name}”, skipped for you to pick which to keep. Files: {_c_files}",
             )
             for _i in _idxs:
                 _intra_conflict_indices.add(_i)
@@ -4989,8 +5268,9 @@ class IdarrRunner:
         if not tmdb_api_key:
             raise ValueError("TMDB API key is required for IDarr runs")
 
-        IdarrRunner._tmdb_consecutive_failures = 0  # fresh circuit breaker per run
-        IdarrRunner._tmdb_last_failure_reason = ""
+        IdarrRunner._tmdb_note_success()  # fresh circuit breaker per run
+        with IdarrRunner._tmdb_failure_lock:
+            IdarrRunner._tmdb_last_failure_reason = ""
 
         warnings: list[str] = []
 
@@ -5048,7 +5328,26 @@ class IdarrRunner:
             allowed_asset_keys = pending_keys
             log_info(LogTags.IDARR, f"Pending-matches mode enabled: {len(pending_keys)} item(s) queued")
 
-        if bool(config_data.get("remove_non_image_files", False)):
+        selected_source_filenames = self._extract_selected_source_filenames(config_data)
+        single_item_mode = bool(selected_source_filenames)
+        if single_item_mode:
+            _selected_sorted = sorted(selected_source_filenames)
+            _selected_preview = ", ".join(_selected_sorted[:5])
+            if len(_selected_sorted) > 5:
+                _selected_preview += f" (and {len(_selected_sorted) - 5} more)"
+            log_info(
+                LogTags.IDARR,
+                f"Targeted run: only processing {len(_selected_sorted)} selected file(s): {_selected_preview}",
+                selected_count=len(_selected_sorted),
+            )
+            log_info(
+                LogTags.IDARR,
+                "Targeted run: skipping full-scope steps (non-image cleanup, unsupported-format check, cache pruning/maintenance)",
+            )
+
+        # Full-scope housekeeping (non-image cleanup, unsupported-format sweep) is skipped in
+        # single-item mode — a targeted rename only needs the selected files.
+        if bool(config_data.get("remove_non_image_files", False)) and not single_item_mode:
             removed_count, dry_run_count = self._remove_non_images(source_dir, dry_run=dry_run)
             log_info(
                 LogTags.IDARR,
@@ -5058,46 +5357,45 @@ class IdarrRunner:
             )
             _notify_progress("cleanup", 6, f"Cleanup complete: removed {removed_count} non-image file(s)")
 
-        selected_source_filenames = self._extract_selected_source_filenames(config_data)
-        single_item_mode = bool(selected_source_filenames)
-
         is_asset_drive = bool(config_data.get("is_asset_drive", False))
         is_psd_drive = bool(config_data.get("is_psd_drive", False))
+        _scan_note = " (targeted: selected files only)" if single_item_mode else ""
         if is_asset_drive:
             log_info(
                 LogTags.IDARR,
-                f"Asset drive mode: scanning logos/, backgrounds/ and squareart/ subfolders of: {source_dir}",
+                f"Asset drive mode: scanning logos/, backgrounds/ and squareart/ subfolders of: {source_dir}{_scan_note}",
                 source_dir=str(source_dir),
             )
-            _notify_progress("scanning", 9, f"Scanning asset drive subfolders: {source_dir}")
-            assets = self.scan_asset_drive_subfolders(source_dir)
+            _notify_progress("scanning", 9, f"Scanning asset drive subfolders{_scan_note}: {source_dir}")
+            assets = self.scan_asset_drive_subfolders(source_dir, only_filenames=selected_source_filenames or None)
         elif is_psd_drive:
             # PSD drive: a flat folder using asset-style matching (no season-suffix hints, since
             # PSD source files don't carry season info) but without the logos/backgrounds/squareart subfolders.
             log_info(
                 LogTags.IDARR,
-                f"PSD drive mode: scanning flat folder with asset-style matching: {source_dir}",
+                f"PSD drive mode: scanning flat folder with asset-style matching: {source_dir}{_scan_note}",
                 source_dir=str(source_dir),
             )
-            _notify_progress("scanning", 9, f"Scanning PSD drive folder: {source_dir}")
-            assets = self._scan_assets_for_asset_drive(source_dir)
+            _notify_progress("scanning", 9, f"Scanning PSD drive folder{_scan_note}: {source_dir}")
+            assets = self._scan_assets_for_asset_drive(source_dir, only_filenames=selected_source_filenames or None)
         else:
-            log_info(LogTags.IDARR, f"Scanning directory for image assets: {source_dir}", source_dir=str(source_dir))
-            _notify_progress("scanning", 9, f"Scanning source folder: {source_dir}")
-            assets = self.scan_files_in_flat_folder(source_dir)
+            log_info(LogTags.IDARR, f"Scanning directory for image assets: {source_dir}{_scan_note}", source_dir=str(source_dir))
+            _notify_progress("scanning", 9, f"Scanning source folder{_scan_note}: {source_dir}")
+            assets = self.scan_files_in_flat_folder(source_dir, only_filenames=selected_source_filenames or None)
 
-        unsupported_files = self._find_unsupported_image_files(source_dir, is_asset_drive=is_asset_drive)
-        if unsupported_files:
-            ext_groups: dict[str, list[str]] = {}
-            for _uf in unsupported_files:
-                ext_groups.setdefault(_uf.suffix.lower(), []).append(_uf.name)
-            for _ext, _names in sorted(ext_groups.items()):
-                _examples = ", ".join(_names[:3])
-                if len(_names) > 3:
-                    _examples += f" (and {len(_names) - 3} more)"
-                _msg = f"Unsupported file format {_ext}: {_examples} — these files cannot be renamed or processed"
-                warnings.append(_msg)
-                log_warning(LogTags.IDARR, _msg)
+        if not single_item_mode:
+            unsupported_files = self._find_unsupported_image_files(source_dir, is_asset_drive=is_asset_drive)
+            if unsupported_files:
+                ext_groups: dict[str, list[str]] = {}
+                for _uf in unsupported_files:
+                    ext_groups.setdefault(_uf.suffix.lower(), []).append(_uf.name)
+                for _ext, _names in sorted(ext_groups.items()):
+                    _examples = ", ".join(_names[:3])
+                    if len(_names) > 3:
+                        _examples += f" (and {len(_names) - 3} more)"
+                    _msg = f"Unsupported file format {_ext}: {_examples} — these files cannot be renamed or processed"
+                    warnings.append(_msg)
+                    log_warning(LogTags.IDARR, _msg)
 
         if selected_source_filenames:
             assets = [
@@ -5119,6 +5417,13 @@ class IdarrRunner:
             else:
                 log_info(LogTags.IDARR, f"No image assets found in source folder: {source_dir}", source_dir=str(source_dir))
                 _notify_progress("scanning", 12, "No image assets found in source folder")
+        elif single_item_mode:
+            log_info(
+                LogTags.IDARR,
+                f"Targeted scan complete: found {total_assets} of {len(selected_source_filenames)} selected file(s) — rest of folder not scanned",
+                total_assets=total_assets,
+            )
+            _notify_progress("scanning", 12, f"Targeted scan found {total_assets} selected file(s)")
         else:
             log_info(LogTags.IDARR, f"Completed scanning: discovered {total_assets} image asset(s)", total_assets=total_assets)
             _notify_progress("scanning", 12, f"Discovered {total_assets} image asset(s)")
@@ -5260,6 +5565,10 @@ class IdarrRunner:
             warnings.append(f"Failed to update IDarr cache table: {exc}")
             log_warning(LogTags.IDARR, f"Failed to update IDarr cache table: {exc}")
 
+        realigned_ids = self._sync_asset_ids_from_cache(assets)
+        if realigned_ids:
+            log_info(LogTags.IDARR, f"Realigned {realigned_ids} file(s) to final cache IDs before rename")
+
         renamed_count = 0
         skipped_count = 0
         duplicate_conflicts = 0
@@ -5318,7 +5627,8 @@ class IdarrRunner:
         if bool(app_settings.debug) and unmatched_assets:
             for _unmatched in unmatched_assets:
                 _unmatched_title = str(_unmatched.get("title") or "unknown")
-                log_debug(LogTags.IDARR, f"❌ Unmatched: {_unmatched_title}")
+                _unmatched_subtype = self._asset_subtype_log_label(_unmatched)
+                log_debug(LogTags.IDARR, f"❌ Unmatched: {_unmatched_title}{_unmatched_subtype}")
 
         duplicate_log_csv: str | None = None
         if conflict_rows:
@@ -5383,7 +5693,9 @@ class IdarrRunner:
                 log_warning(LogTags.IDARR, f"Failed to prune orphaned pending cache rows: {exc}")
 
         orphan_prune_stats = {"removed_cache": 0, "removed_pending": 0}
-        if bool(config_data.get("prune", False)) and not single_item_mode:
+        # Default-on: matched rows for deleted files otherwise accumulate forever
+        # (config "prune": false still disables it).
+        if bool(config_data.get("prune", True)) and not single_item_mode:
             orphan_prune_stats = self._prune_orphaned_cache_entries(source_dir)
 
         _notify_progress("finalizing", 96, "Finalizing IDarr summary report")

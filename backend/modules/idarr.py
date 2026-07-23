@@ -1,5 +1,6 @@
 import hashlib
 import os
+import threading
 import traceback
 import json
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from database import SessionLocal
+from core.config import settings as app_settings
 from core.logging import (
     LogTags,
     add_job_log_handler,
@@ -29,7 +31,7 @@ from models.job import (
     finalize_job_cancelled,
 )
 from core.job_cancel import JobCancelled, check_cancelled
-from models.idarr import IdarrAssetCache, create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
+from models.idarr import create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
 from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
 from services.idarr_runner import IdarrRunner
@@ -273,13 +275,14 @@ def _run_idarr_personal_sync_inline(
     def _sync_progress(current: int, total: int, phase: str, message: str) -> None:
         try:
             ratio = min(max(current / max(total, 1), 0.0), 1.0)
+            # Same weighting as the standalone sync job: the upload dominates wall time.
             if phase == "listing":
                 listing_ratio = min(current / max(2 * max(total, 1), 1), 1.0)
-                scaled = int(progress_start + listing_ratio * span * 0.45)
+                scaled = int(progress_start + listing_ratio * span * 0.10)
             elif phase == "checking":
-                scaled = int(progress_start + span * 0.45 + ratio * span * 0.07)
+                scaled = int(progress_start + span * 0.10 + ratio * span * 0.04)
             elif phase in {"uploading", "uploading_stats", "uploading_file"}:
-                scaled = int(progress_start + span * 0.52 + ratio * span * 0.48)
+                scaled = int(progress_start + span * 0.14 + ratio * span * 0.86)
             elif phase == "complete":
                 scaled = progress_end
             else:
@@ -305,7 +308,45 @@ def _run_idarr_personal_sync_inline(
     log_success(LogTags.IDARR, f"Personal sync complete for '{label}'", drive_id=personal_drive_id)
 
 
+def _prune_idarr_duplicates(config_data: dict[str, Any]) -> None:
+    """Delete files in config/idarr/duplicates older than `duplicates_retention_days`
+    (0 = keep forever). Runs at the start of each IDarr job so the archive of overwritten
+    files (from IDarr renames and Artwork Finder overwrites) doesn't grow without bound."""
+    try:
+        days = int(config_data.get("duplicates_retention_days") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        return
+    duplicates_dir = app_settings.config_dir / "idarr" / "duplicates"
+    if not duplicates_dir.is_dir():
+        return
+    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
+    removed = 0
+    for f in duplicates_dir.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        except OSError as exc:
+            log_warning(LogTags.IDARR, f"Could not delete old duplicate '{f.name}': {exc}")
+    if removed:
+        log_info(LogTags.IDARR,
+                 f"Cleared {removed} duplicate file(s) older than {days} day(s) from {duplicates_dir}")
+
+
+# IDarr runs must never overlap (shared source folder + cache table). The default job
+# queue is single-worker so this never blocks, but max_concurrent_jobs can be raised for
+# drive syncs — this lock keeps queued targeted runs serialized regardless.
+_IDARR_JOB_LOCK = threading.Lock()
+
+
 def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
+    with _IDARR_JOB_LOCK:
+        _run_idarr_background_job_locked(job_id, config_data)
+
+
+def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -> None:
     db = SessionLocal()
     handler_id = add_job_log_handler("idarr", job_id, "IDarr")
     success = False
@@ -329,6 +370,8 @@ def run_idarr_background_job(job_id: int, config_data: dict[str, Any]) -> None:
         update_job_state(db, job, progress=5, message="Validating native IDarr runtime...")
 
         idarr_service = IdarrRunner(db)
+
+        _prune_idarr_duplicates(config_data)
 
         update_job_state(db, job, progress=10, message="Running native IDarr...")
         result = idarr_service.run(
@@ -593,13 +636,15 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
             try:
                 normalized_total = max(total, 1)
                 ratio = min(max(current / normalized_total, 0.0), 1.0)
+                # Bands track wall time, not phase count: listing+checking take seconds,
+                # the upload takes tens of minutes, so it gets most of the bar.
                 if phase == "listing":
                     listing_ratio = min(current / max(2 * normalized_total, 1), 1.0)
-                    scaled_progress = int(20 + listing_ratio * 45)
+                    scaled_progress = int(20 + listing_ratio * 10)
                 elif phase == "checking":
-                    scaled_progress = int(65 + ratio * 7)
+                    scaled_progress = int(30 + ratio * 4)
                 elif phase in {"uploading", "uploading_stats", "uploading_file"}:
-                    scaled_progress = int(72 + ratio * 27)
+                    scaled_progress = int(34 + ratio * 65)
                 elif phase == "complete":
                     scaled_progress = 99
                 else:
@@ -643,7 +688,14 @@ def run_idarr_sync_background_job(job_id: int, config_data: dict[str, Any]) -> N
                 if next_progress == last_progress_emit and sync_message == str(job.message or ""):
                     return
 
-                if next_progress == last_progress_emit and phase not in {"complete", "checking", "listing"}:
+                # uploading_stats is already rate-limited (rclone --stats 1s) and carries the live count,
+                # so let it through even when the % hasn't moved; uploading_file fires per file and stays gated.
+                if next_progress == last_progress_emit and phase not in {
+                    "complete",
+                    "checking",
+                    "listing",
+                    "uploading_stats",
+                }:
                     return
 
                 update_job_state(
@@ -762,6 +814,10 @@ def run_idarr_workflow_step(job_id: int, run_config: dict[str, Any]) -> None:
             scope_label = str(target.get("label") or f"Target {scope_idx + 1}").strip()
             source_dir = str(target.get("source_dir") or "").strip()
 
+            # Visual break between scope runs (tagged so it lands in the IDARR job log too,
+            # not just the main log). Skipped before the first — it follows the job banner.
+            if run_num > 0:
+                log_info(LogTags.IDARR, "─" * 60, job_id=job_id)
             log_info(LogTags.IDARR, f"Running IDarr scope {run_num + 1}/{total_scopes}: '{scope_label}'",
                      job_id=job_id, scope_idx=scope_idx, source_dir=source_dir)
             update_job_state(db, job, progress=scope_start_progress,

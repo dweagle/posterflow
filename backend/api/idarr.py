@@ -45,6 +45,7 @@ class MakerIdarrConfig(BaseModel):
     limit: int | None = None
     frequency_days: int = 30
     tvdb_frequency: int = 7
+    duplicates_retention_days: int = 0   # auto-delete duplicates older than N days (0 = keep forever)
 
 
 class IdarrPendingResolveRequest(BaseModel):
@@ -194,6 +195,9 @@ def _sanitize_maker_idarr_config(payload: Any) -> MakerIdarrConfig:
 
     data["frequency_days"] = _parse_positive_int(payload.get("frequency_days"), defaults.frequency_days)
     data["tvdb_frequency"] = _parse_positive_int(payload.get("tvdb_frequency"), defaults.tvdb_frequency)
+    # 0 = disabled; _parse_positive_int returns the default (0) for 0/negative/garbage.
+    data["duplicates_retention_days"] = _parse_positive_int(
+        payload.get("duplicates_retention_days"), defaults.duplicates_retention_days)
 
     return MakerIdarrConfig(**{**defaults.model_dump(), **data})
 
@@ -1342,6 +1346,7 @@ def _build_idarr_pending_items_payload(
                 "pending_status": cache_payload.get("pending_status") or None,
                 "conflict_files": cache_payload.get("conflict_files") if isinstance(cache_payload.get("conflict_files"), list) else None,
                 "conflict_file_tracked": cache_payload.get("conflict_file_tracked") if isinstance(cache_payload.get("conflict_file_tracked"), list) else None,
+                "conflict_target_name": cache_payload.get("conflict_target_name") if isinstance(cache_payload.get("conflict_target_name"), str) else None,
                 "conflict_file_previews": (
                     [
                         _build_idarr_pending_preview_url({"pending_entry": {"files": p}}, source_dirs, cache_buster=None)
@@ -2594,7 +2599,7 @@ def export_maker_idarr_csvs(payload: IdarrExportRequest, db: Session = Depends(g
     try:
         stats_payload = json.loads(latest_run.stats_json) if latest_run.stats_json else {}
         details_payload = json.loads(latest_run.details_json) if latest_run.details_json else {}
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Failed to parse IDarr run payload")
 
     if not isinstance(stats_payload, dict):
@@ -2807,7 +2812,7 @@ def revert_maker_idarr_latest_run(payload: IdarrRevertRequest, db: Session = Dep
 
     try:
         details_payload = json.loads(latest_run.details_json) if latest_run.details_json else {}
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Failed to parse IDarr run details")
 
     if not isinstance(details_payload, dict):

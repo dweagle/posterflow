@@ -313,3 +313,36 @@ def test_start_idarr_accepts_scoped_source_filenames(client, test_db, monkeypatc
     assert queued_payloads
     queued_config = queued_payloads[0]
     assert queued_config.get("source_filenames") == ["poster-one.jpg", "poster-two.png"]
+
+
+def test_start_idarr_targeted_queues_behind_active_job_but_full_run_blocked(client, test_db, monkeypatch, tmp_path):
+    """With an IDarr job already active, a targeted run (source_filenames) queues,
+    while a duplicate full run is still refused with 409."""
+    source_dir = tmp_path / "idarr-source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "sync_targets": [
+            {
+                "label": "Drive 1",
+                "personal_drive_id": "drive-1",
+                "source_dir": str(source_dir),
+            }
+        ],
+    }
+    test_db.add(Setting(key="maker_tools_idarr_config", value=json.dumps(payload)))
+    test_db.add(Setting(key="tmdb_api_key", value="tmdb-test-key"))
+    test_db.add(Job(job_type="idarr", status="running", progress=50, message="busy"))
+    test_db.commit()
+
+    monkeypatch.setattr("api.jobs.job_queue.submit", lambda *_a, **_k: None)
+
+    targeted = client.post(
+        "/api/jobs/idarr",
+        json={"dry_run": False, "sync_target_index": 0, "source_filenames": ["poster-one.jpg"]},
+    )
+    assert targeted.status_code == 200
+
+    full = client.post("/api/jobs/idarr", json={"dry_run": False, "sync_target_index": 0})
+    assert full.status_code == 409
+    assert "already" in full.json()["detail"]

@@ -36,6 +36,7 @@ import { API_URL } from '../api/http'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './IDarr.css'
+import Toolbar from '../components/Toolbar'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
 const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
@@ -69,6 +70,7 @@ const DEFAULT_IDARR_CONFIG: MakerIdarrConfig = {
   limit: null,
   frequency_days: 30,
   tvdb_frequency: 7,
+  duplicates_retention_days: 0,
   force_sync_after_run: false,
   show_in_workflow: false,
 }
@@ -98,6 +100,7 @@ const normalizeIdarrConfigForCompare = (value: MakerIdarrConfig) => ({
   limit: value.limit === null ? null : Number(value.limit),
   frequency_days: Number(value.frequency_days || 30),
   tvdb_frequency: Number(value.tvdb_frequency || 7),
+  duplicates_retention_days: Number(value.duplicates_retention_days || 0),
   force_sync_after_run: Boolean(value.force_sync_after_run),
   show_in_workflow: Boolean(value.show_in_workflow),
   sync_targets: Array.isArray(value.sync_targets)
@@ -249,6 +252,7 @@ function IDarr() {
   const [selectedSyncTargetIndex, setSelectedSyncTargetIndex] = useState(0)
   const [frequencyDaysInput, setFrequencyDaysInput] = useState(String(DEFAULT_IDARR_CONFIG.frequency_days))
   const [tvdbFrequencyInput, setTvdbFrequencyInput] = useState(String(DEFAULT_IDARR_CONFIG.tvdb_frequency))
+  const [duplicatesRetentionInput, setDuplicatesRetentionInput] = useState(String(DEFAULT_IDARR_CONFIG.duplicates_retention_days))
   const [limitInput, setLimitInput] = useState('')
   const [lastRun, setLastRun] = useState<MakerIdarrLastRun | null>(null)
   const [pendingItems, setPendingItems] = useState<MakerIdarrPendingItem[]>([])
@@ -397,6 +401,11 @@ function IDarr() {
   // and show a PSD placeholder instead. Matches a .psd extension whether it's a bare filename or
   // sits inside a preview URL (e.g. "…/source-image?path=Foo.psd&cb=123").
   const isPsd = (url: string | null | undefined) => /\.psd\b/i.test(String(url || ''))
+
+  // Pull the {tmdb-…}/{tvdb-…}/{imdb-…} tags from a filename so a conflict file whose tags differ
+  // from the corrected target name can be flagged as the wrong-id copy.
+  const extractIdTags = (name: string | null | undefined): string =>
+    (String(name || '').match(/\{(?:tmdb|tvdb|imdb)-[^}]+\}/gi) || []).join(' ').toLowerCase()
 
   const getPreviewImageUrl = (rawUrl: string | null | undefined): string | null => {
     const value = String(rawUrl || '').trim()
@@ -705,6 +714,10 @@ function IDarr() {
   useEffect(() => {
     setTvdbFrequencyInput(String(config.tvdb_frequency || DEFAULT_IDARR_CONFIG.tvdb_frequency))
   }, [config.tvdb_frequency])
+
+  useEffect(() => {
+    setDuplicatesRetentionInput(String(config.duplicates_retention_days ?? DEFAULT_IDARR_CONFIG.duplicates_retention_days))
+  }, [config.duplicates_retention_days])
 
   useEffect(() => {
     setLimitInput(config.limit === null ? '' : String(config.limit))
@@ -1199,12 +1212,6 @@ function IDarr() {
     }
   }
 
-  const wsJobsRef = useRef(wsJobs)
-  wsJobsRef.current = wsJobs
-  const isIdarrJobActive = () => wsJobsRef.current.some(
-    (job) => job.job_type === 'idarr' && (job.status === 'running' || job.status === 'pending' || job.status === 'queued'),
-  )
-
   const {
     handleResolvePending,
     handleResolveAndRename,
@@ -1221,7 +1228,6 @@ function IDarr() {
     refreshPendingAndHandleResolverAdvance,
     loadCacheStats,
     loadIgnoredTitles,
-    isIdarrJobActive,
   })
 
   const handleManualCandidateSearch = async () => {
@@ -1525,6 +1531,39 @@ const {
                 }}
               />
               <small>How often TVDB fallback metadata is refreshed for cached items.</small>
+            </div>
+
+            <div className="field-group">
+              <label>Duplicates Retention Days</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={duplicatesRetentionInput}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (!/^\d*$/.test(raw)) {
+                    return
+                  }
+
+                  setDuplicatesRetentionInput(raw)
+
+                  if (!raw) {
+                    return
+                  }
+
+                  const parsed = Number(raw)
+                  if (Number.isFinite(parsed) && parsed >= 0) {
+                    updateConfig('duplicates_retention_days', parsed)
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = Number(duplicatesRetentionInput)
+                  const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_IDARR_CONFIG.duplicates_retention_days
+                  setDuplicatesRetentionInput(String(nextValue))
+                  updateConfig('duplicates_retention_days', nextValue)
+                }}
+              />
+              <small>Auto-delete files in the duplicates folder older than this many days at the start of each IDarr run. 0 = keep forever.</small>
             </div>
 
             <div className="field-group">
@@ -1889,9 +1928,13 @@ const {
                     </span>
                   </div>
                 </div>
-                {hasConflictFiles && (
+                {hasConflictFiles && (() => {
+                  const targetIdTags = extractIdTags(item.conflict_target_name)
+                  return (
                   <div className="conflict-files-section">
-                    <small className="conflict-files-label">Same target — select which to keep:</small>
+                    <small className="conflict-files-label">
+                      Same target — select which to keep{item.conflict_target_name ? <> (all become <code>{item.conflict_target_name}</code>)</> : ''}:
+                    </small>
                     <div className="conflict-files-grid">
                       {item.conflict_files!.map((file, fileIndex) => {
                         const fileIsPsd = isPsd(file)
@@ -1901,6 +1944,12 @@ const {
                         const tracked = Array.isArray(trackedFlags) && trackedFlags.length === item.conflict_files!.length
                           ? trackedFlags[fileIndex]
                           : null
+                        // Flag the copy whose on-disk id tags differ from the corrected target name.
+                        const fileIdTags = extractIdTags(file)
+                        // No IDs on disk yet, but the corrected target has them — this copy just
+                        // hasn't been tagged; it will inherit the right IDs (not "wrong").
+                        const noIdsYet = targetIdTags !== '' && fileIdTags === ''
+                        const idsWrong = targetIdTags !== '' && fileIdTags !== '' && fileIdTags !== targetIdTags
                         return (
                           <div key={file} className="conflict-file-cell">
                             <button
@@ -1926,6 +1975,11 @@ const {
                                 <div className="conflict-cell-thumb conflict-cell-thumb-placeholder" />
                               )}
                             </button>
+                            {item.conflict_target_name && (
+                              <span className={`conflict-cell-idbadge ${noIdsYet ? 'conflict-cell-idbadge--pending' : idsWrong ? 'conflict-cell-idbadge--wrong' : 'conflict-cell-idbadge--ok'}`}>
+                                {noIdsYet ? 'No IDs yet' : idsWrong ? 'Wrong IDs' : 'Correct IDs'}
+                              </span>
+                            )}
                             <span className="conflict-cell-name" title={file}>{file}</span>
                             <button
                               className="btn-toolbar btn-primary conflict-cell-use-btn"
@@ -1939,7 +1993,8 @@ const {
                       })}
                     </div>
                   </div>
-                )}
+                  )
+                })()}
                 <div className="pending-list-actions">
                   {!hasConflictFiles && (
                     <button className="btn-toolbar btn-primary" onClick={() => { setResolverIndex(globalIndex); void openResolver(item) }} disabled={resolving}>
@@ -2746,15 +2801,10 @@ const {
 
   const renderIDarrTabContent = () => (
     <>
-      <div className="toolbar">
-        <div className="toolbar-title">
-          <h2>IDarr</h2>
-          <div className="toolbar-info">
-            <Info size={16} />
-            <div className="toolbar-tooltip">Run native in-app IDarr processing from the UI. Configure sync targets and TMDB settings in the Settings tab.</div>
-          </div>
-        </div>
-        <div className="action-buttons">
+      <Toolbar
+        title="IDarr"
+        description="Run native in-app IDarr processing from the UI. Configure sync targets and TMDB settings in the Settings tab."
+      >
           <div className="btn-pair">
             <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading || running || syncing}>
               Scheduling
@@ -2792,8 +2842,7 @@ const {
             <Play size={16} />
             {running ? 'Starting...' : 'Run & Sync'}
           </button>
-        </div>
-      </div>
+      </Toolbar>
 
       <div className="idarr-layout">
         <div className="settings-section idarr-upload-card">
@@ -2887,15 +2936,10 @@ const {
 
   const renderSettingsTabContent = () => (
     <>
-      <div className="toolbar">
-        <div className="toolbar-title">
-          <h2>Settings</h2>
-          <div className="toolbar-info">
-            <Info size={16} />
-            <div className="toolbar-tooltip">Configure your IDarr workflow options, including TMDB API key, sync targets, and processing behaviour.</div>
-          </div>
-        </div>
-        <div className="action-buttons">
+      <Toolbar
+        title="Settings"
+        description="Configure your IDarr workflow options, including TMDB API key, sync targets, and processing behaviour."
+      >
           <div className="btn-pair">
             <button className="btn-toolbar btn-toolbar-link" onClick={openSchedulingSettings} disabled={saving || loading}>
               Scheduling
@@ -2913,8 +2957,7 @@ const {
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Settings'}
           </button>
-        </div>
-      </div>
+      </Toolbar>
 
       {renderIDarrConfigurationSection()}
     </>
