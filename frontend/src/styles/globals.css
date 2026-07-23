@@ -92,8 +92,8 @@ input, textarea, select {
 /* Shared top-tab styling across page tab bars */
 .poster-manager-tabs button,
 .settings-tabs button,
-.plex-upload-tabs button,
 .maker-tools-tabs button,
+.gdrives-tabs button,
 .logs-page .tab {
   display: inline-flex;
   align-items: center;
@@ -113,8 +113,8 @@ input, textarea, select {
 @media (max-width: 550px) {
   .poster-manager-tabs button,
   .settings-tabs button,
-  .plex-upload-tabs button,
   .maker-tools-tabs button,
+  .gdrives-tabs button,
   .logs-page .tab {
     padding: 0.5rem 0.6rem;
     font-size: 0.78rem;
@@ -124,8 +124,8 @@ input, textarea, select {
 
 .poster-manager-tabs button:hover,
 .settings-tabs button:hover,
-.plex-upload-tabs button:hover,
 .maker-tools-tabs button:hover,
+.gdrives-tabs button:hover,
 .logs-page .tab:hover {
   color: var(--pf-tab-text-hover);
   background: var(--pf-tab-hover-bg);
@@ -133,11 +133,224 @@ input, textarea, select {
 
 .poster-manager-tabs button.active,
 .settings-tabs button.active,
-.plex-upload-tabs button.active,
 .maker-tools-tabs button.active,
+.gdrives-tabs button.active,
 .logs-page .tab.active {
   color: var(--pf-tab-text-active);
   border-bottom-color: var(--pf-tab-active-border);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Shared toolbar styling across pages.
+
+   The <Toolbar> component (components/Toolbar.tsx) renders this markup, so every
+   page gets the same bar. Previously each page kept its own copy of these rules and
+   they drifted (different padding, gaps, tooltip colours, button radii). Pages should
+   only override what their layout genuinely needs — see .maker-tools-panel .toolbar.
+   ───────────────────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem;
+  background-color: #3D4556;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  /* A toolbar with no buttons would otherwise be shorter than its neighbours, since the
+     bar's height comes from the buttons. Matches padding + .btn-toolbar's height. */
+  min-height: 3.6rem;
+}
+
+.toolbar .toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.toolbar h2 {
+  color: #64b5f6;
+  margin: 0;
+  font-size: 1.25rem;
+  white-space: nowrap;
+}
+
+.toolbar-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  color: #888;
+  transition: color 0.2s;
+}
+
+.toolbar-info:hover {
+  color: #64b5f6;
+}
+
+.toolbar-info svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.toolbar-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: #252525;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: #ccc;
+  font-size: 0.85rem;
+  width: 300px;
+  max-width: 90vw;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+  white-space: normal;
+}
+
+.toolbar-info:hover .toolbar-tooltip {
+  opacity: 1;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.btn-pair {
+  display: flex;
+  gap: 0.5rem;
+  width: 185px;
+  flex-shrink: 0;
+}
+
+/* cursor: pointer comes from the global button rule above. */
+.btn-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  min-width: 185px;
+  background-color: #5c6882;
+  color: #E8ECEF;
+  border: none;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.btn-toolbar svg {
+  flex-shrink: 0;
+}
+
+.btn-toolbar:hover:not(:disabled) {
+  background-color: #6c7892;
+}
+
+.btn-toolbar:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-toolbar.btn-primary {
+  background-color: #5B89C4;
+  color: #fff;
+}
+
+.btn-toolbar.btn-primary:hover:not(:disabled) {
+  background-color: #6c9bd4;
+}
+
+.btn-toolbar.btn-unsaved {
+  background-color: #ef5350;
+  color: #fff;
+}
+
+.btn-toolbar.btn-unsaved:hover:not(:disabled) {
+  background-color: #e53935;
+}
+
+.btn-toolbar.btn-danger {
+  background: #3a2323;
+  border-color: #7c4a4a;
+  color: #e6b0b0;
+}
+
+.btn-toolbar.btn-danger:hover:not(:disabled) {
+  background: #4a2a2a;
+  border-color: #9c5a5a;
+}
+
+.btn-toolbar.btn-toolbar-link {
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #424242;
+  color: #fff;
+  padding: 0.45rem 0.25rem;
+  font-size: 0.85rem;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+.btn-toolbar.btn-toolbar-link:hover:not(:disabled) {
+  background: #555;
+}
+
+/* Stack the bar once the buttons can't sit beside the title. */
+@media (max-width: 1300px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .toolbar .toolbar-title {
+    width: 100%;
+  }
+
+  .action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 185px);
+    justify-content: start;
+    width: 100%;
+  }
+
+  .btn-pair {
+    width: 185px;
+  }
+}
+
+@media (max-width: 550px) {
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-pair {
+    width: 100%;
+  }
+
+  /* Prevent the fixed 185px min-width from overflowing at the narrowest screens.
+     Maker Tools and IDarr each discovered this separately; every page wants it. */
+  .btn-toolbar {
+    min-width: 0;
+  }
+
+  /* Tooltip doesn't work on touch screens and causes scrollWidth overflow */
+  .toolbar-tooltip {
+    display: none;
+  }
 }
 
 /* Shared chip/badge baseline across pages */
