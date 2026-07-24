@@ -115,7 +115,7 @@
   let detectedStyle = '';                          // CL2K/MM2K guessed from the active doc's layer structure
   let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false, batchMode = 'tags';  // batch-export state ('tags' = name-tag convention, 'seasons' = season range from one poster)
   let batchSeasonText = [], batchSpecialsText = [];  // "Season N" / "Specials" text layers found by the batch scan (to pair with s-layers)
-  let lastActiveName = null;                        // active-doc watcher: last name we read layers for; a change re-reads the panel
+  let lastActiveSig = null;                         // active-doc watcher: signature (name+source+CL2K/MM2K structure) of the doc we last read; a change re-reads the panel
 
   // ---- talk to Photopea ----------------------------------------------------
   const send = (script) => PP.postMessage(script, '*');
@@ -164,6 +164,7 @@
 
       app.echoToOE('SZNAME:'+app.activeDocument.name);
       app.echoToOE('SZDET:'+detStyle);
+      app.echoToOE('SZSIG:'+d.name+'\\u0001'+(''+(d.source||''))+'\\u0001'+detStyle);
       app.echoToOE('SZ:'+JSON.stringify({singles:singles,seasons:seasons,sequels:sequels,seqGroup:(sq?sq.p:null)}));
     }
   }catch(e){app.echoToOE('SZERR:'+e);}`;
@@ -700,10 +701,11 @@
   window.addEventListener('message', (e) => {
     const d = e.data;
     if (typeof d !== 'string') { onBytes(d); return; }   // ArrayBuffer = saveToOE (JPG) result
-    if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; lastActiveName = d.slice(7); }
+    if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; }
     else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
+    else if (d.startsWith('SZSIG:'))   { lastActiveSig = d.slice(6); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
     else if (d.startsWith('SZBINIT:')) { onBatchInit(d.slice(8)); }
-    else if (d.startsWith('SZACT:'))   { const nm = d.slice(6); if (nm !== lastActiveName && !jpgBusy && !placeBusy && !batchBusy) { lastActiveName = nm; fetchLayers(); } }
+    else if (d.startsWith('SZACT:'))   { const sig = d.slice(6); if (sig !== lastActiveSig && !jpgBusy && !placeBusy && !batchBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('SZGEO:'))   { onGeo(d.slice(6)); }
     else if (d.startsWith('SZRSZ:'))   { const p = d.slice(6).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
     else if (d.startsWith('SZPLACED:')){ finishPlace(true); }
@@ -733,9 +735,16 @@
 
   updateDocUI();
 
-  // Active-document watcher: the panel mirrors whatever doc is in front. Poll the active name
-  // (cheap) and only re-read layers when it changes. Paused while a JPG/place op is mid-flight.
-  const POLL = 'try{app.echoToOE("SZACT:"+(app.documents.length?app.activeDocument.name:""))}catch(e){}';
+  // Active-document watcher: the panel mirrors whatever doc is in front. Poll a SIGNATURE of the
+  // active doc — name + source + its CL2K/MM2K structure (LOGO group ⇒ CL2K, SEQUEL ⇒ MM2K) — and
+  // re-read layers when it changes. Keying on the name alone missed a switch between a CL2K and an
+  // MM2K doc of the SAME title (same filename), so the badge stayed stale until the plugin was
+  // reopened. Paused while a JPG/place op is mid-flight.
+  const POLL = 'try{var sig="";if(app.documents.length){var ad=app.activeDocument;'
+    + 'function hg(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hg(L.layers,re))return true;}}return false;}'
+    + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
+    + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
+    + 'app.echoToOE("SZACT:"+sig)}catch(e){}';
   setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the active document (press ⟳ to reload)
