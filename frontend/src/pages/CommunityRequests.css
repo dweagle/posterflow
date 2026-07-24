@@ -590,10 +590,10 @@
   gap: 0.75rem;
 }
 
-/* Maker Tools panel — fixed 520px at wide viewports so all cards align */
+/* Maker Tools panel — fixed 540px at wide viewports so all cards align */
 .request-maker-tools-panel {
-  flex: 0 0 520px;
-  width: 520px;
+  flex: 0 0 540px;
+  width: 540px;
   min-width: 0;
   display: flex;
   gap: 0.5rem;
@@ -608,6 +608,16 @@
 
 .request-maker-tools-panel .tmdb-result-card {
   background: #181818;
+  /* Uniform card height so cards with fewer than 6 logos match the tall ones. Tune with the
+     logo size — this fits a 6-logo column at the current 40px icon width. */
+  min-height: 160px;
+  /* Stretch the info column to the full card height so its Browse button can bottom-align. */
+  align-items: stretch;
+}
+
+/* Pin the Browse / Hide-images control (or the no-match export group) to the card bottom. */
+.request-maker-tools-panel .tmdb-gallery-toggle {
+  margin-top: auto;
 }
 
 /* Visual-only drop zone indicator inside the maker panel */

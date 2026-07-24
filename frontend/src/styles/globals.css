@@ -386,6 +386,13 @@ input, textarea, select {
   white-space: nowrap;
 }
 
+/* Narrower type / seasons / specials badges in the maker card meta row. */
+.tmdb-result-meta .badge {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  gap: 0.1rem;
+}
+
 .tmdb-result-wrapper .badge svg {
   flex-shrink: 0;
 }

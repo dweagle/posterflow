@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, Loader2, ListPlus,
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
+import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
 import { publishToCommunityLists } from './publishToCommunityLists'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -553,6 +554,26 @@ function UnmatchedItemsModal({
                         >
                           <ExternalLink size={13} />
                           <span>Open</span>
+                        </a>
+                        <a
+                          href={googleSearchUrl(candidate.title, candidate.year)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tmdb-icon-btn"
+                          title="Google search"
+                        >
+                          <Search size={13} />
+                          <span>Google</span>
+                        </a>
+                        <a
+                          href={tpdbSearchUrl(candidate.title, candidate.media_type)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tmdb-icon-btn"
+                          title="Search ThePosterDB"
+                        >
+                          <ExternalLink size={13} />
+                          <span>TPDB</span>
                         </a>
                         <button
                           type="button"

@@ -956,7 +956,7 @@
   background: none;
   border: none;
   color: #aaa;
-  padding: 0.22rem 0.55rem;
+  padding: 0.16rem 0.4rem;
   font-size: 0.78rem;
   line-height: 1;
   cursor: pointer;
@@ -1087,7 +1087,8 @@
   flex-wrap: wrap;
 }
 
-.tmdb-result-ids {
+.tmdb-result-ids,
+.tmdb-result-copyrow {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -1104,6 +1105,9 @@
 }
 
 .tmdb-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.75rem;
   color: #999;
   background: #252525;
@@ -1114,6 +1118,17 @@
   /* button reset */
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
+}
+
+/* Maker card: smaller id chips + tighter gap so all three (TMDB/IMDB/TVDB) fit one row. */
+.tmdb-result-ids--compact {
+  gap: 0.3rem;
+}
+
+.tmdb-result-ids--compact .tmdb-id-chip {
+  gap: 0.15rem;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
 }
 
 .tmdb-id-chip:hover {
@@ -1167,8 +1182,34 @@
 .tmdb-result-links {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.7rem;
   flex-wrap: wrap;
+}
+
+/* Right-hand column: external-service logos stacked top-to-bottom, pinned to the card top. */
+.tmdb-result-logos {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.15rem;
+}
+
+/* Each logo in the column reads as its own button box (uniform, since every img is 44px wide). */
+.tmdb-result-logos .tmdb-result-link {
+  justify-content: center;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  background: #252525;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tmdb-result-logos .tmdb-result-link:hover {
+  border-color: #64b5f6;
+  background: #2a2a2a;
+  text-decoration: none;
 }
 
 .tmdb-result-link {
@@ -1178,6 +1219,19 @@
   color: #64b5f6;
   font-size: 0.78rem;
   text-decoration: none;
+}
+
+/* Icon-only external link. Source logos are a uniform 400×132 wordmark, so size by width —
+   they all render the same size and align cleanly; height follows the ratio (~1/3 the width). */
+.tmdb-link-icon {
+  width: 40px;
+  height: auto;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.tmdb-result-link:hover .tmdb-link-icon {
+  opacity: 0.7;
 }
 
 .tmdb-result-link:hover {

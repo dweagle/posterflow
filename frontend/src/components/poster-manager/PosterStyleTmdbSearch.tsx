@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'lucide-react'
 import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
+import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
 import { type FallbackItem } from '../../api/posterManager'
 import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import { useToast } from '../Toast'
@@ -265,6 +266,26 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                       >
                         <ExternalLink size={13} />
                         <span>Open</span>
+                      </a>
+                      <a
+                        href={googleSearchUrl(candidate.title, candidate.year)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tmdb-icon-btn"
+                        title="Google search"
+                      >
+                        <Search size={13} />
+                        <span>Google</span>
+                      </a>
+                      <a
+                        href={tpdbSearchUrl(candidate.title, candidate.media_type)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="tmdb-icon-btn"
+                        title="Search ThePosterDB"
+                      >
+                        <ExternalLink size={13} />
+                        <span>TPDB</span>
                       </a>
                       <button
                         type="button"

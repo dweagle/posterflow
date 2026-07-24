@@ -7,10 +7,10 @@ import {
   Copy,
   Download,
   Eraser,
-  ExternalLink,
   FileDown,
   FolderOpen,
   Globe,
+  Hash,
   Image,
   Layers,
   Clapperboard as MovieIcon,
@@ -40,6 +40,13 @@ import {
 } from '../../api/client'
 import { useToast } from '../Toast'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
+import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
+import tmdbIcon from '../../assets/service-icons/tmdb.png'
+import imdbIcon from '../../assets/service-icons/imdb.png'
+import tvdbIcon from '../../assets/service-icons/tvdb.png'
+import appleTvIcon from '../../assets/service-icons/appletv.png'
+import googleIcon from '../../assets/service-icons/google.png'
+import tpdbIcon from '../../assets/service-icons/tpdb.png'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -752,39 +759,15 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             {hideTitle && driveSearchControl}
           </div>
 
-          <div className="tmdb-result-ids">
-            <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID">TMDB&nbsp;#{item.tmdb_id}</button>
-            {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID">IMDB&nbsp;{item.imdb_id}</button>}
-            {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID">TVDB&nbsp;#{item.tvdb_id}</button>}
+          {/* ID badges — click any to copy the id. Compact so all three fit one row. */}
+          <div className="tmdb-result-ids tmdb-result-ids--compact">
+            <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID"><Hash size={10} />TMDB&nbsp;#{item.tmdb_id}</button>
+            {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID"><Hash size={10} />IMDB&nbsp;{item.imdb_id}</button>}
+            {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID"><Hash size={10} />TVDB&nbsp;#{item.tvdb_id}</button>}
           </div>
 
-          <div className="tmdb-result-links">
-            {item.homepage && (
-              <a className="tmdb-result-link" href={item.homepage} target="_blank" rel="noreferrer">
-                <ExternalLink size={12} /> TMDB
-              </a>
-            )}
-            {item.imdb_id && (
-              <a className="tmdb-result-link" href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noreferrer">
-                <ExternalLink size={12} /> IMDB
-              </a>
-            )}
-            {item.tvdb_id && (
-              <a className="tmdb-result-link" href={`https://thetvdb.com/?id=${item.tvdb_id}&tab=series`} target="_blank" rel="noreferrer">
-                <ExternalLink size={12} /> TVDB
-              </a>
-            )}
-            <a
-              className="tmdb-result-link"
-              href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
-              target="_blank"
-              rel="noreferrer"
-              onMouseEnter={ensureAppleTvStorefront}
-              onFocus={ensureAppleTvStorefront}
-              title="Find Apple TV artwork"
-            >
-              <ExternalLink size={12} /> Apple TV Art
-            </a>
+          {/* Title / link text — click to copy. */}
+          <div className="tmdb-result-copyrow">
             <button
               type="button"
               className="tmdb-copy-btn"
@@ -821,6 +804,54 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 : <><ChevronDown size={13} /> Browse images</>
             }
           </button>
+        </div>
+
+        {/* Logos column: external-service links, stacked on the right. */}
+        <div className="tmdb-result-logos">
+          {item.homepage && (
+            <a className="tmdb-result-link" href={item.homepage} target="_blank" rel="noreferrer" title="Open on TMDB">
+              <img className="tmdb-link-icon" src={tmdbIcon} alt="TMDB" />
+            </a>
+          )}
+          {item.imdb_id && (
+            <a className="tmdb-result-link" href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noreferrer" title="Open on IMDB">
+              <img className="tmdb-link-icon" src={imdbIcon} alt="IMDB" />
+            </a>
+          )}
+          {item.tvdb_id && (
+            <a className="tmdb-result-link" href={`https://thetvdb.com/?id=${item.tvdb_id}&tab=series`} target="_blank" rel="noreferrer" title="Open on TheTVDB">
+              <img className="tmdb-link-icon" src={tvdbIcon} alt="TVDB" />
+            </a>
+          )}
+          <a
+            className="tmdb-result-link"
+            href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
+            target="_blank"
+            rel="noreferrer"
+            onMouseEnter={ensureAppleTvStorefront}
+            onFocus={ensureAppleTvStorefront}
+            title="Find Apple TV artwork"
+          >
+            <img className="tmdb-link-icon" src={appleTvIcon} alt="Apple TV Art" />
+          </a>
+          <a
+            className="tmdb-result-link"
+            href={googleSearchUrl(item.title, item.year)}
+            target="_blank"
+            rel="noreferrer"
+            title="Google search"
+          >
+            <img className="tmdb-link-icon" src={googleIcon} alt="Google" />
+          </a>
+          <a
+            className="tmdb-result-link"
+            href={tpdbSearchUrl(item.title, item.media_type)}
+            target="_blank"
+            rel="noreferrer"
+            title="Search ThePosterDB"
+          >
+            <img className="tmdb-link-icon" src={tpdbIcon} alt="ThePosterDB" />
+          </a>
         </div>
       </div>
 
