@@ -284,6 +284,10 @@ export type TmdbItemCardProps = {
 export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
+  // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (gallery, id chip) but
+  // still let the user export a blank/existing PSD, named by title + year.
+  const hasTmdb = (item.tmdb_id ?? 0) > 0
+
   // Gallery state
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [galleryImages, setGalleryImages] = useState<TmdbImagesResponse | null>(null)
@@ -356,7 +360,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
   // Eagerly fetch TV details on mount so season/specials badges render immediately
   useEffect(() => {
-    if (item.media_type !== 'tv') return
+    if (item.media_type !== 'tv' || (item.tmdb_id ?? 0) <= 0) return
     void ensureTvDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.tmdb_id])
@@ -365,6 +369,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // the matching Apple storefront, so the link opens the right region by click time.
   const ensureAppleTvStorefront = useCallback(() => {
     if (appleTvOriginFetchedRef.current) return
+    if ((item.tmdb_id ?? 0) <= 0) return
     if (item.media_type !== 'movie' && item.media_type !== 'tv') return
     appleTvOriginFetchedRef.current = true
     getTmdbOriginCountry(item.tmdb_id, item.media_type)
@@ -522,7 +527,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         {
           title: item.title,
           year: item.year ?? '',
-          tmdb_id: item.tmdb_id != null ? String(item.tmdb_id) : '',
+          tmdb_id: item.tmdb_id ? String(item.tmdb_id) : '',
           tvdb_id: item.tvdb_id != null ? String(item.tvdb_id) : '',
           imdb_id: item.imdb_id ?? '',
           media_type: item.media_type ?? '',
@@ -706,6 +711,48 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     </span>
   )
 
+  // Style toggle + New/Use-Existing export buttons — shared by the gallery bar and, when there's
+  // no TMDB match, the standalone group on the card body (see hasTmdb branch below).
+  const psdExportControls = (
+    <>
+      <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
+        {(['CL2K', 'MM2K'] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`tmdb-psd-style-opt${exportStyle === s ? ' active' : ''}`}
+            onClick={() => setExportStyle(s)}
+            disabled={psdExporting}
+            title={posterStyle === s ? `${s} — the requested style` : `Export as ${s}`}
+          >
+            {s}
+            {posterStyle === s && <span className="tmdb-psd-style-req" title="Requested style" />}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
+        onClick={() => void handlePsdExport(false)}
+        disabled={psdExporting}
+        title="Create a new PSD from the selected images, or a blank template if none are selected"
+      >
+        <FileDown size={13} />
+        {psdExporting ? 'Exporting…' : 'New Export'}
+      </button>
+      <button
+        type="button"
+        className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
+        onClick={() => void handlePsdExport(true)}
+        disabled={psdExporting}
+        title="Open an existing PSD from your export folder and add any selected images to it"
+      >
+        <Layers size={13} />
+        {psdExporting ? 'Exporting…' : 'Use Existing PSD'}
+      </button>
+    </>
+  )
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -760,11 +807,13 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
 
           {/* ID badges — click any to copy the id. Compact so all three fit one row. */}
-          <div className="tmdb-result-ids tmdb-result-ids--compact">
-            <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID"><Hash size={10} />TMDB&nbsp;#{item.tmdb_id}</button>
-            {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID"><Hash size={10} />IMDB&nbsp;{item.imdb_id}</button>}
-            {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID"><Hash size={10} />TVDB&nbsp;#{item.tvdb_id}</button>}
-          </div>
+          {(hasTmdb || item.imdb_id || item.tvdb_id) && (
+            <div className="tmdb-result-ids tmdb-result-ids--compact">
+              {hasTmdb && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID"><Hash size={10} />TMDB&nbsp;#{item.tmdb_id}</button>}
+              {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID"><Hash size={10} />IMDB&nbsp;{item.imdb_id}</button>}
+              {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID"><Hash size={10} />TVDB&nbsp;#{item.tvdb_id}</button>}
+            </div>
+          )}
 
           {/* Title / link text — click to copy. */}
           <div className="tmdb-result-copyrow">
@@ -790,20 +839,28 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
           {item.overview && <p className="tmdb-result-overview">{item.overview}</p>}
 
-          <button
-            type="button"
-            className={`tmdb-gallery-toggle${galleryOpen ? ' open' : ''}`}
-            onClick={() => void toggleGallery()}
-            disabled={galleryLoading}
-          >
-            <Image size={13} />
-            {galleryLoading
-              ? 'Loading images…'
-              : galleryOpen
-                ? <><ChevronUp size={13} /> Hide images</>
-                : <><ChevronDown size={13} /> Browse images</>
-            }
-          </button>
+          {hasTmdb ? (
+            <button
+              type="button"
+              className={`tmdb-gallery-toggle${galleryOpen ? ' open' : ''}`}
+              onClick={() => void toggleGallery()}
+              disabled={galleryLoading}
+            >
+              <Image size={13} />
+              {galleryLoading
+                ? 'Loading images…'
+                : galleryOpen
+                  ? <><ChevronUp size={13} /> Hide images</>
+                  : <><ChevronDown size={13} /> Browse images</>
+              }
+            </button>
+          ) : (
+            // No TMDB match → no image gallery; expose the export buttons directly so a blank
+            // (or existing) PSD can still be made.
+            <div className="tmdb-psd-export-group tmdb-psd-export-group--standalone">
+              {psdExportControls}
+            </div>
+          )}
         </div>
 
         {/* Logos column: external-service links, stacked on the right. */}
@@ -823,17 +880,19 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               <img className="tmdb-link-icon" src={tvdbIcon} alt="TVDB" />
             </a>
           )}
-          <a
-            className="tmdb-result-link"
-            href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
-            target="_blank"
-            rel="noreferrer"
-            onMouseEnter={ensureAppleTvStorefront}
-            onFocus={ensureAppleTvStorefront}
-            title="Find Apple TV artwork"
-          >
-            <img className="tmdb-link-icon" src={appleTvIcon} alt="Apple TV Art" />
-          </a>
+          {(hasTmdb || item.tvdb_id) && (
+            <a
+              className="tmdb-result-link"
+              href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
+              target="_blank"
+              rel="noreferrer"
+              onMouseEnter={ensureAppleTvStorefront}
+              onFocus={ensureAppleTvStorefront}
+              title="Find Apple TV artwork"
+            >
+              <img className="tmdb-link-icon" src={appleTvIcon} alt="Apple TV Art" />
+            </a>
+          )}
           <a
             className="tmdb-result-link"
             href={googleSearchUrl(item.title, item.year)}
@@ -907,41 +966,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               )
             })()}
             <div className="tmdb-psd-export-group">
-              <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
-                {(['CL2K', 'MM2K'] as const).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className={`tmdb-psd-style-opt${exportStyle === s ? ' active' : ''}`}
-                    onClick={() => setExportStyle(s)}
-                    disabled={psdExporting}
-                    title={posterStyle === s ? `${s} — the requested style` : `Export as ${s}`}
-                  >
-                    {s}
-                    {posterStyle === s && <span className="tmdb-psd-style-req" title="Requested style" />}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
-                onClick={() => void handlePsdExport(false)}
-                disabled={psdExporting}
-                title="Create a new PSD from the selected images, or a blank template if none are selected"
-              >
-                <FileDown size={13} />
-                {psdExporting ? 'Exporting…' : 'New Export'}
-              </button>
-              <button
-                type="button"
-                className="tmdb-psd-export-btn tmdb-psd-export-btn--existing"
-                onClick={() => void handlePsdExport(true)}
-                disabled={psdExporting}
-                title="Open an existing PSD from your export folder and add any selected images to it"
-              >
-                <Layers size={13} />
-                {psdExporting ? 'Exporting…' : 'Use Existing PSD'}
-              </button>
+              {psdExportControls}
             </div>
           </div>
 

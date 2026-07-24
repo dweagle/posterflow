@@ -657,17 +657,15 @@ function MakerTools() {
                             </button>
                           </div>
                         </div>
-                        {hasTmdb && (
-                          <div className="maker-card-panel">
-                            <TmdbItemCard
-                              item={{ tmdb_id: tmdbId, media_type: 'tv', title: show.name, year: show.first_air_year, overview: '', poster_url: show.poster_url || '', homepage: show.homepage, imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
-                              psdConfig={psdConfig}
-                              posterAvailability={posterAvailability[tmdbId]}
-                              posterAvailabilityChecked={posterAvailabilityChecked}
-                              hideTitle
-                            />
-                          </div>
-                        )}
+                        <div className="maker-card-panel">
+                          <TmdbItemCard
+                            item={{ tmdb_id: hasTmdb ? tmdbId : 0, media_type: 'tv', title: show.name, year: show.first_air_year, overview: '', poster_url: show.poster_url || '', homepage: hasTmdb ? show.homepage : '', imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
+                            psdConfig={psdConfig}
+                            posterAvailability={hasTmdb ? posterAvailability[tmdbId] : undefined}
+                            posterAvailabilityChecked={posterAvailabilityChecked}
+                            hideTitle
+                          />
+                        </div>
                         </div>
                         )
                       })}
@@ -741,17 +739,15 @@ function MakerTools() {
                             </button>
                           </div>
                         </div>
-                        {parsed && (
-                          <div className="maker-card-panel">
-                            <TmdbItemCard
-                              item={{ tmdb_id: parsed.tmdb_id, media_type: parsed.media_type, title: item.name, year: item.date?.slice(0, 4) ?? '', overview: '', poster_url: item.poster_url || '', homepage: item.homepage, imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
-                              psdConfig={psdConfig}
-                              posterAvailability={posterAvailability[parsed.tmdb_id]}
-                              posterAvailabilityChecked={posterAvailabilityChecked}
-                              hideTitle
-                            />
-                          </div>
-                        )}
+                        <div className="maker-card-panel">
+                          <TmdbItemCard
+                            item={{ tmdb_id: parsed ? parsed.tmdb_id : 0, media_type: parsed ? parsed.media_type : (discoveryTab === 'movies' ? 'movie' : 'tv'), title: item.name, year: item.date?.slice(0, 4) ?? '', overview: '', poster_url: item.poster_url || '', homepage: parsed ? item.homepage : '', imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
+                            psdConfig={psdConfig}
+                            posterAvailability={parsed ? posterAvailability[parsed.tmdb_id] : undefined}
+                            posterAvailabilityChecked={posterAvailabilityChecked}
+                            hideTitle
+                          />
+                        </div>
                         </div>
                         )
                       })}

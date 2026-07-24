@@ -64,7 +64,7 @@ const buildResult = (item: FlatItem, tmdbId: number, posterUrl: string | null, i
   year: item.year ? String(item.year) : '',
   overview: '',
   poster_url: posterUrl || '',
-  homepage: tmdbHomepage(item.mediaType, tmdbId),
+  homepage: tmdbId ? tmdbHomepage(item.mediaType, tmdbId) : '',
   imdb_id: imdbId ?? null,
   tvdb_id: tvdbId ?? null,
 })
@@ -224,7 +224,7 @@ function UnmatchedAssetCard({ item, psdConfig, posterAvailability, posterAvailab
             {item.year && <span className="tmdb-result-year">{item.year}</span>}
             <span className="badge badge-grey">{CATEGORY_LABEL[item.category]}</span>
           </div>
-          <p className="muted unmatched-maker-resolve-note">No TMDB id on this item — find it to browse images and export a PSD.</p>
+          <p className="muted unmatched-maker-resolve-note">No TMDB id on this item — find it to browse images, or export a blank PSD below.</p>
           {candidates === null ? (
             <button type="button" className="btn-toolbar" onClick={() => void handleResolve()} disabled={loading}>
               {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
@@ -247,6 +247,15 @@ function UnmatchedAssetCard({ item, psdConfig, posterAvailability, posterAvailab
           )}
         </div>
       </div>
+      {/* No TMDB match yet: still expose the export buttons (blank/existing PSD) without resolving. */}
+      <TmdbItemCard
+        item={buildResult(item, 0, item.poster_url, item.imdb_id, item.tvdb_id)}
+        psdConfig={psdConfig}
+        posterAvailability={posterAvailability}
+        posterAvailabilityChecked={posterAvailabilityChecked}
+        hidePoster
+        hideTitle
+      />
     </div>
   )
 }

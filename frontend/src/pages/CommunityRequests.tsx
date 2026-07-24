@@ -628,7 +628,8 @@ export default function CommunityRequests() {
             </div>
           </div>
           {visibleRequests.map((req) => {
-            const showMakerTools = isMaker && isConnected && req.tmdb_id != null
+            // No tmdb_id is fine — the card still offers a blank/existing PSD export.
+            const showMakerTools = isMaker && isConnected
             const isActive = req.status === 'pending' || req.status === 'in_progress'
             // Soft cross-sync signal: a matching list item was completed elsewhere.
             const listCompleted = isActive && !!req.list_completed_at

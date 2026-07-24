@@ -616,7 +616,8 @@
 }
 
 /* Pin the Browse / Hide-images control (or the no-match export group) to the card bottom. */
-.request-maker-tools-panel .tmdb-gallery-toggle {
+.request-maker-tools-panel .tmdb-gallery-toggle,
+.request-maker-tools-panel .tmdb-psd-export-group--standalone {
   margin-top: auto;
 }
 

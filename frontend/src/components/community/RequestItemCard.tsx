@@ -184,11 +184,11 @@ export default function RequestItemCard({
         </div>
 
         <div className="request-maker-actions-group">
-          {showMakerTools && tmdbId != null && (
+          {showMakerTools && (
             <div className="request-maker-tools-panel">
               <TmdbItemCard
                 item={{
-                  tmdb_id: tmdbId,
+                  tmdb_id: tmdbId ?? 0,
                   media_type: tmdbMediaType,
                   title,
                   year: year ? String(year) : '',

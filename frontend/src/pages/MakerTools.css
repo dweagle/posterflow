@@ -1697,6 +1697,14 @@
   margin-left: auto;
 }
 
+/* Standalone variant on the card body when there's no TMDB match (no image gallery to sit in). */
+.tmdb-psd-export-group--standalone {
+  margin-left: 0;
+  margin-top: 0.35rem;
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+
 /* Export style picker (CL2K / MM2K) — defaults to the request's style, overridable per export */
 .tmdb-psd-style-toggle {
   display: inline-flex;

@@ -631,7 +631,8 @@ export default function ListsView() {
           )}
 
           {visibleItems.map((item) => {
-            const showMakerTools = isMaker && isConnected && item.tmdb_id != null
+            // No tmdb_id is fine — the card still offers a blank/existing PSD export.
+            const showMakerTools = isMaker && isConnected
             const as_ = actionStates.get(item.id)
             const actionLoading = as_ === 'loading'
             const uploadState = uploadStates.get(item.id)
