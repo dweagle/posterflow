@@ -935,7 +935,9 @@
   align-items: stretch;
   justify-content: flex-start;
   align-self: flex-start;
-  gap: 0.35rem;
+  /* Roomier gap so the stacked buttons have a bit more breathing room between them.
+     Uniform (not space-between) so cards with only a few buttons don't over-spread. */
+  gap: 0.6rem;
   min-width: 80px;
 }
 
@@ -967,6 +969,11 @@
   color: #64b5f6;
 }
 
+/* Discord button sits in the full-width actions column — center its content like the others. */
+.request-discord-link {
+  justify-content: center;
+}
+
 .request-discord-link:hover {
   border-color: #7289da;
   color: #7289da;
@@ -980,6 +987,7 @@
 .request-maker-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   padding: 0.15rem 0.4rem;
   border: 1px solid rgba(100, 181, 246, 0.4);
@@ -1004,6 +1012,7 @@
 .request-upload-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   padding: 0.15rem 0.4rem;
   border: 1px solid rgba(76, 175, 80, 0.5);
@@ -1036,12 +1045,10 @@
 }
 
 /* Claim / Complete / Reject action buttons */
+/* Flatten so Claim/Complete/Reject/Remove become direct children of .request-actions and
+   join the same even top-to-bottom distribution as Discord/Maker/Upload. */
 .request-status-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: 0.15rem;
-  width: 100%;
+  display: contents;
 }
 
 .request-action-btn {
