@@ -123,7 +123,7 @@
   let pendingExport = null;                        // context captured at 💾/JPG click, consumed when Photopea returns the bytes
   let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false, batchMode = 'tags';  // batch-export state ('tags' = name-tag convention, 'seasons' = season range from one poster)
   let batchSeasonText = [], batchSpecialsText = [];  // "Season N" / "Specials" text layers found by the batch scan (to pair with s-layers)
-  let lastActiveName = null;                        // active-doc watcher: last name we read layers for; a change re-reads the panel
+  let lastActiveSig = null;                         // active-doc watcher: signature (name+source+CL2K/MM2K structure) of the doc we last read; a change re-reads the panel
 
   // ---- config from this page's query string (set by openPhotopeaWithPsd) ----
   // These describe the FIRST doc this plugin launched with. In same-tab mode the tab holds several
@@ -188,6 +188,7 @@
       app.echoToOE('PFLNAME:'+app.activeDocument.name);
       var _s=(''+(d.source||''));app.echoToOE('PFLCTX:'+(_s.indexOf('pflctx:')==0?_s.slice(7):''));
       app.echoToOE('PFLDET:'+detStyle);
+      app.echoToOE('PFLSIG:'+d.name+'\\u0001'+_s+'\\u0001'+detStyle);
       app.echoToOE('PFL:'+JSON.stringify({singles:singles,seasons:seasons,sequels:sequels,seqGroup:(sq?sq.p:null)}));
     }
   }catch(e){app.echoToOE('PFLERR:'+e);}`;
@@ -844,14 +845,15 @@
   window.addEventListener('message', (e) => {
     const d = e.data;
     if (typeof d !== 'string') { onSaved(d); return; }   // ArrayBuffer = saveToOE result
-    if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; lastActiveName = d.slice(8); if (!posterDocName) posterDocName = pendingDocName; }
+    if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
     else if (d.startsWith('PFLEXP:'))   { try { pendingExport = JSON.parse(d.slice(7)); } catch (_) { pendingExport = null; } }
     else if (d.startsWith('PFLDOC:'))   { let o = null; try { o = JSON.parse(d.slice(7)); } catch (_) {} pendingExport = o ? { save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(o.name + '.psd') + '?style=' + encodeURIComponent(o.style), name: o.name, style: o.style } : null; }
     else if (d.startsWith('PFLURL:'))   { pendingExport = ctxFromUrl(d.slice(7)); }
     else if (d.startsWith('PFLCTX:'))   { const raw = d.slice(7); activeCtx = null; if (raw && raw.charAt(0) === '{') { try { activeCtx = JSON.parse(raw); } catch (_) {} } updateDocUI(); }
     else if (d.startsWith('PFLDET:'))   { detectedStyle = d.slice(7); updateDocUI(); }
+    else if (d.startsWith('PFLSIG:'))   { lastActiveSig = d.slice(7); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
     else if (d.startsWith('BATCHINIT:')){ onBatchInit(d.slice(10)); }
-    else if (d.startsWith('PFLACT:'))   { const nm = d.slice(7); if (nm !== lastActiveName && !saving && !jpgBusy && !placeBusy && !batchBusy) { lastActiveName = nm; fetchLayers(); } }
+    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
@@ -899,19 +901,26 @@
   updateDocUI();
 
   // Active-document watcher: the panel mirrors whatever doc is in front. In same-tab mode a new
-  // export becomes the active doc; switching docs by hand also counts. Poll the active name (cheap)
-  // and only re-read layers when it changes. Paused while a save/JPG/place op is mid-flight.
+  // export becomes the active doc; switching docs by hand also counts. Poll a SIGNATURE of the active
+  // doc — name + source + its CL2K/MM2K structure (LOGO group ⇒ CL2K, SEQUEL ⇒ MM2K) — and re-read
+  // layers when it changes. Keying on the name alone missed a switch between a CL2K and an MM2K
+  // export of the SAME title (same filename; style rides in ?style=, and the self-heal below even
+  // normalizes both to that same name) — so the badge stayed stale until the plugin was reopened.
+  // Paused while a save/JPG/place op is mid-flight.
   // It also SELF-HEALS tab titles: Photopea names a URL-opened doc from the %-encoded, truncated
   // URL basename (e.g. "Mr. and Mrs. (1996) …" → "Mr."), so decode the real filename from each doc's
   // Document.source and set it back — EVERY open doc, not just the active one, so background tabs
   // heal too. This runs on the plugin's OWN interval — the reliable place to do it, since
   // Photopea-side setTimeout can't loop a launch/open-script rename past the load clobber.
   // Only our own /psd-exports/ docs are touched; a dragged-in doc keeps its name.
-  const POLL = 'try{var nm="";'
+  const POLL = 'try{var sig="";'
     + 'for(var i=0;i<app.documents.length;i++){try{var dd=app.documents[i],s=""+(dd.source||""),m=s.match(/\\/psd-exports\\/([^/?#]+)/);'
     + 'if(m){var w=decodeURIComponent(m[1]).replace(/\\.psd$/i,"");if(w&&dd.name!==w)dd.name=w;}}catch(_e){}}'
-    + 'if(app.documents.length)nm=app.activeDocument.name;'
-    + 'app.echoToOE("PFLACT:"+nm);}catch(e){}';
+    + 'if(app.documents.length){var ad=app.activeDocument;'
+    + 'function hg(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hg(L.layers,re))return true;}}return false;}'
+    + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
+    + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
+    + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
   setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
