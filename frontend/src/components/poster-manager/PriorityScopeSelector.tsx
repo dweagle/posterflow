@@ -18,7 +18,7 @@ type Props = {
  */
 function PriorityScopeSelector({ value, onChange }: Props) {
   return (
-    <div className="priority-scope-toggle">
+    <div className="priority-scope-toggle pf-subtabs">
       {SCOPES.map((scope) => (
         <button
           key={scope.value}

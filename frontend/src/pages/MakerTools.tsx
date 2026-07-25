@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Check, CircleHelp, Clapperboard, Clapperboard as MovieIcon, FolderOpen, Info, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { BookOpen, Check, CircleHelp, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -579,9 +579,7 @@ function MakerTools() {
 
         {result && (
           <div className="maker-results">
-            <p className="maker-range">Range: {result.range_start} → {result.range_end}</p>
-
-            <div className="maker-result-tabs" role="tablist" aria-label="Monitor result tabs">
+            <div className="pf-subtabs" role="tablist" aria-label="Monitor result tabs">
               {sortedLibraryResults.map((libraryResult) => {
                 const tabKey = `lib-${libraryResult.library_name}-${libraryResult.library_type}`
                 return (
@@ -602,7 +600,7 @@ function MakerTools() {
                   className={activeResultTab === 'discovery' ? 'active' : ''}
                   onClick={() => setResultTab('discovery')}
                 >
-                  <Sparkles size={15} /> New Releases
+                  <Sparkles size={13} /> New Releases
                 </button>
               )}
             </div>
@@ -682,12 +680,12 @@ function MakerTools() {
                   <div className="stat-card"><span>{discoveryTotals.total}</span><small>Total Found</small></div>
                 </div>
 
-                <div className="maker-subtabs">
+                <div className="maker-subtabs pf-subtabs">
                   <button type="button" className={discoveryTab === 'series' ? 'active' : ''} onClick={() => setDiscoveryTab('series')}>
-                    <Tv size={15} /> Series
+                    <Tv size={13} /> Series
                   </button>
                   <button type="button" className={discoveryTab === 'movies' ? 'active' : ''} onClick={() => setDiscoveryTab('movies')}>
-                    <Clapperboard size={15} /> Movies
+                    <Clapperboard size={13} /> Movies
                   </button>
                 </div>
 
@@ -766,25 +764,26 @@ function MakerTools() {
           <Toolbar
             title="TMDB Search/PSD Export"
             description="Search TMDB for movies, TV shows, and collections. Browse posters, logos, and backdrops, then export directly to PSD."
+            titleControl={
+              <button
+                type="button"
+                className={`btn-toolbar ${tmdbHelpExpanded ? 'btn-primary' : ''}`}
+                onClick={() => setTmdbHelpExpanded((v) => !v)}
+                aria-expanded={tmdbHelpExpanded}
+              >
+                <BookOpen size={14} />
+                How to Export PSDs
+              </button>
+            }
           >
             <button className="btn-toolbar" type="button" onClick={openPsdConfigModal}>
               <SlidersHorizontal size={16} /> Configure
             </button>
           </Toolbar>
-          <div className="tmdb-search-panel">
-            <div className="tmdb-search-help">
-              <button
-                type="button"
-                className="tmdb-search-help-toggle"
-                onClick={() => setTmdbHelpExpanded((v) => !v)}
-                aria-expanded={tmdbHelpExpanded}
-              >
-                <Info size={14} />
-                <span>How to search &amp; export PSDs</span>
-                <span className={`tmdb-help-chevron${tmdbHelpExpanded ? ' expanded' : ''}`}>›</span>
-              </button>
-              {tmdbHelpExpanded && (
-                <div className="tmdb-search-help-body">
+
+          {/* Pops open under the toolbar; the toggle sits by the toolbar title (like Plex Upload). */}
+          {tmdbHelpExpanded && (
+            <div className="tmdb-search-help-body">
                   <p>Search TMDB for movies, TV shows, and collections to look up IDs and metadata.</p>
                   <ul>
                     <li><strong>By title</strong> — <code>The Office</code></li>
@@ -816,7 +815,8 @@ function MakerTools() {
                   </ul>
                 </div>
               )}
-            </div>
+
+          <div className="tmdb-search-panel">
             <div className="tmdb-search-bar">
               <Search size={18} className="tmdb-search-icon" />
               <input

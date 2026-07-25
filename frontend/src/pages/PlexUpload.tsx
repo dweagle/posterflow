@@ -1487,7 +1487,7 @@ function PlexUpload() {
       )}
 
       {/* Same switch row as the Unmatched and Drive Priority tabs. */}
-      <div className="plex-upload-scope-toggle">
+      <div className="plex-upload-scope-toggle pf-subtabs">
         <button
           type="button"
           className={activeTab === 'webhook' ? 'active' : ''}

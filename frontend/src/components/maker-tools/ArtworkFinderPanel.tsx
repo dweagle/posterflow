@@ -72,10 +72,10 @@ export default function ArtworkFinderPanel() {
         )}
       </Toolbar>
 
-      <div className="tmdb-filter-bar" style={{ marginTop: 12 }}>
-        <button type="button" className={`tmdb-filter-btn${mode === 'search' ? ' active' : ''}`} onClick={() => setMode('search')}>Find &amp; Add</button>
-        <button type="button" className={`tmdb-filter-btn${mode === 'batch' ? ' active' : ''}`} onClick={() => setMode('batch')}>Batch Pull</button>
-        <button type="button" className={`tmdb-filter-btn${mode === 'drive' ? ' active' : ''}`} onClick={() => setMode('drive')}>My Drive</button>
+      <div className="pf-subtabs">
+        <button type="button" className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>Find &amp; Add</button>
+        <button type="button" className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch Pull</button>
+        <button type="button" className={mode === 'drive' ? 'active' : ''} onClick={() => setMode('drive')}>My Drive</button>
       </div>
 
       {mode === 'drive' ? (

@@ -60,31 +60,14 @@
   border-bottom: 1px solid #2a2f3c;
 }
 
+/* Appearance comes from the shared subtab style in globals.css; keep only the
+   compact coverage-tab layout (fixed width + smaller text). */
 .poster-coverage-card .coverage-scope-btn {
   flex: none;
   width: 6.25rem;
-  text-align: center;
-  background: transparent;
-  border: 1px solid #3a4150;
-  color: #9aa4b2;
   font-size: 0.74rem;
   padding: 0.3rem 0.4rem;
-  border-radius: 4px;
-  cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.poster-coverage-card .coverage-scope-btn:hover {
-  color: #e5e7eb;
-  border-color: #64b5f6;
-}
-
-.poster-coverage-card .coverage-scope-btn.active {
-  background: #64b5f6;
-  border-color: #64b5f6;
-  color: #1e1e1e;
-  font-weight: 600;
 }
 
 .poster-coverage-card .coverage-empty {

@@ -28,7 +28,7 @@ type Props = {
  */
 function UnmatchedTypeSelector({ value, onChange, settingsActive, onShowSettings }: Props) {
   return (
-    <div className="artwork-type-selector">
+    <div className="artwork-type-selector pf-subtabs">
       {UNMATCHED_SCOPES.map((scope) => (
         <button
           key={scope}

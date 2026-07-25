@@ -551,7 +551,7 @@ function Dashboard() {
 
       {coverageAvailable && (
         <div className="poster-coverage-card">
-          <div className="coverage-tabs" role="tablist" aria-label="Coverage type">
+          <div className="coverage-tabs pf-subtabs" role="tablist" aria-label="Coverage type">
             {COVERAGE_SCOPES.map(s => (
               <button
                 key={s.key}

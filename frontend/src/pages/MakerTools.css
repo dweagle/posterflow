@@ -24,6 +24,14 @@
   gap: 0.55rem;
 }
 
+/* The shared .toolbar carries margin-bottom: 1rem for normal block flow. Inside this flex
+   panel that margin stacks with the 0.55rem row gap (1.55rem total), so trim it to 0.45rem —
+   the toolbar → first row (subtabs, search, etc.) then lands at the standard 1rem used by the
+   Poster Manager / Plex Upload toolbars. */
+.maker-tools-panel .toolbar {
+  margin-bottom: 0.45rem;
+}
+
 .maker-tools-tabs {
   display: flex;
   gap: 0.5rem;
@@ -44,6 +52,27 @@
 .maker-tools-page .toolbar .btn-toolbar.btn-primary {
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
+}
+
+/* Unmatched: the Posters/Artwork subtabs and the artwork scope picker share one row,
+   with the picker sitting just to the right of the subtabs. */
+.unmatched-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* .maker-subtabs carries a 0.25rem top margin for its discovery-tab use (below the stat
+   cards). Here the row already sits the standard 1rem below the toolbar, so drop that extra
+   margin — the subtabs then line up with the Artwork tab's mode tabs and the Poster Manager
+   scope toggles, all at 1rem. */
+.unmatched-scope-row .maker-subtabs {
+  margin-top: 0;
+}
+
+.unmatched-scope-row .artwork-scope-control {
+  margin-left: 0;
 }
 
 .artwork-scope-control {
@@ -389,8 +418,10 @@
   padding-bottom: 0.75rem;
 }
 
-.maker-result-tabs button,
-.maker-subtabs button {
+/* Category filter tabs (All | Movies) + Monitor library result tabs — plain filter
+   look. (The Posters/Artwork & Series/Movies .maker-subtabs use the shared subtab
+   style in globals.css instead.) */
+.maker-result-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 0.34rem;
@@ -403,6 +434,11 @@
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
+}
+
+.maker-result-tabs button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f3f4f6;
 }
 
 .maker-result-tabs button.active {
@@ -432,18 +468,6 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.25rem;
-}
-
-.maker-subtabs button.active {
-  background: rgba(91, 137, 196, 0.16);
-  border-color: rgba(91, 137, 196, 0.35);
-  color: #f3f4f6;
-}
-
-.maker-result-tabs button:hover,
-.maker-subtabs button:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #f3f4f6;
 }
 
 .maker-language-group {
@@ -689,54 +713,16 @@
   gap: 1rem;
 }
 
-.tmdb-search-help {
-  background: #1e1e1e;
-  border: 1px solid #333;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.tmdb-search-help-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 0.82rem;
-  padding: 0.65rem 1rem;
-  cursor: pointer;
-  text-align: left;
-  transition: color 0.15s;
-}
-
-.tmdb-search-help-toggle:hover {
-  color: #bbb;
-}
-
-.tmdb-search-help-toggle span:first-of-type {
-  flex: 1;
-}
-
-.tmdb-help-chevron {
-  font-size: 1rem;
-  line-height: 1;
-  display: inline-block;
-  transform: rotate(90deg);
-  transition: transform 0.2s;
-}
-
-.tmdb-help-chevron.expanded {
-  transform: rotate(270deg);
-}
-
+/* Standalone help panel that pops open under the TMDB Search toolbar (its toggle lives on the
+   toolbar, like Plex Upload's Setup Walkthrough). Styled as its own card. */
 .tmdb-search-help-body {
-  padding: 0 1rem 0.85rem;
+  padding: 0.85rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  border-top: 1px solid #2a2a2a;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
 }
 
 .tmdb-search-help-body p {
@@ -780,7 +766,15 @@
   background: #1e1e1e;
   border: 1px solid #424242;
   border-radius: 8px;
-  padding: 0.6rem 0.85rem;
+  padding: 0.35rem 0.85rem;
+}
+
+/* The inline Search button defaults to a full 185px-wide toolbar button (0.5rem padding),
+   which stretched the bar taller than a normal input row. Size it to its label and trim the
+   height so the bar reads as a standard single-line search field. */
+.tmdb-search-bar .btn-toolbar {
+  min-width: 0;
+  padding: 0.45rem 1.2rem;
 }
 
 .tmdb-search-icon {
@@ -2142,6 +2136,36 @@
 
 .maker-result-tabs button.active .unmatched-maker-tab-count {
   background: rgba(91, 137, 196, 0.4);
+}
+
+/* Category filter tabs + search share one row, with the search bar kept short. */
+.unmatched-maker-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+
+.unmatched-maker-controls .maker-result-tabs {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* Shorten the search bar only inside the shared controls row. The Artwork tab's
+   standalone search bar keeps its default full-width block layout. */
+.unmatched-maker-controls .unmatched-maker-search {
+  margin-top: 0;
+  flex: 0 1 300px;
+  min-width: 200px;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+}
+
+/* Shrink the search bar to the filter-tab / subtab button height. */
+.unmatched-maker-controls .unmatched-maker-search .tmdb-search-input {
+  font-size: 0.85rem;
 }
 
 .unmatched-maker-search {

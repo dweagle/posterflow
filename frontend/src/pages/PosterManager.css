@@ -1378,21 +1378,14 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .unmatched-type-row .artwork-type-selector {
   margin: 0;
 }
+/* Appearance comes from the shared subtab style in globals.css; keep only the
+   uniform per-group width so the asset-type switches read as one set. */
 .artwork-type-selector button,
 .priority-scope-toggle button,
 .plex-upload-scope-toggle button {
   padding: 0.4rem 1rem;
-  /* Uniform width so the asset-type switches read as one set. */
   min-width: 120px;
   text-align: center;
-  background: #2a2a2a;
-  color: #ccc;
-  border: 1px solid #424242;
-  border-radius: 4px;
-  transition: all 0.2s;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
 }
 
 /* Detection Settings sits at the end of the row: its own button, sized to its label
@@ -1404,20 +1397,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.4rem;
 }
-.artwork-type-selector button:hover,
-.priority-scope-toggle button:hover,
-.plex-upload-scope-toggle button:hover {
-  background: #333;
-  border-color: #555;
-  color: #fff;
-}
-.artwork-type-selector button.active,
-.priority-scope-toggle button.active,
-.plex-upload-scope-toggle button.active {
-  background: #f59e0b;
-  border-color: #f59e0b;
-  color: #1a1a1a;
-}
+/* :hover and .active states for these toggles come from the shared subtab style
+   in globals.css (dark-pill hover, solid bright-blue active). */
 
 /* Poster Drives | Artwork Drives switcher — its own row under the Drive Priority
    toolbar, matching the Unmatched asset-type row above (button styling is shared). */

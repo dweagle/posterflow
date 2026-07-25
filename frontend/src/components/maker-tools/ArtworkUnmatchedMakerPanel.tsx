@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, HardDrive, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
+import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
 import {
   getApiErrorMessage,
   getArtworkUnmatchedStats,
@@ -13,7 +13,7 @@ import {
 } from '../../api/client'
 import { useToast } from '../Toast'
 import ArtworkFinderCard from './ArtworkFinderCard'
-import { useArtworkScopes } from './useArtworkScopes'
+import { type AssetScope } from './useArtworkScopes'
 
 type Category = 'movie' | 'series' | 'collection'
 
@@ -205,10 +205,9 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   )
 }
 
-export default function ArtworkUnmatchedMakerPanel() {
+export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: AssetScope | null }) {
   const navigate = useNavigate()
   const { showToast } = useToast()
-  const { scopes, selectedValue, selected, onSelectScope, scopesLoaded } = useArtworkScopes()
 
   const PAGE_SIZE = 50   // cards rendered at a time; more stream in as the list scrolls
   const [stats, setStats] = useState<ArtworkUnmatchedStats | null>(null)
@@ -280,23 +279,6 @@ export default function ArtworkUnmatchedMakerPanel() {
 
   return (
     <>
-      {/* Scope picker — adds land in this IDarr artwork scope */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0.35rem 0 0.75rem' }}>
-        {scopes.length > 0 ? (
-          <div className="artwork-scope-control" style={{ marginLeft: 0 }}>
-            <HardDrive size={15} />
-            <span className="artwork-scope-label">Artwork scope:</span>
-            <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
-              {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </div>
-        ) : scopesLoaded ? (
-          <span style={{ fontSize: '0.82rem', color: '#ffb74d' }}>
-            No artwork scope configured — enable "Assets Drive" on an IDarr sync target to add artwork.
-          </span>
-        ) : null}
-      </div>
-
       {items.length === 0 ? (
         <div className="unmatched-maker-empty">
           <AlertCircle size={44} />

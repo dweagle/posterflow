@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
+import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, HardDrive, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
 import {
   checkTmdbPosterAvailability,
   PosterAvailability,
@@ -13,6 +13,7 @@ import TmdbItemCard, { PsdConfig } from './TmdbItemCard'
 import { useToast } from '../Toast'
 import Toolbar from '../Toolbar'
 import ArtworkUnmatchedMakerPanel from './ArtworkUnmatchedMakerPanel'
+import { useArtworkScopes } from './useArtworkScopes'
 
 type Category = 'movie' | 'series' | 'season' | 'collection'
 type FilterTab = 'all' | Category
@@ -275,6 +276,8 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
     setScope(next)
     localStorage.setItem('posterflow.makerTools.unmatchedScope', next)
   }
+  // Artwork scope picker lives beside the subtabs; the selection is handed to the panel below.
+  const { scopes, selectedValue, selected, onSelectScope, scopesLoaded } = useArtworkScopes()
   const [filter, setFilter] = useState<FilterTab>('all')
   const [query, setQuery] = useState('')
   const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
@@ -345,18 +348,35 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
         </button>
       </Toolbar>
 
-      {/* Posters | Artwork sub-tabs */}
-      <div className="maker-subtabs" role="tablist" aria-label="Unmatched scope">
-        <button type="button" role="tab" aria-selected={scope === 'posters'} className={scope === 'posters' ? 'active' : ''} onClick={() => selectScope('posters')}>
-          Posters
-        </button>
-        <button type="button" role="tab" aria-selected={scope === 'artwork'} className={scope === 'artwork' ? 'active' : ''} onClick={() => selectScope('artwork')}>
-          Artwork
-        </button>
+      {/* Posters | Artwork sub-tabs, with the artwork scope picker pushed to the right. */}
+      <div className="unmatched-scope-row">
+        <div className="maker-subtabs pf-subtabs" role="tablist" aria-label="Unmatched scope">
+          <button type="button" role="tab" aria-selected={scope === 'posters'} className={scope === 'posters' ? 'active' : ''} onClick={() => selectScope('posters')}>
+            Posters
+          </button>
+          <button type="button" role="tab" aria-selected={scope === 'artwork'} className={scope === 'artwork' ? 'active' : ''} onClick={() => selectScope('artwork')}>
+            Artwork
+          </button>
+        </div>
+        {scope === 'artwork' && (
+          scopes.length > 0 ? (
+            <div className="artwork-scope-control">
+              <HardDrive size={15} />
+              <span className="artwork-scope-label">Artwork scope:</span>
+              <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
+                {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+          ) : scopesLoaded ? (
+            <span style={{ fontSize: '0.82rem', color: '#ffb74d' }}>
+              No artwork scope configured — enable "Assets Drive" on an IDarr sync target to add artwork.
+            </span>
+          ) : null
+        )}
       </div>
 
       {scope === 'artwork' ? (
-        <ArtworkUnmatchedMakerPanel />
+        <ArtworkUnmatchedMakerPanel selected={selected} />
       ) : !unmatchedStats || !unmatchedStats.last_run ? (
         <div className="unmatched-maker-empty">
           <AlertCircle size={44} />
@@ -374,36 +394,38 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
         </div>
       ) : (
         <>
-          <div className="maker-result-tabs" role="tablist" aria-label="Unmatched category tabs">
-            {filterTabs.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={filter === t}
-                className={filter === t ? 'active' : ''}
-                onClick={() => setFilter(t)}
-              >
-                {TAB_LABEL[t]}
-                <span className="unmatched-maker-tab-count">{counts[t]}</span>
-              </button>
-            ))}
-          </div>
+          <div className="unmatched-maker-controls">
+            <div className="maker-result-tabs" role="tablist" aria-label="Unmatched category tabs">
+              {filterTabs.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === t}
+                  className={filter === t ? 'active' : ''}
+                  onClick={() => setFilter(t)}
+                >
+                  {TAB_LABEL[t]}
+                  <span className="unmatched-maker-tab-count">{counts[t]}</span>
+                </button>
+              ))}
+            </div>
 
-          <div className="tmdb-search-bar unmatched-maker-search">
-            <Search size={18} className="tmdb-search-icon" />
-            <input
-              type="text"
-              className="tmdb-search-input"
-              placeholder="Filter unmatched items by title…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query && (
-              <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
-                <X size={15} />
-              </button>
-            )}
+            <div className="tmdb-search-bar unmatched-maker-search">
+              <Search size={16} className="tmdb-search-icon" />
+              <input
+                type="text"
+                className="tmdb-search-input"
+                placeholder="Filter by title…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
           </div>
 
           <p className="muted unmatched-maker-count">
