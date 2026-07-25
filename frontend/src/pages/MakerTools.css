@@ -1347,6 +1347,85 @@
   align-items: center;
 }
 
+/* Image-source switcher (TMDB | TVDB) — a joined segmented control left of the content tabs,
+   separated by a rule so it doesn't read as another Posters/Backdrops/Logos tab. */
+.tmdb-gallery-sources {
+  display: inline-flex;
+  /* Stretch to the row so the source buttons end up exactly as tall as the tabs beside them. */
+  align-self: stretch;
+  align-items: stretch;
+  flex-shrink: 0;
+  padding-right: 0.55rem;
+  border-right: 1px solid #3a3a3a;
+}
+
+/* Icon-only — the PNGs are the brand wordmarks, so a text label would just repeat them. */
+.tmdb-gallery-source {
+  background: #1f1f1f;
+  border: 1px solid #3a3a3a;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Each source wears its own brand colour, so the pair never reads as more content tabs. */
+.tmdb-gallery-source--tmdb {
+  --gallery-source-color: #01b4e4;
+  --gallery-source-tint: rgba(1, 180, 228, 0.16);
+}
+
+.tmdb-gallery-source--tvdb {
+  --gallery-source-color: #6cd591;
+  --gallery-source-tint: rgba(108, 213, 145, 0.16);
+}
+
+/* Same 6px corners as the content tabs, but joined into one segmented control. */
+.tmdb-gallery-source:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.tmdb-gallery-source:last-child {
+  border-radius: 0 6px 6px 0;
+  margin-left: -1px;  /* collapse the shared edge into a single line */
+}
+
+.tmdb-gallery-source:hover:not(:disabled):not(.active) {
+  border-color: var(--gallery-source-color);
+}
+
+.tmdb-gallery-source.active {
+  background: var(--gallery-source-tint);
+  border-color: var(--gallery-source-color);
+  position: relative;  /* lift the highlighted edge above its neighbour */
+  z-index: 1;
+}
+
+.tmdb-gallery-source:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* The source PNGs are 400x132, so size by height and let the width follow — both logos then get
+   the same layout box (their own transparent side padding centres each wordmark). */
+.tmdb-gallery-source-icon {
+  height: 15px;
+  width: auto;
+  object-fit: contain;
+  filter: grayscale(0.6);
+  opacity: 0.75;
+  transition: filter 0.15s, opacity 0.15s;
+}
+
+/* Full-colour logo once the source is selected (or hovered). */
+.tmdb-gallery-source:hover:not(:disabled) .tmdb-gallery-source-icon,
+.tmdb-gallery-source.active .tmdb-gallery-source-icon {
+  filter: none;
+  opacity: 1;
+}
+
 .tmdb-gallery-lang-wrapper {
   display: inline-flex;
   align-items: center;

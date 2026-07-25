@@ -101,6 +101,7 @@ function MakerTools() {
   const [psdImageExportFolderMm2k, setPsdImageExportFolderMm2k] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
   const [psdSameTab, setPsdSameTab] = useState(false)
+  const [tvdbEnabled, setTvdbEnabled] = useState(false)   // gallery's TheTVDB source tab
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
@@ -183,6 +184,7 @@ function MakerTools() {
       setPsdImageExportFolderMm2k(cfg.imageExportFolderMm2k)
       setPsdOpenPhotopea(cfg.openPhotopea)
       setPsdSameTab(cfg.sameTab)
+      setTvdbEnabled(cfg.tvdbEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -347,7 +349,8 @@ function MakerTools() {
     imageExportFolderMm2k: psdImageExportFolderMm2k,
     openPhotopea: psdOpenPhotopea,
     sameTab: psdSameTab,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab])
+    tvdbEnabled,
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, tvdbEnabled])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))

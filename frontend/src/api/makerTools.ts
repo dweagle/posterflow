@@ -197,6 +197,32 @@ export const getSeasonImages = async (tmdb_id: number, season_number: number, la
   return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
 
+/** The image sources the gallery can browse. TMDB is always present; TVDB needs a configured key. */
+export type ImageSource = 'tmdb' | 'tvdb'
+
+/**
+ * Same response shape as the TMDB gallery, so both sources render through one code path.
+ * TV items carry a tvdb_id from TMDB's external_ids; movies never do, so the server resolves
+ * those from the imdb_id instead. Returns empty lists when the title has no TVDB entry.
+ */
+export const getTvdbImages = async (
+  item: { media_type: string; tvdb_id?: number | null; imdb_id?: string | null },
+  language: string = 'en+textless',
+): Promise<TmdbImagesResponse> => {
+  const params = new URLSearchParams({ media_type: item.media_type, language })
+  if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
+  if (item.imdb_id) params.set('imdb_id', item.imdb_id)
+  return getData<TmdbImagesResponse>(`/api/maker-tools/tvdb/images?${params.toString()}`)
+}
+
+export const getTvdbSeasonImages = async (tvdb_id: number, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
+  return getData<TmdbImagesResponse>(`/api/maker-tools/tvdb/season-images?tvdb_id=${tvdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
+}
+
+export const getTvdbImageProxyUrl = (url: string): string => {
+  return `/api/maker-tools/tvdb/image-proxy?url=${encodeURIComponent(url)}`
+}
+
 /** Origin country/countries (ISO 3166-1 alpha-2, preference-ordered) of a movie/TV item. */
 export const getTmdbOriginCountry = async (tmdb_id: number, media_type: string): Promise<string[]> => {
   const data = await getData<{ countries: string[] }>(

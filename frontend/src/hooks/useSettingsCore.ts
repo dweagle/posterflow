@@ -66,6 +66,8 @@ export const useSettingsCore = ({
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [uploadingServiceAccount, setUploadingServiceAccount] = useState(false)
   const [tmdbApiKey, setTmdbApiKey] = useState('')
+  const [tvdbApiKey, setTvdbApiKey] = useState('')
+  const [tvdbPin, setTvdbPin] = useState('')
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
@@ -84,6 +86,9 @@ export const useSettingsCore = ({
       const tmdbKey = (settings.tmdb_api_key || '').trim()
       // tmdb_api_key is sensitive so it comes back masked if set; treat masked as configured
       setTmdbApiKey(tmdbKey === '***masked***' ? '***masked***' : tmdbKey)
+      // Also sensitive, so the same masked-means-configured treatment applies.
+      setTvdbApiKey((settings.tvdb_api_key || '').trim())
+      setTvdbPin((settings.tvdb_pin || '').trim())
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
@@ -200,6 +205,30 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSaveTvdbApiKey = async (): Promise<boolean> => {
+    const valueToSave = tvdbApiKey.trim()
+    if (!valueToSave || valueToSave === '***masked***') {
+      return false
+    }
+    try {
+      setSaving(true)
+      const payload: Record<string, string> = { tvdb_api_key: valueToSave }
+      // The PIN is only used by subscriber keys. A masked value means "leave the saved one
+      // alone"; anything else (including blank, to clear it) is written through.
+      const pin = tvdbPin.trim()
+      if (pin !== '***masked***') payload.tvdb_pin = pin
+      await saveBulkSettings(payload)
+      showToast('TheTVDB API key saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving TheTVDB API key:', error)
+      showToast('Failed to save TheTVDB API key', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSavePsdExportFolder = async (): Promise<boolean> => {
     try {
       setSaving(true)
@@ -277,6 +306,11 @@ export const useSettingsCore = ({
     tmdbApiKey,
     setTmdbApiKey,
     handleSaveTmdbApiKey,
+    tvdbApiKey,
+    setTvdbApiKey,
+    tvdbPin,
+    setTvdbPin,
+    handleSaveTvdbApiKey,
     psdExportFolder,
     setPsdExportFolder,
     handleSavePsdExportFolder,

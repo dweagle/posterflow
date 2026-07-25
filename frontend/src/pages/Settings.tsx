@@ -272,6 +272,26 @@ function Settings() {
   const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
   const [showFeatureWebhooks, setShowFeatureWebhooks] = useState<Record<string, boolean>>({})
   const [showTmdbKey, setShowTmdbKey] = useState(false)
+  const [showTvdbKey, setShowTvdbKey] = useState(false)
+
+  const handleToggleTvdbKeyVisibility = async () => {
+    const willShow = !showTvdbKey
+    if (willShow && tvdbApiKey === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'tvdb_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved TheTVDB API key available to reveal', 'error')
+          return
+        }
+        setTvdbApiKey(revealedValue)
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal TheTVDB API key'), 'error')
+        return
+      }
+    }
+    setShowTvdbKey((prev) => !prev)
+  }
 
   const handleToggleTmdbKeyVisibility = async () => {
     const willShow = !showTmdbKey
@@ -464,6 +484,11 @@ function Settings() {
     tmdbApiKey,
     setTmdbApiKey,
     handleSaveTmdbApiKey,
+    tvdbApiKey,
+    setTvdbApiKey,
+    tvdbPin,
+    setTvdbPin,
+    handleSaveTvdbApiKey,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -853,6 +878,51 @@ function Settings() {
               </div>
             </div>
             <SourceAttribution source="tmdb" />
+            <div className="setting-item api-key-setting">
+              <div className="setting-info">
+                <label>TheTVDB API Key</label>
+                <p className="setting-description">
+                  Optional. Adds TheTVDB as a second source in the Maker Tools image browser,
+                  alongside TMDB. Create a v4 key at{' '}
+                  <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                    thetvdb.com
+                  </a>. Leave the PIN blank unless yours is a subscriber-supported key.
+                </p>
+              </div>
+              <div className="settings-input-row api-key-control">
+                <div className="input-with-toggle">
+                  <input
+                    type={showTvdbKey ? 'text' : 'password'}
+                    value={tvdbApiKey === MASKED_VALUE ? '' : tvdbApiKey}
+                    onChange={(e) => setTvdbApiKey(e.target.value)}
+                    placeholder={tvdbApiKey === MASKED_VALUE ? '••••••••••••••••' : 'Enter your TheTVDB API key'}
+                  />
+                  <button
+                    className="toggle-visibility"
+                    type="button"
+                    onClick={handleToggleTvdbKeyVisibility}
+                    title={showTvdbKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showTvdbKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  style={{ maxWidth: 130 }}
+                  value={tvdbPin === MASKED_VALUE ? '' : tvdbPin}
+                  onChange={(e) => setTvdbPin(e.target.value)}
+                  placeholder={tvdbPin === MASKED_VALUE ? '••••• PIN' : 'PIN (optional)'}
+                />
+                <button
+                  className="btn-primary btn-inline-save"
+                  onClick={handleSaveTvdbApiKey}
+                  disabled={saving}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+            <SourceAttribution source="tvdb" />
           </div>
 
           <div className="settings-section">

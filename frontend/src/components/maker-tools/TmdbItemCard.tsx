@@ -32,6 +32,9 @@ import {
   uploadPsdToExportFolder,
   getSeasonImages,
   getTmdbImages,
+  type ImageSource,
+  getTvdbImages,
+  getTvdbSeasonImages,
   getArtworkTaggedDownloadUrl, // canonical download names
   getTmdbOriginCountry,
   getTvDetails,
@@ -224,6 +227,9 @@ const TMDB_IMAGE_LANGUAGES = [
   { value: 'vi', label: 'Vietnamese' },
 ]
 
+// Season image caches are per source — the same season number has different artwork on each.
+const seasonKey = (source: ImageSource, seasonNumber: number) => `${source}:s${seasonNumber}`
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -239,13 +245,16 @@ export type PsdConfig = {
   imageExportFolderMm2k: string
   openPhotopea: boolean        // shared toggle across both styles
   sameTab: boolean             // reuse one Photopea tab (separate docs) instead of a new tab each export
+  // Not PSD-related, but this is the settings-derived config every card already receives:
+  // gates the gallery's TheTVDB source tab on a configured API key.
+  tvdbEnabled: boolean
 }
 
 /** Empty config used before settings load (shared by every consumer). */
 export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
-  openPhotopea: false, sameTab: false,
+  openPhotopea: false, sameTab: false, tvdbEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -259,6 +268,8 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     imageExportFolderMm2k: (s.psd_image_export_folder_mm2k || '').trim(),
     openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
     sameTab: (s.psd_photopea_same_tab || '').trim().toLowerCase() === 'true',
+    // tvdb_api_key is sensitive, so it comes back masked when set — presence is all we need.
+    tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
   }
 }
 
@@ -288,10 +299,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // still let the user export a blank/existing PSD, named by title + year.
   const hasTmdb = (item.tmdb_id ?? 0) > 0
 
-  // Gallery state
+  // Gallery state. Images are cached per source, so TMDB stays the default load and TheTVDB is
+  // only ever called once the user actually clicks its tab — after that, switching is instant.
   const [galleryOpen, setGalleryOpen] = useState(false)
-  const [galleryImages, setGalleryImages] = useState<TmdbImagesResponse | null>(null)
-  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [imageSource, setImageSource] = useState<ImageSource>('tmdb')
+  const [imagesBySource, setImagesBySource] = useState<Partial<Record<ImageSource, TmdbImagesResponse>>>({})
+  const [loadingSource, setLoadingSource] = useState<ImageSource | null>(null)
+  const galleryImages = imagesBySource[imageSource] ?? null
+  const galleryLoading = loadingSource === imageSource
   const [activeGalleryTab, setActiveGalleryTab] = useState<'posters' | 'backdrops' | 'logos' | 'season-posters'>('posters')
   const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
   const [galleryPreview, setGalleryPreview] = useState<TmdbImage | null>(null)
@@ -450,18 +465,49 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
   const fetchSeasonImages = useCallback(async (seasonNumber: number) => {
     setSelectedSeason(seasonNumber)
-    const sk = `s${seasonNumber}`
+    const sk = seasonKey(imageSource, seasonNumber)
     if (seasonImages[sk]) return
     setSeasonImagesLoading((prev) => ({ ...prev, [sk]: true }))
     try {
-      const data = await getSeasonImages(item.tmdb_id, seasonNumber, galleryLanguage)
+      const data = imageSource === 'tmdb'
+        ? await getSeasonImages(item.tmdb_id, seasonNumber, galleryLanguage)
+        : await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
       setSeasonImages((prev) => ({ ...prev, [sk]: data }))
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load season images'), 'error')
     } finally {
       setSeasonImagesLoading((prev) => ({ ...prev, [sk]: false }))
     }
-  }, [item.tmdb_id, galleryLanguage, seasonImages, showToast])
+  }, [item.tmdb_id, item.tvdb_id, imageSource, galleryLanguage, seasonImages, showToast])
+
+  // Fetch one source's images and cache them; already-cached sources are a no-op unless forced
+  // (a language change, which invalidates every cache). Returns whether that source now has
+  // images to show, so callers can back out instead of leaving an empty panel open.
+  const loadSource = useCallback(async (source: ImageSource, opts?: { language?: string; force?: boolean }) => {
+    const language = opts?.language ?? galleryLanguage
+    if (!opts?.force && imagesBySource[source]) return true
+    setLoadingSource(source)
+    try {
+      const data = source === 'tmdb'
+        ? await getTmdbImages(item.tmdb_id, item.media_type, language)
+        : await getTvdbImages(item, language)
+      setImagesBySource((prev) => ({ ...prev, [source]: data }))
+      // Keep the current tab when the new source has content for it, else fall to the first
+      // tab that does — so switching sources never lands on a needlessly empty grid.
+      setActiveGalleryTab((cur) => {
+        if (cur === 'season-posters') return cur
+        if (data[cur].length > 0) return cur
+        return data.posters.length > 0 ? 'posters' : data.backdrops.length > 0 ? 'backdrops' : 'logos'
+      })
+      return true
+    } catch (error) {
+      const label = source === 'tmdb' ? 'TMDB' : 'TheTVDB'
+      showToast(getApiErrorMessage(error, `Failed to load ${label} images`), 'error')
+      return false
+    } finally {
+      setLoadingSource((cur) => (cur === source ? null : cur))
+    }
+  }, [galleryLanguage, imagesBySource, item, showToast])
 
   const toggleGallery = useCallback(async () => {
     if (galleryOpen) {
@@ -470,37 +516,31 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     }
     setGalleryOpen(true)
     if (item.media_type === 'tv') void ensureTvDetails()
-    if (galleryImages) return
-    setGalleryLoading(true)
-    try {
-      const data = await getTmdbImages(item.tmdb_id, item.media_type, galleryLanguage)
-      setGalleryImages(data)
-      const defaultTab = data.posters.length > 0 ? 'posters' : data.backdrops.length > 0 ? 'backdrops' : 'logos'
-      setActiveGalleryTab(defaultTab)
-    } catch (error) {
-      showToast(getApiErrorMessage(error, 'Failed to load images'), 'error')
-      setGalleryOpen(false)
-    } finally {
-      setGalleryLoading(false)
-    }
-  }, [galleryOpen, galleryImages, galleryLanguage, item.tmdb_id, item.media_type, ensureTvDetails, showToast])
+    // Nothing to render if the load fails, so close again rather than showing an empty panel.
+    if (!(await loadSource(imageSource))) setGalleryOpen(false)
+  }, [galleryOpen, imageSource, item.media_type, ensureTvDetails, loadSource])
+
+  const handleSourceChange = useCallback(async (source: ImageSource) => {
+    if (source === imageSource) return
+    const previous = imageSource
+    setImageSource(source)
+    setSelectedSeason(null)
+    // A failed switch would leave the panel blank — stay on the source that still has images.
+    if (!(await loadSource(source))) setImageSource(previous)
+  }, [imageSource, loadSource])
 
   const handleGalleryLanguageChange = useCallback(async (newLang: string) => {
     setGalleryLanguage(newLang)
-    setGalleryImages(null)
+    // Every cache is language-scoped; drop them all and refetch only the source in view. The
+    // other reloads the next time its tab is clicked.
+    setImagesBySource({})
     setSeasonImages({})
-    if (galleryOpen) {
-      setGalleryLoading(true)
-      try {
-        const data = await getTmdbImages(item.tmdb_id, item.media_type, newLang)
-        setGalleryImages(data)
-      } catch (error) {
-        showToast(getApiErrorMessage(error, 'Failed to reload images'), 'error')
-      } finally {
-        setGalleryLoading(false)
-      }
+    setSeasonImagesLoading({})
+    setSelectedSeason(null)
+    if (galleryOpen && !(await loadSource(imageSource, { language: newLang, force: true }))) {
+      setGalleryOpen(false)
     }
-  }, [galleryOpen, item.tmdb_id, item.media_type, showToast])
+  }, [galleryOpen, imageSource, loadSource])
 
   const togglePsdSelection = useCallback((role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
     setPsdSelection((prev) => {
@@ -915,9 +955,26 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       </div>
 
       {/* Gallery panel */}
-      {galleryOpen && galleryImages && (() => { const _panel = (
+      {galleryOpen && (galleryImages || galleryLoading) && (() => { const _panel = (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs">
+            {psdConfig.tvdbEnabled && (
+              <div className="tmdb-gallery-sources" role="group" aria-label="Image source">
+                {([['tmdb', 'TMDB', tmdbIcon], ['tvdb', 'TVDB', tvdbIcon]] as const).map(([id, label, icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${imageSource === id ? ' active' : ''}`}
+                    onClick={() => void handleSourceChange(id)}
+                    disabled={loadingSource !== null}
+                    title={`Browse ${label} images`}
+                    aria-label={`Browse ${label} images`}
+                  >
+                    <img className="tmdb-gallery-source-icon" src={icon} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
             {galleryTabs.map((t) => (
               <button
                 key={t.id}
@@ -1003,7 +1060,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             )
           })()}
 
-          {activeGalleryTab === 'season-posters'
+          {!galleryImages
+            ? <p className="tmdb-gallery-empty">Loading {imageSource === 'tmdb' ? 'TMDB' : 'TheTVDB'} images…</p>
+            : imageSource === 'tvdb' && galleryImages.posters.length === 0
+              && galleryImages.backdrops.length === 0 && galleryImages.logos.length === 0
+            // Common for movies — plenty aren't in TVDB at all, so say that rather than
+            // showing an empty tab the user has to interpret.
+            ? <p className="tmdb-gallery-empty">No TheTVDB artwork for this title.</p>
+            : activeGalleryTab === 'season-posters'
             ? (
               <div className="tmdb-season-picker">
                 {tvDetailsLoading
@@ -1019,14 +1083,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                               type="button"
                               className={`tmdb-season-chip${selectedSeason === s.season_number ? ' active' : ''}`}
                               onClick={() => void fetchSeasonImages(s.season_number)}
-                              disabled={seasonImagesLoading[`s${s.season_number}`]}
+                              disabled={seasonImagesLoading[seasonKey(imageSource, s.season_number)]}
                             >
                               {s.season_number === 0 ? 'Specials' : `S${String(s.season_number).padStart(2, '0')}`}
                             </button>
                           ))}
                         </div>
                         {selectedSeason != null && (() => {
-                          const sk = `s${selectedSeason}`
+                          const sk = seasonKey(imageSource, selectedSeason)
                           const sImgs = seasonImages[sk]
                           if (seasonImagesLoading[sk]) return <p className="tmdb-gallery-empty">Loading posters…</p>
                           if (!sImgs || sImgs.posters.length === 0) return <p className="tmdb-gallery-empty">No posters available for this season.</p>
