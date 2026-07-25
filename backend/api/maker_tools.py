@@ -37,6 +37,7 @@ from models.job import (
     update_job_state,
 )
 from models.setting import get_setting, get_setting_value, upsert_setting
+from services import tvdb
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 router = APIRouter(prefix="/api/maker-tools", tags=["maker-tools"])
@@ -1562,6 +1563,106 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
     return TmdbImagesResponse(posters=posters, backdrops=[], logos=[])
 
 
+# ---------------------------------------------------------------------------
+# TheTVDB image browser — a second source feeding the same gallery shape
+# ---------------------------------------------------------------------------
+
+def _tvdb_credentials(db: Session) -> tuple[str, str]:
+    api_key, pin = tvdb.get_tvdb_credentials(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TheTVDB API key not configured.")
+    return api_key, pin
+
+
+def _tvdb_language(language: str) -> str:
+    lang = str(language or "en+textless").strip().lower()
+    if lang not in ("all", "en+textless") and not re.fullmatch(r"[a-z]{2,3}", lang):
+        return "en+textless"
+    return lang
+
+
+def _tvdb_images_response(buckets: dict[str, list[dict]]) -> TmdbImagesResponse:
+    return TmdbImagesResponse(
+        posters=[TmdbImage(**i) for i in buckets["posters"]],
+        backdrops=[TmdbImage(**i) for i in buckets["backdrops"]],
+        logos=[TmdbImage(**i) for i in buckets["logos"]],
+    )
+
+
+@router.get("/tvdb/images", response_model=TmdbImagesResponse)
+def tvdb_images(media_type: str, tvdb_id: int = 0, imdb_id: str = "", language: str = "en+textless",
+                db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Posters, backgrounds, and logos for a title from TheTVDB.
+
+    Returns empty lists (not an error) when the title simply has no TVDB entry — collections
+    have none at all, and plenty of movies aren't in TVDB.
+    """
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    if mt == "collection":
+        return empty  # TVDB has no collection entity
+
+    api_key, pin = _tvdb_credentials(db)
+    try:
+        resolved = tvdb.resolve_tvdb_id(media_type=mt, tvdb_id=tvdb_id,
+                                        imdb_id=str(imdb_id or "").strip(), api_key=api_key, pin=pin)
+        if not resolved:
+            return empty
+        records = tvdb.fetch_artwork(tvdb_id=resolved, media_type=mt, api_key=api_key, pin=pin)
+        buckets = tvdb.group_artwork(records, tvdb.artwork_types(api_key, pin), _tvdb_language(language))
+    except tvdb.TvdbError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+    return _tvdb_images_response(buckets)
+
+
+@router.get("/tvdb/season-images", response_model=TmdbImagesResponse)
+def tvdb_season_images(tvdb_id: int, season_number: int, language: str = "en+textless",
+                       db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Poster images for one TV season from TheTVDB."""
+    api_key, pin = _tvdb_credentials(db)
+    if tvdb_id <= 0:
+        return TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    try:
+        records = tvdb.fetch_season_artwork(
+            tvdb_id=tvdb_id, season_number=season_number, api_key=api_key, pin=pin,
+        )
+        # Already scoped to one season, so the season-artwork filter must not apply here.
+        buckets = tvdb.group_artwork(records, tvdb.artwork_types(api_key, pin),
+                                     _tvdb_language(language), title_only=False)
+    except tvdb.TvdbError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+    # Season artwork is posters as far as the gallery is concerned.
+    return TmdbImagesResponse(posters=[TmdbImage(**i) for i in buckets["posters"]], backdrops=[], logos=[])
+
+
+@router.get("/tvdb/image-proxy")
+def tvdb_image_proxy(url: str):
+    """Proxy a TVDB artwork download so the browser gets a proper filename."""
+    from fastapi.responses import StreamingResponse
+
+    if not tvdb.is_tvdb_image_url(url):
+        raise HTTPException(status_code=400, detail="Invalid image URL")
+
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to download image from TheTVDB: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"TheTVDB image download failed (HTTP {resp.status_code}).")
+
+    filename = url.rstrip("/").split("/")[-1] or "artwork.jpg"
+    return StreamingResponse(
+        resp.iter_content(chunk_size=8192),
+        media_type=resp.headers.get("content-type", "image/jpeg"),
+        headers={"Content-Disposition": _content_disposition("attachment", filename)},
+    )
+
+
 # ── PSD Export ───────────────────────────────────────────────────────────────
 
 SETTING_PSD_EXPORT_FOLDER = "psd_export_folder"                   # CL2K export folder
@@ -1699,13 +1800,23 @@ class PsdExportRequest(BaseModel):
                                      # backdrop fit (scaled to height, no crop) but gets a variant name
 
 
+def _is_export_ref_valid(ref: str) -> bool:
+    """Export refs are source-qualified: a TMDB file_path ('/abc.jpg') or an absolute TVDB URL."""
+    if ref.startswith("/"):
+        return ".." not in ref
+    return tvdb.is_tvdb_image_url(ref)
+
+
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
-    """Download a full-resolution TMDB image and return raw bytes.
+    """Download a full-resolution image for the PSD export and return raw bytes.
+
+    Accepts either source's ref: a TMDB file_path is expanded against the TMDB CDN, while a
+    TVDB ref is already an absolute artwork URL.
 
     If the original is an SVG (common for TMDB logos), converts it to a
     high-quality PNG in-process using cairosvg at 2000px wide.
     """
-    url = f"https://image.tmdb.org/t/p/original{path}"
+    url = f"https://image.tmdb.org/t/p/original{path}" if path.startswith("/") else path
     # api_key is not needed for image CDN but included for consistency / future auth
     resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
@@ -2105,7 +2216,7 @@ def tmdb_psd_export(payload: PsdExportRequest, db: Session = Depends(get_db)):
 
 
 def _fetch_export_images(payload: PsdExportRequest, api_key: str) -> tuple[list[bytes], list[bytes], list[bytes]]:
-    """Download the selected poster/backdrop/logo images from TMDB.
+    """Download the selected poster/backdrop/logo images from whichever source each ref names.
 
     Returns (posters, backdrops, logos); logo entries that fail SVG conversion are dropped.
     """
@@ -2117,7 +2228,7 @@ def _fetch_export_images(payload: PsdExportRequest, api_key: str) -> tuple[list[
         raise
     except Exception as exc:
         log_error(LogTags.API, f"PSD export image fetch failed: {exc}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=502, detail=f"Failed to download image from TMDB: {exc}")
+        raise HTTPException(status_code=502, detail=f"Failed to download image: {exc}")
     return poster_bytes_list, backdrop_bytes_list, logo_bytes_list
 
 
@@ -2141,10 +2252,10 @@ def _resolve_new_export_template(db: Session, style: str = "CL2K") -> Path | Non
 
 def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
     # ── Validate image paths (a blank selection is allowed — it yields the
-    #    template/existing PSD as-is; paths must start with / and contain no traversal) ──
+    #    template/existing PSD as-is; refs are a TMDB file_path or an absolute TVDB URL) ──
     all_paths = list(payload.poster_paths) + list(payload.backdrop_paths) + list(payload.logo_paths)
     for p in all_paths:
-        if not p.startswith("/") or ".." in p:
+        if not _is_export_ref_valid(p):
             raise HTTPException(status_code=400, detail="Invalid image path.")
 
     # ── Resolve names + save destination ──

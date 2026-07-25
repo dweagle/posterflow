@@ -27,6 +27,8 @@ SENSITIVE_PLAIN_KEYS: set[str] = {
     "google_token",
     "discord_notifications_webhook_url",
     "tmdb_api_key",
+    "tvdb_api_key",
+    "tvdb_pin",
     # App password – hash and salt must never leave the backend
     "app_password_hash",
     "app_password_salt",
@@ -77,6 +79,9 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "asset_renamer_libraries",
     "asset_renamer_include",
     "tmdb_api_key",
+    # TheTVDB v4 — pin is only needed for user-supported (subscriber) keys
+    "tvdb_api_key",
+    "tvdb_pin",
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",
