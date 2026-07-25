@@ -702,6 +702,17 @@
     display: block;
   }
 
+  /* Mobile drawer is the full-width layout again — bring customization back
+     (the 1200px compact-rail rules hide it). */
+  .sidebar-customize-btn-row {
+    display: flex;
+  }
+
+  .sidebar-customize-header,
+  .sidebar-customize-list {
+    display: block;
+  }
+
   .sidebar-header .release-notes-popover {
     left: 0;
     top: calc(100% + 0.25rem);
