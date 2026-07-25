@@ -7,14 +7,19 @@ import {
   getArtworkCandidates,
   getGracenoteImageProxyUrl,
   getTmdbImageProxyUrl,
+  getTvdbImageProxyUrl,
   type ArtworkCandidate,
   type ArtworkCandidatesResponse,
   type ArtworkListType,
   type ArtworkSubtype,
+  type ImageSource,
   type TmdbSearchResult,
 } from '../../api/client'
 import { useToast } from '../Toast'
 import SquareCropModal from './SquareCropModal'
+import { useTvdbEnabled } from '../../hooks/useTvdbEnabled'
+import tmdbIcon from '../../assets/service-icons/tmdb.png'
+import tvdbIcon from '../../assets/service-icons/tvdb.png'
 
 type Props = {
   item: TmdbSearchResult
@@ -51,6 +56,7 @@ function candidatesForKey(data: ArtworkCandidatesResponse, key: ArtworkListType)
 
 function previewUrl(key: ArtworkListType, c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
+  if (c.source === 'tvdb') return c.ref   // already an absolute artwork URL
   const size = key === 'background' ? 'w780' : 'w300'
   return `https://image.tmdb.org/t/p/${size}${c.ref}`
 }
@@ -68,12 +74,15 @@ const CHECKER: CSSProperties = {
 // Full-resolution URL for the lightbox preview.
 function fullUrl(c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
+  if (c.source === 'tvdb') return c.ref
   return `https://image.tmdb.org/t/p/original${c.ref}`
 }
 
 // Same-origin URL for downloading (a proper filename / no CORS), matching the TMDB search page.
 function downloadUrl(c: ArtworkCandidate): string {
-  return c.source === 'gracenote' ? getGracenoteImageProxyUrl(c.ref) : getTmdbImageProxyUrl(c.ref)
+  if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
+  if (c.source === 'tvdb') return getTvdbImageProxyUrl(c.ref)
+  return getTmdbImageProxyUrl(c.ref)
 }
 
 type ArtworkPreview = { src: string; download: string; filename: string; isLogo: boolean; white: boolean; dims: string }
@@ -83,7 +92,12 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<ArtworkCandidatesResponse | null>(null)
+  // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB only
+  // once its tab is clicked.
+  const tvdbEnabled = useTvdbEnabled()
+  const [source, setSource] = useState<ImageSource>('tmdb')
+  const [dataBySource, setDataBySource] = useState<Partial<Record<ImageSource, ArtworkCandidatesResponse>>>({})
+  const data = dataBySource[source] ?? null
   const [makeWhite, setMakeWhite] = useState<Record<string, boolean>>({})   // logo ref -> recolor on save
   const [adding, setAdding] = useState<Record<string, boolean>>({})
   const [added, setAdded] = useState<Record<string, string>>({})            // candidate key -> written filename
@@ -121,11 +135,12 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
     })
   }, [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (which: ImageSource) => {
     setLoading(true)
     setError(null)
     try {
-      setData(await getArtworkCandidates(item))
+      const result = await getArtworkCandidates(item, undefined, undefined, which)
+      setDataBySource((prev) => ({ ...prev, [which]: result }))
     } catch (e) {
       setError(getApiErrorMessage(e, 'Failed to load artwork'))
     } finally {
@@ -136,10 +151,17 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const toggle = useCallback(() => {
     setOpen((prev) => {
       const next = !prev
-      if (next && !data && !loading) void load()
+      if (next && !data && !loading) void load(source)
       return next
     })
-  }, [data, loading, load])
+  }, [data, loading, load, source])
+
+  const handleSourceChange = useCallback((next: ImageSource) => {
+    if (next === source) return
+    setSource(next)
+    setError(null)
+    if (!dataBySource[next]) void load(next)
+  }, [source, dataBySource, load])
 
   const noScope = syncTargetIndex == null
 
@@ -317,10 +339,35 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
       {open && (
         <div className="tmdb-gallery-panel">
+          {tvdbEnabled && (
+            <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
+              <div className="tmdb-gallery-sources" role="group" aria-label="Artwork source">
+                {([['tmdb', 'TMDB', tmdbIcon], ['tvdb', 'TVDB', tvdbIcon]] as const).map(([id, label, icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${source === id ? ' active' : ''}`}
+                    onClick={() => handleSourceChange(id)}
+                    disabled={loading}
+                    title={`Browse ${label} artwork`}
+                    aria-label={`Browse ${label} artwork`}
+                  >
+                    <img className="tmdb-gallery-source-icon" src={icon} alt="" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="tmdb-error">{error}</p>}
-          {data && !data.plex_available && (
+          {loading && !data && <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>Loading {source === 'tmdb' ? 'TMDB' : 'TheTVDB'} artwork…</p>}
+          {data && source === 'tmdb' && !data.plex_available && (
             <p style={{ fontSize: '0.8rem', color: '#ffb74d', margin: '0 0 10px' }}>
               No Plex token configured — square art (Plex-only; TMDB has none) is unavailable. Add a Plex instance in Settings to enable it.
+            </p>
+          )}
+          {data && source === 'tvdb' && (
+            <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>
+              TheTVDB has no square art — switch to the TMDB tab for Plex's square art.
             </p>
           )}
           {data && SECTIONS.map(({ key, label }) => {
@@ -373,9 +420,10 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                             </div>
                             <div className="tmdb-gallery-item-meta">
                               <div className="tmdb-gallery-meta-row" style={{ gap: 6 }}>
-                                {/* Only square art comes from Plex; everything else is TMDB, so the source
-                                    badge is only worth showing for Plex. */}
+                                {/* Under the TMDB tab only square art comes from Plex, so its badge is
+                                    the one worth showing; the TVDB tab labels its own. */}
                                 {c.source === 'gracenote' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Plex</span>}
+                                {c.source === 'tvdb' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>TVDB</span>}
                                 {c.width && c.height ? <span className="tmdb-gallery-dims">{c.width}×{c.height}</span> : null}
                                 {key === 'logo' && typeof c.off_white_pct === 'number' && (
                                   <span className={`badge ${c.is_white ? 'badge-green' : 'badge-orange'}`} style={{ fontSize: '0.62rem' }} title={c.is_white ? 'Passes the white filter' : 'Off-white %'}>

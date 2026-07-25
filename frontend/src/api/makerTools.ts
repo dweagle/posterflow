@@ -236,7 +236,7 @@ export type ArtworkSubtype = 'logo' | 'background' | 'squareart'
 export type ArtworkListType = ArtworkSubtype | 'poster'
 
 export interface ArtworkCandidate {
-  source: 'tmdb' | 'gracenote'
+  source: 'tmdb' | 'gracenote' | 'tvdb'
   ref: string
   width: number | null
   height: number | null
@@ -265,6 +265,7 @@ export const getArtworkCandidates = async (
   item: ArtworkItemRef,
   types: ArtworkListType[] = ['logo', 'background', 'squareart', 'poster'],
   evaluateWhite = true,
+  source: ImageSource = 'tmdb',
 ): Promise<ArtworkCandidatesResponse> => {
   const params = new URLSearchParams({
     tmdb_id: String(item.tmdb_id),
@@ -272,6 +273,7 @@ export const getArtworkCandidates = async (
     title: item.title,
     types: types.join(','),
     evaluate_white: String(evaluateWhite),
+    source,
   })
   if (item.year) params.set('year', String(item.year))
   if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
@@ -282,7 +284,7 @@ export const getArtworkCandidates = async (
 export interface AddArtworkRequest extends ArtworkItemRef {
   sync_target_index: number
   subtype: ArtworkSubtype
-  source: 'tmdb' | 'gracenote'
+  source: 'tmdb' | 'gracenote' | 'tvdb'
   ref: string
   make_white?: boolean
   confirm_overwrite?: boolean   // set true after the user confirms overwriting an existing file
@@ -303,7 +305,7 @@ export const addArtwork = async (req: AddArtworkRequest): Promise<AddArtworkResp
 
 export interface CropArtworkRequest extends ArtworkItemRef {
   sync_target_index: number
-  source: 'tmdb' | 'gracenote'
+  source: 'tmdb' | 'gracenote' | 'tvdb'
   ref: string
   x: number       // crop rect in the SOURCE image's own pixels
   y: number

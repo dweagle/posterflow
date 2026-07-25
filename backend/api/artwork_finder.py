@@ -1,4 +1,4 @@
-"""Artwork Finder API — browse logos / backgrounds / square art (TMDB + Plex Gracenote) and
+"""Artwork Finder API — browse logos / backgrounds / square art (TMDB + Plex Gracenote, or TheTVDB) and
 add a chosen one into an IDarr artwork scope. New, self-contained router; delete the file to
 remove the endpoints.
 """
@@ -21,6 +21,7 @@ from database import get_db
 from models.job import JOB_STATUSES_ACTIVE, JOB_TYPE_ARTWORK_PULL, Job, create_job
 from models.setting import get_setting
 from services import artwork_finder as af
+from services import tvdb
 
 router = APIRouter(prefix="/api/artwork-finder", tags=["artwork-finder"])
 
@@ -28,8 +29,8 @@ router = APIRouter(prefix="/api/artwork-finder", tags=["artwork-finder"])
 # ------------------------------------------------------------------ schemas
 
 class Candidate(BaseModel):
-    source: str            # "tmdb" | "gracenote"
-    ref: str               # tmdb file_path ("/xxx.png") or absolute gracenote CDN url
+    source: str            # "tmdb" | "gracenote" | "tvdb"
+    ref: str               # tmdb file_path ("/xxx.png"), or an absolute gracenote/TVDB CDN url
     width: Optional[int] = None
     height: Optional[int] = None
     off_white_pct: Optional[float] = None   # logos only, when evaluated
@@ -60,7 +61,7 @@ class CropSquareRequest(BaseModel):
     sync_target_index: int
     title: str
     media_type: str        # movie | tv | collection
-    source: str            # tmdb | gracenote
+    source: str            # tmdb | gracenote | tvdb
     ref: str
     x: int                 # crop rect in the SOURCE image's own pixels
     y: int
@@ -79,7 +80,7 @@ class AddRequest(BaseModel):
     title: str
     media_type: str        # movie | tv | collection
     subtype: str           # logo | background | squareart
-    source: str            # tmdb | gracenote
+    source: str            # tmdb | gracenote | tvdb
     ref: str
     year: Optional[int] = None
     tmdb_id: Optional[int] = None
@@ -161,20 +162,40 @@ def get_candidates(
     types: str = "logo,background,squareart,poster",
     evaluate_white: bool = True,
     min_backdrop_width: int = 1920,
+    source: str = "tmdb",
     db: Session = Depends(get_db),
 ) -> CandidatesResponse:
-    """Browse logo / background / square-art / poster candidates for one title. Logos, backgrounds
-    and posters are from TMDB; square art is from Plex's Gracenote provider (TMDB has none)."""
-    key = _require_tmdb_key(db)
+    """Browse logo / background / square-art / poster candidates for one title, from one source.
+
+    ``source=tmdb`` (the default) lists TMDB logos/backgrounds/posters plus square art from Plex's
+    Gracenote provider. ``source=tvdb`` lists TheTVDB's instead — it's only ever called when the
+    user picks that tab, and it carries no square art."""
+    src = str(source or "tmdb").strip().lower()
+    if src not in ("tmdb", "tvdb"):
+        raise HTTPException(status_code=400, detail="source must be tmdb or tvdb")
+
     item = _make_item(title=title, media_type=media_type, year=year, tmdb_id=tmdb_id,
                       tvdb_id=tvdb_id, imdb_id=imdb_id)
     wanted = [t.strip() for t in types.split(",") if t.strip() in LISTABLE_TYPES]
 
+    key = "" if src == "tvdb" else _require_tmdb_key(db)
+    tvdb_creds: Optional[tuple[str, str]] = None
+    if src == "tvdb":
+        tvdb_key, tvdb_pin = tvdb.get_tvdb_credentials(db)
+        if not tvdb_key:
+            raise HTTPException(status_code=400,
+                                detail="TheTVDB API key not configured. Set it in Settings → General → API Keys.")
+        tvdb_creds = (tvdb_key, tvdb_pin)
+
     session = requests.Session()
     token = af.get_plex_token(db)
     plex = af.PlexMetadataProvider(token, session) if token else None
-    result = af.list_candidates(item, wanted, tmdb_api_key=key, plex=plex, session=session,
-                                min_backdrop_width=min_backdrop_width, evaluate_white=evaluate_white)
+    try:
+        result = af.list_candidates(item, wanted, tmdb_api_key=key, plex=plex, session=session,
+                                    min_backdrop_width=min_backdrop_width, evaluate_white=evaluate_white,
+                                    source=src, tvdb_creds=tvdb_creds)
+    except tvdb.TvdbError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
     return CandidatesResponse(**result)
 
 
@@ -184,8 +205,8 @@ def add_artwork(request: AddRequest, db: Session = Depends(get_db)) -> AddRespon
     selected artwork scope so IDarr can rename + upload it."""
     if request.subtype not in af.SUBTYPE_EXT:
         raise HTTPException(status_code=400, detail="subtype must be logo, background, or squareart")
-    if request.source not in ("tmdb", "gracenote"):
-        raise HTTPException(status_code=400, detail="source must be tmdb or gracenote")
+    if request.source not in ("tmdb", "gracenote", "tvdb"):
+        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, or tvdb")
 
     source_dir, is_asset_drive, label = _resolve_artwork_scope(db, request.sync_target_index)
     item = _make_item(title=request.title, media_type=request.media_type, year=request.year,
@@ -210,8 +231,8 @@ def add_artwork(request: AddRequest, db: Session = Depends(get_db)) -> AddRespon
 def crop_square(request: CropSquareRequest, db: Session = Depends(get_db)) -> AddResponse:
     """Crop a chosen image (usually a poster/background) to a square and save it as the item's
     square art — for titles where Plex has no square art."""
-    if request.source not in ("tmdb", "gracenote"):
-        raise HTTPException(status_code=400, detail="source must be tmdb or gracenote")
+    if request.source not in ("tmdb", "gracenote", "tvdb"):
+        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, or tvdb")
     if request.size <= 0:
         raise HTTPException(status_code=400, detail="crop size must be positive")
 
@@ -274,16 +295,21 @@ def tmdb_tagged_download(
     imdb_id: Optional[str] = None,
     season: Optional[int] = None,
 ):
-    """Stream a TMDB image with a canonical download filename (ids + artwork tag), so a manually
-    downloaded logo/backdrop/poster is already named the way the rest of the app expects."""
-    if not path.startswith("/"):
+    """Stream a TMDB or TheTVDB image with a canonical download filename (ids + artwork tag), so a
+    manually downloaded logo/backdrop/poster is already named the way the rest of the app expects.
+
+    ``path`` is source-qualified the same way PSD export refs are: a TMDB file_path ('/abc.jpg')
+    or an absolute TVDB artwork URL."""
+    is_tmdb = path.startswith("/")
+    if not is_tmdb and not tvdb.is_tvdb_image_url(path):
         raise HTTPException(status_code=400, detail="Invalid image path")
     item = _make_item(title=title, media_type=media_type, year=year, tmdb_id=tmdb_id,
                       tvdb_id=tvdb_id, imdb_id=imdb_id)
-    src_ext = os.path.splitext(path)[1] or ".jpg"
+    src_ext = os.path.splitext(urlparse(path).path if not is_tmdb else path)[1] or ".jpg"
     filename = af.build_download_filename(item, role, season, src_ext)
     try:
-        resp = requests.get(f"https://image.tmdb.org/t/p/original{path}", stream=True, timeout=30)
+        resp = requests.get(f"https://image.tmdb.org/t/p/original{path}" if is_tmdb else path,
+                            stream=True, timeout=30)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch image: {exc}")
     if resp.status_code != 200:

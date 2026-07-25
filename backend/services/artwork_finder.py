@@ -24,6 +24,7 @@ from PIL import Image, ImageChops, ImageFile
 
 from core.rate_limiter import tmdb_bucket
 from models.setting import get_setting
+from services import tvdb as tvdb_service
 
 Image.MAX_IMAGE_PIXELS = None  # some TMDB logos are 12000px wide
 
@@ -331,7 +332,8 @@ def _probe_size(session: requests.Session, url: str) -> Optional[tuple[int, int]
 
 
 def _resolve_url(source: str, ref: str) -> str:
-    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote refs are absolute."""
+    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote and TVDB refs are
+    already absolute."""
     if source == "tmdb":
         return f"{TMDB_IMG}{ref}"
     return ref
@@ -340,29 +342,74 @@ def _resolve_url(source: str, ref: str) -> str:
 # ------------------------------------------------------------------ candidate listing
 
 
+def tvdb_candidate_groups(item: FinderItem, api_key: str, pin: str, min_backdrop_width: int) -> dict:
+    """TheTVDB's logos / backgrounds / posters for an item, already in candidate shape.
+
+    Mirrors the TMDB pickers: logos are PNG-only (a clear logo needs transparency), backgrounds
+    are textless and wide enough, posters are textless-first."""
+    resolved = tvdb_service.resolve_tvdb_id(media_type=item.media_type, tvdb_id=item.tvdb_id,
+                                            imdb_id=item.imdb_id, api_key=api_key, pin=pin)
+    if not resolved or item.is_collection:
+        return {"logos": [], "backgrounds": [], "posters": []}
+
+    records = tvdb_service.fetch_artwork(tvdb_id=resolved, media_type="tv" if item.is_tv else "movie",
+                                         api_key=api_key, pin=pin)
+    grouped = tvdb_service.group_artwork(records, tvdb_service.artwork_types(api_key, pin), "en+textless")
+
+    def shape(entries):
+        return [{"source": "tvdb", "ref": e["file_path"], "width": e.get("width"), "height": e.get("height")}
+                for e in entries]
+
+    return {
+        "logos": shape([l for l in grouped["logos"] if str(l["file_path"]).lower().endswith(".png")]),
+        "backgrounds": shape([b for b in grouped["backdrops"]
+                              if b["language"] is None and (b.get("width") or 0) >= min_backdrop_width]),
+        "posters": shape(grouped["posters"]),
+    }
+
+
 def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     plex: Optional[PlexMetadataProvider], session: requests.Session,
                     min_backdrop_width: int = 1920, evaluate_white: bool = False,
-                    white_top_n: int = 8) -> dict:
-    """Candidates per requested type. Logos and backgrounds come from TMDB only; square art
-    comes only from Plex's Gracenote provider (TMDB has none, and Plex's logos/backdrops just
-    duplicate TMDB's, so they aren't offered).
+                    white_top_n: int = 8, source: str = "tmdb",
+                    tvdb_creds: Optional[tuple[str, str]] = None) -> dict:
+    """Candidates per requested type, from one source at a time.
+
+    ``source='tmdb'`` is the default pairing: logos/backgrounds/posters from TMDB plus square art
+    from Plex's Gracenote provider (TMDB has none, and Plex's logos/backdrops just duplicate
+    TMDB's, so they aren't offered). ``source='tvdb'`` swaps in TheTVDB and yields no square art,
+    which TVDB doesn't carry either.
 
     Returns {"logos": [...], "backgrounds": [...], "squareart": [...], "plex_available": bool}.
     Each candidate: {source, ref, width, height, off_white_pct?, is_white?}."""
     out: dict[str, Any] = {"logos": [], "backgrounds": [], "squareart": [], "posters": [],
                            "plex_available": plex is not None}
 
-    tmdb_imgs = tmdb_images(item, tmdb_api_key) if item.tmdb_id else {}
-    # Plex is consulted only for square art now.
-    want_square = "squareart" in types and plex is not None and not item.is_collection
+    use_tvdb = source == "tvdb"
+    if use_tvdb:
+        key, pin = tvdb_creds or ("", "")
+        groups = tvdb_candidate_groups(item, key, pin, min_backdrop_width)
+    else:
+        tmdb_imgs = tmdb_images(item, tmdb_api_key) if item.tmdb_id else {}
+        groups = {
+            "logos": [{"source": "tmdb", "ref": c["file_path"],
+                       "width": c.get("width"), "height": c.get("height")}
+                      for c in logo_candidates(tmdb_imgs)],
+            "backgrounds": [{"source": "tmdb", "ref": b["file_path"],
+                             "width": b.get("width"), "height": b.get("height")}
+                            for b in textless_backdrops(tmdb_imgs, min_backdrop_width)],
+            "posters": [{"source": "tmdb", "ref": p["file_path"],
+                         "width": p.get("width"), "height": p.get("height")}
+                        for p in poster_candidates(tmdb_imgs)],
+        }
+
+    # Plex is consulted only for square art, and only alongside TMDB.
+    want_square = "squareart" in types and plex is not None and not item.is_collection and not use_tvdb
     gn: dict = plex.images(item) if want_square else {}
 
-    # ---- logos (TMDB only; collections have none)
+    # ---- logos (collections have none)
     if "logo" in types and not item.is_collection:
-        logos: list[dict] = [{"source": "tmdb", "ref": c["file_path"],
-                              "width": c.get("width"), "height": c.get("height")}
-                             for c in logo_candidates(tmdb_imgs)]
+        logos: list[dict] = groups["logos"]
         if evaluate_white:
             for c in logos[:white_top_n]:
                 data = _download_bytes(session, _resolve_url(c["source"], c["ref"]))
@@ -372,19 +419,16 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     c["is_white"], c["off_white_pct"] = white, round(pct, 2)
         out["logos"] = logos
 
-    # ---- backgrounds (TMDB textless only)
+    # ---- backgrounds (textless only)
     if "background" in types:
-        out["backgrounds"] = [{"source": "tmdb", "ref": b["file_path"],
-                               "width": b.get("width"), "height": b.get("height")}
-                              for b in textless_backdrops(tmdb_imgs, min_backdrop_width)]
+        out["backgrounds"] = groups["backgrounds"]
 
-    # ---- posters (TMDB) — a source to crop into square art
+    # ---- posters — a source to crop into square art
     if "poster" in types:
-        out["posters"] = [{"source": "tmdb", "ref": p["file_path"],
-                           "width": p.get("width"), "height": p.get("height")}
-                          for p in poster_candidates(tmdb_imgs)]
+        out["posters"] = groups["posters"]
 
-    # ---- square art (Gracenote only — TMDB has none). Gracenote carries no dims, so probe them.
+    # ---- square art (Gracenote only — neither TMDB nor TVDB has any). Gracenote carries no
+    #      dims, so probe them.
     if want_square and gn.get("backgroundSquare"):
         c = {"source": "gracenote", "ref": gn["backgroundSquare"], "width": None, "height": None}
         size = _probe_size(session, _resolve_url(c["source"], c["ref"]))
