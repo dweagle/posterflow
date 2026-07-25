@@ -365,11 +365,6 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
               No Plex token configured — square art (Plex-only; TMDB has none) is unavailable. Add a Plex instance in Settings to enable it.
             </p>
           )}
-          {data && source === 'tvdb' && (
-            <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>
-              TheTVDB has no square art — switch to the TMDB tab for Plex's square art.
-            </p>
-          )}
           {data && SECTIONS.map(({ key, label }) => {
             const cands = candidatesForKey(data, key)
             const gridClass = key === 'logo' ? 'tmdb-gallery-grid--logos'
@@ -391,7 +386,11 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                   )}
                 </div>
                 {cands.length === 0
-                  ? <p style={{ fontSize: '0.78rem', color: '#777', margin: 0 }}>None found.</p>
+                  ? <p style={{ fontSize: '0.78rem', color: '#777', margin: 0 }}>
+                      {key === 'squareart' && source === 'tvdb'
+                        ? "TheTVDB has no square art — switch to the TMDB tab for Plex's square art."
+                        : 'None found.'}
+                    </p>
                   : (
                     <div className={`tmdb-gallery-grid ${gridClass}`}>
                       {cands.map((c) => {
