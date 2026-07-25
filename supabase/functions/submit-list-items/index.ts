@@ -18,6 +18,13 @@
  * season for TMDB items, by title+media_type for custom items). The DB also has
  * a partial unique index as a backstop.
  *
+ * Show/season merge: a show item covers its seasons — a series poster is never
+ * made without its season posters, so a show and its season set never coexist
+ * as two rows (same rule the requests board enforces). Season items attach to
+ * an active show row, and a show item upgrades an active season row in place
+ * (keeping its wanters — the full set covers what they need). Standalone season
+ * items (set exists, a season poster is missing) are untouched.
+ *
  * Required Supabase secrets:
  *   DISCORD_JWT_SECRET        (same secret discord-oauth signs with)
  *   SUPABASE_URL              (auto-provided)
@@ -157,6 +164,24 @@ function dedupKey(it: { tmdb_id: number | null; media_type: string; season_numbe
     : `c:${it.media_type}:${it.title.toLowerCase()}:${it.season_number ?? ''}`
 }
 
+// ── Show/season merge helpers ───────────────────────────────────────────────
+
+// Dedup keys of an item's show-level / season-set twin for the same media.
+const showTwinKey = (it: { tmdb_id: number | null; title: string }): string =>
+  it.tmdb_id != null ? `t:${it.tmdb_id}:show:` : `c:show:${it.title.toLowerCase()}:`
+const seasonTwinKey = (it: { tmdb_id: number | null; title: string }): string =>
+  it.tmdb_id != null ? `t:${it.tmdb_id}:season:` : `c:season:${it.title.toLowerCase()}:`
+
+// Drop the machine "Seasons: 1, 2, 3" first line when a season row is upgraded
+// to show-level — the whole set gets made, so the per-season detail is stale.
+function stripSeasonsLine(notes: string | null): string | null {
+  if (!notes) return null
+  const lines = notes.split('\n')
+  if (!lines[0].startsWith('Seasons: ')) return notes
+  const rest = lines.slice(1).join('\n').trim()
+  return rest || null
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -189,7 +214,7 @@ Deno.serve(async (req: Request) => {
 
   // Normalize + drop invalid, then de-duplicate within the batch itself.
   const seen = new Set<string>()
-  const normalized: NormalizedItem[] = []
+  let normalized: NormalizedItem[] = []
   for (const raw of rawItems) {
     if (typeof raw !== 'object' || raw === null) continue
     const item = normalizeItem(raw as Record<string, unknown>)
@@ -203,17 +228,23 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'No valid items to add' }, 400)
   }
 
+  // A show item covers its seasons (a series poster is never made without
+  // them), so drop any season item whose show is also in this batch.
+  const showKeys = new Set(normalized.filter((n) => n.media_type === 'show').map((n) => dedupKey(n)))
+  normalized = normalized.filter((it) => !(it.media_type === 'season' && showKeys.has(showTwinKey(it))))
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   })
 
   // One row per poster now (shared across everyone who wants it); this user is
   // attached as a "wanter". dedupKey is the in-memory media key (matches the DB
-  // unique indexes), letting us map a batch item to its existing row id.
-  type KeyedRow = { id: string; tmdb_id: number | null; media_type: string; season_number: number | null; title: string }
-  const idByKey = new Map<string, string>()
+  // unique indexes), letting us map a batch item to its existing row.
+  type KeyedRow = { id: string; tmdb_id: number | null; media_type: string; season_number: number | null; title: string; notes: string | null; status: string }
+  const ROW_COLS = 'id, tmdb_id, media_type, season_number, title, notes, status'
+  const rowByKey = new Map<string, KeyedRow>()
   const indexRows = (rows: KeyedRow[] | null) => {
-    for (const r of rows ?? []) idByKey.set(dedupKey(r), r.id)
+    for (const r of rows ?? []) rowByKey.set(dedupKey(r), r)
   }
 
   // Find existing poster rows for the batch (active + fulfilled).
@@ -221,7 +252,7 @@ Deno.serve(async (req: Request) => {
   if (tmdbIds.length) {
     const { data, error } = await supabase
       .from('poster_list_items')
-      .select('id, tmdb_id, media_type, season_number, title')
+      .select(ROW_COLS)
       .in('status', ['open', 'in_progress', 'fulfilled'])
       .in('tmdb_id', tmdbIds)
     if (error) {
@@ -234,7 +265,7 @@ Deno.serve(async (req: Request) => {
   if (customTitles.size) {
     const { data, error } = await supabase
       .from('poster_list_items')
-      .select('id, tmdb_id, media_type, season_number, title')
+      .select(ROW_COLS)
       .in('status', ['open', 'in_progress', 'fulfilled'])
       .is('tmdb_id', null)
     if (error) {
@@ -244,23 +275,56 @@ Deno.serve(async (req: Request) => {
     indexRows((data ?? []).filter((r) => customTitles.has((r.title ?? '').toLowerCase())))
   }
 
+  // Merge batch items into rows already on the board. A season item with no row
+  // of its own attaches to the show's active row (the show item covers its
+  // seasons); a show item with no row of its own upgrades the show's active
+  // season row in place, keeping its wanters — the full set covers their need.
+  const isActive = (r: KeyedRow | undefined): r is KeyedRow =>
+    r != null && (r.status === 'open' || r.status === 'in_progress')
+  for (const it of normalized) {
+    if (rowByKey.has(dedupKey(it))) continue
+    if (it.media_type === 'season') {
+      const show = rowByKey.get(showTwinKey(it))
+      if (isActive(show)) rowByKey.set(dedupKey(it), show)
+    } else if (it.media_type === 'show') {
+      const season = rowByKey.get(seasonTwinKey(it))
+      if (isActive(season)) {
+        // The media_type guard is the race backstop: if a concurrent publisher
+        // already created a show row, this is a no-op and the normal
+        // create/re-read path below takes over.
+        const { data: upgraded, error } = await supabase
+          .from('poster_list_items')
+          .update({ media_type: 'show', notes: stripSeasonsLine(season.notes) })
+          .eq('id', season.id)
+          .eq('media_type', 'season')
+          .select('id')
+        if (error) {
+          console.error('[submit-list-items] season→show upgrade failed:', error)
+        } else if (upgraded?.length) {
+          season.media_type = 'show'
+          rowByKey.set(dedupKey(it), season)
+        }
+      }
+    }
+  }
+
   // Create poster rows for items that don't exist yet. The partial unique index
   // is the race backstop: if a concurrent publisher created the same poster, the
   // insert fails and we re-read so we can still attach this user as a wanter.
-  const toCreate = normalized.filter((it) => !idByKey.has(dedupKey(it)))
+  const toCreate = normalized.filter((it) => !rowByKey.has(dedupKey(it)))
   if (toCreate.length) {
     const newRows = toCreate.map((it) => ({ ...it, status: 'open' }))
     const { data: created, error: createErr } = await supabase
       .from('poster_list_items')
       .insert(newRows)
-      .select('id, tmdb_id, media_type, season_number, title')
+      .select(ROW_COLS)
     if (createErr) {
       console.error('[submit-list-items] create failed, re-reading:', createErr)
       const retryTmdb = [...new Set(toCreate.filter((i) => i.tmdb_id != null).map((i) => i.tmdb_id as number))]
       if (retryTmdb.length) {
         const { data } = await supabase
           .from('poster_list_items')
-          .select('id, tmdb_id, media_type, season_number, title')
+          .select(ROW_COLS)
           .in('status', ['open', 'in_progress', 'fulfilled'])
           .in('tmdb_id', retryTmdb)
         indexRows(data)
@@ -273,7 +337,7 @@ Deno.serve(async (req: Request) => {
 
   // Resolve every batch item to a poster id; abuse cap on total posters wanted.
   const itemIds = [...new Set(
-    normalized.map((it) => idByKey.get(dedupKey(it))).filter((id): id is string => typeof id === 'string'),
+    normalized.map((it) => rowByKey.get(dedupKey(it))?.id).filter((id): id is string => typeof id === 'string'),
   )]
   if (itemIds.length === 0) {
     return json({ inserted: 0, skipped: normalized.length })
@@ -283,7 +347,7 @@ Deno.serve(async (req: Request) => {
   // THIS user's context rather than the row's first-creator source.
   const sourceByItemId = new Map<string, string>()
   for (const it of normalized) {
-    const id = idByKey.get(dedupKey(it))
+    const id = rowByKey.get(dedupKey(it))?.id
     if (id && !sourceByItemId.has(id)) sourceByItemId.set(id, it.source)
   }
 
