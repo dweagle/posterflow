@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { BookOpen, Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
+import IdarrQuickAddNoticeHost from './IdarrQuickAddNotice'
 import './MainLayout.css'
 
 function MainLayout() {
@@ -64,6 +65,7 @@ function MainLayout() {
         </div>
         <Outlet />
       </div>
+      <IdarrQuickAddNoticeHost />
     </div>
   )
 }

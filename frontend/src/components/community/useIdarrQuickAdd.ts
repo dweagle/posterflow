@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings, type MakerIdarrSyncTarget } from '../../api/client'
+import { notifyIdarrTargetedRun } from '../../utils/idarrTargetedRun'
 
 const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
 
@@ -83,7 +84,9 @@ export function useIdarrQuickAdd() {
 
       const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
       if (config.auto_rename_quick_add && response.uploaded_count > 0) {
-        await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
+        const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
+        // The maker is on the requests page, not IDarr — pop a notice if anything went pending.
+        void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add))
       }
     } catch {
       // Silently ignore — best-effort maker convenience

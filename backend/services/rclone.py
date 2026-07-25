@@ -727,6 +727,74 @@ scope = drive.readonly
             log_error(LogTags.RCLONE, f"Error in upload_folder: {str(e)}\n{traceback.format_exc()}")
             return {"success": False, "error": str(e)}
     
+    def upload_file(
+        self,
+        local_path: Path,
+        drive_id: str,
+        remote_path: str,
+        *,
+        drive_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Upload one local file to a Drive folder via rclone copyto.
+
+        Unlike upload_folder this never lists or checks the whole remote folder, so dropping a
+        single poster costs a couple of API calls instead of a full pass over the scope. It also
+        never deletes anything remote — stale names are left for the next full mirror sync.
+        """
+        display_name = drive_name or drive_id
+        try:
+            if not self.rclone_binary:
+                return {"success": False, "error": "rclone executable not found"}
+
+            auth_args = self._get_drive_auth_args()
+            if auth_args is None:
+                return {"success": False, "error": "Missing Google Drive credentials"}
+
+            if not local_path.is_file():
+                return {"success": False, "error": f"Local file not found: {local_path}"}
+
+            remote_root = self._build_remote_root_path(drive_id)
+            remote_relative_path = self._sanitize_remote_relative_path(remote_path)
+            if not remote_relative_path:
+                return {"success": False, "error": "Remote path is empty"}
+            remote_file = f"{remote_root}{remote_relative_path}"
+
+            upload_tps = settings.rclone_upload_tps_limit or settings.rclone_tps_limit
+            upload_pacer = settings.rclone_upload_pacer_min_sleep or settings.rclone_pacer_min_sleep
+
+            result = subprocess.run(  # nosec B603
+                [
+                    self.rclone_binary, 'copyto', str(local_path), remote_file,
+                    '--config', str(self.config_path),
+                    *auth_args,
+                    f'--tpslimit={upload_tps}',
+                    f'--drive-pacer-min-sleep={upload_pacer}',
+                    f'--drive-chunk-size={settings.rclone_upload_chunk_size}',
+                    '--drive-stop-on-upload-limit',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+
+            if result.returncode == 0:
+                log_success(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Uploaded '{remote_relative_path}' to '{display_name}'")
+                return {"success": True, "remote_path": remote_relative_path}
+
+            error_output = (result.stderr or result.stdout or "").strip()
+            log_error(
+                LogTags.RCLONE,
+                f"Single-file upload of '{remote_relative_path}' to '{display_name}' failed: {error_output}",
+            )
+            return {"success": False, "error": error_output or f"rclone exited with code {result.returncode}"}
+        except subprocess.TimeoutExpired:
+            log_error(LogTags.RCLONE, f"Single-file upload of '{local_path.name}' to '{display_name}' timed out")
+            return {"success": False, "error": "rclone upload timed out"}
+        except Exception as e:
+            import traceback
+            log_error(LogTags.RCLONE, f"Error in upload_file: {str(e)}\n{traceback.format_exc()}")
+            return {"success": False, "error": str(e)}
+
     def download_file(self, drive_id: str, remote_path: str, local_path: Path) -> bool:
         """Download a file from Google Drive"""
         try:

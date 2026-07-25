@@ -21,6 +21,7 @@ from core.config import settings as app_settings
 from core.logging import LogTags, log_debug, log_error, log_info, log_user_action, log_warning
 from database import get_db
 from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key
+from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_RECENT_TERMINAL
 from models.setting import Setting, get_setting, upsert_setting
 from util.data.normalization import normalize_titles
 
@@ -1043,6 +1044,59 @@ def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Session =
             log_error(LogTags.API, f"Failed to parse idarr_runs payload: {e}\n{traceback.format_exc()}")
 
     return {}
+
+
+@router.get("/run-result/{job_id}")
+def get_maker_idarr_run_result(job_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Per-file outcome of a targeted (quick add) run.
+
+    The maker who drops a poster into a request never sees the IDarr page, so the dropping UI
+    polls this until the job is finished and reports anything that went pending or conflicted.
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    status = str(job.status) if job else "unknown"
+    finished = status in JOB_STATUSES_RECENT_TERMINAL or job is None
+
+    outcomes: list[Any] = []
+    upload_job_id: int | None = None
+    run = (
+        db.query(IdarrRun)
+        .filter(IdarrRun.job_id == job_id)
+        .order_by(IdarrRun.id.desc())
+        .first()
+    )
+    if run and run.details_json:
+        try:
+            details_payload = json.loads(run.details_json)
+            if isinstance(details_payload, dict):
+                raw_outcomes = details_payload.get("targeted_outcomes")
+                if isinstance(raw_outcomes, list):
+                    outcomes = [row for row in raw_outcomes if isinstance(row, dict)]
+                raw_upload_job_id = details_payload.get("targeted_upload_job_id")
+                if isinstance(raw_upload_job_id, int):
+                    upload_job_id = raw_upload_job_id
+        except Exception as e:
+            log_error(LogTags.API, f"Failed to parse targeted run outcomes for job {job_id}: {e}")
+
+    error = str(job.message or "") if job and status == JOB_STATUS_FAILED else ""
+
+    # The upload runs as its own job, so the rename finishing isn't the end of the story --
+    # keep the caller polling until the upload has had its say about each file.
+    if upload_job_id is not None:
+        upload_job = db.query(Job).filter(Job.id == upload_job_id).first()
+        upload_status = str(upload_job.status) if upload_job else "unknown"
+        finished = finished and (upload_job is None or upload_status in JOB_STATUSES_RECENT_TERMINAL)
+        if upload_job is not None and upload_status == JOB_STATUS_FAILED and not error:
+            error = str(upload_job.message or "")
+
+    return {
+        "job_id": job_id,
+        "status": status,
+        "finished": finished,
+        "outcomes": outcomes,
+        "upload_job_id": upload_job_id,
+        "error": error,
+    }
 
 
 @router.get("/pending-matches/count")

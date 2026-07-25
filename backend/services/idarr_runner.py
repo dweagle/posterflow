@@ -5143,6 +5143,95 @@ class IdarrRunner:
             "duplicates_dir_for_log": duplicates_dir_for_log,
         }
 
+    @staticmethod
+    def _build_targeted_outcomes(
+        *,
+        assets: list[dict[str, Any]],
+        operation_rows: list[dict[str, Any]],
+        unmatched_assets: list[dict[str, Any]],
+        source_dir: Path,
+        selected_filenames: set[str],
+    ) -> list[dict[str, Any]]:
+        """Per-file result of a targeted (quick add) run.
+
+        The caller uploads only the `ready` rows one at a time and reports the rest back to the
+        maker — a pending or conflicted file stays local until it is resolved.
+        """
+        renamed_from: dict[str, str] = {}
+        skipped_reason: dict[str, str] = {}
+        for row in operation_rows:
+            status = str(row.get("status") or "").strip().lower()
+            from_name = Path(str(row.get("from_path") or "")).name
+            to_name = Path(str(row.get("to_path") or "")).name
+            if status == "success" and from_name and to_name:
+                renamed_from[to_name] = from_name
+            elif status == "skipped" and from_name:
+                skipped_reason[from_name] = str(row.get("reason") or "").strip() or "skipped"
+
+        pending_names = {
+            Path(str(item.get("source_path") or "")).name
+            for item in unmatched_assets
+            if str(item.get("source_path") or "").strip()
+        }
+
+        outcomes: list[dict[str, Any]] = []
+        for asset in assets:
+            file_path = asset.get("file_path")
+            if not isinstance(file_path, Path):
+                continue
+            final_name = file_path.name
+            source_name = renamed_from.get(final_name, final_name)
+            try:
+                relative_path = str(file_path.relative_to(source_dir))
+            except ValueError:
+                relative_path = final_name
+
+            if not bool(asset.get("has_id", False)) or final_name in pending_names or source_name in pending_names:
+                status = "pending"
+                reason = (
+                    str(asset.get("pending_reason") or "").strip()
+                    or str(asset.get("match_reason") or "").strip()
+                    or "no_match"
+                )
+            elif source_name in skipped_reason:
+                status = "conflict"
+                reason = skipped_reason[source_name]
+            else:
+                status = "ready"
+                reason = ""
+
+            outcomes.append(
+                {
+                    "source_filename": source_name,
+                    "final_filename": final_name,
+                    "relative_path": relative_path,
+                    "title": str(asset.get("title") or "").strip(),
+                    "year": asset.get("year") if isinstance(asset.get("year"), int) else None,
+                    "status": status,
+                    "reason": reason,
+                    "uploaded": False,
+                }
+            )
+
+        # A selected file with no asset row never made it through the scan (unsupported name,
+        # deleted mid-run); surface it rather than letting it vanish silently.
+        seen = {str(row["source_filename"]).lower() for row in outcomes}
+        seen.update(str(row["final_filename"]).lower() for row in outcomes)
+        for filename in sorted(selected_filenames - seen):
+            outcomes.append(
+                {
+                    "source_filename": filename,
+                    "final_filename": filename,
+                    "relative_path": filename,
+                    "title": "",
+                    "year": None,
+                    "status": "missing",
+                    "reason": "not_scanned",
+                    "uploaded": False,
+                }
+            )
+        return outcomes
+
     def summarize_run(
         self,
         *,
@@ -5719,6 +5808,14 @@ class IdarrRunner:
             inactive_cache_prune_stats=inactive_cache_prune_stats,
             collisions_healed=collisions_healed,
         )
+        if single_item_mode:
+            details["targeted_outcomes"] = self._build_targeted_outcomes(
+                assets=assets,
+                operation_rows=operation_rows,
+                unmatched_assets=unmatched_assets,
+                source_dir=source_dir,
+                selected_filenames=selected_source_filenames,
+            )
         log_info(LogTags.IDARR, "Summary Report:")
         for _row in summary_report:
             log_info(LogTags.IDARR, f"{_row.get('label', '')}: {_row.get('value', '')}")

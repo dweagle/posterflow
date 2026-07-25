@@ -367,6 +367,30 @@ export interface MakerIdarrUploadResponse {
   skipped: string[]
 }
 
+// Per-file result of a targeted IDarr run (quick add / community drop).
+export type MakerIdarrRunOutcomeStatus = 'uploaded' | 'ready' | 'pending' | 'conflict' | 'upload_failed' | 'missing'
+
+export interface MakerIdarrRunOutcome {
+  source_filename: string
+  final_filename: string
+  relative_path: string
+  title: string
+  year: number | null
+  status: MakerIdarrRunOutcomeStatus
+  reason: string
+  uploaded: boolean
+}
+
+export interface MakerIdarrRunResult {
+  job_id: number
+  status: string
+  finished: boolean
+  outcomes: MakerIdarrRunOutcome[]
+  // The upload runs as its own job; `finished` already waits on it.
+  upload_job_id: number | null
+  error: string
+}
+
 export const getPlexLibraryConfigs = async (): Promise<{ configs: PlexLibraryConfig[] }> => {
   return getData('/api/settings/plex-libraries')
 }
@@ -418,6 +442,10 @@ export const getMakerIdarrLastRun = async (syncTargetIndex?: number): Promise<Ma
   return getData('/api/idarr/last-run', {
     params: syncTargetIndex === undefined ? undefined : { sync_target_index: syncTargetIndex },
   })
+}
+
+export const getMakerIdarrRunResult = async (jobId: number): Promise<MakerIdarrRunResult> => {
+  return getData(`/api/idarr/run-result/${jobId}`)
 }
 
 export const getMakerIdarrPendingMatches = async (

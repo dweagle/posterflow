@@ -31,9 +31,10 @@ from models.job import (
     finalize_job_cancelled,
 )
 from core.job_cancel import JobCancelled, check_cancelled
-from models.idarr import create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
+from models.idarr import IdarrRun, create_idarr_run, prune_idarr_run_history, compact_idarr_run_details_history
 from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
+from services.sync_base import STEP_INDENT
 from services.idarr_runner import IdarrRunner
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
@@ -258,6 +259,238 @@ def _queue_idarr_sync_after_run(db: Any, config_data: dict[str, Any], triggered_
             pass
 
 
+def _resolve_targeted_upload_target(config_data: dict[str, Any]) -> dict[str, str] | None:
+    """Resolve the sync target a targeted run should upload to."""
+    sync_target_index = int(config_data.get("sync_target_index") or 0)
+    raw_targets = config_data.get("sync_targets")
+    sync_targets = [t for t in raw_targets if isinstance(t, dict)] if isinstance(raw_targets, list) else []
+    if not sync_targets or sync_target_index >= len(sync_targets):
+        return None
+
+    selected_target = sync_targets[sync_target_index]
+    personal_drive_id = str(selected_target.get("personal_drive_id") or "").strip()
+    source_dir = str(selected_target.get("source_dir") or "").strip()
+    if not personal_drive_id or not source_dir:
+        return None
+
+    return {
+        "personal_drive_id": personal_drive_id,
+        "source_dir": source_dir,
+        "label": str(selected_target.get("label") or "").strip() or personal_drive_id,
+    }
+
+
+def _queue_idarr_targeted_upload(
+    db: Any,
+    config_data: dict[str, Any],
+    run: Any,
+    ready_count: int,
+    triggered_by_job_id: int,
+) -> int | None:
+    """Queue the single-item upload as its own job so it gets its own log and progress.
+
+    Mirroring the whole scope folder to push one poster costs a full remote listing plus a check
+    pass over every file, so single-item drops copy their own files instead — in a separate job,
+    the same way the full personal sync has always been separate from the rename that triggered it.
+    """
+    from core.job_queue import job_queue
+    from models.job import JOB_TYPE_IDARR
+
+    target = _resolve_targeted_upload_target(config_data)
+    if not target:
+        log_warning(
+            LogTags.IDARR,
+            "Single-item upload: sync target is missing a personal drive ID or sync folder, skipping upload",
+            triggered_by=triggered_by_job_id,
+        )
+        return None
+
+    upload_job_id: int | None = None
+    try:
+        upload_job = Job(
+            job_type=JOB_TYPE_IDARR,
+            status="pending",
+            progress=0,
+            message=f"Queued single-item upload (after IDarr job {triggered_by_job_id})",
+        )
+        db.add(upload_job)
+        db.commit()
+        db.refresh(upload_job)
+        upload_job_id = upload_job.id
+
+        # Recorded before the job is submitted so the run-result endpoint can always tell the
+        # UI that an upload is still pending, even if the worker picks it up immediately.
+        _set_run_detail(db, run, "targeted_upload_job_id", upload_job_id)
+
+        log_info(
+            LogTags.IDARR,
+            f"Single-item upload: queued job {upload_job_id} for {ready_count} file(s) to '{target['label']}'",
+            triggered_by=triggered_by_job_id,
+            drive_id=target["personal_drive_id"],
+        )
+        job_queue.submit(
+            run_idarr_targeted_upload_job,
+            upload_job_id,
+            upload_job_id,
+            {
+                **target,
+                "idarr_run_id": int(run.id),
+                "triggered_by_job_id": triggered_by_job_id,
+            },
+        )
+        return upload_job_id
+    except Exception as exc:
+        log_error(
+            LogTags.IDARR,
+            f"Single-item upload: failed to queue upload job: {exc}\n{traceback.format_exc()}",
+            triggered_by=triggered_by_job_id,
+        )
+        try:
+            db.rollback()
+            # The row may already be recorded on the run; fail it so nothing waits on a job
+            # that will never be picked up.
+            if upload_job_id is not None:
+                mark_job_failed(db, upload_job_id, exc)
+        except Exception:  # nosec B110
+            pass
+        return None
+
+
+def _set_run_detail(db: Any, run: Any, key: str, value: Any) -> None:
+    """Write one key into an IdarrRun's details payload and commit."""
+    try:
+        details = json.loads(run.details_json) if run.details_json else {}
+    except json.JSONDecodeError:
+        details = {}
+    if not isinstance(details, dict):
+        details = {}
+    details[key] = value
+    run.details_json = json.dumps(details)
+    db.commit()
+
+
+def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> None:
+    """Upload the files a targeted (quick add) run produced, one at a time.
+
+    Deliberately unlike the full sync: pending/conflicted files are held back, and the last-sync
+    timestamp is left alone so a later full sync still sees everything it has to reconcile
+    (deletes and stale renames included).
+    """
+    db = SessionLocal()
+    handler_id = add_job_log_handler("idarr", job_id, "IDarr single-item upload")
+    success = False
+
+    try:
+        log_section_start(LogTags.IDARR, f"IDarr Single-Item Upload Started (job_id={job_id})")
+
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            log_error(LogTags.IDARR, f"Job {job_id} not found")
+            return
+
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_RUNNING,
+            progress=5,
+            message=format_start_message("IDarr single-item upload"),
+        )
+
+        personal_drive_id = str(config_data.get("personal_drive_id") or "").strip()
+        source_dir = Path(str(config_data.get("source_dir") or "").strip())
+        label = str(config_data.get("label") or "").strip() or personal_drive_id
+        triggered_by_job_id = config_data.get("triggered_by_job_id")
+
+        run = db.query(IdarrRun).filter(IdarrRun.id == int(config_data.get("idarr_run_id") or 0)).first()
+        if not run:
+            raise ValueError(f"IDarr run {config_data.get('idarr_run_id')} not found")
+
+        try:
+            details = json.loads(run.details_json) if run.details_json else {}
+        except json.JSONDecodeError:
+            details = {}
+        outcomes = [row for row in (details.get("targeted_outcomes") or []) if isinstance(row, dict)]
+        ready = [row for row in outcomes if str(row.get("status") or "") == "ready"]
+        held_back = [row for row in outcomes if str(row.get("status") or "") != "ready"]
+
+        log_info(
+            LogTags.IDARR,
+            f"Uploading {len(ready)} file(s) from '{source_dir}' to '{label}' (from IDarr job {triggered_by_job_id})",
+            drive_id=personal_drive_id,
+        )
+        for row in held_back:
+            log_warning(
+                LogTags.IDARR,
+                f"{STEP_INDENT}Held back '{row.get('source_filename')}': {row.get('status')} "
+                f"({row.get('reason') or 'no reason given'}) — stays in the sync folder until it is resolved",
+            )
+
+        uploaded = 0
+        failed = 0
+        rclone = RcloneService()
+        for index, row in enumerate(ready, start=1):
+            check_cancelled(job_id)
+            relative_path = str(row.get("relative_path") or row.get("final_filename") or "").strip()
+            local_path = source_dir / relative_path
+            update_job_state(
+                db,
+                job,
+                progress=min(95, int(5 + (index - 1) / max(len(ready), 1) * 90)),
+                message=_sanitize_message(f"Uploading {index}/{len(ready)} to {label}: {local_path.name}"),
+            )
+            log_info(LogTags.IDARR, f"{STEP_INDENT}[{index}/{len(ready)}] Uploading '{relative_path}'")
+
+            upload_result = rclone.upload_file(
+                local_path,
+                personal_drive_id,
+                relative_path,
+                drive_name=label,
+            )
+            if upload_result.get("success"):
+                row["uploaded"] = True
+                row["status"] = "uploaded"
+                uploaded += 1
+            else:
+                row["status"] = "upload_failed"
+                row["reason"] = str(upload_result.get("error") or "rclone upload failed")
+                failed += 1
+                log_error(LogTags.IDARR, f"{STEP_INDENT}Upload failed for '{relative_path}': {row['reason']}")
+
+        details["targeted_outcomes"] = outcomes
+        run.details_json = json.dumps(details)
+        db.commit()
+
+        summary = f"uploaded={uploaded}, failed={failed}, held_back={len(held_back)}"
+        if failed:
+            log_warning(LogTags.IDARR, f"Single-item upload finished with failures: {summary}")
+        else:
+            log_success(LogTags.IDARR, f"Single-item upload complete: {summary}")
+
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_COMPLETED,
+            progress=100,
+            message=format_complete_message("IDarr single-item upload", summary),
+            completed_at=datetime.now(timezone.utc),
+        )
+        # The last-sync timestamp is intentionally not touched here: stamping it would hide
+        # older local changes from the next full sync's change check.
+        success = True
+        log_section_end(LogTags.IDARR, f"IDarr Single-Item Upload Completed (job_id={job_id})")
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.IDARR, f"IDarr Single-Item Upload Stopped (job_id={job_id})")
+    except Exception as exc:
+        log_error(LogTags.IDARR, f"IDarr single-item upload failed: {exc}\n{traceback.format_exc()}")
+        mark_job_failed(db, job_id, exc)
+        log_section_end(LogTags.IDARR, f"IDarr Single-Item Upload Failed (job_id={job_id})")
+    finally:
+        remove_job_log_handler(handler_id, job_type="idarr", success=success)
+        db.close()
+
+
 def _run_idarr_personal_sync_inline(
     db: Any,
     job: Job,
@@ -409,7 +642,9 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
         else:
             log_success(LogTags.IDARR, "Native IDarr complete")
 
-        create_idarr_run(
+        targeted_run = bool(config_data.get("source_filenames"))
+
+        idarr_run = create_idarr_run(
             db,
             job_id=job_id,
             success=True,
@@ -433,6 +668,25 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
         )
         _auto_prune_cache(db, str(config_data.get("scope_token") or "").strip() or None)
         db.commit()
+
+        # A targeted run pushes its own files rather than mirroring the whole scope folder, and
+        # does it in a separate job so the upload has its own log and progress bar. Queued before
+        # this job reports completion: a caller polling the run result in between would otherwise
+        # see a finished rename with no upload pending and stop watching.
+        if targeted_run and bool(config_data.get("sync_after_run")) and not bool(config_data.get("dry_run")):
+            _targeted_outcomes = [
+                row for row in ((result.details or {}).get("targeted_outcomes") or []) if isinstance(row, dict)
+            ]
+            _ready_count = sum(1 for row in _targeted_outcomes if str(row.get("status") or "") == "ready")
+            _held_count = len(_targeted_outcomes) - _ready_count
+            if _ready_count:
+                _queue_idarr_targeted_upload(db, config_data, idarr_run, _ready_count, job_id)
+            else:
+                log_info(
+                    LogTags.IDARR,
+                    f"Single-item upload: nothing to upload — {_held_count} file(s) held back for a manual match",
+                    job_id=job_id,
+                )
 
         update_job_state(
             db,
@@ -510,10 +764,11 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
         success = True
         log_section_end(LogTags.IDARR, f"IDarr Job Completed (job_id={job_id})")
 
-        # Queue personal drive sync if requested and there is something to upload
+        # Queue personal drive sync if requested and there is something to upload. Targeted runs
+        # already uploaded their own files above, so they never queue the full mirror sync.
         _sync_after = bool(config_data.get("sync_after_run"))
         _force_sync = bool(config_data.get("force_sync_after_run"))
-        if _sync_after and not bool(config_data.get("dry_run")):
+        if _sync_after and not bool(config_data.get("dry_run")) and not targeted_run:
             _source_dir_str = str(config_data.get("source_dir") or "").strip()
             _should_sync = False
             _sync_reason = ""

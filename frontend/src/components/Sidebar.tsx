@@ -5,6 +5,7 @@ import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
+import { notifyIdarrTargetedRun } from '../utils/idarrTargetedRun'
 import ConfirmDialog from './ConfirmDialog'
 import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
@@ -199,6 +200,7 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
         try {
           const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
           showToast(`IDarr auto-rename started (Job ID: ${job.id})`, 'success')
+          void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add))
         } catch (error) {
           showToast(getApiErrorMessage(error, 'Files uploaded, but failed to start IDarr auto-rename'), 'error')
         }
