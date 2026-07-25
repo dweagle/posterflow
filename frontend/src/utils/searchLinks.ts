@@ -9,10 +9,13 @@ export function googleSearchUrl(title: string, year?: number | string | null): s
 }
 
 // ThePosterDB scopes results by a ?section= tab. Map our media types onto it; a season belongs
-// to a show, so it points at shows. Unknown types (e.g. person) fall back to an unscoped search.
+// to a show, so it points at shows. Series arrive as 'tv' from TMDB search results and as 'show'
+// from the unmatched/community APIs — both are here so either caller gets a scoped search.
+// Unknown types (e.g. person) fall back to an unscoped search.
 const TPDB_SECTION: Record<string, string> = {
   movie: 'movies',
   tv: 'shows',
+  show: 'shows',
   season: 'shows',
   collection: 'collections',
 }
