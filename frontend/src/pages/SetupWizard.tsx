@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
+import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -23,8 +23,11 @@ interface FormData {
   google_refresh_token: string
   google_service_account_file: string
   tmdb_api_key: string
+  tvdb_api_key: string
+  tvdb_pin: string
   poster_destination: string
   gdrive_storage_path: string
+  artwork_gdrive_storage_path: string
   plex_instances: ServerInstance[]
   sonarr_instances: ServerInstance[]
   radarr_instances: ServerInstance[]
@@ -49,6 +52,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showClientSecret, setShowClientSecret] = useState(false)
   const [showRefreshToken, setShowRefreshToken] = useState(false)
   const [showTmdbKey, setShowTmdbKey] = useState(false)
+  const [showTvdbKey, setShowTvdbKey] = useState(false)
 
   const MASKED_VALUE = '***masked***'
 
@@ -109,6 +113,25 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     setShowTmdbKey((prev) => !prev)
   }
 
+  const handleToggleTvdbKeyVisibility = async () => {
+    const willShow = !showTvdbKey
+    if (willShow && formData.tvdb_api_key === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'tvdb_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved TheTVDB API key available to reveal', 'error')
+          return
+        }
+        setFormData((prev) => ({ ...prev, tvdb_api_key: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal TheTVDB API key'), 'error')
+        return
+      }
+    }
+    setShowTvdbKey((prev) => !prev)
+  }
+
   const [showPlexTokens, setShowPlexTokens] = useState<Record<number, boolean>>({})
   const [showSonarrKeys, setShowSonarrKeys] = useState<Record<number, boolean>>({})
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
@@ -123,8 +146,11 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     google_refresh_token: '',
     google_service_account_file: '',
     tmdb_api_key: '',
+    tvdb_api_key: '',
+    tvdb_pin: '',
     poster_destination: '',
     gdrive_storage_path: '',
+    artwork_gdrive_storage_path: '',
     plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
     sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
     radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
@@ -141,8 +167,11 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           google_refresh_token: settings.google_token || settings.google_refresh_token || '',
           google_service_account_file: settings.google_service_account_file || '',
           tmdb_api_key: settings.tmdb_api_key || '',
+          tvdb_api_key: settings.tvdb_api_key || '',
+          tvdb_pin: settings.tvdb_pin || '',
           poster_destination: settings.poster_destination || '',
           gdrive_storage_path: settings.gdrive_storage_path || '',
+          artwork_gdrive_storage_path: settings.artwork_gdrive_storage_path || '',
           plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
           sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
           radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
@@ -416,6 +445,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     setIsSaving(true)
     try {
       await saveGdriveStoragePath(formData.gdrive_storage_path.trim())
+      await saveArtworkGdriveStoragePath(formData.artwork_gdrive_storage_path.trim())
       setStep(3)
     } catch (error) {
       console.error('Error saving settings:', error)
@@ -480,9 +510,20 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleSaveStep4 = async () => {
     setIsSaving(true)
     try {
-      const keyToSave = formData.tmdb_api_key.trim() === MASKED_VALUE ? '' : formData.tmdb_api_key.trim()
-      if (keyToSave) {
-        await saveSettings({ tmdb_api_key: keyToSave })
+      // Masked values mean "unchanged" — only newly typed keys are written through.
+      const payload: Record<string, string> = {}
+      const tmdbKey = formData.tmdb_api_key.trim()
+      if (tmdbKey && tmdbKey !== MASKED_VALUE) payload.tmdb_api_key = tmdbKey
+      const tvdbKey = formData.tvdb_api_key.trim()
+      const savingTvdbKey = !!tvdbKey && tvdbKey !== MASKED_VALUE
+      if (savingTvdbKey) payload.tvdb_api_key = tvdbKey
+      // The PIN only applies to subscriber keys. Write a typed one through; a blank one clears any
+      // stale PIN, but only when its key is being saved too.
+      const tvdbPin = formData.tvdb_pin.trim()
+      if (tvdbPin && tvdbPin !== MASKED_VALUE) payload.tvdb_pin = tvdbPin
+      else if (!tvdbPin && savingTvdbKey) payload.tvdb_pin = ''
+      if (Object.keys(payload).length > 0) {
+        await saveSettings(payload)
       }
       setStep(5)
     } catch (error) {
@@ -567,7 +608,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className={`step ${step === 1 ? 'active' : ''}`}><span className="step-number">1</span><span className="step-label">Google Drive</span></div>
                 <div className={`step ${step === 2 ? 'active' : ''}`}><span className="step-number">2</span><span className="step-label">Storage</span></div>
                 <div className={`step ${step === 3 ? 'active' : ''}`}><span className="step-number">3</span><span className="step-label">Media Servers</span></div>
-                <div className={`step ${step === 4 ? 'active' : ''}`}><span className="step-number">4</span><span className="step-label">TMDB</span></div>
+                <div className={`step ${step === 4 ? 'active' : ''}`}><span className="step-number">4</span><span className="step-label">API Keys</span></div>
                 <div className={`step ${step === 5 ? 'active' : ''}`}><span className="step-number">5</span><span className="step-label">Destination</span></div>
                 <div className={`step ${step === 6 ? 'active' : ''}`}><span className="step-number">6</span><span className="step-label">Finish</span></div>
               </div>
@@ -873,7 +914,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             <div className="form-section">
               <h2>Storage Configuration</h2>
               <p className="section-description">
-                Set where synced poster files will be stored on disk.
+                Set where synced poster and artwork files will be stored on disk.
               </p>
 
               <div className="form-group">
@@ -887,6 +928,19 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 />
                 <small>Leave blank to use default: <code>/config/posters/gdrive</code> — stored inside your <code>/config</code> volume.</small>
                 <small>Set a custom absolute path only if you mount a separate volume for posters (e.g. <code>/posters</code>).</small>
+              </div>
+
+              <div className="form-group">
+                <label>GDrive Artwork Storage Path</label>
+                <input
+                  type="text"
+                  name="artwork_gdrive_storage_path"
+                  value={formData.artwork_gdrive_storage_path}
+                  onChange={(e) => updateGoogleCreds('artwork_gdrive_storage_path', e.target.value)}
+                  placeholder="ex. /artwork/gdrive"
+                />
+                <small>Logos, backgrounds, and square art sync here, separately from posters.</small>
+                <small>Leave blank to use default: <code>/config/artwork/gdrive</code> — stored inside your <code>/config</code> volume.</small>
               </div>
 
               <div className="button-group">
@@ -1260,9 +1314,10 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
           {step === 4 && (
             <div className="form-section">
-              <h2>TMDB API Key</h2>
+              <h2>API Keys</h2>
               <p className="section-description">
-                Enter your TMDB API key. This is used for metadata lookups in IDarr, Unmatched Assets, and other features.
+                Metadata sources used for lookups and artwork browsing. Both are optional and can be
+                added or updated later in Settings.
               </p>
 
               <div className="form-group">
@@ -1285,8 +1340,45 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     {showTmdbKey ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                <small>Used for metadata lookups in IDarr, Unmatched Assets, and other features.</small>
                 <small>Get your API key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">themoviedb.org/settings/api</a></small>
-                <small>This step is optional — you can add or update your TMDB key later in Settings.</small>
+              </div>
+
+              <div className="form-group">
+                <label>TheTVDB API Key</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showTvdbKey ? 'text' : 'password'}
+                    name="tvdb_api_key"
+                    value={formData.tvdb_api_key}
+                    onChange={(e) => updateGoogleCreds('tvdb_api_key', e.target.value)}
+                    placeholder="Enter your TheTVDB API key"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={handleToggleTvdbKeyVisibility}
+                    title={showTvdbKey ? 'Hide' : 'Show'}
+                  >
+                    {showTvdbKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <small>Adds TheTVDB as a second source in the Maker Tools image browser, alongside TMDB.</small>
+                <small>Create a v4 key at <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer">thetvdb.com/api-information</a></small>
+              </div>
+
+              <div className="form-group">
+                <label>TheTVDB PIN</label>
+                <input
+                  type="password"
+                  name="tvdb_pin"
+                  value={formData.tvdb_pin}
+                  onChange={(e) => updateGoogleCreds('tvdb_pin', e.target.value)}
+                  placeholder="Optional — subscriber keys only"
+                  autoComplete="off"
+                />
+                <small>Leave blank unless yours is a user-supported (subscriber) key.</small>
               </div>
 
               <div className="button-group">

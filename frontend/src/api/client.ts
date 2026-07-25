@@ -114,6 +114,8 @@ export {
   saveSettings,
   getGdriveStoragePath,
   saveGdriveStoragePath,
+  getArtworkGdriveStoragePath,
+  saveArtworkGdriveStoragePath,
   testDiscordNotification,
   testPlex,
   testRadarr,

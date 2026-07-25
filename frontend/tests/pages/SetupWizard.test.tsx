@@ -23,6 +23,7 @@ vi.mock('../../src/api/client', () => ({
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
   saveSettings: (...args: unknown[]) => mockSaveSettings(...args),
   saveGdriveStoragePath: vi.fn().mockResolvedValue({ path: '/config/posters/gdrive' }),
+  saveArtworkGdriveStoragePath: vi.fn().mockResolvedValue({ path: '/config/artwork/gdrive' }),
   testPlex: vi.fn(),
   testSonarr: vi.fn(),
   testRadarr: vi.fn(),
@@ -148,7 +149,7 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
-    await screen.findByRole('heading', { name: 'TMDB API Key' })
+    await screen.findByRole('heading', { name: 'API Keys' })
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
@@ -229,7 +230,7 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
-    await screen.findByRole('heading', { name: 'TMDB API Key' })
+    await screen.findByRole('heading', { name: 'API Keys' })
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Destination Folder Setup')
