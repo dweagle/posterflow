@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
 import { useToast } from '../components/Toast'
@@ -16,6 +16,15 @@ interface ServerInstance {
   url: string
   api_key: string
 }
+
+// Order-independent fingerprint of an instance's library selection, used to skip re-saving a
+// config the wizard only loaded and never changed.
+const librarySignature = (libraries: PlexLibrary[]): string =>
+  JSON.stringify(
+    [...libraries]
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((lib) => [lib.key, lib.title, lib.type, lib.enabled])
+  )
 
 interface FormData {
   google_client_id: string
@@ -53,6 +62,10 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showRefreshToken, setShowRefreshToken] = useState(false)
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
+
+  // What's already stored per instance name, so step 3 only writes configs the user actually
+  // touched — re-running the wizard used to re-save every loaded config unchanged.
+  const savedLibrarySignatures = useRef<Record<string, string>>({})
 
   const MASKED_VALUE = '***masked***'
 
@@ -210,6 +223,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 )
                 if (instanceIndex !== -1) {
                   librariesMap[instanceIndex] = config.libraries
+                  savedLibrarySignatures.current[config.instance_name] = librarySignature(config.libraries)
                 }
               })
             }
@@ -486,14 +500,47 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         const index = parseInt(indexStr)
         const instance = formData.plex_instances[index]
         if (instance?.url && libraries.length > 0) {
+          const signature = librarySignature(libraries)
+          if (savedLibrarySignatures.current[instance.name] === signature) continue   // unchanged
           try {
             const config: PlexLibraryConfig = {
               instance_name: instance.name,
               libraries,
             }
             await savePlexLibraryConfig(config)
+            savedLibrarySignatures.current[instance.name] = signature
           } catch (e) {
             console.error(`Failed to save library config for ${instance.name}:`, e)
+          }
+        }
+      }
+
+      // Mirror Settings → Media Servers: any reachable instance still without a library config
+      // gets an all-enabled one. Without it, an instance added during the wizard (never tested,
+      // so never fetched above) ends up with no config, which downstream reads as "no libraries
+      // selected". Configs are re-read first because the save above migrates them on a rename.
+      let freshConfigs: PlexLibraryConfig[] | null = null
+      try {
+        freshConfigs = (await getPlexLibraryConfigs()).configs
+      } catch (e) {
+        console.error('Skipping Plex library auto-configuration; could not load current configs:', e)
+      }
+      if (freshConfigs !== null) {
+        for (let index = 0; index < formData.plex_instances.length; index++) {
+          const instance = formData.plex_instances[index]
+          // A masked key can't be used to call Plex — but a masked key means a saved instance,
+          // which already has its config.
+          if (!instance.url || !instance.api_key || instance.api_key === MASKED_VALUE) continue
+          if (freshConfigs.some(c => c.instance_name === instance.name)) continue
+          try {
+            const data = await getPlexLibraries(instance.url, instance.api_key)
+            const allEnabled = data.libraries.map(lib => ({ ...lib, enabled: true }))
+            if (allEnabled.length === 0) continue
+            await savePlexLibraryConfig({ instance_name: instance.name, libraries: allEnabled })
+            savedLibrarySignatures.current[instance.name] = librarySignature(allEnabled)
+            setPlexLibraries(prev => ({ ...prev, [index]: allEnabled }))
+          } catch (e) {
+            console.error(`Failed to auto-configure libraries for ${instance.name}:`, e)
           }
         }
       }
