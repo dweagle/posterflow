@@ -415,17 +415,16 @@ function UnmatchedItemsModal({
     const isLoading = loadingKeys.has(key)
     const candidates = candidatesMap[key]
     const isNoKey = noKeyItems.has(key)
+    const cleanedTitle = item.year
+      ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+      : item.title
 
     return (
       <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
         <div className="unmatched-item">
           <div className="unmatched-item-top">
           <div className="unmatched-item-meta">
-            <span className="item-title">
-              {item.year
-                ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
-                : item.title}
-            </span>
+            <span className="item-title">{cleanedTitle}</span>
             {item.year && <span className="item-year">({item.year})</span>}
             {item.category && (
               <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
@@ -449,9 +448,6 @@ function UnmatchedItemsModal({
             className="maker-nav-btn"
             title="Search in Maker Tools (opens in a new tab)"
             onClick={() => {
-              const cleanedTitle = item.year
-                ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
-                : item.title
               const query = item.year ? `${cleanedTitle} ${item.year}` : cleanedTitle
               const filter = mediaTypeToTmdbFilter(item.type)
               const params = new URLSearchParams({ tmdbSearch: query })
@@ -465,6 +461,26 @@ function UnmatchedItemsModal({
             <Search size={13} />
             <span>Maker</span>
           </button>
+          <a
+            href={googleSearchUrl(cleanedTitle, item.year)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="maker-nav-btn"
+            title="Google search (opens in a new tab)"
+          >
+            <Search size={13} />
+            <span>Google</span>
+          </a>
+          <a
+            href={tpdbSearchUrl(cleanedTitle, item.type)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="maker-nav-btn"
+            title="Search ThePosterDB (opens in a new tab)"
+          >
+            <ExternalLink size={13} />
+            <span>TPDB</span>
+          </a>
           {!hideCommunity && (
             <button
               type="button"
@@ -554,26 +570,6 @@ function UnmatchedItemsModal({
                         >
                           <ExternalLink size={13} />
                           <span>Open</span>
-                        </a>
-                        <a
-                          href={googleSearchUrl(candidate.title, candidate.year)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tmdb-icon-btn"
-                          title="Google search"
-                        >
-                          <Search size={13} />
-                          <span>Google</span>
-                        </a>
-                        <a
-                          href={tpdbSearchUrl(candidate.title, candidate.media_type)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tmdb-icon-btn"
-                          title="Search ThePosterDB"
-                        >
-                          <ExternalLink size={13} />
-                          <span>TPDB</span>
                         </a>
                         <button
                           type="button"

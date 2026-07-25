@@ -2612,7 +2612,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   background: #1a2d45;
 }
 
-/* --- Maker Tools navigation button (opens item search in Maker Tools page) --- */
+/* --- Maker Tools navigation button (opens item search in Maker Tools page) ---
+   Also worn by the Google/TPDB item-bar links — new-tab actions share this look. */
 .maker-nav-btn {
   display: inline-flex;
   align-items: center;
@@ -2628,6 +2629,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.2s;
+  text-decoration: none;
 }
 
 .maker-nav-btn:hover {

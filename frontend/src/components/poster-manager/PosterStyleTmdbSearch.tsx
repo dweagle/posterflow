@@ -176,6 +176,26 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               <Search size={13} />
               <span>Maker</span>
             </button>
+            <a
+              href={googleSearchUrl(cleanTitle, item.year)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="maker-nav-btn"
+              title="Google search (opens in a new tab)"
+            >
+              <Search size={13} />
+              <span>Google</span>
+            </a>
+            <a
+              href={tpdbSearchUrl(cleanTitle, item.type)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="maker-nav-btn"
+              title="Search ThePosterDB (opens in a new tab)"
+            >
+              <ExternalLink size={13} />
+              <span>TPDB</span>
+            </a>
             <button
               type="button"
               className="community-request-btn"
@@ -266,26 +286,6 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                       >
                         <ExternalLink size={13} />
                         <span>Open</span>
-                      </a>
-                      <a
-                        href={googleSearchUrl(candidate.title, candidate.year)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="tmdb-icon-btn"
-                        title="Google search"
-                      >
-                        <Search size={13} />
-                        <span>Google</span>
-                      </a>
-                      <a
-                        href={tpdbSearchUrl(candidate.title, candidate.media_type)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="tmdb-icon-btn"
-                        title="Search ThePosterDB"
-                      >
-                        <ExternalLink size={13} />
-                        <span>TPDB</span>
                       </a>
                       <button
                         type="button"
