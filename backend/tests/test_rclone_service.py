@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 import io
 import pytest
@@ -520,3 +521,149 @@ class TestOAuthWrittenToConfig:
         auth_args = svc._get_drive_auth_args()
         assert "--drive-service-account-file" in auth_args
 
+
+
+# ---------------------------------------------------------------------------
+# upload_files — one rclone process for a named set of files
+# ---------------------------------------------------------------------------
+
+class TestUploadFiles:
+    """Single-item drops name their files instead of mirroring the folder, so the transfer
+    never lists a scope holding thousands of others -- and one process covers the whole drop,
+    because paying startup/auth per file cost ~2s each and gave up parallel transfers."""
+
+    def _service(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(settings, "config_dir", tmp_path)
+        monkeypatch.setattr("services.rclone.shutil.which", lambda _: "/usr/bin/rclone")
+        svc = RcloneService()
+        monkeypatch.setattr(svc, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
+        return svc
+
+    def _popen(self, monkeypatch, output_lines, returncode=0):
+        captured = {}
+
+        def _fake_popen(args, **_kwargs):
+            captured["args"] = args
+            captured["list_file"] = Path(args[args.index("--files-from-raw") + 1]).read_text()
+            proc = SimpleNamespace(
+                stdout=io.StringIO("\n".join(output_lines) + "\n"),
+                returncode=returncode,
+            )
+            proc.wait = lambda: None
+            return proc
+
+        monkeypatch.setattr("services.rclone.subprocess.Popen", _fake_popen)
+        return captured
+
+    def _root(self, tmp_path, *names):
+        root = tmp_path / "scope"
+        for name in names:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x")
+        return root
+
+    def test_one_process_covers_every_file(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "a.jpg", "b.jpg", "logos/c.png")
+        captured = self._popen(monkeypatch, [
+            "INFO  : a.jpg: Copied (new)",
+            "INFO  : b.jpg: Copied (new)",
+            "INFO  : logos/c.png: Copied (new)",
+        ])
+
+        result = svc.upload_files(root, "drive-123", ["a.jpg", "b.jpg", "logos/c.png"])
+
+        assert result["success"] is True
+        assert result["uploaded"] == ["a.jpg", "b.jpg", "logos/c.png"]
+        assert captured["list_file"].splitlines() == ["a.jpg", "b.jpg", "logos/c.png"]
+
+    def test_never_traverses_the_destination(self, monkeypatch, tmp_path):
+        """--no-traverse is what keeps this cheap against a scope with thousands of files."""
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "a.jpg")
+        captured = self._popen(monkeypatch, ["INFO  : a.jpg: Copied (new)"])
+
+        svc.upload_files(root, "drive-123", ["a.jpg"])
+
+        assert "--no-traverse" in captured["args"]
+        assert "--fast-list" not in captured["args"]
+        assert captured["args"][1] == "copy", "copy, never sync -- this must not delete anything remote"
+
+    def test_uses_files_from_raw_so_hash_names_are_not_comments(self, monkeypatch, tmp_path):
+        """--files-from would treat '#1 (2020).jpg' as a comment and silently skip it."""
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "#1 (2020).jpg")
+        captured = self._popen(monkeypatch, ["INFO  : #1 (2020).jpg: Copied (new)"])
+
+        result = svc.upload_files(root, "drive-123", ["#1 (2020).jpg"])
+
+        assert "--files-from-raw" in captured["args"]
+        assert "--files-from" not in captured["args"]
+        assert result["uploaded"] == ["#1 (2020).jpg"]
+
+    def test_unchanged_file_counts_as_landed(self, monkeypatch, tmp_path):
+        """A re-drop of identical bytes is skipped by rclone -- it's still on the drive."""
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "a.jpg")
+        self._popen(monkeypatch, ["INFO  : a.jpg: Unchanged skipping"])
+
+        result = svc.upload_files(root, "drive-123", ["a.jpg"])
+
+        assert result["success"] is True
+        assert result["failed"] == {}
+
+    def test_partial_failure_blames_only_the_file_that_did_not_transfer(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "good.jpg", "bad.jpg")
+        self._popen(
+            monkeypatch,
+            ["INFO  : good.jpg: Copied (new)", "ERROR : bad.jpg: quota exceeded"],
+            returncode=1,
+        )
+
+        result = svc.upload_files(root, "drive-123", ["good.jpg", "bad.jpg"])
+
+        assert result["success"] is False
+        assert result["uploaded"] == ["good.jpg"]
+        assert "bad.jpg" in result["failed"]
+        assert "good.jpg" not in result["failed"]
+
+    def test_colon_in_filename_parses_correctly(self, monkeypatch, tmp_path):
+        """Titles carry colons; the action is the LAST ': ' segment, not the first."""
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "SI-VIS: The Sound of Heroes (2025).jpg")
+        self._popen(monkeypatch, ["INFO  : SI-VIS: The Sound of Heroes (2025).jpg: Copied (new)"])
+
+        seen = []
+        result = svc.upload_files(
+            root, "drive-123", ["SI-VIS: The Sound of Heroes (2025).jpg"],
+            file_done_callback=lambda path, action: seen.append((path, action)),
+        )
+
+        assert result["success"] is True
+        assert seen == [("SI-VIS: The Sound of Heroes (2025).jpg", "Copied (new)")]
+
+    def test_missing_local_file_is_reported_without_running_rclone(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "here.jpg")
+
+        def _must_not_run(*_args, **_kwargs):  # pragma: no cover - guard
+            raise AssertionError("rclone must not run when nothing is uploadable")
+
+        monkeypatch.setattr("services.rclone.subprocess.Popen", _must_not_run)
+
+        result = svc.upload_files(root, "drive-123", ["gone.jpg"])
+
+        assert result["success"] is False
+        assert "Local file not found" in result["failed"]["gone.jpg"]
+
+    def test_list_file_is_cleaned_up(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        root = self._root(tmp_path, "a.jpg")
+        captured = self._popen(monkeypatch, ["INFO  : a.jpg: Copied (new)"])
+
+        svc.upload_files(root, "drive-123", ["a.jpg"])
+
+        list_path = Path(captured["args"][captured["args"].index("--files-from-raw") + 1])
+        assert not list_path.exists()

@@ -1,7 +1,9 @@
 import subprocess  # nosec B404
 import json
+import os
 import re
 import shutil
+import tempfile
 from collections import deque
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -727,73 +729,146 @@ scope = drive.readonly
             log_error(LogTags.RCLONE, f"Error in upload_folder: {str(e)}\n{traceback.format_exc()}")
             return {"success": False, "error": str(e)}
     
-    def upload_file(
+    def upload_files(
         self,
-        local_path: Path,
+        local_root: Path,
         drive_id: str,
-        remote_path: str,
+        relative_paths: List[str],
         *,
         drive_name: Optional[str] = None,
+        file_done_callback: Optional[Callable[[str, str], None]] = None,
     ) -> Dict[str, Any]:
-        """Upload one local file to a Drive folder via rclone copyto.
+        """Upload a named set of files under local_root in ONE rclone process.
 
-        Unlike upload_folder this never lists or checks the whole remote folder, so dropping a
-        single poster costs a couple of API calls instead of a full pass over the scope. It also
-        never deletes anything remote — stale names are left for the next full mirror sync.
+        `--files-from` restricts the transfer to exactly these paths and `--no-traverse` keeps
+        rclone from listing the destination, so this stays cheap against a big scope while paying
+        process startup, auth and connection setup once instead of once per file. Nothing remote
+        is ever deleted — stale names are left for the next full mirror sync.
+
+        Returns the paths that made it and, for anything that didn't, why.
         """
         display_name = drive_name or drive_id
+        list_file: Optional[Path] = None
+        process = None
         try:
             if not self.rclone_binary:
-                return {"success": False, "error": "rclone executable not found"}
+                return {"success": False, "uploaded": [], "failed": {}, "error": "rclone executable not found"}
 
             auth_args = self._get_drive_auth_args()
             if auth_args is None:
-                return {"success": False, "error": "Missing Google Drive credentials"}
+                return {"success": False, "uploaded": [], "failed": {}, "error": "Missing Google Drive credentials"}
 
-            if not local_path.is_file():
-                return {"success": False, "error": f"Local file not found: {local_path}"}
+            failed: Dict[str, str] = {}
+            wanted: List[str] = []
+            for raw_path in relative_paths:
+                relative_path = self._sanitize_remote_relative_path(raw_path)
+                if not relative_path:
+                    continue
+                if not (local_root / relative_path).is_file():
+                    failed[relative_path] = f"Local file not found: {local_root / relative_path}"
+                    continue
+                wanted.append(relative_path)
+
+            if not wanted:
+                return {"success": not failed, "uploaded": [], "failed": failed, "error": ""}
 
             remote_root = self._build_remote_root_path(drive_id)
-            remote_relative_path = self._sanitize_remote_relative_path(remote_path)
-            if not remote_relative_path:
-                return {"success": False, "error": "Remote path is empty"}
-            remote_file = f"{remote_root}{remote_relative_path}"
-
             upload_tps = settings.rclone_upload_tps_limit or settings.rclone_tps_limit
             upload_pacer = settings.rclone_upload_pacer_min_sleep or settings.rclone_pacer_min_sleep
 
-            result = subprocess.run(  # nosec B603
+            # --files-from-raw, not --files-from: the latter treats a line starting with '#' or
+            # ';' as a comment, and poster filenames can legitimately start with either.
+            list_fd, list_name = tempfile.mkstemp(prefix="rclone-upload-", suffix=".txt", text=True)
+            list_file = Path(list_name)
+            with os.fdopen(list_fd, "w") as handle:
+                handle.write("\n".join(wanted) + "\n")
+
+            log_info(
+                LogTags.RCLONE,
+                f"Uploading {len(wanted)} file(s) from '{local_root}' to '{display_name}' via rclone copy (--files-from)",
+            )
+
+            process = subprocess.Popen(  # nosec B603
                 [
-                    self.rclone_binary, 'copyto', str(local_path), remote_file,
+                    self.rclone_binary, 'copy', str(local_root), remote_root,
                     '--config', str(self.config_path),
                     *auth_args,
+                    '--files-from-raw', str(list_file),
+                    # Checking each named file beats listing a scope holding thousands of others.
+                    '--no-traverse',
                     f'--tpslimit={upload_tps}',
                     f'--drive-pacer-min-sleep={upload_pacer}',
+                    f'--transfers={settings.rclone_upload_transfers}',
                     f'--drive-chunk-size={settings.rclone_upload_chunk_size}',
                     '--drive-stop-on-upload-limit',
+                    '-v',
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=600,
+                bufsize=1,
+                universal_newlines=True,
             )
 
-            if result.returncode == 0:
-                log_success(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Uploaded '{remote_relative_path}' to '{display_name}'")
-                return {"success": True, "remote_path": remote_relative_path}
+            recent_lines: Deque[str] = deque(maxlen=50)
+            transferred: set = set()
+            wanted_set = set(wanted)
 
-            error_output = (result.stderr or result.stdout or "").strip()
-            log_error(
-                LogTags.RCLONE,
-                f"Single-file upload of '{remote_relative_path}' to '{display_name}' failed: {error_output}",
-            )
-            return {"success": False, "error": error_output or f"rclone exited with code {result.returncode}"}
-        except subprocess.TimeoutExpired:
-            log_error(LogTags.RCLONE, f"Single-file upload of '{local_path.name}' to '{display_name}' timed out")
-            return {"success": False, "error": "rclone upload timed out"}
+            for line in process.stdout:
+                recent_lines.append(line)
+                if 'INFO  :' not in line:
+                    continue
+                message = line.split('INFO  :', 1)[1].strip()
+                # "<relative path>: Copied (new)" — rsplit so a colon inside the filename is safe.
+                path_part, _, action = message.rpartition(': ')
+                if not path_part or not any(
+                    action.startswith(keyword) for keyword in ('Copied', 'Updated', 'Renamed', 'Unchanged')
+                ):
+                    continue
+                if path_part not in wanted_set:
+                    continue
+                transferred.add(path_part)
+                if file_done_callback:
+                    try:
+                        file_done_callback(path_part, action)
+                    except JobCancelled:
+                        raise
+                    except Exception as callback_error:
+                        log_warning(LogTags.RCLONE, f"Upload callback error: {callback_error}")
+
+            process.wait()
+
+            if process.returncode == 0:
+                # rclone exits non-zero if any transfer failed, so a clean exit means every
+                # requested file is on the drive -- including ones it skipped as unchanged.
+                log_success(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Uploaded {len(wanted)} file(s) to '{display_name}'")
+                return {"success": not failed, "uploaded": wanted, "failed": failed, "error": ""}
+
+            error_output = ''.join(recent_lines).strip()
+            for relative_path in wanted:
+                if relative_path not in transferred:
+                    failed[relative_path] = error_output or f"rclone exited with code {process.returncode}"
+            log_error(LogTags.RCLONE, f"Upload to '{display_name}' failed: {error_output}")
+            return {
+                "success": False,
+                "uploaded": sorted(transferred),
+                "failed": failed,
+                "error": error_output or f"rclone exited with code {process.returncode}",
+            }
+        except JobCancelled:
+            _terminate_process(process)
+            log_info(LogTags.RCLONE, f"Upload to '{display_name}' stopped by user")
+            raise
         except Exception as e:
             import traceback
-            log_error(LogTags.RCLONE, f"Error in upload_file: {str(e)}\n{traceback.format_exc()}")
-            return {"success": False, "error": str(e)}
+            log_error(LogTags.RCLONE, f"Error in upload_files: {str(e)}\n{traceback.format_exc()}")
+            return {"success": False, "uploaded": [], "failed": {}, "error": str(e)}
+        finally:
+            if list_file is not None:
+                try:
+                    list_file.unlink()
+                except OSError:  # nosec B110
+                    pass
 
     def download_file(self, drive_id: str, remote_path: str, local_path: Path) -> bool:
         """Download a file from Google Drive"""

@@ -425,36 +425,54 @@ def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> N
                 f"({row.get('reason') or 'no reason given'}) — stays in the sync folder until it is resolved",
             )
 
-        uploaded = 0
-        failed = 0
-        rclone = RcloneService()
-        for index, row in enumerate(ready, start=1):
+        # One rclone process for the whole drop: paying startup, auth and connection setup per
+        # file made a multi-file drop crawl (~2s each), and it gave up rclone's parallel transfers.
+        by_path = {
+            str(row.get("relative_path") or row.get("final_filename") or "").strip(): row
+            for row in ready
+        }
+        done = [0]
+
+        def _file_done(relative_path: str, action: str) -> None:
             check_cancelled(job_id)
-            relative_path = str(row.get("relative_path") or row.get("final_filename") or "").strip()
-            local_path = source_dir / relative_path
+            done[0] += 1
+            log_info(LogTags.IDARR, f"{STEP_INDENT}[{done[0]}/{len(ready)}] {relative_path}: {action}")
             update_job_state(
                 db,
                 job,
-                progress=min(95, int(5 + (index - 1) / max(len(ready), 1) * 90)),
-                message=_sanitize_message(f"Uploading {index}/{len(ready)} to {label}: {local_path.name}"),
+                progress=min(95, int(5 + done[0] / max(len(ready), 1) * 90)),
+                message=_sanitize_message(f"Uploaded {done[0]}/{len(ready)} to {label}: {Path(relative_path).name}"),
             )
-            log_info(LogTags.IDARR, f"{STEP_INDENT}[{index}/{len(ready)}] Uploading '{relative_path}'")
 
-            upload_result = rclone.upload_file(
-                local_path,
-                personal_drive_id,
-                relative_path,
-                drive_name=label,
-            )
-            if upload_result.get("success"):
+        check_cancelled(job_id)
+        update_job_state(
+            db,
+            job,
+            progress=10,
+            message=_sanitize_message(f"Uploading {len(ready)} file(s) to {label}..."),
+        )
+        upload_result = RcloneService().upload_files(
+            source_dir,
+            personal_drive_id,
+            list(by_path.keys()),
+            drive_name=label,
+            file_done_callback=_file_done,
+        )
+
+        failed_paths = upload_result.get("failed") or {}
+        uploaded = 0
+        failed = 0
+        for relative_path, row in by_path.items():
+            error = failed_paths.get(relative_path)
+            if error:
+                row["status"] = "upload_failed"
+                row["reason"] = str(error)
+                failed += 1
+                log_error(LogTags.IDARR, f"{STEP_INDENT}Upload failed for '{relative_path}': {row['reason']}")
+            else:
                 row["uploaded"] = True
                 row["status"] = "uploaded"
                 uploaded += 1
-            else:
-                row["status"] = "upload_failed"
-                row["reason"] = str(upload_result.get("error") or "rclone upload failed")
-                failed += 1
-                log_error(LogTags.IDARR, f"{STEP_INDENT}Upload failed for '{relative_path}': {row['reason']}")
 
         details["targeted_outcomes"] = outcomes
         run.details_json = json.dumps(details)

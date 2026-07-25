@@ -128,16 +128,26 @@ def test_selected_file_that_never_scanned_is_reported_missing():
 
 
 class FakeRclone:
+    """Stands in for one batched rclone process: records the call, fails the named paths."""
+
     def __init__(self, fail_on=None):
+        self.calls = []
         self.uploads = []
         self.folder_syncs = []
         self.fail_on = fail_on or set()
 
-    def upload_file(self, local_path, drive_id, remote_path, drive_name=None):
-        self.uploads.append((str(local_path), drive_id, remote_path))
-        if Path(remote_path).name in self.fail_on:
-            return {"success": False, "error": "quota exceeded"}
-        return {"success": True, "remote_path": remote_path}
+    def upload_files(self, local_root, drive_id, relative_paths, drive_name=None, file_done_callback=None):
+        self.calls.append((str(local_root), drive_id, list(relative_paths)))
+        uploaded, failed = [], {}
+        for relative_path in relative_paths:
+            if Path(relative_path).name in self.fail_on:
+                failed[relative_path] = "quota exceeded"
+                continue
+            uploaded.append(relative_path)
+            self.uploads.append((str(local_root), drive_id, relative_path))
+            if file_done_callback:
+                file_done_callback(relative_path, "Copied (new)")
+        return {"success": not failed, "uploaded": uploaded, "failed": failed, "error": ""}
 
     def upload_folder(self, *args, **kwargs):  # pragma: no cover - must never be called
         self.folder_syncs.append((args, kwargs))
@@ -208,6 +218,25 @@ def test_only_ready_files_are_uploaded(run_targeted_upload):
     assert outcomes[0]["status"] == "uploaded" and outcomes[0]["uploaded"] is True
     assert outcomes[1]["status"] == "pending" and outcomes[1]["uploaded"] is False
     assert "uploaded=1, failed=0, held_back=2" in str(job.message)
+
+
+def test_the_whole_drop_goes_up_in_one_rclone_call(run_targeted_upload):
+    """One process for the drop -- per-file processes cost ~2s each and lost parallel transfers."""
+    _, _, fake = run_targeted_upload([_outcome("a.jpg"), _outcome("b.jpg"), _outcome("c.jpg")])
+
+    assert len(fake.calls) == 1
+    assert fake.calls[0][2] == ["a.jpg", "b.jpg", "c.jpg"]
+
+
+def test_partial_batch_failure_marks_only_the_failed_file(run_targeted_upload):
+    job, outcomes, _ = run_targeted_upload(
+        [_outcome("good.jpg"), _outcome("bad.jpg")],
+        fail_on={"bad.jpg"},
+    )
+
+    assert outcomes[0]["status"] == "uploaded"
+    assert outcomes[1]["status"] == "upload_failed"
+    assert "uploaded=1, failed=1" in str(job.message)
 
 
 def test_upload_uses_the_relative_path_for_asset_drives(run_targeted_upload):
