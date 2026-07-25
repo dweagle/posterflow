@@ -469,19 +469,31 @@ input, textarea, select {
   border-color: rgba(156, 39, 176, 0.32);
 }
 
-/* TMDB attribution — used wherever TMDB API is exposed in the UI */
-.tmdb-attribution {
+/* Metadata-source attribution — used wherever the TMDB or TheTVDB API is exposed in the UI.
+   Both providers require a linked logo; TMDB additionally requires its "not endorsed" notice,
+   which rides alongside as text. See components/SourceAttribution.tsx. */
+.source-attribution {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.75rem;
   color: #555;
   margin: 0;
   line-height: 1.5;
 }
 
-.tmdb-attribution a {
-  color: #64b5f6;
-  text-decoration: none;
+.source-attribution a {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
-.tmdb-attribution a:hover {
-  text-decoration: underline;
+.source-attribution img {
+  height: 22px;
+  width: auto;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+
+.source-attribution a:hover img {
+  opacity: 1;
 }

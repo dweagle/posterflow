@@ -17,6 +17,7 @@ import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff, Settings as SettingsIcon } from 'lucide-react'
 import SettingsTabs from '../components/settings/SettingsTabs'
+import SourceAttribution from '../components/SourceAttribution'
 import BackupRestoreSection from '../components/settings/BackupRestoreSection'
 import MaintenanceSection from '../components/settings/MaintenanceSection'
 import RestartRequiredModal from '../components/settings/RestartRequiredModal'
@@ -851,10 +852,7 @@ function Settings() {
                 </button>
               </div>
             </div>
-            <p className="tmdb-attribution">
-              This product uses the TMDB API but is not endorsed or certified by TMDB.{' '}
-              <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">themoviedb.org</a>
-            </p>
+            <SourceAttribution source="tmdb" />
           </div>
 
           <div className="settings-section">

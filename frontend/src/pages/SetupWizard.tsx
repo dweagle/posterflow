@@ -1287,10 +1287,6 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 </div>
                 <small>Get your API key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">themoviedb.org/settings/api</a></small>
                 <small>This step is optional — you can add or update your TMDB key later in Settings.</small>
-                <small className="tmdb-attribution" style={{ marginTop: '0.5rem' }}>
-                  This product uses the TMDB API but is not endorsed or certified by TMDB.{' '}
-                  <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">themoviedb.org</a>
-                </small>
               </div>
 
               <div className="button-group">

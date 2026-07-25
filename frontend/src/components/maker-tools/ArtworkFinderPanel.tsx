@@ -124,11 +124,6 @@ export default function ArtworkFinderPanel() {
           ))}
         </div>
 
-        <p className="tmdb-attribution">
-          This product uses the TMDB API but is not endorsed or certified by TMDB.{' '}
-          <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">themoviedb.org</a>
-        </p>
-
         {error && <p className="tmdb-error">{error}</p>}
 
         {results !== null && (
