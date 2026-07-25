@@ -852,7 +852,9 @@
   border: 1px solid #333;
   border-radius: 8px;
   padding: 0.75rem;
-  align-items: flex-start;
+  /* Stretch the info column to the full card height so its bottom controls (Browse images /
+     the no-match export group) can pin to the card's bottom edge. */
+  align-items: stretch;
 }
 
 .tmdb-poster {
@@ -1318,7 +1320,7 @@
   padding: 0.25rem 0.6rem;
   font-size: 0.78rem;
   cursor: pointer;
-  margin-top: 0.25rem;
+  margin-top: auto;   /* pinned to the card bottom on every page */
   transition: color 0.15s, border-color 0.15s;
   align-self: flex-start;
 }
@@ -1770,12 +1772,20 @@
   margin-left: auto;
 }
 
-/* Standalone variant on the card body when there's no TMDB match (no image gallery to sit in). */
+/* Standalone variant on the card body when there's no TMDB match (no image gallery to sit in):
+   pinned to the card bottom like the Browse-images toggle it replaces, and kept on one line. */
 .tmdb-psd-export-group--standalone {
   margin-left: 0;
-  margin-top: 0.35rem;
+  margin-top: auto;
   align-self: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+/* Mobile is too narrow for one line — wrap rather than overflow the card. */
+@media (max-width: 550px) {
+  .tmdb-psd-export-group--standalone {
+    flex-wrap: wrap;
+  }
 }
 
 /* Export style picker (CL2K / MM2K) — defaults to the request's style, overridable per export */

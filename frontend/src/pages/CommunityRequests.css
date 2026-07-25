@@ -611,14 +611,22 @@
   /* Uniform card height so cards with fewer than 6 logos match the tall ones. Tune with the
      logo size — this fits a 6-logo column at the current 40px icon width. */
   min-height: 160px;
-  /* Stretch the info column to the full card height so its Browse button can bottom-align. */
-  align-items: stretch;
 }
 
-/* Pin the Browse / Hide-images control (or the no-match export group) to the card bottom. */
-.request-maker-tools-panel .tmdb-gallery-toggle,
-.request-maker-tools-panel .tmdb-psd-export-group--standalone {
-  margin-top: auto;
+/* The panel's info column is ~350px — too tight for the full-size export controls, which then
+   wrapped onto a second line. Trim them so the style toggle + both buttons stay on one line.
+   (Bottom-pinning itself is shared card CSS in MakerTools.css.) */
+.request-maker-tools-panel .tmdb-psd-export-group {
+  gap: 0.3rem;
+}
+
+.request-maker-tools-panel .tmdb-psd-style-opt {
+  padding: 0.3rem 0.4rem;
+}
+
+.request-maker-tools-panel .tmdb-psd-export-btn {
+  padding: 0.3rem 0.45rem;
+  font-size: 0.72rem;
 }
 
 /* Visual-only drop zone indicator inside the maker panel */
