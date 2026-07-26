@@ -21,8 +21,11 @@ from api.maker_tools import (
     _build_lang_params,
     _build_psd,
     _build_tmdb_images,
+    _check_show_status,
     _content_disposition,
     _extract_name,
+    _merge_recent_missing_items,
+    _translate_year_season,
     _fetch_tmdb_image_bytes,
     _measure_logo_density,
     _parse_bool,
@@ -36,6 +39,8 @@ from api.maker_tools import (
     compute_logo_geometry,
     compute_poster_fit_geometry,
     MakerMonitorConfig,
+    MakerMonitorLibraryResult,
+    MakerMonitorShowResult,
 )
 
 
@@ -1953,3 +1958,168 @@ def test_tmdb_search_pins_id_match_and_dedupes(client, test_db):
     assert results[0]["auto_matched"] is True
     assert results[0]["media_type"] == "movie"
     assert results[1]["auto_matched"] is False
+
+
+# ---------------------------------------------------------------------------
+# _translate_year_season / monitor year-numbered seasons (Shark Week)
+# ---------------------------------------------------------------------------
+
+
+def _tvdb_year_rows(*years):
+    return [{"id": 1000 + i, "number": y, "name": "", "image": None, "year": str(y)}
+            for i, y in enumerate(years)]
+
+
+def test_translate_year_season_maps_by_air_year():
+    with patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(0, 1988, 1989, 2025, 2026)):
+        assert _translate_year_season(37, 2026, 81189, ("tvdb-key", "")) == 2026
+
+
+def test_translate_year_season_falls_back_to_ordinal_position():
+    """Premiere air year missing from TVDB's list: TMDB season k maps to the k-th aired season."""
+    with patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(1988, 1989, 1990)):
+        assert _translate_year_season(2, 2027, 81189, ("tvdb-key", "")) == 1989
+
+
+def test_translate_year_season_leaves_sequential_shows_alone():
+    with patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(0, 1, 2, 3)):
+        assert _translate_year_season(4, 2026, 81189, ("tvdb-key", "")) is None
+
+
+def test_translate_year_season_skips_without_tvdb_key():
+    with patch("services.tvdb.fetch_series_seasons",
+               side_effect=AssertionError("should not be called")):
+        assert _translate_year_season(37, 2026, 81189, ("", "")) is None
+
+
+def test_translate_year_season_survives_tvdb_error():
+    import services.tvdb as tvdb_service
+    with patch("services.tvdb.fetch_series_seasons",
+               side_effect=tvdb_service.TvdbError("TheTVDB is down")):
+        assert _translate_year_season(37, 2026, 81189, ("tvdb-key", "")) is None
+
+
+def _shark_week_payload():
+    return {
+        "name": "Shark Week",
+        "first_air_date": "1988-07-17",
+        "poster_path": "/shark.jpg",
+        "external_ids": {"imdb_id": "tt0000001", "tvdb_id": 81189},
+        "next_episode_to_air": {"air_date": "2026-07-27", "season_number": 37, "episode_number": 1},
+    }
+
+
+def test_check_show_status_matches_year_numbered_drive_files():
+    existing = {1988, 1989, 2025, 2026}
+    with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
+         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(1988, 1989, 2025, 2026)):
+        result = _check_show_status("3959", existing, "tmdb-key", 21, ("tvdb-key", ""))
+
+    assert result is not None
+    assert result.season_number == 2026
+    assert result.poster_exists is True
+
+
+def test_check_show_status_reports_year_season_as_needed_when_missing():
+    existing = {1988, 1989, 2025}
+    with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
+         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(1988, 1989, 2025, 2026)):
+        result = _check_show_status("3959", existing, "tmdb-key", 21, ("tvdb-key", ""))
+
+    assert result is not None
+    assert result.season_number == 2026
+    assert result.poster_exists is False
+
+
+def test_check_show_status_keeps_tmdb_number_without_tvdb_key():
+    with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
+         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("services.tvdb.fetch_series_seasons",
+               side_effect=AssertionError("should not be called")):
+        result = _check_show_status("3959", {1988, 1989}, "tmdb-key", 21)
+
+    assert result is not None
+    assert result.season_number == 37
+    assert result.poster_exists is False
+
+
+def _merge_fixture():
+    """Current run has Shark Week as Season 2026; the saved result kept it as Season 37."""
+    current = [MakerMonitorLibraryResult(
+        library_name="TV", library_type="TV", total_scanned=1, premieres_found=1, posters_needed=1,
+        shows=[MakerMonitorShowResult(
+            tmdb_id="3959", name="Shark Week", homepage="https://www.themoviedb.org/tv/3959",
+            season_number=2026, date="2026-07-27", poster_exists=False, tvdb_id=81189,
+        )],
+    )]
+    previous = {
+        "range_start": "2026-07-20",
+        "libraries": [{
+            "library_name": "TV", "library_type": "TV",
+            "shows": [{
+                "tmdb_id": "3959", "name": "Shark Week", "season_number": 37,
+                "date": "2026-07-27", "poster_exists": False, "tvdb_id": 81189,
+            }],
+        }],
+    }
+    return current, previous
+
+
+def _merge_kwargs(current, previous, inventory):
+    return dict(
+        current_results=current,
+        previous_payload=previous,
+        reference_today=date(2026, 7, 26),
+        retention_days=14,
+        scanned_tmdb_ids={("TV", "TV"): {show["tmdb_id"] for lib in previous["libraries"] for show in lib["shows"]} | {"3959"}},
+        scanned_seasons={("TV", "TV"): inventory},
+        tvdb_credentials=("tvdb-key", ""),
+    )
+
+
+def test_merge_rekeys_retained_ordinal_season_and_drops_duplicate():
+    current, previous = _merge_fixture()
+    with patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(1988, 1989, 2025, 2026)):
+        _, items_added = _merge_recent_missing_items(
+            **_merge_kwargs(current, previous, {"3959": {1988, 1989, 2025}}))
+
+    assert items_added == 0
+    assert [show.season_number for show in current[0].shows] == [2026]
+
+
+def test_merge_drops_same_date_duplicate_when_tvdb_is_down():
+    import services.tvdb as tvdb_service
+    current, previous = _merge_fixture()
+    with patch("services.tvdb.fetch_series_seasons",
+               side_effect=tvdb_service.TvdbError("TheTVDB is down")):
+        _, items_added = _merge_recent_missing_items(
+            **_merge_kwargs(current, previous, {"3959": {1988, 1989, 2025}}))
+
+    assert items_added == 0
+    assert [show.season_number for show in current[0].shows] == [2026]
+
+
+def test_merge_still_retains_sequential_show_missing_from_current_run():
+    current, previous = _merge_fixture()
+    previous["libraries"][0]["shows"].append({
+        "tmdb_id": "1234", "name": "Foundation", "season_number": 3,
+        "date": "2026-07-21", "poster_exists": False, "tvdb_id": 999,
+    })
+    with patch("services.tvdb.fetch_series_seasons",
+               return_value=_tvdb_year_rows(1, 2, 3)):
+        _, items_added = _merge_recent_missing_items(
+            **_merge_kwargs(current, previous, {"3959": {1988, 1989, 2025}, "1234": {1, 2}}))
+
+    assert items_added == 1
+    retained = [show for show in current[0].shows if show.tmdb_id == "1234"]
+    assert len(retained) == 1
+    assert retained[0].season_number == 3
+    assert len(current[0].shows) == 2

@@ -176,6 +176,7 @@ def _merge_recent_missing_items(
     scanned_tmdb_ids: dict[tuple[str, str], set[str]] | None = None,
     scanned_seasons: dict[tuple[str, str], dict[str, set[int]]] | None = None,
     tmdb_api_key: str = "",
+    tvdb_credentials: tuple[str, str] = ("", ""),
 ) -> tuple[int, int]:
     # fresh_dates: mapping of (tmdb_id, season_number) -> air_date string from current scan results
     # scanned_tmdb_ids: mapping of (library_name, library_type) -> set of tmdb_ids found on disk this run
@@ -216,6 +217,7 @@ def _merge_recent_missing_items(
             continue
 
         current_keys = {(show.tmdb_id, int(show.season_number)) for show in library.shows}
+        current_dates = {(show.tmdb_id, show.date) for show in library.shows if show.date}
         library_key = (library.library_name, library.library_type.upper())
         drive_scanned = scanned_tmdb_ids.get(library_key) if scanned_tmdb_ids is not None else None
         drive_inventory = scanned_seasons.get(library_key) if scanned_seasons is not None else None
@@ -238,11 +240,26 @@ def _merge_recent_missing_items(
             if season_number is None:
                 continue
 
+            air_date = _parse_iso_date(str(previous_show.get("date") or ""))
+
+            # Re-key entries saved under TMDB's ordinal numbering for year-numbered shows
+            # (Shark Week's "Season 37" is this run's "Season 2026") so they compare and
+            # re-check against the same numbers the fresh scan and the drive files use.
+            inventory_seasons = drive_inventory.get(tmdb_id, set()) if drive_inventory is not None else set()
+            prev_tvdb_raw = previous_show.get("tvdb_id")
+            if season_number not in inventory_seasons and isinstance(prev_tvdb_raw, int) and prev_tvdb_raw > 0 and air_date:
+                mapped = _translate_year_season(season_number, air_date.year, prev_tvdb_raw, tvdb_credentials)
+                if mapped is not None:
+                    season_number = mapped
+
             show_key = (tmdb_id, season_number)
             if not tmdb_id or show_key in current_keys:
                 continue
+            # Same show premiering on the same date is the same premiere however it's numbered —
+            # covers the renumbering dupe even when TheTVDB can't be reached this run.
+            if (tmdb_id, str(previous_show.get("date") or "")) in current_dates:
+                continue
 
-            air_date = _parse_iso_date(str(previous_show.get("date") or ""))
             if air_date and air_date < retention_cutoff:
                 continue
 
@@ -494,11 +511,42 @@ def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], se
     return tv_inventory, movie_ids
 
 
+def _translate_year_season(
+    tmdb_season: int,
+    air_year: int,
+    tvdb_id: int,
+    tvdb_credentials: tuple[str, str],
+) -> int | None:
+    """TheTVDB's number for a TMDB ordinal season, for shows TVDB numbers by year.
+
+    Drive files follow Sonarr/TVDB naming, so Shark Week's posters say "Season 1988" while TMDB
+    calls that season 1. Maps by the premiere's air year first, ordinal position as a fallback.
+    Returns None when the show isn't year-numbered or TVDB can't answer.
+    """
+    api_key, pin = tvdb_credentials
+    if tmdb_season <= 0 or not api_key:
+        return None
+    try:
+        rows = tvdb.fetch_series_seasons(tvdb_id=tvdb_id, api_key=api_key, pin=pin)
+    except tvdb.TvdbError as exc:
+        log_warning(LogTags.MONITOR, f"TheTVDB season lookup failed for tvdb-{tvdb_id} ({exc}); keeping TMDB season number")
+        return None
+    numbers = sorted(r["number"] for r in rows if isinstance(r.get("number"), int) and r["number"] > 0)
+    if not numbers or max(numbers) < 1900:
+        return None
+    if air_year in numbers:
+        return air_year
+    if tmdb_season <= len(numbers):
+        return numbers[tmdb_season - 1]
+    return None
+
+
 def _check_show_status(
     tmdb_id: str,
     existing_seasons: set[int],
     tmdb_api_key: str,
     lookahead_days: int,
+    tvdb_credentials: tuple[str, str] = ("", ""),
 ) -> MakerMonitorShowResult | None:
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
     # append_to_response=external_ids folds the IMDb/TVDB ids into this same call
@@ -533,6 +581,22 @@ def _check_show_status(
     if episode_number != 1:
         return None
 
+    ext_ids = payload.get("external_ids") if isinstance(payload.get("external_ids"), dict) else {}
+    imdb_id = str(ext_ids.get("imdb_id") or "").strip()
+    tvdb_raw = ext_ids.get("tvdb_id")
+    tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
+
+    if season_number not in existing_seasons and tvdb_id:
+        mapped = _translate_year_season(season_number, premiere_date.year, tvdb_id, tvdb_credentials)
+        if mapped is not None:
+            log_info(
+                LogTags.MONITOR,
+                f"Season number mapped via TheTVDB: tmdb season {season_number} -> {mapped} (tvdb-{tvdb_id})",
+                tmdb_id=tmdb_id,
+                tvdb_id=tvdb_id,
+            )
+            season_number = mapped
+
     poster_exists = season_number in existing_seasons
 
     name = str(payload.get("name") or "Unknown")
@@ -540,10 +604,6 @@ def _check_show_status(
     first_air_year = first_air_date[:4] if len(first_air_date) >= 4 else ""
     poster_path = str(payload.get("poster_path") or "")
     poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else ""
-    ext_ids = payload.get("external_ids") if isinstance(payload.get("external_ids"), dict) else {}
-    imdb_id = str(ext_ids.get("imdb_id") or "").strip()
-    tvdb_raw = ext_ids.get("tvdb_id")
-    tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
     log_info(
         LogTags.MONITOR,
         (
@@ -2799,6 +2859,8 @@ def run_maker_monitor_scan_internal(
     scanned_tmdb_ids: dict[tuple[str, str], set[str]] = {}
     scanned_seasons: dict[tuple[str, str], dict[str, set[int]]] = {}
     breaker = TmdbCircuitBreaker()  # abort the whole run if TMDB fails too many times in a row
+    # Fetched once here so the pooled premiere checks never touch the db session.
+    tvdb_credentials = tvdb.get_tvdb_credentials(db)
 
     total_drives = max(1, len(selected_drives))
     drive_progress_start = 15
@@ -2856,6 +2918,7 @@ def run_maker_monitor_scan_internal(
                         seasons,
                         resolved_config.tmdb_api_key,
                         resolved_config.lookahead_days,
+                        tvdb_credentials,
                     ): tmdb_id
                     for tmdb_id, seasons in tv_inventory.items()
                 }
@@ -3044,6 +3107,7 @@ def run_maker_monitor_scan_internal(
         scanned_tmdb_ids=scanned_tmdb_ids,
         scanned_seasons=scanned_seasons,
         tmdb_api_key=resolved_config.tmdb_api_key,
+        tvdb_credentials=tvdb_credentials,
     )
 
     if merged_item_count > 0:
