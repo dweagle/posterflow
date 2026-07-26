@@ -660,6 +660,116 @@ def test_tmdb_tv_details_returns_seasons(client, test_db):
     assert s2["poster_url"] is None
 
 
+# --- TMDB response cache -----------------------------------------------------------------
+# A list view mounts ~50 cards, each fetching details + an overview, and revisiting the page
+# used to repeat every one of them.
+
+def test_repeat_reads_are_served_from_cache(client, test_db):
+    _seed_tmdb_key(test_db)
+    calls = []
+
+    def counting_get(*args, **kwargs):
+        calls.append(1)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"overview": "Same title, asked for twice."}
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=counting_get):
+        first = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=movie")
+        second = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=movie")
+
+    assert first.json() == second.json()
+    assert len(calls) == 1
+
+
+def test_cache_is_keyed_per_title(client, test_db):
+    _seed_tmdb_key(test_db)
+    calls = []
+
+    def counting_get(*args, **kwargs):
+        calls.append(1)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"overview": "x"}
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=counting_get):
+        client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=movie")
+        client.get("/api/maker-tools/tmdb/overview?tmdb_id=79&media_type=movie")
+        client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=tv")
+
+    assert len(calls) == 3   # different id, and different media type, are different reads
+
+
+def test_scan_paths_are_not_cached(client, test_db):
+    """The monitor must see fresh air dates, so its fetches pass no cache_ttl."""
+    from api.maker_tools import _tmdb_fetch_json
+
+    calls = []
+
+    def counting_get(*args, **kwargs):
+        calls.append(1)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"name": "Show"}
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=counting_get):
+        _tmdb_fetch_json("https://api.themoviedb.org/3/tv/1", {"api_key": "k"}, "show status")
+        _tmdb_fetch_json("https://api.themoviedb.org/3/tv/1", {"api_key": "k"}, "show status")
+
+    assert len(calls) == 2
+
+
+def test_cache_key_ignores_the_api_key(test_db):
+    from api.maker_tools import _tmdb_cache_key
+
+    a = _tmdb_cache_key("https://x/y", {"api_key": "one", "language": "en-US"})
+    b = _tmdb_cache_key("https://x/y", {"api_key": "two", "language": "en-US"})
+    assert a == b
+
+
+# --- GET /api/maker-tools/tmdb/overview -------------------------------------------------
+# Unmatched cards carry ids but no TMDB text, so they look the description up on render.
+
+def test_tmdb_overview_returns_the_description(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"overview": "A blade runner must pursue replicants."}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=movie")
+
+    assert response.status_code == 200
+    assert response.json()["overview"] == "A blade runner must pursue replicants."
+
+
+def test_tmdb_overview_is_blank_when_tmdb_has_none(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp):
+        response = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=tv")
+
+    assert response.status_code == 200
+    assert response.json()["overview"] == ""
+
+
+def test_tmdb_overview_rejects_an_unknown_media_type(client, test_db):
+    _seed_tmdb_key(test_db)
+    response = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=person")
+    assert response.status_code == 400
+
+
+def test_tmdb_overview_no_api_key_returns_400(client):
+    response = client.get("/api/maker-tools/tmdb/overview?tmdb_id=78&media_type=movie")
+    assert response.status_code == 400
+
+
 def test_tmdb_tv_details_no_api_key_returns_400(client):
     response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
     assert response.status_code == 400

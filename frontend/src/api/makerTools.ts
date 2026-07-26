@@ -25,6 +25,7 @@ export interface MakerMonitorShowResult {
   first_air_year: string
   poster_exists: boolean
   poster_url?: string
+  overview?: string
   imdb_id?: string
   tvdb_id?: number | null
   external_sources: string[]
@@ -191,6 +192,14 @@ export interface TmdbTvDetails {
   // Both providers' lists, so the gallery's season picker can follow the source being browsed.
   tmdb_seasons: TmdbSeasonInfo[]
   tvdb_seasons: TmdbSeasonInfo[]
+}
+
+/** A title's description on its own — for cards built from data that carries ids but no text. */
+export const getTmdbOverview = async (tmdb_id: number, media_type: string): Promise<string> => {
+  const data = await getData<{ overview: string }>(
+    `/api/maker-tools/tmdb/overview?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
+  )
+  return data.overview ?? ''
 }
 
 /**

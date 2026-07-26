@@ -58,12 +58,12 @@ const tmdbHomepage = (mediaType: FlatItem['mediaType'], id: number): string => {
 }
 
 // Build the TmdbSearchResult the card consumes from an unmatched row + a resolved tmdb id.
-const buildResult = (item: FlatItem, tmdbId: number, posterUrl: string | null, imdbId: string | null, tvdbId: number | null): TmdbSearchResult => ({
+const buildResult = (item: FlatItem, tmdbId: number, posterUrl: string | null, imdbId: string | null, tvdbId: number | null, overview = ''): TmdbSearchResult => ({
   tmdb_id: tmdbId,
   media_type: item.mediaType,
   title: item.title,
   year: item.year ? String(item.year) : '',
-  overview: '',
+  overview,
   poster_url: posterUrl || '',
   homepage: tmdbId ? tmdbHomepage(item.mediaType, tmdbId) : '',
   imdb_id: imdbId ?? null,
@@ -193,7 +193,7 @@ function UnmatchedAssetCard({ item, psdConfig, posterAvailability, posterAvailab
   }
 
   const pickCandidate = (c: TmdbCandidate) => {
-    setResolved(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id))
+    setResolved(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))
   }
 
   if (resolved) {

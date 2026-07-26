@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -75,6 +76,7 @@ class MakerMonitorShowResult(BaseModel):
     first_air_year: str = ""
     poster_exists: bool
     poster_url: str = ""
+    overview: str = ""
     imdb_id: str = ""
     tvdb_id: int | None = None
     external_sources: list[str] = Field(default_factory=list)
@@ -563,6 +565,7 @@ def _check_show_status(
         first_air_year=first_air_year,
         poster_exists=poster_exists,
         poster_url=poster_url,
+        overview=str(payload.get("overview") or ""),
         imdb_id=imdb_id,
         tvdb_id=tvdb_id,
         external_sources=[],
@@ -936,11 +939,57 @@ def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
     return HTTPException(status_code=502, detail=f"{err.reason[:1].upper()}{err.reason[1:]} — try again shortly.")
 
 
-def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: int = 10, retries: int = 2) -> dict[str, Any]:
+# Short-lived cache for TMDB reads that a page repeats. Maker cards fetch details and an
+# overview each, so a 50-card list is ~100 calls — and revisiting the page repeated every one.
+# Opt-in per call site (cache_ttl): scan paths that must see fresh data don't pass one.
+_TMDB_DETAIL_TTL = 10 * 60      # details/overviews/artwork lists
+_TMDB_STATIC_TTL = 12 * 60 * 60  # facts that don't change (country of origin)
+_TMDB_CACHE_MAX = 512
+_tmdb_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_tmdb_cache_lock = threading.Lock()
+
+
+def _tmdb_cache_key(url: str, params: dict[str, Any]) -> str:
+    # The api_key is constant per install and shouldn't sit in a cache key.
+    rest = sorted((k, str(v)) for k, v in params.items() if k != "api_key")
+    return f"{url}?{rest}"
+
+
+def _tmdb_cache_get(key: str) -> dict[str, Any] | None:
+    with _tmdb_cache_lock:
+        hit = _tmdb_cache.get(key)
+        if not hit:
+            return None
+        if hit[0] <= time.monotonic():
+            _tmdb_cache.pop(key, None)
+            return None
+        return hit[1]
+
+
+def _tmdb_cache_put(key: str, value: dict[str, Any], ttl: float) -> None:
+    with _tmdb_cache_lock:
+        if len(_tmdb_cache) >= _TMDB_CACHE_MAX:
+            now = time.monotonic()
+            for stale in [k for k, v in _tmdb_cache.items() if v[0] <= now]:
+                _tmdb_cache.pop(stale, None)
+            while len(_tmdb_cache) >= _TMDB_CACHE_MAX:
+                _tmdb_cache.pop(next(iter(_tmdb_cache)))   # oldest insert first
+        _tmdb_cache[key] = (time.monotonic() + ttl, value)
+
+
+def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: int = 10, retries: int = 2, cache_ttl: float = 0) -> dict[str, Any]:
     """Low-level TMDB GET: logs + raises TmdbUpstreamError on any failure, else returns the parsed JSON dict.
 
     A 429 (rate limit) is retried up to ``retries`` times, honoring the Retry-After
-    header, before giving up — so a brief throttle doesn't fail the request outright."""
+    header, before giving up — so a brief throttle doesn't fail the request outright.
+
+    ``cache_ttl`` > 0 serves a recent identical response instead of calling out again."""
+    cache_key = _tmdb_cache_key(url, params) if cache_ttl else ""
+    if cache_key:
+        cached = _tmdb_cache_get(cache_key)
+        if cached is not None:
+            return cached
+
     attempt = 0
     while True:
         tmdb_bucket.acquire()  # shared with IDarr — TMDB limits by IP, not by key
@@ -968,13 +1017,16 @@ def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: in
             reason = f"TMDB sent an unreadable (non-JSON) response loading {context}"
             _log_tmdb_failure(reason, level=log_error)
             raise TmdbUpstreamError(reason)
-        return data if isinstance(data, dict) else {}
+        result = data if isinstance(data, dict) else {}
+        if cache_key:
+            _tmdb_cache_put(cache_key, result, cache_ttl)
+        return result
 
 
-def _tmdb_get_json(url: str, params: dict[str, Any], context: str, timeout: int = 10) -> dict[str, Any]:
+def _tmdb_get_json(url: str, params: dict[str, Any], context: str, timeout: int = 10, cache_ttl: float = 0) -> dict[str, Any]:
     """Endpoint wrapper around _tmdb_fetch_json that surfaces failures as a user-facing HTTPException."""
     try:
-        return _tmdb_fetch_json(url, params, context, timeout)
+        return _tmdb_fetch_json(url, params, context, timeout, cache_ttl=cache_ttl)
     except TmdbUpstreamError as err:
         raise _tmdb_http_error(err)
 
@@ -1427,7 +1479,8 @@ def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session
     if img_lang:
         params["include_image_language"] = img_lang
 
-    data = _tmdb_get_json(url, params, "images")
+    # Galleries get reopened; artwork lists barely move minute to minute.
+    data = _tmdb_get_json(url, params, "images", cache_ttl=_TMDB_DETAIL_TTL)
 
     posters = _build_tmdb_images(data.get("posters", []))
     backdrops = _build_tmdb_images(data.get("backdrops", []), size_thumb="w780")
@@ -1510,6 +1563,32 @@ def _tvdb_season_list(tvdb_id: int, db: Session) -> list[TmdbSeasonInfo] | None:
     ]
 
 
+class TmdbOverview(BaseModel):
+    overview: str = ""
+
+
+@router.get("/tmdb/overview", response_model=TmdbOverview)
+def tmdb_overview(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) -> TmdbOverview:
+    """A title's description on its own.
+
+    Unmatched detection builds its items from the *arr library, which carries ids and an *arr
+    poster but no TMDB text, so those cards look it up on render rather than making every scan
+    fetch a description for thousands of items.
+    """
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+
+    data = _tmdb_get_json(f"https://api.themoviedb.org/3/{mt}/{tmdb_id}",
+                          {"api_key": api_key, "language": "en-US"}, "overview",
+                          cache_ttl=_TMDB_DETAIL_TTL)
+    return TmdbOverview(overview=str(data.get("overview") or ""))
+
+
 @router.get("/tv-details", response_model=TmdbTvDetails)
 def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) -> TmdbTvDetails:
     """TV show details for a maker card: the seasons list, season count, and series type.
@@ -1523,7 +1602,8 @@ def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) ->
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
 
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
-    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "TV details")
+    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "TV details",
+                          cache_ttl=_TMDB_DETAIL_TTL)
 
     tmdb_seasons: list[TmdbSeasonInfo] = []
     for s in (data.get("seasons") or []):
@@ -1578,7 +1658,9 @@ def tmdb_origin_country(tmdb_id: int, media_type: str, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
 
     url = f"https://api.themoviedb.org/3/{mt}/{tmdb_id}"
-    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "country of origin")
+    # A title's country of origin never changes; hold it longer.
+    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "country of origin",
+                          cache_ttl=_TMDB_STATIC_TTL)
 
     countries: list[str] = []
     for c in (data.get("origin_country") or []):
@@ -1610,7 +1692,7 @@ def tmdb_season_images(tmdb_id: int, season_number: int, language: str = "en+tex
     if img_lang:
         params["include_image_language"] = img_lang
 
-    data = _tmdb_get_json(url, params, "season images")
+    data = _tmdb_get_json(url, params, "season images", cache_ttl=_TMDB_DETAIL_TTL)
 
     posters = _build_tmdb_images(data.get("posters", []))
     posters.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))

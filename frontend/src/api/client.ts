@@ -227,6 +227,7 @@ export {
   getTmdbImages,
   getTmdbImageProxyUrl,
   getTmdbOriginCountry,
+  getTmdbOverview,
   getTvDetails,
   type ImageSource,
   getTvdbImages,

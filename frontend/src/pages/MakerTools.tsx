@@ -660,7 +660,7 @@ function MakerTools() {
                         </div>
                         <div className="maker-card-panel">
                           <TmdbItemCard
-                            item={{ tmdb_id: hasTmdb ? tmdbId : 0, media_type: 'tv', title: show.name, year: show.first_air_year, overview: '', poster_url: show.poster_url || '', homepage: hasTmdb ? show.homepage : '', imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
+                            item={{ tmdb_id: hasTmdb ? tmdbId : 0, media_type: 'tv', title: show.name, year: show.first_air_year, overview: show.overview || '', poster_url: show.poster_url || '', homepage: hasTmdb ? show.homepage : '', imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
                             psdConfig={psdConfig}
                             posterAvailability={hasTmdb ? posterAvailability[tmdbId] : undefined}
                             posterAvailabilityChecked={posterAvailabilityChecked}
@@ -742,7 +742,7 @@ function MakerTools() {
                         </div>
                         <div className="maker-card-panel">
                           <TmdbItemCard
-                            item={{ tmdb_id: parsed ? parsed.tmdb_id : 0, media_type: parsed ? parsed.media_type : (discoveryTab === 'movies' ? 'movie' : 'tv'), title: item.name, year: item.date?.slice(0, 4) ?? '', overview: '', poster_url: item.poster_url || '', homepage: parsed ? item.homepage : '', imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
+                            item={{ tmdb_id: parsed ? parsed.tmdb_id : 0, media_type: parsed ? parsed.media_type : (discoveryTab === 'movies' ? 'movie' : 'tv'), title: item.name, year: item.date?.slice(0, 4) ?? '', overview: item.overview || '', poster_url: item.poster_url || '', homepage: parsed ? item.homepage : '', imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
                             psdConfig={psdConfig}
                             posterAvailability={parsed ? posterAvailability[parsed.tmdb_id] : undefined}
                             posterAvailabilityChecked={posterAvailabilityChecked}

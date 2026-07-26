@@ -53,6 +53,22 @@ _bootstrap_engine.dispose()
 # Import app after models
 from main import app
 
+@pytest.fixture(autouse=True)
+def _clear_upstream_caches():
+    """Upstream response caches are process-wide, so one test's fetch must not answer another's.
+
+    Real runs want the cache; tests each set up their own mocked responses.
+    """
+    from api.maker_tools import _tmdb_cache
+    import services.tvdb as _tvdb
+
+    _tmdb_cache.clear()
+    _tvdb._seasons_cache.clear()
+    yield
+    _tmdb_cache.clear()
+    _tvdb._seasons_cache.clear()
+
+
 @pytest.fixture(scope="session")
 def test_engine():
     """Create test engine once for all tests"""
