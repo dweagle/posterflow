@@ -1615,7 +1615,9 @@ def _tvdb_season_list(tvdb_id: int, db: Session) -> list[TmdbSeasonInfo] | None:
         TmdbSeasonInfo(
             season_number=r["number"],
             name=r["name"] or ("Specials" if r["number"] == 0 else f"Season {r['number']}"),
-            episode_count=0,          # TVDB's season records carry no episode count
+            # Only looked up for specials, where it decides whether the season is real; -1 marks
+            # "not determined" so an unknown is never mistaken for an empty season.
+            episode_count=r.get("episode_count") if r.get("episode_count") is not None else -1,
             air_date=r["year"],       # TVDB gives a year only, not a full date
             poster_url=r["image"] or None,
         )
@@ -1677,11 +1679,20 @@ def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) ->
             poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else None,
         ))
 
+    # TheTVDB lists a Specials season for every series whether or not it holds episodes (its own
+    # site shows 0 for those). Each provider's list is judged by its OWN count: TheTVDB is
+    # authoritative for shows — it carries specials TMDB doesn't list at all — so TMDB's view can't
+    # decide what TheTVDB has. episode_count of -1 means "not determined", which keeps the season.
+    def drop_empty_specials(rows: list[TmdbSeasonInfo]) -> list[TmdbSeasonInfo]:
+        return [s for s in rows if s.season_number != 0 or s.episode_count != 0]
+
+    tmdb_seasons = drop_empty_specials(tmdb_seasons)
+    tvdb_seasons = drop_empty_specials(_tvdb_season_list(tvdb_id, db) or [])
+
     seasons = tmdb_seasons
     season_count = int(data.get("number_of_seasons") or 0)
     season_source = "tmdb"
 
-    tvdb_seasons = _tvdb_season_list(tvdb_id, db) or []
     if tvdb_seasons:
         seasons = tvdb_seasons
         # Match TMDB's number_of_seasons semantics, which exclude specials.

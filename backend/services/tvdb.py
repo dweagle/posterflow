@@ -367,10 +367,35 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
             "name": str(season.get("name") or "").strip(),
             "image": absolute_image_url(season.get("image")),
             "year": str(season.get("year") or "").strip() or None,
+            # Season records carry no episode count, and it's only worth a lookup for specials
+            # (see below). None = not asked.
+            "episode_count": None,
         })
     seasons.sort(key=lambda s: s["number"])
+
+    # TVDB lists a Specials season for every series whether or not it holds episodes, so callers
+    # need the real count to tell a genuine Specials from an empty placeholder. It costs one extra
+    # call, only for series that have a season 0, and rides along in this function's cache.
+    specials = next((s for s in seasons if s["number"] == 0), None)
+    if specials is not None:
+        specials["episode_count"] = _season_episode_count(specials["id"], api_key, pin)
     _store_seasons(tvdb_id, seasons)
     return seasons
+
+
+def _season_episode_count(season_id: int, api_key: str, pin: str) -> Optional[int]:
+    """How many episodes a season holds, or None if it couldn't be determined.
+
+    None rather than 0 on failure, so a caller deciding whether to hide an empty Specials errs
+    towards showing it — hiding a season the user's library actually has is the worse mistake.
+    """
+    try:
+        data = _get(f"/seasons/{season_id}/extended", api_key, pin, what="season episodes")
+    except TvdbError:
+        return None
+    if data is None:
+        return None
+    return len((data.get("episodes") or []))
 
 
 def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:

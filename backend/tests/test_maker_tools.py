@@ -820,10 +820,10 @@ def test_tv_details_prefers_tvdb_seasons_when_configured(client, test_db):
     _seed_tmdb_key(test_db)
     _seed_tvdb_key(test_db)
     tvdb_rows = [
-        {"id": 10, "number": 0, "name": "", "image": "", "year": None},
-        {"id": 11, "number": 1, "name": "", "image": "https://artworks.thetvdb.com/s1.jpg", "year": "2020"},
-        {"id": 12, "number": 2, "name": "", "image": "", "year": "2021"},
-        {"id": 13, "number": 3, "name": "", "image": "", "year": "2022"},
+        {"id": 10, "number": 0, "name": "", "image": "", "year": None, "episode_count": 3},
+        {"id": 11, "number": 1, "name": "", "image": "https://artworks.thetvdb.com/s1.jpg", "year": "2020", "episode_count": None},
+        {"id": 12, "number": 2, "name": "", "image": "", "year": "2021", "episode_count": None},
+        {"id": 13, "number": 3, "name": "", "image": "", "year": "2022", "episode_count": None},
     ]
     with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
          patch("services.tvdb.fetch_series_seasons", return_value=tvdb_rows):
@@ -852,7 +852,7 @@ def test_tv_details_always_returns_the_tmdb_season_list(client, test_db):
     _seed_tvdb_key(test_db)
     with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
          patch("services.tvdb.fetch_series_seasons",
-               return_value=[{"id": 11, "number": 1, "name": "", "image": "", "year": None}]):
+               return_value=[{"id": 11, "number": 1, "name": "", "image": "", "year": None, "episode_count": None}]):
         response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
 
     data = response.json()
@@ -870,6 +870,95 @@ def test_tv_details_leaves_tvdb_seasons_empty_without_tvdb(client, test_db):
     data = response.json()
     assert data["tvdb_seasons"] == []
     assert [s["season_number"] for s in data["tmdb_seasons"]] == [0, 1, 2]
+
+
+# --- empty Specials ----------------------------------------------------------------------
+# TheTVDB lists a Specials season for every series even when it holds no episodes. Each list is
+# judged by its OWN source's count — TheTVDB is authoritative for shows and carries specials TMDB
+# doesn't list (The Witcher's TVDB season 0 has 9 episodes; TMDB lists none at all).
+
+def _tmdb_details(seasons, number_of_seasons=2):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "number_of_seasons": number_of_seasons,
+        "type": "Scripted",
+        "seasons": seasons,
+    }
+    return mock_resp
+
+
+_S1 = {"season_number": 1, "name": "Season 1", "episode_count": 10, "air_date": "2020-06-01", "poster_path": ""}
+_EMPTY_S0 = {"season_number": 0, "name": "Specials", "episode_count": 0, "air_date": None, "poster_path": ""}
+
+
+def _tvdb_rows(specials_episodes):
+    """TVDB season rows; specials_episodes None = the lookup couldn't determine a count."""
+    return [
+        {"id": 10, "number": 0, "name": "", "image": "", "year": None,
+         "episode_count": specials_episodes},
+        {"id": 11, "number": 1, "name": "", "image": "", "year": "2020", "episode_count": None},
+    ]
+
+
+def test_tvdb_specials_kept_when_tmdb_lists_none(client, test_db):
+    """The Witcher's case: TheTVDB has real special episodes, TMDB lists no Specials season.
+    TMDB's silence must not hide a season the user's library actually has."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(9)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert [s["season_number"] for s in response.json()["seasons"]] == [0, 1]
+
+
+def test_tvdb_specials_dropped_when_tvdb_itself_reports_none(client, test_db):
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(0)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert [s["season_number"] for s in data["seasons"]] == [1]
+    assert [s["season_number"] for s in data["tvdb_seasons"]] == [1]
+
+
+def test_tvdb_specials_kept_when_the_count_is_unknown(client, test_db):
+    """A failed episode lookup must not hide a season — showing a stray badge is the lesser harm."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(None)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert [s["season_number"] for s in response.json()["seasons"]] == [0, 1]
+
+
+def test_tmdb_list_drops_its_own_empty_specials(client, test_db):
+    """Each list is filtered by its own source, so TMDB's empty Specials goes from TMDB's list
+    while TheTVDB's real one stays in TheTVDB's."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_EMPTY_S0, _S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(9)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert [s["season_number"] for s in data["tmdb_seasons"]] == [1]
+    assert [s["season_number"] for s in data["tvdb_seasons"]] == [0, 1]
+
+
+def test_dropping_specials_leaves_the_season_count_alone(client, test_db):
+    """season_count already excludes specials, so the filter must not move it."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(0)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert response.json()["season_count"] == 1
 
 
 def test_tv_details_ignores_tvdb_without_a_tvdb_id(client, test_db):
