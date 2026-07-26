@@ -60,6 +60,7 @@ function buildTmdbLink(tmdbId: number | null, mediaType: string): string {
   if (!tmdbId) return ''
   if (mediaType === 'movie') return `https://www.themoviedb.org/movie/${tmdbId}`
   if (mediaType === 'collection') return `https://www.themoviedb.org/collection/${tmdbId}`
+  if (mediaType === 'person') return `https://www.themoviedb.org/person/${tmdbId}`
   return `https://www.themoviedb.org/tv/${tmdbId}`
 }
 
