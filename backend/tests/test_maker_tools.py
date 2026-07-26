@@ -620,7 +620,7 @@ def test_tmdb_images_language_all_omits_include_image_language(client, test_db):
 
 
 # ---------------------------------------------------------------------------
-# API: GET /api/maker-tools/tmdb/tv-details
+# API: GET /api/maker-tools/tv-details
 # ---------------------------------------------------------------------------
 
 _FAKE_TV_DETAILS = {
@@ -641,7 +641,7 @@ def test_tmdb_tv_details_returns_seasons(client, test_db):
     mock_resp.json.return_value = _FAKE_TV_DETAILS
 
     with patch("api.maker_tools.requests.get", return_value=mock_resp):
-        response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=1396")
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
 
     assert response.status_code == 200
     data = response.json()
@@ -661,7 +661,7 @@ def test_tmdb_tv_details_returns_seasons(client, test_db):
 
 
 def test_tmdb_tv_details_no_api_key_returns_400(client):
-    response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=1396")
+    response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
     assert response.status_code == 400
 
 
@@ -671,9 +671,126 @@ def test_tmdb_tv_details_tmdb_error_returns_502(client, test_db):
     mock_resp.status_code = 404
 
     with patch("api.maker_tools.requests.get", return_value=mock_resp):
-        response = client.get("/api/maker-tools/tmdb/tv-details?tmdb_id=99999")
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=99999")
 
     assert response.status_code == 502
+
+
+# --- season source: TheTVDB wins when available, TMDB is the fallback -------------------
+# Sonarr's metadata comes from TVDB, so its season list is what the user's library reflects.
+
+def _tmdb_details_response():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _FAKE_TV_DETAILS
+    return mock_resp
+
+
+def _seed_tvdb_key(test_db):
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+
+
+def test_tv_details_uses_tmdb_seasons_when_tvdb_is_not_configured(client, test_db):
+    _seed_tmdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert data["season_source"] == "tmdb"
+    assert data["season_count"] == 2
+
+
+def test_tv_details_prefers_tvdb_seasons_when_configured(client, test_db):
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    tvdb_rows = [
+        {"id": 10, "number": 0, "name": "", "image": "", "year": None},
+        {"id": 11, "number": 1, "name": "", "image": "https://artworks.thetvdb.com/s1.jpg", "year": "2020"},
+        {"id": 12, "number": 2, "name": "", "image": "", "year": "2021"},
+        {"id": 13, "number": 3, "name": "", "image": "", "year": "2022"},
+    ]
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
+         patch("services.tvdb.fetch_series_seasons", return_value=tvdb_rows):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert data["season_source"] == "tvdb"
+    # TVDB says 3 real seasons where TMDB said 2 — that disagreement is the whole point.
+    assert data["season_count"] == 3
+    assert [s["season_number"] for s in data["seasons"]] == [0, 1, 2, 3]
+    # TVDB leaves season names blank, so the API supplies display names.
+    assert data["seasons"][0]["name"] == "Specials"
+    assert data["seasons"][1]["name"] == "Season 1"
+    # Series type stays TMDB-only — TVDB has no Miniseries equivalent.
+    assert data["series_type"] == "Miniseries"
+    # Both lists ship regardless of which one won, so the gallery's season picker can follow
+    # whichever source's images are being browsed.
+    assert [s["season_number"] for s in data["tvdb_seasons"]] == [0, 1, 2, 3]
+    assert [s["season_number"] for s in data["tmdb_seasons"]] == [0, 1, 2]
+
+
+def test_tv_details_always_returns_the_tmdb_season_list(client, test_db):
+    """TMDB can list a season TVDB doesn't (an airing show, usually). Browsing TMDB images must
+    still reach those seasons, so its list is never replaced by TVDB's."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
+         patch("services.tvdb.fetch_series_seasons",
+               return_value=[{"id": 11, "number": 1, "name": "", "image": "", "year": None}]):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert data["season_source"] == "tvdb"
+    assert [s["season_number"] for s in data["tvdb_seasons"]] == [1]
+    # TMDB's season 2 survives even though TVDB has never heard of it.
+    assert [s["season_number"] for s in data["tmdb_seasons"]] == [0, 1, 2]
+
+
+def test_tv_details_leaves_tvdb_seasons_empty_without_tvdb(client, test_db):
+    _seed_tmdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
+
+    data = response.json()
+    assert data["tvdb_seasons"] == []
+    assert [s["season_number"] for s in data["tmdb_seasons"]] == [0, 1, 2]
+
+
+def test_tv_details_ignores_tvdb_without_a_tvdb_id(client, test_db):
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
+         patch("services.tvdb.fetch_series_seasons", side_effect=AssertionError("should not be called")):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
+
+    assert response.json()["season_source"] == "tmdb"
+
+
+def test_tv_details_falls_back_to_tmdb_when_tvdb_errors(client, test_db):
+    """A TVDB outage must not break the card — it just loses the accuracy upgrade."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    import services.tvdb as tvdb_service
+
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
+         patch("services.tvdb.fetch_series_seasons",
+               side_effect=tvdb_service.TvdbError("TheTVDB is down")):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert response.status_code == 200
+    assert response.json()["season_source"] == "tmdb"
+    assert response.json()["season_count"] == 2
+
+
+def test_tv_details_falls_back_when_tvdb_has_no_seasons(client, test_db):
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details_response()), \
+         patch("services.tvdb.fetch_series_seasons", return_value=[]):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert response.json()["season_source"] == "tmdb"
 
 
 # ---------------------------------------------------------------------------

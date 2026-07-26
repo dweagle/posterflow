@@ -190,6 +190,83 @@ def test_group_artwork_falls_back_to_the_full_image_when_no_thumbnail():
     assert out["posters"][0]["url_thumb"] == out["posters"][0]["url_full"]
 
 
+# ---------------------------------------------------------------- season list
+
+def _season(number, order="official", season_id=None, name="", image="", year=None):
+    return {"id": season_id if season_id is not None else 100 + number,
+            "number": number, "name": name, "image": image, "year": year,
+            "type": {"type": order}}
+
+
+def test_fetch_series_seasons_keeps_only_the_official_order(monkeypatch):
+    """TVDB stacks several season orders in one array — a live Simpsons record carried 72 seasons
+    (38 official + 33 dvd + 1 absolute). Without this filter the card would show all 72."""
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [
+        _season(0), _season(1), _season(2),
+        _season(1, "dvd", season_id=901), _season(2, "dvd", season_id=902),
+        _season(1, "absolute", season_id=903),
+    ]})
+    seasons = tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")
+    assert [s["number"] for s in seasons] == [0, 1, 2]
+    assert [s["id"] for s in seasons] == [100, 101, 102]
+
+
+def test_fetch_series_seasons_sorts_unordered_input(monkeypatch):
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [
+        _season(3), _season(1), _season(0), _season(2),
+    ]})
+    seasons = tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")
+    assert [s["number"] for s in seasons] == [0, 1, 2, 3]
+
+
+def test_fetch_series_seasons_keeps_seasons_with_no_order_type(monkeypatch):
+    """An untyped season is kept rather than dropped — same fail-safe stance as record types."""
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [{"id": 5, "number": 1}]})
+    assert len(tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")) == 1
+
+
+def test_fetch_series_seasons_normalizes_fields(monkeypatch):
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [
+        _season(1, name="  Book One  ", image="banners/s1.jpg", year="2020"),
+    ]})
+    season = tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")[0]
+    assert season["name"] == "Book One"
+    assert season["image"] == "https://artworks.thetvdb.com/banners/s1.jpg"
+    assert season["year"] == "2020"
+
+
+def test_fetch_series_seasons_skips_unparseable_rows(monkeypatch):
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [
+        _season(1), {"id": "x", "number": "y"}, "not-a-dict", {"number": 2},
+    ]})
+    assert [s["number"] for s in tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")] == [1]
+
+
+def test_fetch_series_seasons_handles_a_missing_series(monkeypatch):
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: None)   # 404 → _get returns None
+    assert tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="") == []
+
+
+def test_fetch_season_artwork_resolves_the_number_through_the_season_list(monkeypatch):
+    monkeypatch.setattr(tvdb, "fetch_series_seasons",
+                        lambda **k: [{"id": 55, "number": 2, "name": "", "image": "", "year": None}])
+    calls = []
+
+    def fake_get(path, *a, **k):
+        calls.append(path)
+        return {"artwork": [{"type": 7}]}
+
+    monkeypatch.setattr(tvdb, "_get", fake_get)
+    out = tvdb.fetch_season_artwork(tvdb_id=1, season_number=2, api_key="k", pin="")
+    assert calls == ["/seasons/55/extended"]
+    assert len(out) == 1
+
+
+def test_fetch_season_artwork_returns_empty_for_an_unknown_season(monkeypatch):
+    monkeypatch.setattr(tvdb, "fetch_series_seasons", lambda **k: [{"id": 55, "number": 2}])
+    assert tvdb.fetch_season_artwork(tvdb_id=1, season_number=9, api_key="k", pin="") == []
+
+
 # ---------------------------------------------------------------- id resolution
 
 def test_resolve_tvdb_id_prefers_a_carried_id():

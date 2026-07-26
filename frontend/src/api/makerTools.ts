@@ -184,13 +184,24 @@ export interface TmdbSeasonInfo {
 }
 
 export interface TmdbTvDetails {
-  season_count: number
-  seasons: TmdbSeasonInfo[]
-  series_type: string | null  // TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
+  season_count: number             // preferred source, excluding specials — drives the card badge
+  seasons: TmdbSeasonInfo[]        // preferred source (TheTVDB when available)
+  series_type: string | null       // TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
+  season_source: 'tmdb' | 'tvdb'   // which provider the preferred season list came from
+  // Both providers' lists, so the gallery's season picker can follow the source being browsed.
+  tmdb_seasons: TmdbSeasonInfo[]
+  tvdb_seasons: TmdbSeasonInfo[]
 }
 
-export const getTvDetails = async (tmdb_id: number): Promise<TmdbTvDetails> => {
-  return getData<TmdbTvDetails>(`/api/maker-tools/tmdb/tv-details?tmdb_id=${tmdb_id}`)
+/**
+ * Season list + count for a TV maker card. Passing the item's tvdb_id lets the server prefer
+ * TheTVDB's seasons — the same source Sonarr uses, so the count matches the user's library.
+ * Falls back to TMDB when TheTVDB isn't configured or the item has no tvdb_id.
+ */
+export const getTvDetails = async (tmdb_id: number, tvdb_id?: number | null): Promise<TmdbTvDetails> => {
+  const params = new URLSearchParams({ tmdb_id: String(tmdb_id) })
+  if (tvdb_id) params.set('tvdb_id', String(tvdb_id))
+  return getData<TmdbTvDetails>(`/api/maker-tools/tv-details?${params.toString()}`)
 }
 
 export const getSeasonImages = async (tmdb_id: number, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {

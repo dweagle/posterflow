@@ -1349,6 +1349,20 @@
   align-items: center;
 }
 
+/* Marks the season badge when its count came from TheTVDB rather than TMDB, so a count that
+   disagrees with TMDB reads as deliberate (it matches Sonarr) instead of looking wrong. */
+.tmdb-season-source {
+  margin-left: 0.35rem;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  background: rgba(100, 181, 246, 0.18);
+  color: #64b5f6;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
 /* Image-source switcher (TMDB | TVDB) — a joined segmented control left of the content tabs,
    separated by a rule so it doesn't read as another Posters/Backdrops/Logos tab. */
 .tmdb-gallery-sources {

@@ -454,14 +454,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     if (tvDetails || tvDetailsLoading) return
     setTvDetailsLoading(true)
     try {
-      const details = await getTvDetails(item.tmdb_id)
+      const details = await getTvDetails(item.tmdb_id, item.tvdb_id)
       setTvDetails(details)
     } catch {
       // non-blocking
     } finally {
       setTvDetailsLoading(false)
     }
-  }, [item.tmdb_id, tvDetails, tvDetailsLoading])
+  }, [item.tmdb_id, item.tvdb_id, tvDetails, tvDetailsLoading])
 
   const fetchSeasonImages = useCallback(async (seasonNumber: number) => {
     setSelectedSeason(seasonNumber)
@@ -687,6 +687,16 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // A TMDB "Miniseries" replaces the generic "Series" badge rather than adding a second one.
   const isMiniseries = item.media_type === 'tv' && tvDetails?.series_type === 'Miniseries'
 
+  // The season picker follows whichever source's images are being browsed: each provider can
+  // list a season the other doesn't (TMDB often carries one more for an airing show), and
+  // pinning the chips to one source would make the other's season posters unreachable. Falls
+  // back to the preferred list when the active source has no seasons of its own.
+  const seasonList = !tvDetails
+    ? []
+    : (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons).length > 0
+      ? (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons)
+      : tvDetails.seasons
+
   const galleryTabs: Array<{ id: 'posters' | 'backdrops' | 'logos' | 'season-posters'; label: string; count: number | null }> =
     galleryImages
       ? [
@@ -835,8 +845,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             </span>
             {item.media_type === 'tv' && tvDetails && (
               <>
-                <span className="badge badge-grey">
+                <span
+                  className="badge badge-grey"
+                  title={tvDetails.season_source === 'tvdb'
+                    ? 'Season count from TheTVDB — the same source Sonarr uses'
+                    : 'Season count from TMDB'}
+                >
                   <Layers size={11} /> {tvDetails.season_count} season{tvDetails.season_count !== 1 ? 's' : ''}
+                  {tvDetails.season_source === 'tvdb' && <span className="tmdb-season-source">TVDB</span>}
                 </span>
                 {tvDetails.seasons.some((s) => s.season_number === 0) && (
                   <span className="badge badge-grey">Specials</span>
@@ -1072,12 +1088,12 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               <div className="tmdb-season-picker">
                 {tvDetailsLoading
                   ? <p className="tmdb-gallery-empty">Loading seasons…</p>
-                  : !tvDetails || tvDetails.seasons.length === 0
+                  : seasonList.length === 0
                     ? <p className="tmdb-gallery-empty">No seasons available.</p>
                     : (
                       <>
                         <div className="tmdb-season-chips">
-                          {tvDetails.seasons.map((s) => (
+                          {seasonList.map((s) => (
                             <button
                               key={s.season_number}
                               type="button"

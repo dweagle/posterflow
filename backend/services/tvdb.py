@@ -235,25 +235,46 @@ def fetch_artwork(*, tvdb_id: int, media_type: str, api_key: str, pin: str) -> l
     return [r for r in records if isinstance(r, dict)]
 
 
-def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
-    """Artwork for one season — needs the series' season list first to turn a number into an id."""
+def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
+    """A series' seasons in official (aired) order — the same ordering Sonarr uses.
+
+    TVDB publishes several parallel season orders (official/aired, DVD, absolute, alternate).
+    Only the official one lines up with what Sonarr shows, so the alternates are dropped;
+    otherwise a show would appear to have several times its real number of seasons.
+
+    Returns [{id, number, name, image, year}] sorted by season number, specials (0) first.
+    """
     data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"},
                 what="series seasons")
-    season_id: int | None = None
+    seasons: list[dict] = []
     for season in ((data or {}).get("seasons") or []):
         if not isinstance(season, dict):
             continue
-        # Only the official/aired-order season list carries the artwork users expect.
         stype = season.get("type")
         type_slug = str((stype or {}).get("type") or "") if isinstance(stype, dict) else ""
         if type_slug and type_slug != "official":
             continue
         try:
-            if int(season.get("number")) == int(season_number):
-                season_id = int(season.get("id"))
-                break
+            number = int(season.get("number"))
+            season_id = int(season.get("id"))
         except (TypeError, ValueError):
             continue
+        seasons.append({
+            "id": season_id,
+            "number": number,
+            # TVDB usually leaves season names blank; the caller supplies a display fallback.
+            "name": str(season.get("name") or "").strip(),
+            "image": absolute_image_url(season.get("image")),
+            "year": str(season.get("year") or "").strip() or None,
+        })
+    seasons.sort(key=lambda s: s["number"])
+    return seasons
+
+
+def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
+    """Artwork for one season — needs the series' season list first to turn a number into an id."""
+    seasons = fetch_series_seasons(tvdb_id=tvdb_id, api_key=api_key, pin=pin)
+    season_id = next((s["id"] for s in seasons if s["number"] == int(season_number)), None)
     if season_id is None:
         return []
     extended = _get(f"/seasons/{season_id}/extended", api_key, pin, what="season artwork")

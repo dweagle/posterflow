@@ -1369,15 +1369,20 @@ class TmdbImagesResponse(BaseModel):
 class TmdbSeasonInfo(BaseModel):
     season_number: int
     name: str
-    episode_count: int
+    episode_count: int    # 0 when the seasons came from TVDB, which doesn't publish per-season counts
     air_date: str | None = None
     poster_url: str | None = None
 
 
 class TmdbTvDetails(BaseModel):
-    season_count: int
-    seasons: list[TmdbSeasonInfo]
+    season_count: int               # preferred source, excluding specials — drives the card badge
+    seasons: list[TmdbSeasonInfo]   # preferred source (TheTVDB when available)
     series_type: str | None = None  # TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
+    season_source: str = "tmdb"     # which provider the preferred season list came from
+    # Both providers' lists, kept separate so the gallery's season picker can follow whichever
+    # source's images are being browsed. Either one can carry a season the other doesn't.
+    tmdb_seasons: list[TmdbSeasonInfo] = []
+    tvdb_seasons: list[TmdbSeasonInfo] = []
 
 
 def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300") -> list[TmdbImage]:
@@ -1474,9 +1479,45 @@ def _build_lang_params(lang: str) -> str | None:
     return lang  # specific language, no textless
 
 
-@router.get("/tmdb/tv-details", response_model=TmdbTvDetails)
-def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetails:
-    """Fetch TV show details including the full seasons list."""
+def _tvdb_season_list(tvdb_id: int, db: Session) -> list[TmdbSeasonInfo] | None:
+    """Seasons from TheTVDB, or None when it's unconfigured, unusable, or has nothing to say.
+
+    Sonarr takes its metadata from TVDB, so TVDB's season list is what a user's library actually
+    reflects — TMDB's numbering and counts can disagree with it. This is an accuracy upgrade
+    rather than a dependency, so every failure path returns None and lets TMDB stand.
+    """
+    if tvdb_id <= 0:
+        return None
+    api_key, pin = tvdb.get_tvdb_credentials(db)
+    if not api_key:
+        return None
+    try:
+        rows = tvdb.fetch_series_seasons(tvdb_id=tvdb_id, api_key=api_key, pin=pin)
+    except tvdb.TvdbError as exc:
+        log_warning(LogTags.API, f"TheTVDB season lookup failed for tvdb-{tvdb_id} ({exc}); using TMDB seasons")
+        return None
+    if not rows:
+        return None
+    return [
+        TmdbSeasonInfo(
+            season_number=r["number"],
+            name=r["name"] or ("Specials" if r["number"] == 0 else f"Season {r['number']}"),
+            episode_count=0,          # TVDB's season records carry no episode count
+            air_date=r["year"],       # TVDB gives a year only, not a full date
+            poster_url=r["image"] or None,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/tv-details", response_model=TmdbTvDetails)
+def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) -> TmdbTvDetails:
+    """TV show details for a maker card: the seasons list, season count, and series type.
+
+    Seasons come from TheTVDB when a key is configured and the item has a tvdb_id, so the count
+    matches Sonarr; otherwise they come from TMDB. The series type stays TMDB-only either way —
+    TVDB has no Miniseries equivalent.
+    """
     api_key = _get_monitor_tmdb_key(db)
     if not api_key:
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
@@ -1484,11 +1525,11 @@ def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetail
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
     data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "TV details")
 
-    seasons: list[TmdbSeasonInfo] = []
+    tmdb_seasons: list[TmdbSeasonInfo] = []
     for s in (data.get("seasons") or []):
         sn = int(s.get("season_number") or 0)
         poster_path = str(s.get("poster_path") or "")
-        seasons.append(TmdbSeasonInfo(
+        tmdb_seasons.append(TmdbSeasonInfo(
             season_number=sn,
             name=str(s.get("name") or f"Season {sn}"),
             episode_count=int(s.get("episode_count") or 0),
@@ -1496,10 +1537,24 @@ def tmdb_tv_details(tmdb_id: int, db: Session = Depends(get_db)) -> TmdbTvDetail
             poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else None,
         ))
 
+    seasons = tmdb_seasons
+    season_count = int(data.get("number_of_seasons") or 0)
+    season_source = "tmdb"
+
+    tvdb_seasons = _tvdb_season_list(tvdb_id, db) or []
+    if tvdb_seasons:
+        seasons = tvdb_seasons
+        # Match TMDB's number_of_seasons semantics, which exclude specials.
+        season_count = sum(1 for s in tvdb_seasons if s.season_number > 0)
+        season_source = "tvdb"
+
     return TmdbTvDetails(
-        season_count=int(data.get("number_of_seasons") or 0),
+        season_count=season_count,
         seasons=seasons,
         series_type=str(data.get("type") or "") or None,
+        season_source=season_source,
+        tmdb_seasons=tmdb_seasons,
+        tvdb_seasons=tvdb_seasons,
     )
 
 
