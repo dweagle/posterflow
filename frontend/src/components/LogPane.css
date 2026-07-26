@@ -9,10 +9,3 @@
 .log-pane-managed {
   overflow-anchor: none;
 }
-
-/* The no-virtualization trade: the browser skips layout/paint for off-screen rows.
-   The 30px intrinsic estimate only matters before a row's first render. */
-.log-pane-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 30px;
-}

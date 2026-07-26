@@ -1,10 +1,9 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useImperativeHandle, type ReactNode, type Ref } from 'react'
 import './LogPane.css'
 
-// Plain-DOM log list. No virtualization: rows use content-visibility so the browser
-// skips layout/paint for off-screen entries, and scrollHeight is exact and synchronous —
-// stick-to-bottom is a plain scrollTop write with none of the estimate-correction races
-// a virtualizer brings.
+// Plain-DOM log list. No virtualization, and deliberately NO content-visibility on rows.
+// Ordinary divs keep scrollHeight exact and synchronous — stick-to-bottom is a plain
+// scrollTop write with none of the estimate-correction races a virtualizer brings.
 
 export type LogPaneHandle = {
   jumpToLatest: () => void
@@ -54,9 +53,8 @@ function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom 
     const el = scrollerRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-    // content-visibility rows get real sizes only as they render, so the write above can
-    // land a few rows short of the true bottom. Re-check for a few frames; converges fast
-    // because the browser remembers rendered sizes (contain-intrinsic-size: auto).
+    // Late reflow (font load, wrap changes) can land the write a hair short of the
+    // true bottom; re-check for a few frames.
     const token = ++settleTokenRef.current
     let tries = 12
     const settle = () => {

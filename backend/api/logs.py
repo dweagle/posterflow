@@ -26,7 +26,9 @@ class LogEntry(BaseModel):
 
 LOG_LINE_PATTERN = r'(\d{2}[/:]\d{2}[/:]\d{2} \d{2}:\d{2}:\d{2}) \| (\w+)\s+\| (.+)'
 LOG_WINDOW_BYTES = 1_000_000
-LOG_WINDOW_MAX_LINES = 5000
+# Keep the initial window modest: Safari's Reader-availability scan repeatedly forces
+# full layout of every mounted row, and ~5k rows wedges its main thread (Jul 2026).
+LOG_WINDOW_MAX_LINES = 1000
 
 
 def read_log_window(end_offset: Optional[int] = None, max_lines: int = LOG_WINDOW_MAX_LINES) -> tuple[list[dict], int]:
