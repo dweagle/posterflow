@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-07-26
+### Added
+- Artwork Drives: added the tarantula212 drive.
+
+### Changed
+- Maker Tools: TVDB season mapping now handles year-numbered shows (seasons labeled by year instead of sequential numbers).
+
+### Fixed
+- Maker Tools: the Specials badge now only shows when TVDB specials actually have an episode count.
+- Community Requests: corrected the TMDB link on person collection posters.
+- Logs: fixed log page freezing and stuttering in Safari.
+
 ## [0.12.0] - 2026-07-25
 ### Added
 - Artwork: logos, backgrounds, and squareart are now available assets alongside posters. Artwork drives can be added, synced, and scheduled just like poster drives, and posters + artwork flow through one shared engine for drive sync, matching/renaming, unmatched detection, cleanup, Plex upload, and database maintenance (orphaned artwork records are detected and cleaned like posters). Discord notifications include artwork reporting.
