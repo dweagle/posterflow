@@ -16,6 +16,16 @@ import ArtworkFinderCard from './ArtworkFinderCard'
 import { type AssetScope } from './useArtworkScopes'
 
 type Category = 'movie' | 'series' | 'collection'
+export type FilterTab = 'all' | Category
+
+// Mirrors the poster tab's labels — pluralized where it reads naturally.
+export const TAB_LABEL: Record<FilterTab, string> = {
+  all: 'All',
+  movie: 'Movies',
+  series: 'Series',
+  collection: 'Collections',
+}
+export const FILTER_TABS: FilterTab[] = ['all', 'movie', 'series', 'collection']
 
 interface FlatArtworkItem {
   key: string
@@ -56,7 +66,11 @@ function mergeByItem(byType: Record<ArtworkType, FlatArtworkItem[]>): MergedArtw
       if (cur) {
         if (!cur.missing.includes(t)) cur.missing.push(t)
       } else {
-        map.set(key, { ...it, missing: [t] })
+        // Take the identity key as the row's React key too. flattenArtwork numbers its keys per
+        // type ("movie-0", "movie-1", …) and runs once per artwork type, so two different titles
+        // can both arrive as "movie-0" — duplicate keys make React reuse the wrong card when the
+        // list is filtered.
+        map.set(key, { ...it, key, missing: [t] })
       }
     }
   }
@@ -71,12 +85,12 @@ const tmdbHomepage = (mediaType: FlatArtworkItem['mediaType'], id: number): stri
   return `https://www.themoviedb.org/${seg}/${id}`
 }
 
-const buildResult = (item: FlatArtworkItem, tmdbId: number, posterUrl: string | null, imdbId: string | null, tvdbId: number | null): TmdbSearchResult => ({
+const buildResult = (item: FlatArtworkItem, tmdbId: number, posterUrl: string | null, imdbId: string | null, tvdbId: number | null, overview = ''): TmdbSearchResult => ({
   tmdb_id: tmdbId,
   media_type: item.mediaType,
   title: item.title,
   year: item.year ? String(item.year) : '',
-  overview: '',
+  overview,
   poster_url: posterUrl || '',
   homepage: tmdbHomepage(item.mediaType, tmdbId),
   imdb_id: imdbId ?? null,
@@ -121,8 +135,16 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   scopeLabel: string | null
 }) {
   const { showToast } = useToast()
-  const [resolved, setResolved] = useState<TmdbSearchResult | null>(
-    item.tmdb_id ? buildResult(item, item.tmdb_id, item.poster_url, item.imdb_id, item.tvdb_id) : null,
+  // A candidate the user picked, which outranks whatever the item itself resolves to.
+  const [picked, setPicked] = useState<TmdbSearchResult | null>(null)
+  // Derived rather than seeded into state on mount: the drive browser fills a card's poster in
+  // after the fact, and state seeded at mount would ignore it — which previously forced a
+  // remount to apply, resetting the card and re-fetching its poster and description mid-scroll.
+  const resolved = useMemo(
+    () => picked ?? (item.tmdb_id
+      ? buildResult(item, item.tmdb_id, item.poster_url, item.imdb_id, item.tvdb_id)
+      : null),
+    [picked, item],
   )
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -189,7 +211,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
           ) : (
             <div className="unmatched-maker-candidates">
               {candidates.map((c) => (
-                <button key={`${c.media_type}-${c.tmdb_id}`} type="button" className="unmatched-maker-candidate" onClick={() => setResolved(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id))}>
+                <button key={`${c.media_type}-${c.tmdb_id}`} type="button" className="unmatched-maker-candidate" onClick={() => setPicked(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))}>
                   {c.poster_url ? <img src={c.poster_url} alt="" loading="lazy" /> : <span className="unmatched-maker-candidate-placeholder"><Search size={14} /></span>}
                   <span className="unmatched-maker-candidate-meta">
                     <span className="unmatched-maker-candidate-title">{c.title}</span>
@@ -213,6 +235,7 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
   const [stats, setStats] = useState<ArtworkUnmatchedStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<FilterTab>('all')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
@@ -230,16 +253,25 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
     squareart: flattenArtwork(stats.squareart),
   }) : []), [stats])
 
+  const counts = useMemo(() => {
+    const c: Record<FilterTab, number> = { all: items.length, movie: 0, series: 0, collection: 0 }
+    items.forEach((it) => { c[it.category] += 1 })
+    return c
+  }, [items])
+
   const visibleItems = useMemo(() => {
     const lower = query.trim().toLowerCase()
-    return lower ? items.filter((it) => it.title.toLowerCase().includes(lower)) : items
-  }, [items, query])
+    return items.filter((it) => {
+      if (filter !== 'all' && it.category !== filter) return false
+      return lower ? it.title.toLowerCase().includes(lower) : true
+    })
+  }, [items, filter, query])
 
   // Paged rendering so a large unmatched list doesn't mount every card at once (same
   // pattern as the My Drive browser).
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [query, items, PAGE_SIZE])
+  }, [query, filter, items, PAGE_SIZE])
 
   const shownItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount])
 
@@ -287,20 +319,38 @@ export default function ArtworkUnmatchedMakerPanel({ selected }: { selected: Ass
         </div>
       ) : (
         <>
-          <div className="tmdb-search-bar unmatched-maker-search">
-            <Search size={18} className="tmdb-search-icon" />
-            <input
-              type="text"
-              className="tmdb-search-input"
-              placeholder="Filter unmatched items by title…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query && (
-              <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
-                <X size={15} />
-              </button>
-            )}
+          <div className="unmatched-maker-controls">
+            <div className="maker-result-tabs" role="tablist" aria-label="Unmatched artwork category tabs">
+              {FILTER_TABS.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === t}
+                  className={filter === t ? 'active' : ''}
+                  onClick={() => setFilter(t)}
+                >
+                  {TAB_LABEL[t]}
+                  <span className="unmatched-maker-tab-count">{counts[t]}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="tmdb-search-bar unmatched-maker-search">
+              <Search size={16} className="tmdb-search-icon" />
+              <input
+                type="text"
+                className="tmdb-search-input"
+                placeholder="Filter by title…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
           </div>
 
           <p className="muted unmatched-maker-count">

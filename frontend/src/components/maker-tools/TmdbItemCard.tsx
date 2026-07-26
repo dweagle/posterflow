@@ -10,7 +10,6 @@ import {
   FileDown,
   FolderOpen,
   Globe,
-  Hash,
   Image,
   Layers,
   Clapperboard as MovieIcon,
@@ -43,13 +42,10 @@ import {
 } from '../../api/client'
 import { useToast } from '../Toast'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
-import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
+import ServiceLinks from './ServiceLinks'
+import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
-import imdbIcon from '../../assets/service-icons/imdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
-import appleTvIcon from '../../assets/service-icons/appletv.png'
-import googleIcon from '../../assets/service-icons/google.png'
-import tpdbIcon from '../../assets/service-icons/tpdb.png'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -298,6 +294,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (gallery, id chip) but
   // still let the user export a blank/existing PSD, named by title + year.
   const hasTmdb = (item.tmdb_id ?? 0) > 0
+  const overview = useCardOverview(item)
 
   // Gallery state. Images are cached per source, so TMDB stays the default load and TheTVDB is
   // only ever called once the user actually clicks its tab — after that, switching is instant.
@@ -687,6 +684,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // A TMDB "Miniseries" replaces the generic "Series" badge rather than adding a second one.
   const isMiniseries = item.media_type === 'tv' && tvDetails?.series_type === 'Miniseries'
 
+  // `display` null = the item has no such id, which still gets a chip so the row stays a
+  // fixed three across. `copy` is the bare id, without the "#" the label shows.
+  const idChips = [
+    { label: 'TMDB', display: hasTmdb ? `#${item.tmdb_id}` : null, copy: String(item.tmdb_id ?? '') },
+    { label: 'IMDB', display: item.imdb_id || null, copy: item.imdb_id ?? '' },
+    { label: 'TVDB', display: item.tvdb_id ? `#${item.tvdb_id}` : null, copy: String(item.tvdb_id ?? '') },
+  ]
+
   // The season picker follows whichever source's images are being browsed: each provider can
   // list a season the other doesn't (TMDB often carries one more for an airing show), and
   // pinning the chips to one source would make the other's season posters unreachable. Falls
@@ -826,18 +831,26 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
         )}
 
-        <div className="tmdb-result-info">
-          <div className="tmdb-result-title-row">
-            {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
-            {!hideTitle && item.year && <span className="tmdb-result-year">{item.year}</span>}
-            {!hideTitle && item.auto_matched && (
-              <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
-                <Check size={11} /> Matched
-              </span>
-            )}
-            {!hideTitle && driveSearchControl}
-          </div>
+        {/* Left side: poster, title, year, overview. Omitted entirely when the host card already
+            shows all of it (request cards), so the box isn't pushed off a blank column. */}
+        {(!hideTitle || item.overview) && (
+          <div className="tmdb-result-info">
+            <div className="tmdb-result-title-row">
+              {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
+              {!hideTitle && item.year && <span className="tmdb-result-year">{item.year}</span>}
+              {!hideTitle && item.auto_matched && (
+                <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                  <Check size={11} /> Matched
+                </span>
+              )}
+            </div>
 
+            {overview && <p className="tmdb-result-overview">{overview}</p>}
+          </div>
+        )}
+
+          {/* Right side: everything actionable, at a fixed width so it's identical on every tab. */}
+          <div className="tmdb-result-box">
           <div className="tmdb-result-meta">
             <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? (isMiniseries ? 'badge-purple' : 'badge-green') : 'badge-orange'}`}>
               {item.media_type === 'movie' ? <MovieIcon size={12} /> : item.media_type === 'tv' ? <Tv size={12} /> : <FolderOpen size={12} />}
@@ -852,24 +865,40 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                     : 'Season count from TMDB'}
                 >
                   <Layers size={11} /> {tvDetails.season_count} season{tvDetails.season_count !== 1 ? 's' : ''}
-                  {tvDetails.season_source === 'tvdb' && <span className="tmdb-season-source">TVDB</span>}
                 </span>
                 {tvDetails.seasons.some((s) => s.season_number === 0) && (
                   <span className="badge badge-grey">Specials</span>
                 )}
               </>
             )}
-            {hideTitle && driveSearchControl}
+            {driveSearchControl}
           </div>
 
-          {/* ID badges — click any to copy the id. Compact so all three fit one row. */}
-          {(hasTmdb || item.imdb_id || item.tvdb_id) && (
-            <div className="tmdb-result-ids tmdb-result-ids--compact">
-              {hasTmdb && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID"><Hash size={10} />TMDB&nbsp;#{item.tmdb_id}</button>}
-              {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID"><Hash size={10} />IMDB&nbsp;{item.imdb_id}</button>}
-              {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID"><Hash size={10} />TVDB&nbsp;#{item.tvdb_id}</button>}
-            </div>
-          )}
+          <ServiceLinks item={item} appleTvStorefront={appleTvStorefront} onAppleTvIntent={ensureAppleTvStorefront} />
+
+          {/* ID chips — all three always render, so the row keeps its shape whichever ids the
+              item happens to carry. Present ones copy on click; missing ones say so. */}
+          <div className="tmdb-result-ids tmdb-result-ids--compact">
+            {idChips.map(({ label, display, copy }) => (
+              display
+                ? (
+                  <button
+                    key={label}
+                    type="button"
+                    className="tmdb-id-chip"
+                    onClick={() => copyToClipboard(copy)}
+                    title={`Copy ${label} ID`}
+                  >
+                    <Copy size={10} />{label}&nbsp;{display}
+                  </button>
+                )
+                : (
+                  <span key={label} className="tmdb-id-chip tmdb-id-chip--empty" title={`No ${label} ID`}>
+                    No {label} ID
+                  </span>
+                )
+            ))}
+          </div>
 
           {/* Title / link text — click to copy. */}
           <div className="tmdb-result-copyrow">
@@ -893,8 +922,6 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             )}
           </div>
 
-          {item.overview && <p className="tmdb-result-overview">{item.overview}</p>}
-
           {hasTmdb ? (
             <button
               type="button"
@@ -917,57 +944,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               {psdExportControls}
             </div>
           )}
-        </div>
-
-        {/* Logos column: external-service links, stacked on the right. */}
-        <div className="tmdb-result-logos">
-          {item.homepage && (
-            <a className="tmdb-result-link" href={item.homepage} target="_blank" rel="noreferrer" title="Open on TMDB">
-              <img className="tmdb-link-icon" src={tmdbIcon} alt="TMDB" />
-            </a>
-          )}
-          {item.imdb_id && (
-            <a className="tmdb-result-link" href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noreferrer" title="Open on IMDB">
-              <img className="tmdb-link-icon" src={imdbIcon} alt="IMDB" />
-            </a>
-          )}
-          {item.tvdb_id && (
-            <a className="tmdb-result-link" href={`https://thetvdb.com/?id=${item.tvdb_id}&tab=series`} target="_blank" rel="noreferrer" title="Open on TheTVDB">
-              <img className="tmdb-link-icon" src={tvdbIcon} alt="TVDB" />
-            </a>
-          )}
-          {(hasTmdb || item.tvdb_id) && (
-            <a
-              className="tmdb-result-link"
-              href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''}`}
-              target="_blank"
-              rel="noreferrer"
-              onMouseEnter={ensureAppleTvStorefront}
-              onFocus={ensureAppleTvStorefront}
-              title="Find Apple TV artwork"
-            >
-              <img className="tmdb-link-icon" src={appleTvIcon} alt="Apple TV Art" />
-            </a>
-          )}
-          <a
-            className="tmdb-result-link"
-            href={googleSearchUrl(item.title, item.year)}
-            target="_blank"
-            rel="noreferrer"
-            title="Google search"
-          >
-            <img className="tmdb-link-icon" src={googleIcon} alt="Google" />
-          </a>
-          <a
-            className="tmdb-result-link"
-            href={tpdbSearchUrl(item.title, item.media_type)}
-            target="_blank"
-            rel="noreferrer"
-            title="Search ThePosterDB"
-          >
-            <img className="tmdb-link-icon" src={tpdbIcon} alt="ThePosterDB" />
-          </a>
-        </div>
+          </div>
       </div>
 
       {/* Gallery panel */}

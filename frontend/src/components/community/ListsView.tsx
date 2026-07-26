@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, Search, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
+import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/makerTools'
@@ -74,7 +73,6 @@ function toRequestPayload(item: CommunityListItem, token: string, values: MoveTo
 }
 
 export default function ListsView() {
-  const navigate = useNavigate()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
@@ -675,15 +673,6 @@ export default function ListsView() {
 
             const actions = (
               <>
-                <button
-                  type="button"
-                  className="request-maker-btn"
-                  data-tooltip="Search in Maker Tools"
-                  onClick={() => navigate('/maker-tools', { state: { tmdbSearch: item.year ? `${item.title} ${item.year}` : item.title } })}
-                >
-                  <Search size={11} />
-                  <span>Maker</span>
-                </button>
                 {isMaker && idarrEnabled && (
                   <button
                     type="button"

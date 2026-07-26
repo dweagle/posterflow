@@ -1,5 +1,5 @@
 import { useCallback, useState, type CSSProperties } from 'react'
-import { Check, ChevronDown, ChevronUp, Clapperboard as MovieIcon, Copy, Crop as CropIcon, Download, ExternalLink, FolderOpen, Image as ImageIcon, Plus, Sparkles, Tv, Wand2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Clapperboard as MovieIcon, Copy, Crop as CropIcon, Download, FolderOpen, Image as ImageIcon, Plus, Sparkles, Tv, Wand2 } from 'lucide-react'
 import {
   addArtwork,
   cropArtworkSquare,
@@ -18,6 +18,8 @@ import {
 import { useToast } from '../Toast'
 import SquareCropModal from './SquareCropModal'
 import { useTvdbEnabled } from '../../hooks/useTvdbEnabled'
+import ServiceLinks from './ServiceLinks'
+import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
 
@@ -95,6 +97,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB only
   // once its tab is clicked.
   const tvdbEnabled = useTvdbEnabled()
+  const overview = useCardOverview(item)
   const [source, setSource] = useState<ImageSource>('tmdb')
   const [dataBySource, setDataBySource] = useState<Partial<Record<ImageSource, ArtworkCandidatesResponse>>>({})
   const data = dataBySource[source] ?? null
@@ -106,6 +109,13 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const [cropTarget, setCropTarget] = useState<ArtworkCandidate | null>(null)   // image open in the crop modal
   const [cropping, setCropping] = useState(false)
   const [cropOverwrite, setCropOverwrite] = useState<{ candidate: ArtworkCandidate; crop: { x: number; y: number; size: number } } | null>(null)
+
+  // Mirrors the maker card: a chip per source whether or not the item carries that id.
+  const idChips = [
+    { label: 'TMDB', display: item.tmdb_id ? `#${item.tmdb_id}` : null, copy: String(item.tmdb_id ?? '') },
+    { label: 'IMDB', display: item.imdb_id || null, copy: item.imdb_id ?? '' },
+    { label: 'TVDB', display: item.tvdb_id ? `#${item.tvdb_id}` : null, copy: String(item.tvdb_id ?? '') },
+  ]
 
   const downloadImage = useCallback(async (url: string, filename: string) => {
     try {
@@ -292,6 +302,12 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             <span className="tmdb-result-title">{item.title}</span>
             {item.year && <span className="tmdb-result-year">{item.year}</span>}
           </div>
+
+          {overview && <p className="tmdb-result-overview">{overview}</p>}
+        </div>
+
+        {/* Same box as the maker card: everything actionable inside, poster + title outside. */}
+        <div className="tmdb-result-box">
           <div className="tmdb-result-meta">
             <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? 'badge-green' : 'badge-orange'}`}>{typeIcon} {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? 'Series' : 'Collection'}</span>
             {missing && missing.length > 0 && (
@@ -304,22 +320,32 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             )}
           </div>
 
-          <div className="tmdb-result-ids">
-            <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tmdb_id))} title="Copy TMDB ID">TMDB&nbsp;#{item.tmdb_id}</button>
-            {item.imdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(item.imdb_id!)} title="Copy IMDB ID">IMDB&nbsp;{item.imdb_id}</button>}
-            {item.tvdb_id && <button type="button" className="tmdb-id-chip" onClick={() => copyToClipboard(String(item.tvdb_id))} title="Copy TVDB ID">TVDB&nbsp;#{item.tvdb_id}</button>}
+          <ServiceLinks item={item} />
+
+          {/* All three chips always render, matching the maker card. */}
+          <div className="tmdb-result-ids tmdb-result-ids--compact">
+            {idChips.map(({ label, display, copy }) => (
+              display
+                ? (
+                  <button
+                    key={label}
+                    type="button"
+                    className="tmdb-id-chip"
+                    onClick={() => copyToClipboard(copy)}
+                    title={`Copy ${label} ID`}
+                  >
+                    <Copy size={10} />{label}&nbsp;{display}
+                  </button>
+                )
+                : (
+                  <span key={label} className="tmdb-id-chip tmdb-id-chip--empty" title={`No ${label} ID`}>
+                    No {label} ID
+                  </span>
+                )
+            ))}
           </div>
 
-          <div className="tmdb-result-links">
-            {item.homepage && (
-              <a className="tmdb-result-link" href={item.homepage} target="_blank" rel="noreferrer"><ExternalLink size={12} /> TMDB</a>
-            )}
-            {item.imdb_id && (
-              <a className="tmdb-result-link" href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noreferrer"><ExternalLink size={12} /> IMDB</a>
-            )}
-            {item.tvdb_id && (
-              <a className="tmdb-result-link" href={`https://thetvdb.com/?id=${item.tvdb_id}&tab=series`} target="_blank" rel="noreferrer"><ExternalLink size={12} /> TVDB</a>
-            )}
+          <div className="tmdb-result-copyrow">
             <button type="button" className="tmdb-copy-btn" onClick={() => copyToClipboard(item.year ? `${item.title} (${item.year})` : item.title)} title="Copy title with year">
               <Copy size={12} /> Title
             </button>
@@ -330,7 +356,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             )}
           </div>
 
-          <button type="button" className="tmdb-gallery-toggle" onClick={toggle} disabled={loading} style={{ marginTop: 8 }}>
+          <button type="button" className="tmdb-gallery-toggle" onClick={toggle} disabled={loading}>
             <ImageIcon size={13} />
             {loading ? 'Loading…' : open ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Find artwork</>}
           </button>

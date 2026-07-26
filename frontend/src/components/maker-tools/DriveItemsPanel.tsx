@@ -8,7 +8,7 @@ import {
   type TmdbSearchFilter,
 } from '../../api/client'
 import { useToast } from '../Toast'
-import { ArtworkUnmatchedCard, type MergedArtworkItem } from './ArtworkUnmatchedMakerPanel'
+import { ArtworkUnmatchedCard, FILTER_TABS, TAB_LABEL, type FilterTab, type MergedArtworkItem } from './ArtworkUnmatchedMakerPanel'
 
 // tmdb_id -> poster url ('' = looked up, none found). Module-level so filter toggles and
 // re-mounts don't refetch.
@@ -48,13 +48,18 @@ function LazyPosterCard({ item, syncTargetIndex, scopeLabel }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Stable identity so the card doesn't see a fresh object on every parent render.
+  const cardItem = useMemo(
+    () => (posterUrl ? { ...item, poster_url: posterUrl } : item),
+    [item, posterUrl],
+  )
+
   return (
     <div ref={holder}>
-      {/* The card seeds internal state from the item on mount, so remount once when the
-          poster resolves (fetch fires ~400px before visibility, so this lands pre-interaction). */}
+      {/* No remount key here: the card reads the poster from props, so it updates in place when
+          the lookup lands. Remounting reset the card and re-fetched its description mid-scroll. */}
       <ArtworkUnmatchedCard
-        key={posterUrl ? 'with-poster' : 'no-poster'}
-        item={posterUrl ? { ...item, poster_url: posterUrl } : item}
+        item={cardItem}
         syncTargetIndex={syncTargetIndex}
         scopeLabel={scopeLabel}
       />
@@ -93,6 +98,7 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [missingOnly, setMissingOnly] = useState(true)
+  const [filter, setFilter] = useState<FilterTab>('all')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
@@ -113,20 +119,30 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
   const merged = useMemo(() => (items ?? []).map(toMergedItem), [items])
   const gapCount = useMemo(() => merged.filter((it) => it.missing.length > 0).length, [merged])
 
+  // Counts sit on the tabs, so they follow the "only missing" toggle — otherwise a tab could
+  // advertise items the list won't show.
+  const counts = useMemo(() => {
+    const base = missingOnly ? merged.filter((it) => it.missing.length > 0) : merged
+    const c: Record<FilterTab, number> = { all: base.length, movie: 0, series: 0, collection: 0 }
+    base.forEach((it) => { c[it.category] += 1 })
+    return c
+  }, [merged, missingOnly])
+
   const visibleItems = useMemo(() => {
     const lower = query.trim().toLowerCase()
     return merged.filter((it) => {
       if (missingOnly && it.missing.length === 0) return false
+      if (filter !== 'all' && it.category !== filter) return false
       if (lower && !it.title.toLowerCase().includes(lower)) return false
       return true
     })
-  }, [merged, query, missingOnly])
+  }, [merged, query, filter, missingOnly])
 
   // Render in pages so a large drive doesn't mount thousands of cards at once; the sentinel
   // below the list streams in the next page as it approaches the viewport.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [query, missingOnly, syncTargetIndex, items])
+  }, [query, filter, missingOnly, syncTargetIndex, items])
 
   const shownItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount])
 
@@ -168,20 +184,38 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
 
   return (
     <>
-      <div className="tmdb-search-bar unmatched-maker-search">
-        <Search size={18} className="tmdb-search-icon" />
-        <input
-          type="text"
-          className="tmdb-search-input"
-          placeholder="Filter drive items by title…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {query && (
-          <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
-            <X size={15} />
-          </button>
-        )}
+      <div className="unmatched-maker-controls">
+        <div className="maker-result-tabs" role="tablist" aria-label="Drive item category tabs">
+          {FILTER_TABS.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={filter === t}
+              className={filter === t ? 'active' : ''}
+              onClick={() => setFilter(t)}
+            >
+              {TAB_LABEL[t]}
+              <span className="unmatched-maker-tab-count">{counts[t]}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="tmdb-search-bar unmatched-maker-search">
+          <Search size={16} className="tmdb-search-icon" />
+          <input
+            type="text"
+            className="tmdb-search-input"
+            placeholder="Filter by title…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
+            <button type="button" className="unmatched-maker-search-clear" onClick={() => setQuery('')} title="Clear filter">
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', margin: '0.4rem 0' }}>

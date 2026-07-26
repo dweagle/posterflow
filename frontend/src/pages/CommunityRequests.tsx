@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Globe, ExternalLink, Search, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
@@ -69,7 +68,6 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 }
 
 export default function CommunityRequests() {
-  const navigate = useNavigate()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
@@ -674,15 +672,6 @@ export default function CommunityRequests() {
                     Discord
                   </a>
                 )}
-                <button
-                  type="button"
-                  className="request-maker-btn"
-                  data-tooltip="Search in Maker Tools"
-                  onClick={() => navigate('/maker-tools', { state: { tmdbSearch: req.year ? `${req.title} ${req.year}` : req.title } })}
-                >
-                  <Search size={11} />
-                  <span>Maker</span>
-                </button>
                   {isMaker && (() => {
                     const us = uploadStates.get(req.id)
                     const as_ = actionStates.get(req.id)

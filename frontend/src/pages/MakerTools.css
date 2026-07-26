@@ -848,6 +848,11 @@
 .tmdb-result-card {
   display: flex;
   gap: 1rem;
+  /* Narrow viewports drop the fixed-width box below the poster/title rather than overflowing. */
+  flex-wrap: wrap;
+  /* Width shared by the action rows inside the box (Title/Link, Browse images) so they line up
+     and hold their size as labels change. Sized to fit "Browse images", the longest of them. */
+  --tmdb-card-action-width: 9.5rem;
   background: #1e1e1e;
   border: 1px solid #333;
   border-radius: 8px;
@@ -1076,11 +1081,14 @@
   font-weight: 600;
 }
 
+/* Type / season / specials badges, ruled off from the rest of the card. */
 .tmdb-result-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #64b5f6;   /* accent blue so the header band reads as a divider */
 }
 
 .tmdb-result-ids,
@@ -1119,17 +1127,38 @@
 /* Maker card: smaller id chips + tighter gap so all three (TMDB/IMDB/TVDB) fit one row. */
 .tmdb-result-ids--compact {
   gap: 0.3rem;
+  flex-wrap: nowrap;
 }
 
+/* The three chips split the row evenly, matching the service-link row above them. */
 .tmdb-result-ids--compact .tmdb-id-chip {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
   gap: 0.15rem;
   font-size: 0.68rem;
   padding: 0.1rem 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tmdb-id-chip:hover {
   color: #ccc;
   border-color: #666;
+}
+
+/* Placeholder for an id the item doesn't have — holds the slot without inviting a click. */
+.tmdb-id-chip--empty {
+  color: #5a5a5a;
+  background: #202020;
+  border-style: dashed;
+  cursor: default;
+}
+
+.tmdb-id-chip--empty:hover {
+  color: #5a5a5a;
+  border-color: #3a3a3a;
 }
 
 .tmdb-lightbox-overlay {
@@ -1182,24 +1211,57 @@
   flex-wrap: wrap;
 }
 
-/* Right-hand column: external-service logos stacked top-to-bottom, pinned to the card top. */
-.tmdb-result-logos {
-  flex-shrink: 0;
+/* Everything actionable — badges, Search Drives, service links, id chips, copy buttons and the
+   Browse images / PSD export controls — grouped in one box. The title, overview and poster stay
+   outside it as the card's header. Shared by the maker card and the artwork finder card.
+   `margin-top: auto` keeps it pinned to the card bottom, the job the toggle's own margin did. */
+.tmdb-result-box {
+  flex: 0 0 var(--tmdb-box-width);
+  width: var(--tmdb-box-width);
+  max-width: 100%;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  align-self: flex-start;
-  gap: 0.15rem;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  margin-top: auto;
 }
 
-/* Each logo in the column reads as its own button box (uniform, since every img is 44px wide). */
+/* The box does the bottom-pinning now, so the toggle is a plain item inside it. */
+.tmdb-result-box .tmdb-gallery-toggle {
+  margin-top: 0;
+}
+
+/* Service links sit as a row directly under the badge rule, inside the info column. They share
+   the row evenly and span its full width, which is the span the id chips below them match. */
+.tmdb-result-logos {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  align-self: stretch;
+  gap: 0.25rem;
+}
+
+/* Each logo reads as its own button box. Equal flex basis of 0 makes every box the same width
+   regardless of how many links the item has, so the row always fills the card evenly. */
 .tmdb-result-logos .tmdb-result-link {
+  flex: 1 1 0;
+  min-width: 0;
   justify-content: center;
-  padding: 0.15rem 0.5rem;
+  padding: 0.15rem 0.35rem;
   border: 1px solid #3a3a3a;
   border-radius: 3px;
   background: #252525;
   transition: border-color 0.15s, background 0.15s;
+}
+
+/* Let the icon shrink with its box rather than forcing the row wider than the card. */
+.tmdb-result-logos .tmdb-link-icon {
+  max-width: 100%;
+  height: auto;
 }
 
 .tmdb-result-logos .tmdb-result-link:hover {
@@ -1232,6 +1294,19 @@
 
 .tmdb-result-link:hover {
   text-decoration: underline;
+}
+
+/* Title + Link together span the same width as the Browse images button below them, splitting
+   it evenly rather than each sizing to its own label. */
+.tmdb-result-copyrow {
+  width: var(--tmdb-card-action-width, 9.5rem);
+  flex-wrap: nowrap;
+}
+
+.tmdb-result-copyrow .tmdb-copy-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
 }
 
 .tmdb-copy-btn {
@@ -1323,6 +1398,10 @@
   margin-top: auto;   /* pinned to the card bottom on every page */
   transition: color 0.15s, border-color 0.15s;
   align-self: flex-start;
+  /* Pinned to the width of its longest label ("Browse images") so it doesn't shrink when it
+     becomes "Hide images" or "Loading images…". */
+  justify-content: center;
+  min-width: var(--tmdb-card-action-width, 9.5rem);
 }
 
 .tmdb-gallery-toggle:hover,
@@ -1347,20 +1426,6 @@
   gap: 0.4rem;
   flex-wrap: wrap;
   align-items: center;
-}
-
-/* Marks the season badge when its count came from TheTVDB rather than TMDB, so a count that
-   disagrees with TMDB reads as deliberate (it matches Sonarr) instead of looking wrong. */
-.tmdb-season-source {
-  margin-left: 0.35rem;
-  padding: 0 0.25rem;
-  border-radius: 3px;
-  background: rgba(100, 181, 246, 0.18);
-  color: #64b5f6;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  vertical-align: middle;
 }
 
 /* Image-source switcher (TMDB | TVDB) — a joined segmented control left of the content tabs,
@@ -2255,8 +2320,8 @@
   padding-bottom: 0;
 }
 
-/* Shorten the search bar only inside the shared controls row. The Artwork tab's
-   standalone search bar keeps its default full-width block layout. */
+/* Shorten the search bar only inside the shared controls row, where it sits beside the filter
+   tabs. The My Drive panel's standalone bar keeps its default full-width block layout. */
 .unmatched-maker-controls .unmatched-maker-search {
   margin-top: 0;
   flex: 0 1 300px;

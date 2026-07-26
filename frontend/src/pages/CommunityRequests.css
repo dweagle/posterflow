@@ -591,9 +591,11 @@
 }
 
 /* Maker Tools panel — fixed 540px at wide viewports so all cards align */
+/* Sized from the box so it fits exactly: box + drop zone (80px) + the 0.5rem gap between them.
+   That keeps the box the same width here as on the Maker Tools tabs. */
 .request-maker-tools-panel {
-  flex: 0 0 540px;
-  width: 540px;
+  flex: 0 0 calc(var(--tmdb-box-width) + 80px + 0.5rem);
+  width: calc(var(--tmdb-box-width) + 80px + 0.5rem);
   min-width: 0;
   display: flex;
   gap: 0.5rem;
@@ -606,12 +608,16 @@
   min-width: 0;
 }
 
+/* Here the card holds nothing but the action box (the request card already shows the poster and
+   title), so its own frame would just be a box drawn around a box. Strip it and let the box show. */
 .request-maker-tools-panel .tmdb-result-card {
-  background: #181818;
-  /* Uniform card height so cards with fewer than 6 logos match the tall ones. Tune with the
-     logo size — this fits a 6-logo column at the current 40px icon width. */
-  min-height: 160px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
+
+
 
 /* The panel's info column is ~350px — too tight for the full-size export controls, which then
    wrapped onto a second line. Trim them so the style toggle + both buttons stay on one line.
@@ -990,30 +996,6 @@
 .request-tvdb-link:hover {
   border-color: #4db8a4;
   color: #4db8a4;
-}
-
-.request-maker-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid rgba(100, 181, 246, 0.4);
-  border-radius: 4px;
-  background: transparent;
-  color: #64b5f6;
-  font-size: 0.72rem;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: all 0.2s;
-}
-
-.request-maker-btn:hover {
-  border-color: #64b5f6;
-  background: rgba(100, 181, 246, 0.1);
-  color: #90caf9;
 }
 
 /* Upload poster button */

@@ -76,6 +76,9 @@ input, textarea, select {
 }
 
 :root {
+  /* Width of the maker card's action box, shared by Maker Tools and the request cards so the
+     two pages match by construction. The request panel derives its own width from this. */
+  --tmdb-box-width: 28rem;
   --pf-tab-text: #aaa;
   --pf-tab-text-hover: #fff;
   --pf-tab-text-active: #64b5f6;
