@@ -6,6 +6,40 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-25
+### Added
+- Artwork: logos, backgrounds, and squareart are now available assets alongside posters. Artwork drives can be added, synced, and scheduled just like poster drives, and posters + artwork flow through one shared engine for drive sync, matching/renaming, unmatched detection, cleanup, Plex upload, and database maintenance (orphaned artwork records are detected and cleaned like posters). Discord notifications include artwork reporting.
+- GDrives: subscribing to a poster or artwork drive now offers to add it to the Drive Priority list, with a "don't ask again" preference. Unsubscribing removes the drive from the priority list, and re-subscribing restores it to its previous position. (Bulk subscribing still requires manual addition to priority list.)
+- Logs: live WebSocket log streaming replaces file polling, with an improved Logs page and search feature.
+- IDarr: configurable duplicates retention window — aged duplicates are auto-deleted after N days (0 keeps them forever).
+- IDarr: per-phase sync progress reporting, and targeted runs (resolve-and-rename, conflict Keep, quick-add) now queue behind an active job instead of being refused.
+- IDarr: single-item drops (sidebar drop, community cards, IDarr page) now upload only the touched files as their own job with separate log and progress, batched into one rclone call, instead of triggering a full scope sync.
+- Maker Tools: Google and ThePosterDB search links, with the maker card's link row replaced by service icon links (TMDB, IMDb, TVDB, Apple TV, Google, TPDB). Google searches carry the year and ThePosterDB searches are scoped by media type.
+- Maker Tools: PSD export is now available on items without a TMDB match.
+- TheTVDB: added as a second image source — configure an API key (PIN only needed for subscriber keys) in Settings, browse TheTVDB images in the maker gallery, and use TheTVDB as a source in the Artwork Finder.
+- Artwork Finder: a new Maker Tools tab to browse artwork, square-crop images, and batch-pull logos/backgrounds/squareart into an IDarr scope.
+- Maker Tools: TV season counts and season lists now come from TheTVDB when a key is configured, matching Sonarr's numbering; TMDB remains the fallback.
+- Community Requests: warnings when requesting an item that already has a request in the same style, plus closed gaps in style handling.
+- Setup Wizard: artwork storage path and TheTVDB API key steps.
+- Sidebar: restored customization options for the mobile drawer layout.
+
+### Changed
+- Poster Manager is now the Asset Manager, with artwork priority and artwork unmatched controls alongside the existing poster tabs.
+- Maker Tools: updated default CL2K and MM2K PSD templates with current season years.
+- UI: unified toolbar, subtab, and metadata-attribution styling across pages for a more consistent look. Reworked various Maker Tools page layouts.
+- Logging: improvements to logging tags and logging format.
+- Dependencies: updated the full stack: Python 3.13 base image, Node 24, React 19, psd-tools 1.17, and all other backend/frontend dependencies to latest.
+
+### Fixed
+- Community Requests: poster uploads to Discord no longer truncate filenames at semicolons. Special character handling improved.
+- Community Requests: Discord sign-in state at page load fixed; removing the logged-out flash on page load.
+- Community Lists: season lists now merge into their show items.
+- Settings: Plex library configs are re-fetched after a bulk save so renamed instances keep their migrated selections.
+- Setup: unchanged Plex library configs are no longer re-saved on every setup pass, and newly detected libraries are auto-configured.
+- Photopea: tab titles now self-heal for documents opened by URL.
+- Photopea Plugin: the layer panel now refreshes when switching between CL2K and MM2K exports of the same title, instead of staying stale until the plugin was reopened.
+- IDarr: drive not found warning correctly disappears after filepath change.
+
 ## [0.11.1] - 2026-07-19
 ### Added
 - Photopea Plugin: batch export now supports year ranges, along with UI improvements.
