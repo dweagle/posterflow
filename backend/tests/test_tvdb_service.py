@@ -9,6 +9,18 @@ import pytest
 import services.tvdb as tvdb
 
 
+@pytest.fixture(autouse=True)
+def _reset_tvdb_caches():
+    """Caches and the failure circuit are module-level, so reset them between tests."""
+    tvdb._seasons_cache.clear()
+    tvdb._token_cache.clear()
+    tvdb._types_cache = None
+    tvdb._consecutive_failures = 0
+    tvdb._circuit_open_until = 0.0
+    yield
+    tvdb._seasons_cache.clear()
+
+
 # ---------------------------------------------------------------- categorisation
 
 @pytest.mark.parametrize("slug, expected", [
@@ -265,6 +277,124 @@ def test_fetch_season_artwork_resolves_the_number_through_the_season_list(monkey
 def test_fetch_season_artwork_returns_empty_for_an_unknown_season(monkeypatch):
     monkeypatch.setattr(tvdb, "fetch_series_seasons", lambda **k: [{"id": 55, "number": 2}])
     assert tvdb.fetch_season_artwork(tvdb_id=1, season_number=9, api_key="k", pin="") == []
+
+
+# ---------------------------------------------------------------- resilience
+# A page of maker cards fires many season lookups at once. Each one holds an app thread while it
+# waits, so an unhealthy TVDB used to spend the pool and stall unrelated work.
+
+def test_bearer_logs_in_once_for_concurrent_callers(monkeypatch):
+    """Without a login lock every concurrent cache-miss logs in — which is what produced the
+    burst of identical 'login succeeded' lines."""
+    import threading
+
+    logins = []
+    ready = threading.Barrier(8)
+
+    def fake_login(api_key, pin):
+        logins.append(1)
+        return "tok"
+
+    monkeypatch.setattr(tvdb, "_login", fake_login)
+
+    def worker():
+        ready.wait()
+        tvdb._bearer("k", "")
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(logins) == 1
+
+
+def test_bearer_reuses_the_cached_token(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tvdb, "_login", lambda k, p: (calls.append(1), "tok")[1])
+    assert tvdb._bearer("k", "") == "tok"
+    assert tvdb._bearer("k", "") == "tok"
+    assert len(calls) == 1
+
+
+def test_bearer_relogs_in_when_the_cached_token_is_the_stale_one(monkeypatch):
+    tokens = iter(["old", "new"])
+    monkeypatch.setattr(tvdb, "_login", lambda k, p: next(tokens))
+    assert tvdb._bearer("k", "") == "old"
+    # A 401 hands back the token that failed, so the cached copy must not satisfy the retry.
+    assert tvdb._bearer("k", "", stale="old") == "new"
+
+
+def test_series_seasons_are_cached_between_calls(monkeypatch):
+    calls = []
+
+    def fake_get(*a, **k):
+        calls.append(1)
+        return {"seasons": [_season(1)]}
+
+    monkeypatch.setattr(tvdb, "_get", fake_get)
+    tvdb.fetch_series_seasons(tvdb_id=7, api_key="k", pin="")
+    tvdb.fetch_series_seasons(tvdb_id=7, api_key="k", pin="")
+    assert len(calls) == 1
+
+
+def test_a_failed_season_lookup_is_cached_so_it_isnt_retried_per_card(monkeypatch):
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise tvdb.TvdbError("HTTP 504")
+
+    monkeypatch.setattr(tvdb, "_get", boom)
+    with pytest.raises(tvdb.TvdbError):
+        tvdb.fetch_series_seasons(tvdb_id=7, api_key="k", pin="")
+    # The next card asking for the same series gets the cached empty result, not another call.
+    assert tvdb.fetch_series_seasons(tvdb_id=7, api_key="k", pin="") == []
+    assert len(calls) == 1
+
+
+def test_repeated_failures_open_the_circuit(monkeypatch):
+    monkeypatch.setattr(tvdb, "_bearer", lambda *a, **k: "tok")
+
+    class Resp:
+        status_code = 504
+
+    monkeypatch.setattr(tvdb.requests, "get", lambda *a, **k: Resp())
+
+    for _ in range(tvdb._FAIL_THRESHOLD):
+        with pytest.raises(tvdb.TvdbError):
+            tvdb._get("/series/1", "k", "")
+
+    assert tvdb._circuit_is_open()
+    # Now it fails fast without touching the network at all.
+    monkeypatch.setattr(tvdb.requests, "get", lambda *a, **k: pytest.fail("circuit should be open"))
+    with pytest.raises(tvdb.TvdbError):
+        tvdb._get("/series/2", "k", "")
+
+
+def test_a_success_resets_the_failure_run(monkeypatch):
+    monkeypatch.setattr(tvdb, "_bearer", lambda *a, **k: "tok")
+
+    class Bad:
+        status_code = 502
+
+    class Good:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": {"ok": True}}
+
+    monkeypatch.setattr(tvdb.requests, "get", lambda *a, **k: Bad())
+    for _ in range(tvdb._FAIL_THRESHOLD - 1):
+        with pytest.raises(tvdb.TvdbError):
+            tvdb._get("/series/1", "k", "")
+
+    monkeypatch.setattr(tvdb.requests, "get", lambda *a, **k: Good())
+    assert tvdb._get("/series/1", "k", "") == {"ok": True}
+    assert tvdb._consecutive_failures == 0
+    assert not tvdb._circuit_is_open()
 
 
 # ---------------------------------------------------------------- id resolution

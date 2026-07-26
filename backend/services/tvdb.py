@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import requests
 
-from core.logging import LogTags, log_info
+from core.logging import LogTags, log_info, log_warning
 from core.rate_limiter import TokenBucket
 from models.setting import get_setting
 
@@ -26,14 +26,51 @@ TVDB_ARTWORK_HOST = "artworks.thetvdb.com"
 # so a polite ceiling costs nothing.
 tvdb_bucket = TokenBucket(10.0, 5)
 
-# Tokens are valid for a month. Refresh daily anyway — a login is one cheap call and it keeps
-# us clear of any expiry/clock drift.
-_TOKEN_TTL = 24 * 60 * 60
+# Requests run in the app's thread pool, and every one waiting on TVDB holds a thread. A page of
+# maker cards can ask for dozens of season lookups at once, which is enough to starve the pool
+# and stall unrelated work (a monitor run refusing to start, say). Cap how many may be in flight
+# and give up quickly rather than queueing — the caller just falls back to TMDB.
+_MAX_INFLIGHT = 4
+_SLOT_WAIT = 3.0
+_slots = threading.Semaphore(_MAX_INFLIGHT)
+
+# Short enough that a hung upstream can't pin a thread for long.
+_TIMEOUT = 10
+
+# TVDB says its tokens last a month. Re-login after a week — far enough inside that window to
+# ignore clock drift, but long enough that a running instance logs in about once, not daily.
+# A 401 refreshes early anyway (see _get), so a short TTL buys nothing.
+_TOKEN_TTL = 7 * 24 * 60 * 60
 _TYPES_TTL = 24 * 60 * 60
 
+# When TVDB starts failing it usually keeps failing for a while (502/504 under load). Stop
+# calling it after a run of failures so the app isn't spending threads and log lines on it.
+_FAIL_THRESHOLD = 5
+_COOLDOWN = 120.0
+
 _lock = threading.Lock()
+_login_lock = threading.Lock()                                # serialises login, see _bearer
 _token_cache: dict[tuple[str, str], tuple[str, float]] = {}   # (key, pin) -> (token, expires_at)
-_types_cache: tuple[dict[int, str], float] | None = None      # (type id -> category, expires_at)
+_types_cache: tuple[dict[int, tuple[str, str]], float] | None = None
+_consecutive_failures = 0
+_circuit_open_until = 0.0
+
+# Season lists per series. Short-lived: long enough that a list of cards fetches each series once,
+# short enough that a failure doesn't pin an item to TMDB seasons for the rest of the session.
+_SEASONS_TTL = 10 * 60
+_SEASONS_FAIL_TTL = 60
+_seasons_cache: dict[int, tuple[list[dict], float]] = {}
+
+
+def _cached_seasons(tvdb_id: int) -> Optional[list[dict]]:
+    with _lock:
+        hit = _seasons_cache.get(tvdb_id)
+    return hit[0] if hit and hit[1] > time.monotonic() else None
+
+
+def _store_seasons(tvdb_id: int, seasons: list[dict], *, ttl: float = _SEASONS_TTL) -> None:
+    with _lock:
+        _seasons_cache[tvdb_id] = (seasons, time.monotonic() + ttl)
 
 
 class TvdbError(Exception):
@@ -81,45 +118,97 @@ def _login(api_key: str, pin: str) -> str:
     return token
 
 
-def _bearer(api_key: str, pin: str, *, force: bool = False) -> str:
-    cache_key = (api_key, pin)
-    now = time.monotonic()
-    if not force:
-        with _lock:
-            hit = _token_cache.get(cache_key)
-            if hit and hit[1] > now:
-                return hit[0]
-    token = _login(api_key, pin)
+def _cached_token(cache_key: tuple[str, str], stale: Optional[str]) -> Optional[str]:
     with _lock:
-        _token_cache[cache_key] = (token, time.monotonic() + _TOKEN_TTL)
-    return token
+        hit = _token_cache.get(cache_key)
+    if hit and hit[1] > time.monotonic() and hit[0] != stale:
+        return hit[0]
+    return None
+
+
+def _bearer(api_key: str, pin: str, *, stale: Optional[str] = None) -> str:
+    """The cached bearer token, logging in only if there isn't a usable one.
+
+    Login is serialised: without the lock, every concurrent caller that missed the cache logs in
+    at once, which is why a page of cards produced a burst of identical "login succeeded" lines.
+    ``stale`` is the token that just got a 401, so a refresh isn't satisfied by the same value.
+    """
+    cache_key = (api_key, pin)
+    token = _cached_token(cache_key, stale)
+    if token:
+        return token
+
+    with _login_lock:
+        # Re-check: another caller may have logged in while we waited for the lock.
+        token = _cached_token(cache_key, stale)
+        if token:
+            return token
+        token = _login(api_key, pin)
+        with _lock:
+            _token_cache[cache_key] = (token, time.monotonic() + _TOKEN_TTL)
+        return token
+
+
+def _note_failure() -> None:
+    global _consecutive_failures, _circuit_open_until
+    with _lock:
+        _consecutive_failures += 1
+        if _consecutive_failures >= _FAIL_THRESHOLD and _circuit_open_until <= time.monotonic():
+            _circuit_open_until = time.monotonic() + _COOLDOWN
+            log_warning(LogTags.API, f"TheTVDB failing repeatedly — pausing calls for {int(_COOLDOWN)}s")
+
+
+def _note_success() -> None:
+    global _consecutive_failures
+    with _lock:
+        _consecutive_failures = 0
+
+
+def _circuit_is_open() -> bool:
+    with _lock:
+        return _circuit_open_until > time.monotonic()
 
 
 def _get(path: str, api_key: str, pin: str, params: Optional[dict] = None, *, what: str = "data") -> Any:
     """GET a v4 endpoint and return its ``data`` payload. Retries once on a 401 (stale token)."""
-    for attempt in (0, 1):
-        token = _bearer(api_key, pin, force=attempt == 1)
-        tvdb_bucket.acquire()
-        try:
-            resp = requests.get(
-                f"{TVDB_API}{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params or {},
-                timeout=30,
-            )
-        except Exception as exc:
-            raise TvdbError(f"Could not reach TheTVDB while fetching {what}: {exc}")
-        if resp.status_code == 401 and attempt == 0:
-            continue  # token went stale early — re-login and try once more
-        if resp.status_code == 404:
-            return None
-        if resp.status_code != 200:
-            raise TvdbError(f"TheTVDB {what} lookup failed (HTTP {resp.status_code}).")
-        try:
-            return resp.json().get("data")
-        except Exception:
-            raise TvdbError(f"TheTVDB returned an unreadable {what} response.")
-    return None
+    if _circuit_is_open():
+        raise TvdbError(f"TheTVDB is unavailable — skipping {what}.")
+
+    if not _slots.acquire(timeout=_SLOT_WAIT):
+        # Too many already in flight. Failing here keeps the thread pool free; callers treat this
+        # like any other TVDB failure and fall back.
+        raise TvdbError(f"TheTVDB is busy — skipping {what}.")
+    try:
+        token = ""
+        for attempt in (0, 1):
+            token = _bearer(api_key, pin, stale=token if attempt else None)
+            tvdb_bucket.acquire()
+            try:
+                resp = requests.get(
+                    f"{TVDB_API}{path}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params or {},
+                    timeout=_TIMEOUT,
+                )
+            except Exception as exc:
+                _note_failure()
+                raise TvdbError(f"Could not reach TheTVDB while fetching {what}: {exc}")
+            if resp.status_code == 401 and attempt == 0:
+                continue  # token went stale early — re-login and try once more
+            if resp.status_code == 404:
+                _note_success()   # a reachable upstream saying "no such record"
+                return None
+            if resp.status_code != 200:
+                _note_failure()
+                raise TvdbError(f"TheTVDB {what} lookup failed (HTTP {resp.status_code}).")
+            _note_success()
+            try:
+                return resp.json().get("data")
+            except Exception:
+                raise TvdbError(f"TheTVDB returned an unreadable {what} response.")
+        return None
+    finally:
+        _slots.release()
 
 
 # ------------------------------------------------------------------ artwork types
@@ -243,9 +332,21 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
     otherwise a show would appear to have several times its real number of seasons.
 
     Returns [{id, number, name, image, year}] sorted by season number, specials (0) first.
+
+    Cached because every TV maker card asks for its series, and a list view mounts many at once —
+    without this the same series is re-fetched on each render. Failures are cached briefly too, so
+    one bad upstream spell doesn't produce a lookup (and a warning line) per card.
     """
-    data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"},
-                what="series seasons")
+    cached = _cached_seasons(tvdb_id)
+    if cached is not None:
+        return cached
+
+    try:
+        data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"},
+                    what="series seasons")
+    except TvdbError:
+        _store_seasons(tvdb_id, [], ttl=_SEASONS_FAIL_TTL)
+        raise
     seasons: list[dict] = []
     for season in ((data or {}).get("seasons") or []):
         if not isinstance(season, dict):
@@ -268,6 +369,7 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
             "year": str(season.get("year") or "").strip() or None,
         })
     seasons.sort(key=lambda s: s["number"])
+    _store_seasons(tvdb_id, seasons)
     return seasons
 
 

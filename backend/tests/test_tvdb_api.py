@@ -12,9 +12,13 @@ TVDB_URL = "https://artworks.thetvdb.com/banners/posters/1-2.jpg"
 def _clear_tvdb_caches():
     """The token and artwork-type caches are process-wide; keep them out of each other's way."""
     tvdb._token_cache.clear()
+    tvdb._seasons_cache.clear()
     tvdb._types_cache = None
+    tvdb._consecutive_failures = 0
+    tvdb._circuit_open_until = 0.0
     yield
     tvdb._token_cache.clear()
+    tvdb._seasons_cache.clear()
     tvdb._types_cache = None
 
 
