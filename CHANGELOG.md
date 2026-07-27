@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-07-27
+### Added
+- Artwork Drives: added the Bostafari drive.
+
 ## [0.12.2] - 2026-07-26
 ### Added
 - Artwork Drives: added the MiniMyself and TokenMinal drives.
