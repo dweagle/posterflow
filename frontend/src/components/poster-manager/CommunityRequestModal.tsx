@@ -175,7 +175,9 @@ export default function CommunityRequestModal({
       showToast(
         result.status === 'already_requested'
           ? 'Already requested!'
-          : 'Request submitted!',
+          : result.status === 'upgraded'
+            ? 'Upgraded the open season request to a show-level request!'
+            : 'Request submitted!',
         result.status === 'already_requested' ? 'info' : 'success',
       )
     } catch (err: unknown) {

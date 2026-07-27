@@ -11,6 +11,13 @@
  * The submit_poster_request RPC has anon/authenticated execute revoked —
  * only this function (running with the service role) can call it.
  *
+ * Show/season merge (in the RPC, same rule as submit-list-items): a show-level
+ * request covers its seasons, so a season submission folds into an active show
+ * request, and a show submission upgrades the show's active season request in
+ * place (season-set row preferred, else the oldest single-season row). On
+ * upgrade the RPC returns { upgraded: true } and this function freshens the
+ * request's existing Discord forum thread.
+ *
  * Rate limits (both enforced server-side, per UTC day):
  *   USER_DAILY_LIMIT submissions per Discord account
  *     (request_user_limits via check_and_increment_user_limit)
@@ -28,6 +35,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
+// Only needed to freshen a request's forum thread after a season→show upgrade.
+const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN') ?? ''
 
 // Per-Discord-account daily limit — the primary limit.
 const USER_DAILY_LIMIT = 5
@@ -118,20 +127,23 @@ async function clearListEntryForRequest(
   body: Record<string, unknown>,
 ): Promise<void> {
   try {
-    // Find the matching OPEN shared list row(s) for this media.
+    // Find the matching OPEN shared list row(s) for this media. A show-level
+    // request covers its seasons, so it also supersedes the open season-set
+    // list row (season_number NULL — single-season rows are left alone).
+    const mediaTypes = body.p_media_type === 'show' ? ['show', 'season'] : [body.p_media_type as string]
     let q = supabase
       .from('poster_list_items')
       .select('id,style_tag')
-      .eq('media_type', body.p_media_type as string)
+      .in('media_type', mediaTypes)
       .eq('status', 'open')
+    // Season requests match on season number; everything else has none.
+    if (body.p_media_type === 'season' && body.p_season_number != null) {
+      q = q.eq('season_number', body.p_season_number as number)
+    } else {
+      q = q.is('season_number', null)
+    }
     if (body.p_tmdb_id != null) {
       q = q.eq('tmdb_id', body.p_tmdb_id as number)
-      // Season requests match on season number; everything else has none.
-      if (body.p_media_type === 'season' && body.p_season_number != null) {
-        q = q.eq('season_number', body.p_season_number as number)
-      } else {
-        q = q.is('season_number', null)
-      }
     } else {
       // Custom item (no TMDB id) — match by exact title, case-insensitive.
       q = q.is('tmdb_id', null).ilike('title', String(body.p_title ?? ''))
@@ -156,6 +168,98 @@ async function clearListEntryForRequest(
     if (delErr) console.error('[submit-request] list clear failed:', delErr)
   } catch (e) {
     console.error('[submit-request] list clear error:', e)
+  }
+}
+
+// ── Discord thread refresh on season→show upgrade ───────────────────────────
+// When a show submission upgrades an open season request in place (the RPC's
+// show/season merge), the request keeps the forum thread created back when it
+// was a season request. Freshen it: drop the "— Seasons: …" suffix from the
+// thread name, swap the Season forum tag for Show, fix the embed's Type/Notes
+// fields, and leave a note saying who asked for the full show. Best-effort —
+// a Discord hiccup never fails the submission.
+async function refreshUpgradedThread(
+  supabase: { from: (table: string) => any },
+  requestId: string,
+  upgraderName: string,
+): Promise<void> {
+  if (!DISCORD_BOT_TOKEN) return
+  try {
+    const { data: rows } = await supabase
+      .from('poster_requests')
+      .select('discord_message_id,title,year,notes')
+      .eq('id', requestId)
+      .limit(1)
+    const row = rows?.[0] as
+      | { discord_message_id: string | null; title: string; year: number | null; notes: string | null }
+      | undefined
+    const threadId = row?.discord_message_id
+    if (!row || !threadId) return
+    const auth = { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }
+    const jsonAuth = { ...auth, 'Content-Type': 'application/json' }
+
+    // Thread name loses the season suffix; the Season forum tag flips to Show.
+    const chResp = await fetch(`https://discord.com/api/v10/channels/${threadId}`, { headers: auth })
+    if (chResp.ok) {
+      const ch = (await chResp.json()) as { applied_tags?: string[] }
+      const seasonTag = Deno.env.get('DISCORD_TAG_SEASON')
+      const showTag = Deno.env.get('DISCORD_TAG_SHOW')
+      let tags = (ch.applied_tags ?? []).filter((t) => t !== seasonTag)
+      if (showTag && !tags.includes(showTag)) tags = [showTag, ...tags]
+      const patchResp = await fetch(`https://discord.com/api/v10/channels/${threadId}`, {
+        method: 'PATCH',
+        headers: jsonAuth,
+        body: JSON.stringify({
+          name: row.year ? `${row.title} (${row.year})` : row.title,
+          applied_tags: tags,
+        }),
+      })
+      if (!patchResp.ok) {
+        console.error('[submit-request] thread rename failed:', await patchResp.text())
+      }
+    }
+
+    // Starter embed: Type becomes Show; Notes mirrors the row's stripped notes.
+    // In forum threads the starter message ID equals the thread channel ID.
+    const msgResp = await fetch(
+      `https://discord.com/api/v10/channels/${threadId}/messages/${threadId}`,
+      { headers: auth },
+    )
+    if (msgResp.ok) {
+      const msg = (await msgResp.json()) as { embeds?: Record<string, unknown>[] }
+      const embed = msg.embeds?.[0]
+      if (embed) {
+        let fields = ((embed.fields ?? []) as { name: string; value: string; inline?: boolean }[])
+          .map((f) => (f.name === 'Type' ? { ...f, value: 'Show' } : f))
+        fields = row.notes
+          ? fields.map((f) => (f.name === 'Notes' ? { ...f, value: row.notes as string } : f))
+          : fields.filter((f) => f.name !== 'Notes')
+        const embedResp = await fetch(
+          `https://discord.com/api/v10/channels/${threadId}/messages/${threadId}`,
+          {
+            method: 'PATCH',
+            headers: jsonAuth,
+            body: JSON.stringify({ embeds: [{ ...embed, fields }] }),
+          },
+        )
+        if (!embedResp.ok) {
+          console.error('[submit-request] embed refresh failed:', await embedResp.text())
+        }
+      }
+    }
+
+    const noteResp = await fetch(`https://discord.com/api/v10/channels/${threadId}/messages`, {
+      method: 'POST',
+      headers: jsonAuth,
+      body: JSON.stringify({
+        content: `⬆️ **${upgraderName}** requested the full show — upgraded to a show-level request (series + all season posters).`,
+      }),
+    })
+    if (!noteResp.ok) {
+      console.error('[submit-request] upgrade note failed:', await noteResp.text())
+    }
+  } catch (e) {
+    console.error('[submit-request] upgraded-thread refresh failed:', e)
   }
 }
 
@@ -305,6 +409,12 @@ Deno.serve(async (req: Request) => {
     if (updateErr) {
       console.error('Failed to store discord IDs:', updateErr)
     }
+  }
+
+  // A show submission that upgraded an open season request keeps that request's
+  // Discord thread — freshen its name/tags/embed to show-level.
+  if (data?.upgraded && data?.request_id) {
+    await refreshUpgradedThread(supabase, data.request_id, user.discord_username)
   }
 
   // Cross-sync: a formal request supersedes the community-list entry, so clear

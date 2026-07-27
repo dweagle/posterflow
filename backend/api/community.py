@@ -336,8 +336,15 @@ async def submit_community_request(payload: PosterRequestPayload):
                     "media_type": f"eq.{payload.media_type}",
                     "status": "not.in.(fulfilled,rejected)",
                 }
-                if payload.media_type == "season" and payload.season_number is not None:
-                    dup_params["season_number"] = f"eq.{payload.season_number}"
+                if payload.media_type == "season":
+                    # Exact season matching (mirrors the RPC): a multi-season
+                    # request (season_number NULL, "Seasons: …" in notes) only
+                    # duplicates another season-set request, not a single season.
+                    dup_params["season_number"] = (
+                        f"eq.{payload.season_number}"
+                        if payload.season_number is not None
+                        else "is.null"
+                    )
                 dup_resp = await client.get(
                     f"{SUPABASE_URL}/rest/v1/poster_requests",
                     headers=SUPABASE_HEADERS,
@@ -392,7 +399,18 @@ async def submit_community_request(payload: PosterRequestPayload):
             if result.get("is_new"):
                 log_info(LogTags.API, f"New community request: {payload.title}", tmdb_id=payload.tmdb_id)
                 return {"status": "created", "request_id": result["request_id"]}
-            # Race condition: another instance submitted between our check and insert
+            if result.get("upgraded"):
+                # The RPC upgraded the show's open season request in place —
+                # the show-level request now covers it.
+                log_info(
+                    LogTags.API,
+                    f"Show request absorbed the open season request: {payload.title}",
+                    tmdb_id=payload.tmdb_id,
+                )
+                return {"status": "upgraded", "request_id": result.get("request_id", "")}
+            # Race condition: another instance submitted between our check and
+            # insert (also covers a season request absorbed by an active show
+            # request in the RPC backstop).
             return {"status": "already_requested", "request_id": result.get("request_id", "")}
 
     except httpx.HTTPStatusError as e:

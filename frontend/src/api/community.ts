@@ -49,7 +49,9 @@ export interface SubmitRequestPayload {
 }
 
 export interface SubmitRequestResponse {
-  status: 'created' | 'already_requested'
+  // 'upgraded' = an open season request for this series was upgraded to
+  // show-level in place (a show request covers its seasons).
+  status: 'created' | 'already_requested' | 'upgraded'
   request_id: string
 }
 
