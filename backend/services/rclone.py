@@ -35,6 +35,37 @@ SYNC_INCLUDE_REGEX = "{{(?i).*\\.(" + "|".join(SYNC_ALLOWED_EXTENSIONS) + ")$}}"
 
 SYNC_MAX_FILE_SIZE = "250M"
 
+# NAS/OS metadata that must never ride along in a folder transfer. Synology's @eaDir
+# thumbnails are real .jpgs, so the image-extension filter alone can't keep them out.
+JUNK_PATTERNS = (
+    "@eaDir/**",  # Synology indexing/thumbnails
+    "#recycle/**",  # Synology share recycle bin
+    "#snapshot/**",  # Synology snapshots
+    "@SynoResource/**",  # Synology AFP resource forks
+    ".SynologyWorkingDirectory/**",  # Synology Drive client
+    "@Recycle/**",  # QNAP recycle bin
+    "@tmp/**",  # QNAP temp
+    ".@__thumb/**",  # QNAP thumbnails
+    ".Spotlight-V100/**",  # macOS volume metadata
+    ".Trashes/**",
+    ".fseventsd/**",
+    ".DS_Store",
+    "._*",  # macOS AppleDouble sidecars
+    "Thumbs.db",  # Windows thumbnail caches
+    "ehthumbs.db",
+    "desktop.ini",
+    "lost+found/**",  # ext filesystem recovery
+    "*.tmp",  # partial/in-progress downloads
+    "*.temp",
+    "*.part",
+    "*.crdownload",
+)
+
+# Ordered '- <pattern>' rules. rclone filters are first-match-wins, so these must come
+# before any '+' rule (which also rules out --include/--exclude flags: rclone always
+# compiles --include ahead of --filter, letting junk .jpgs match the include first).
+JUNK_FILTER_ARGS = tuple(arg for pattern in JUNK_PATTERNS for arg in ("--filter", f"- {pattern}"))
+
 # Indent a drive's per-file results / notices / completion so they read as sub-items under
 # the "Syncing '<drive>' -> ..." header line. Fixed spaces (not a tab) so the offset is the
 # same regardless of the tag/icon prefix width in the log viewer.
@@ -265,7 +296,9 @@ scope = drive.readonly
                     self.rclone_binary, 'sync', remote_path, str(local_path),
                     '--config', str(self.config_path),
                     *auth_args,
-                    '--include', SYNC_INCLUDE_REGEX,  # Only pull poster/PSD file types, never arbitrary files
+                    *JUNK_FILTER_ARGS,  # NAS/OS junk stays on the drive it came from
+                    '--filter', f'+ {SYNC_INCLUDE_REGEX}',  # Only pull poster/PSD file types...
+                    '--filter', '- **',  # ...and nothing else
                     '--max-size', SYNC_MAX_FILE_SIZE,  # Skip oversized files (disk-fill protection)
                     '--fast-list',  # Faster for large folders
                     f'--tpslimit={settings.rclone_tps_limit}',  # Cap Drive API calls/sec to avoid rate limits
@@ -562,6 +595,9 @@ scope = drive.readonly
                     self.rclone_binary, sync_mode, str(local_path), remote_path,
                     '--config', str(self.config_path),
                     *auth_args,
+                    *JUNK_FILTER_ARGS,  # Never push Synology/QNAP/OS metadata to a drive
+                    # Mirror mode also prunes junk that reached the drive before these filters existed.
+                    *(('--delete-excluded',) if sync_mode == 'sync' else ()),
                     '--fast-list',
                     f'--tpslimit={upload_tps}',
                     f'--drive-pacer-min-sleep={upload_pacer}',

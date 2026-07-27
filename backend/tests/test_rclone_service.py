@@ -87,7 +87,7 @@ def test_download_file_returns_true_or_false_from_rclone_result(monkeypatch, tmp
 def test_sync_folder_restricts_to_poster_filetypes_and_size(monkeypatch, tmp_path):
     """sync_folder must constrain the download to poster/PSD file types and a max
     file size so a shared Drive cannot push arbitrary or oversized files to disk."""
-    from services.rclone import SYNC_INCLUDE_REGEX, SYNC_MAX_FILE_SIZE
+    from services.rclone import JUNK_FILTER_ARGS, SYNC_INCLUDE_REGEX, SYNC_MAX_FILE_SIZE
 
     monkeypatch.setattr(settings, "config_dir", tmp_path)
     monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
@@ -114,14 +114,55 @@ def test_sync_folder_restricts_to_poster_filetypes_and_size(monkeypatch, tmp_pat
     assert result["success"] is True
 
     args = captured["args"]
-    # --include must immediately precede the regex value, and --max-size the size.
-    assert "--include" in args
-    assert args[args.index("--include") + 1] == SYNC_INCLUDE_REGEX
+    # One ordered --filter chain: junk excludes first (rclone is first-match-wins, and a
+    # plain --include would outrank them), then the image include, then drop the rest.
+    filter_rules = [args[i + 1] for i, flag in enumerate(args) if flag == "--filter"]
+    junk_rules = [JUNK_FILTER_ARGS[i] for i in range(1, len(JUNK_FILTER_ARGS), 2)]
+    assert filter_rules == junk_rules + [f"+ {SYNC_INCLUDE_REGEX}", "- **"]
+    assert "- @eaDir/**" in junk_rules, "Synology thumbnail folders are image files; they must be excluded by name"
+    assert "--include" not in args, "--include would be compiled ahead of the junk excludes"
     assert "--max-size" in args
     assert args[args.index("--max-size") + 1] == SYNC_MAX_FILE_SIZE
     # The regex is case-insensitive and ends each allowed extension at the path end.
     assert SYNC_INCLUDE_REGEX == r"{{(?i).*\.(jpg|jpeg|png|webp|psd)$}}"
     assert SYNC_MAX_FILE_SIZE == "250M"
+
+
+def test_upload_folder_excludes_junk_and_prunes_it_only_in_mirror_mode(monkeypatch, tmp_path):
+    """Synology/QNAP/OS metadata never uploads, and a mirror sync also deletes junk that
+    reached the drive before these filters existed. Copy mode must never delete anything."""
+    from services.rclone import JUNK_FILTER_ARGS
+
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
+    service = RcloneService()
+    monkeypatch.setattr(service, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "poster.jpg").write_text("x")
+
+    captured = {}
+
+    def _fake_popen(args, **_kwargs):
+        captured["args"] = args
+        proc = SimpleNamespace(stdout=io.StringIO("INFO  : poster.jpg: Copied (new)\n"), returncode=0)
+        proc.wait = lambda: None
+        return proc
+
+    monkeypatch.setattr("services.rclone.subprocess.Popen", _fake_popen)
+
+    junk_rules = [JUNK_FILTER_ARGS[i] for i in range(1, len(JUNK_FILTER_ARGS), 2)]
+
+    assert service.upload_folder(src, "drive-123", mode="sync")["success"] is True
+    sync_args = captured["args"]
+    assert [sync_args[i + 1] for i, flag in enumerate(sync_args) if flag == "--filter"] == junk_rules
+    assert "--delete-excluded" in sync_args
+
+    assert service.upload_folder(src, "drive-123", mode="copy")["success"] is True
+    copy_args = captured["args"]
+    assert [copy_args[i + 1] for i, flag in enumerate(copy_args) if flag == "--filter"] == junk_rules
+    assert "--delete-excluded" not in copy_args
 
 
 # ---------------------------------------------------------------------------
