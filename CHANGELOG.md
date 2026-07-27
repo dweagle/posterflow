@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-07-26
+### Added
+- Artwork Drives: added the MiniMyself and TokenMinal drives.
+
+### Changed
+- Drive Sync: NAS/OS junk (Synology `@eaDir` thumbnails, `#recycle`, QNAP `@Recycle`/`.@__thumb`, `.DS_Store`, `Thumbs.db`, and similar) is now filtered out of drive downloads and personal-drive uploads automatically.
+
+### Fixed
+- Community Requests: simultaneous show/season requests merge correctly and notify
+
 ## [0.12.1] - 2026-07-26
 ### Added
 - Artwork Drives: added the tarantula212 drive.
