@@ -17,6 +17,12 @@
       "display_name": "MiniMyself",
       "drive_id": "13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX",
       "description": "Artwork drive containing logos only."
+    },
+        {
+      "name": "TokenMinal",
+      "display_name": "TokenMinal",
+      "drive_id": "18Yr85mO65WpEXMvtM57OXB_umusADWdF",
+      "description": "Artwork drive containing logos, backgrounds, and squareart."
     }
   ]
 }
