@@ -88,7 +88,7 @@ export default function ListsView() {
   const [ownerFilter, setOwnerFilter] = useState<string>('all')   // 'all' | a wanter's discord_id
   const [ownerLabel, setOwnerLabel] = useState('')                // remembered name of the selected wanter
   const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
-  const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: only my claimed items
+  const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: my claims + open items
   const [noMm2k, setNoMm2k] = useState<boolean>(() => loadNoMm2kFilter())  // hide MM2K-style items; sticks across navigation
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   const [searchInput, setSearchInput] = useState('')   // raw input box value
@@ -130,8 +130,10 @@ export default function ListsView() {
   // Build the query for one page at `offset` from the current filters.
   const buildParams = useCallback((offset: number): Record<string, string> => {
     const params: Record<string, string> = {
-      // "Claimed" overrides the status dropdown — it's my in-progress claims.
-      status: claimedByMe ? 'in_progress' : statusFilter,
+      // "Claimed" overrides the status dropdown — my in-progress claims plus
+      // every open item still up for grabs (the backend drops other makers'
+      // claims and pins mine on top). Same view as the Requests tab.
+      status: claimedByMe ? 'active' : statusFilter,
       sort: sortOrder,
       limit: String(PAGE_SIZE),
       offset: String(offset),
@@ -504,7 +506,7 @@ export default function ListsView() {
             <button
               className={`community-tab-btn${claimedByMe ? ' active' : ''}`}
               onClick={() => setClaimedByMe((v) => !v)}
-              title="Show only the items you've claimed"
+              title="Show your claims first, then the open items still up for grabs (hides other makers' claims)"
             >
               Claimed
             </button>

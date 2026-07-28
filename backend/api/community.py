@@ -492,7 +492,9 @@ async def _search_community_list_items(
     function. Returns {items, total} with wanters embedded — same shape as the
     plain read — but the whole match/filter/page/count runs server-side, so a
     common term can't overflow the request URL (400) the way an id=in.(...) list
-    would, and there are no per-page match sub-queries to freeze the worker."""
+    would, and there are no per-page match sub-queries to freeze the worker.
+
+    p_claimed_by_discord_id matches the plain read: my claims + open items."""
     payload = {
         "p_q": q,
         "p_status": _list_status_values(status),
@@ -534,6 +536,8 @@ async def get_community_lists(
     """Fetch a page of community list items from Supabase.
 
     status filter: active (default) = open+in_progress, fulfilled, or all.
+    claimed_by_discord_id: the maker's "Claimed" view — their own claims plus
+    every open item (i.e. hide only other makers' claims).
     Returns {items, total} — total is the full match count, so the UI knows when
     there's more to load.
     """
@@ -563,10 +567,11 @@ async def get_community_lists(
     }
     if media_type:
         params["media_type"] = f"eq.{media_type}"
-    # "Claimed" filter (maker viewing their own claims). Caller also sends
-    # status=in_progress so completed/released items don't slip in.
+    # "Claimed" filter — hides other makers' claims but keeps open (unclaimed)
+    # items, so a maker sees their work plus what's still available under it
+    # (claim_rank pins their in_progress items on top). Mirrors the Requests tab.
     if claimed_by_discord_id:
-        params["claimed_by_discord_id"] = f"eq.{claimed_by_discord_id}"
+        params["or"] = f"(status.eq.open,claimed_by_discord_id.eq.{claimed_by_discord_id})"
     # "Mine" filter → items this user wants. 
     if added_by_discord_id:
         select += ",mine:poster_list_wanters!inner(discord_id)"
