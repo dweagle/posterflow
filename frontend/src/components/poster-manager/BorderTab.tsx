@@ -271,15 +271,26 @@ function BorderTab({
   const [customHolidayStyle, setCustomHolidayStyle] = useState<SeasonStyle>(DEFAULT_SEASON_STYLE)
 
   // Route a BorderStyleControls patch into a (colors, style) state pair.
+  // Switching to gradient seeds the gradient with the existing solid colors so an
+  // already-configured palette (holiday preset, season, custom) isn't retyped.
   const applyStylePatch = (
     patch: Partial<BorderStyleValue>,
+    currentColors: string[],
     setColors: (c: string[]) => void,
     setStyle: (updater: (prev: SeasonStyle) => SeasonStyle) => void,
   ) => {
     if (patch.colors !== undefined) setColors(patch.colors)
     const { colors, ...rest } = patch
     void colors
-    if (Object.keys(rest).length > 0) setStyle((prev) => ({ ...prev, ...rest }))
+    if (Object.keys(rest).length > 0) {
+      setStyle((prev) => {
+        const next = { ...prev, ...rest }
+        if (rest.style === 'gradient' && prev.style !== 'gradient' && next.gradientColors.length === 0) {
+          next.gradientColors = [...currentColors]
+        }
+        return next
+      })
+    }
   }
 
   const holidayStyleHasRenderable = (colors: string[], style: SeasonStyle) =>
@@ -806,7 +817,7 @@ function BorderTab({
                 <BorderStyleControls
                   verbose
                   value={{ ...seasonStyle, colors: seasonColors }}
-                  onChange={(patch) => applyStylePatch(patch, onSetSeasonColors, onSetSeasonStyle)}
+                  onChange={(patch) => applyStylePatch(patch, seasonColors, onSetSeasonColors, onSetSeasonStyle)}
                   overlays={overlays}
                   refreshOverlays={refreshOverlays}
                   idPrefix="season"
@@ -900,7 +911,7 @@ function BorderTab({
 
                         <BorderStyleControls
                           value={{ ...editHolidayStyle, colors: editHolidayColors }}
-                          onChange={(patch) => applyStylePatch(patch, setEditHolidayColors, setEditHolidayStyle)}
+                          onChange={(patch) => applyStylePatch(patch, editHolidayColors, setEditHolidayColors, setEditHolidayStyle)}
                           overlays={overlays}
                           refreshOverlays={refreshOverlays}
                           idPrefix={`holiday-edit-${holiday.name}`}
@@ -1003,7 +1014,7 @@ function BorderTab({
 
               <BorderStyleControls
                 value={{ ...customHolidayStyle, colors: customHolidayColors }}
-                onChange={(patch) => applyStylePatch(patch, setCustomHolidayColors, setCustomHolidayStyle)}
+                onChange={(patch) => applyStylePatch(patch, customHolidayColors.length > 0 ? customHolidayColors : borderColors, setCustomHolidayColors, setCustomHolidayStyle)}
                 overlays={overlays}
                 refreshOverlays={refreshOverlays}
                 idPrefix="holiday-custom"
