@@ -6,7 +6,13 @@ import {
   isYearRange,
   yearSuffixes,
   buildConventionItems,
+  parseTagName,
+  buildTagItems,
+  baseIsCollection,
+  MAX_RANGE,
   type Variant,
+  type RawVariant,
+  type TextSets,
 } from '../../src/lib/photopeaBatch'
 
 describe('parseRange', () => {
@@ -143,5 +149,129 @@ describe('buildConventionItems', () => {
       expect(on(item, [5])).toBe(false)
     }
     expect(on(byName(''), [3])).toBe(true) // main's own layer on
+  })
+})
+
+describe('parseTagName (jsx tag language)', () => {
+  it('maps aliases (show/movie/poster/main and the PSD name) to one main tag', () => {
+    for (const nm of ['show', 'movie', 'poster', 'main', 'from (2022)']) {
+      const r = parseTagName(nm, 'from (2022)')
+      expect(r.tags).toHaveLength(1)
+      expect(r.tags[0].kind).toBe('main')
+    }
+  })
+  it('parses single seasons, specials, c and cls', () => {
+    expect(parseTagName('s3', '').tags[0]).toMatchObject({ kind: 's', n: 3 })
+    expect(parseTagName('s0', '').tags[0]).toMatchObject({ kind: 's', n: 0 })
+    expect(parseTagName('c', '').tags[0]).toMatchObject({ kind: 'c' })
+    expect(parseTagName('cls', '').tags[0]).toMatchObject({ kind: 'cls', n: 1 })
+  })
+  it('expands ranges, including Specials from 0', () => {
+    expect(parseTagName('s1-4', '').tags.map((t) => t.n)).toEqual([1, 2, 3, 4])
+    expect(parseTagName('s0-2', '').tags.map((t) => t.n)).toEqual([0, 1, 2])
+  })
+  it('rejects backwards and oversized ranges with a reason', () => {
+    expect(parseTagName('s5-3', '').reject).toMatch(/count upwards/)
+    expect(parseTagName('s1-' + (MAX_RANGE + 2), '').reject).toMatch(/more than/)
+    expect(parseTagName('s5-3', '').tags).toHaveLength(0)
+  })
+  it('season years work like seasons (s2027)', () => {
+    expect(parseTagName('s2027', '').tags[0]).toMatchObject({ kind: 's', n: 2027 })
+  })
+  it('unknown names produce no tags and no reject', () => {
+    const r = parseTagName('background art', '')
+    expect(r.tags).toHaveLength(0)
+    expect(r.reject).toBeNull()
+  })
+})
+
+describe('baseIsCollection', () => {
+  it('detects collection PSD names, ignoring {tmdb} tags', () => {
+    expect(baseIsCollection('Back to the Future Collection')).toBe(true)
+    expect(baseIsCollection('Back to the Future Collection {tmdb-264}')).toBe(true)
+    expect(baseIsCollection('From (2022) {tmdb-124364}')).toBe(false)
+  })
+})
+
+describe('buildTagItems', () => {
+  const texts: TextSets = {
+    season: [{ n: 1, p: [8, 0] }, { n: 2, p: [8, 1] }],
+    specials: [{ p: [9] }],
+    cls: [{ p: [10] }],
+    collection: [{ p: [11] }],
+  }
+  const on = (item: { changes: { p: number[]; v: boolean }[] }, p: number[]) => {
+    let last: boolean | undefined
+    for (const ch of item.changes) if (JSON.stringify(ch.p) === JSON.stringify(p)) last = ch.v
+    return last
+  }
+
+  it('sorts main → seasons ascending (cls beside s1) → specials → collection', () => {
+    const variants: RawVariant[] = [
+      { nm: 'c', p: [0], v: true },
+      { nm: 's2', p: [1], v: true },
+      { nm: 'show', p: [2], v: true },
+      { nm: 's0', p: [3], v: true },
+      { nm: 'cls', p: [4], v: true },
+    ]
+    const { items } = buildTagItems(variants, texts, 'From (2022)')
+    expect(items.map((i) => i.suffix)).toEqual(['', ' - Season 1', ' - Season 2', ' - Specials', ' - Collection'])
+  })
+
+  it('a range layer exports once per season with the right text each time', () => {
+    const variants: RawVariant[] = [{ nm: 's1-2', p: [0], v: true }]
+    const { items, warnings } = buildTagItems(variants, texts, 'X')
+    expect(items.map((i) => i.suffix)).toEqual([' - Season 1', ' - Season 2'])
+    expect(on(items[0], [8, 0])).toBe(true)   // Season 1 text on for the first
+    expect(on(items[0], [8, 1])).toBe(false)
+    expect(on(items[1], [8, 1])).toBe(true)   // Season 2 text on for the second
+    expect(on(items[1], [0])).toBe(true)      // same source layer visible both times
+    expect(warnings).toHaveLength(0)
+  })
+
+  it('cls shows the CLS text (not season text) and names the Season 1 file', () => {
+    const variants: RawVariant[] = [{ nm: 'cls', p: [0], v: true }]
+    const { items } = buildTagItems(variants, texts, 'X')
+    expect(items[0].suffix).toBe(' - Season 1')
+    expect(on(items[0], [10])).toBe(true)
+    expect(on(items[0], [8, 0])).toBe(false)
+  })
+
+  it('c shows the COLLECTION text, is flagged, and suffix depends on the PSD name', () => {
+    const variants: RawVariant[] = [{ nm: 'c', p: [0], v: true }]
+    const show = buildTagItems(variants, texts, 'From (2022)')
+    expect(show.items[0].suffix).toBe(' - Collection')
+    expect(show.items[0].collection).toBe(true)
+    expect(on(show.items[0], [11])).toBe(true)
+    const coll = buildTagItems(variants, texts, 'Back to the Future Collection {tmdb-264}')
+    expect(coll.items[0].suffix).toBe('')
+  })
+
+  it('duplicate tags pick the topmost visible candidate and warn', () => {
+    const variants: RawVariant[] = [
+      { nm: 's1', p: [0], v: false },
+      { nm: 's01', p: [1], v: true },
+    ]
+    const { items, warnings } = buildTagItems(variants, texts, 'X')
+    expect(items).toHaveLength(1)
+    expect(on(items[0], [1])).toBe(true)     // the visible one exported
+    expect(on(items[0], [0])).toBe(false)
+    expect(warnings.some((w) => /topmost visible/.test(w))).toBe(true)
+  })
+
+  it('warns when s1 and cls both exist (same output file)', () => {
+    const variants: RawVariant[] = [
+      { nm: 's1', p: [0], v: true },
+      { nm: 'cls', p: [1], v: true },
+    ]
+    const { warnings } = buildTagItems(variants, texts, 'X')
+    expect(warnings.some((w) => /s1.*cls|cls.*s1/i.test(w))).toBe(true)
+  })
+
+  it('rejected ranges surface as warnings, not items', () => {
+    const variants: RawVariant[] = [{ nm: 's9-1', p: [0], v: true }]
+    const { items, warnings } = buildTagItems(variants, texts, 'X')
+    expect(items).toHaveLength(0)
+    expect(warnings).toHaveLength(1)
   })
 })

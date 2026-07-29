@@ -38,12 +38,12 @@
   .btn.bolt-tags:hover { background: #a06a24; }
   .btn.bolt-seasons { background: #2b5c9e; }
   .btn.bolt-seasons:hover { background: #356ec0; }
-  .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
+  .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
   .tools { display: flex; gap: 5px; padding: 6px; border-bottom: 1px solid #3a3a42; }
   .tools .btn { flex: 1; }
-  .list { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; overflow-y: auto; padding: 8px; flex: 1; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
+  .list { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; justify-content: center; overflow-y: scroll; padding: 8px; flex: 1; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
   .list::-webkit-scrollbar { width: 6px; }
   .list::-webkit-scrollbar-thumb { background: #3a3a42; border-radius: 3px; }
   .chip { min-width: 16px; text-align: center; box-sizing: border-box; background: #2a2a31; border: 1px solid #3a3a42;
@@ -55,13 +55,16 @@
   .chip.grp.on { background: #3b6bd6; border-color: #5a86f0; }
   .chip.num { width: 28px; padding-left: 2px; padding-right: 2px; }
   .msg { padding: 8px; color: #9aa; }
-  .trimbar { display: flex; justify-content: center; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
+  .trimbar { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
   .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
   .batchbar.hidden { display: none; }
   .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
   .batchrow { display: flex; gap: 5px; }
   .batchrow.hidden { display: none; }
+  .batchhelp { color: #99aaaa; font-size: 10px; line-height: 1.6; margin-top: 5px; }
+  .batchhelp b { color: #cfcfcf; font-weight: 600; }
+  .batchhelp.hidden { display: none; }
   .batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6;
     border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 </style>
@@ -83,14 +86,18 @@
     <div class="batchrow hidden">
       <input class="batchinput" type="text" placeholder="e.g. 8, 0-5, or blank = all" />
       <button class="btn" data-act="batch-run">Run</button>
+      <button class="btn" data-act="batch-help" title="Show what you can type here">?</button>
       <button class="btn" data-act="batch-cancel" title="Cancel">✕</button>
     </div>
+    <div class="batchhelp hidden"></div>
   </div>
+  <div class="notes"></div>
   <div class="singles hidden"></div>
   <div class="sequels hidden"></div>
   <div class="list"><div class="msg">Loading…</div></div>
   <div class="trimbar">
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
+    <button class="btn" data-act="logo-export" title="Download the LOGO group as a trimmed transparent PNG">Logo</button>
   </div>
 
 <script>
@@ -105,7 +112,9 @@
   const logoBtn = document.querySelector('[data-act="logo"]');
   const fitBtn  = document.querySelector('[data-act="fit"]');
   const trimBtn = document.querySelector('[data-act="trim"]');
+  const logoExpBtn = document.querySelector('[data-act="logo-export"]');
   let trimBusy = false;
+  let logoExpBusy = false, logoRestore = null;   // Logo export: busy flag + visibility changes to undo
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
   let jpgBusy = false;
@@ -114,7 +123,8 @@
   let pendingDocName = 'poster';                  // active doc's (possibly mangled) name — used for the JPG filename
   let detectedStyle = '';                          // CL2K/MM2K guessed from the active doc's layer structure
   let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false, batchMode = 'tags';  // batch-export state ('tags' = name-tag convention, 'seasons' = season range from one poster)
-  let batchSeasonText = [], batchSpecialsText = [];  // "Season N" / "Specials" text layers found by the batch scan (to pair with s-layers)
+  let batchWarnings = [];   // tag warnings from the scan — posted when the run starts, not at the preview
+  let batchColMove = null;  // {dy, cv} echoed by the collection placement — builds the exact undo
   let lastActiveSig = null;                         // active-doc watcher: signature (name+source+CL2K/MM2K structure) of the doc we last read; a change re-reads the panel
 
   // ---- talk to Photopea ----------------------------------------------------
@@ -135,7 +145,7 @@
         if(L.typename=='LayerSet'&&/^\\s*seasons\\s*$/i.test(L.name))return {L:L,p:here};
         if(L.typename=='LayerSet'){var f=find(L.layers,here);if(f)return f;}}return null;}
       function cls(L,pr){
-        if(pr=='main'){if(L.typename=='LayerSet'){if(/\\d+\\s*-\\s*\\d+/.test(L.name))return 'decade';if(/years/i.test(L.name))return 'years';return 'group';}return 'otherLeaf';}
+        if(pr=='main'){if(L.typename=='LayerSet'){if(/\\d+\\s*-\\s*\\d+/.test(L.name))return 'decade';if(/years?/i.test(L.name))return 'years';return 'group';}return 'otherLeaf';}
         if(pr=='decade')return (L.typename=='LayerSet')?'group':'season';
         if(pr=='years')return 'year';
         return 'other';
@@ -198,6 +208,8 @@
   // Hide the whole SEQUEL group by its own path (from FETCH) — robust even if the group's children
   // are nested / not detected as leaf chips; fall back to deriving it from the first sequel leaf.
   const seqGroupOff = () => model.seqGroup ? [{ p: model.seqGroup, v: false }] : (seqs().length ? [{ p: seqs()[0].p.slice(0, -1), v: false }] : []);
+  // Hide every year leaf + years group — years are mutually exclusive with seasons/singles/sequels.
+  const yearsOff = () => byRole('years').map((yg) => ({ p: yg.p, v: false })).concat(byRole('year').map((yn) => ({ p: yn.p, v: false })));
 
   const commit = (changes) => {
     setVis(changes);
@@ -216,7 +228,7 @@
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: key(dn.p) === parentKey }));
     byRole('season').forEach((sn) => { if (sn !== S) changes.push({ p: sn.p, v: false }); });
     model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
-    changes.push(...seqOff(), ...seqGroupOff());
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
     commit(changes);
   };
 
@@ -229,7 +241,7 @@
     model.singles.forEach((x) => { if (x !== SI) changes.push({ p: x.p, v: false }); });
     byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
-    changes.push(...seqOff(), ...seqGroupOff());
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
     commit(changes);
   };
 
@@ -243,6 +255,7 @@
     if (main()) changes.push({ p: main().p, v: false });
     byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    changes.push(...yearsOff());
     commit(changes);
   };
 
@@ -262,6 +275,7 @@
       const changes = [{ p: M.p, v: false }];
       byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
       byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+      changes.push(...yearsOff());
       commit(changes);
       return;
     }
@@ -274,7 +288,7 @@
       byRole('season').forEach((sn) => { if (sn !== first) changes.push({ p: sn.p, v: false }); });
     }
     model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
-    changes.push(...seqOff(), ...seqGroupOff());
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
     commit(changes);
   };
 
@@ -283,6 +297,33 @@
     const changes = [];
     if (main()) changes.push({ p: main().p, v: true });
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: dn === D }));
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
+    commit(changes);
+  };
+
+  // Year chips (Season YYYY leaves under the years group) — mutually exclusive with numbered
+  // seasons, decades, singles, and sequels.
+  const clickYear = (Y) => {
+    if (Y.v) { commit([{ p: Y.p, v: false }]); return; }
+    const parentKey = key(Y.p.slice(0, -1));
+    const changes = [{ p: Y.p, v: true }];
+    if (main()) changes.push({ p: main().p, v: true });
+    byRole('years').forEach((yg) => changes.push({ p: yg.p, v: key(yg.p) === parentKey }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+    byRole('year').forEach((yn) => { if (yn !== Y) changes.push({ p: yn.p, v: false }); });
+    model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    changes.push(...seqOff(), ...seqGroupOff());
+    commit(changes);
+  };
+
+  // The years group bar — mirrors the decade bars: open this group, close the decades.
+  const clickYearsGroup = (YG) => {
+    if (YG.v) { commit([{ p: YG.p, v: false }]); return; }
+    const changes = [];
+    if (main()) changes.push({ p: main().p, v: true });
+    byRole('years').forEach((yg) => changes.push({ p: yg.p, v: yg === YG }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
     changes.push(...seqOff(), ...seqGroupOff());
     commit(changes);
   };
@@ -326,16 +367,20 @@
       list.innerHTML = '<div class="msg">No SEASONS / SPECIALS layers found. Press ⟳ once the PSD is open.</div>';
       return;
     }
-    let decadeOpen = true;
+    let decadeOpen = true, yearsOpen = true;
     model.seasons.forEach((N) => {
-      if (N.r === 'years' || N.r === 'year' || N.r === 'other' || N.r === 'group' || N.r === 'otherLeaf') return;
+      if (N.r === 'other' || N.r === 'group' || N.r === 'otherLeaf') return;
       if (N.r === 'decade') decadeOpen = N.v;
+      if (N.r === 'years') yearsOpen = N.v;
       if (N.r === 'season' && !decadeOpen) return;
-      const folder = (N.r === 'main' || N.r === 'decade');
+      if (N.r === 'year' && !yearsOpen) return;
+      const folder = (N.r === 'main' || N.r === 'decade' || N.r === 'years');
       const c = chip(label(N.n), N.v, folder);
       c.title = N.n;
       if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', () => clickSeason(N)); }
+      else if (N.r === 'year')   c.addEventListener('click', () => clickYear(N));
       else if (N.r === 'decade') c.addEventListener('click', () => clickDecade(N));
+      else if (N.r === 'years')  c.addEventListener('click', () => clickYearsGroup(N));
       else                       c.addEventListener('click', () => clickMain(N));   // main
       list.appendChild(c);
     });
@@ -359,7 +404,7 @@
   };
   const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
   const exportJpg = () => {
-    if (jpgBusy || placeBusy) return;
+    if (jpgBusy || placeBusy || logoExpBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
     send('try{app.echoToOE("SZNAME:"+app.activeDocument.name);app.activeDocument.saveToOE("jpg:0.90")}catch(e){app.echoToOE("SZERR:"+e)}');
   };
@@ -387,7 +432,14 @@
   // Resize + position the SELECTED layer with the poster formula, entirely CLIENT-SIDE.
   // Flow: read the layer + canvas size from Photopea → compute geometry here → resize the
   // layer and re-measure its bounds → translate it into place.
-  const note = (t) => list.insertAdjacentHTML('afterbegin', '<div class="msg">' + t + '</div>');
+  const NOTE_TTL = 8000;   // ms a note stays before clearing itself
+  const notesEl = document.querySelector('.notes');   // dedicated container — re-renders never wipe it
+  const note = (t) => {
+    const d = document.createElement('div');
+    d.className = 'msg'; d.textContent = t;
+    notesEl.insertBefore(d, notesEl.firstChild);
+    setTimeout(() => { if (d.parentNode) d.parentNode.removeChild(d); }, NOTE_TTL);
+  };
 
   // --- the formula ---
   // rnd = round-half-to-even (matches Python's round()) so results are pixel-stable.
@@ -497,9 +549,67 @@
   // saved PSD. Canvas size and all layers are preserved; no visible change. Save afterwards.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
-    if (trimBusy || placeBusy || batchBusy) return;
+    if (trimBusy || placeBusy || batchBusy || logoExpBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
     send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('SZTRIM:ok');"));
+  };
+
+  // ---- Logo export ---------------------------------------------------------
+  // Download the LOGO group as a TRIMMED transparent PNG. Doc manipulation is kept minimal
+  // (throwaway documents are fragile in Photopea): isolate the LOGO group in place (hide siblings
+  // along its path, remembering what changed), export the full canvas as PNG, restore visibility,
+  // then crop to the logo's alpha bounding box HERE in a browser canvas.
+  const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
+  const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
+  const exportLogo = () => {
+    if (logoExpBusy || jpgBusy || placeBusy || batchBusy || trimBusy) return;
+    logoExpBusy = true; logoExpBtn.textContent = '…';
+    send('try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' +
+      'function fl(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i],h=pa.concat(i);if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return h;var f=fl(L.layers,h);if(f)return f;}}return null;}' +
+      'var pth=fl(d.layers,[]);' +
+      'if(!pth){app.echoToOE("SZNOLOGO:");}else{' +
+      'var chg=[],cont=d,pref=[];' +
+      'for(var k=0;k<pth.length;k++){for(var i=0;i<cont.layers.length;i++){var L=cont.layers[i];var want=(i==pth[k]);' +
+      'if(L.visible!=want){chg.push({p:pref.concat(i),v:L.visible});L.visible=want;}}' +
+      'cont=cont.layers[pth[k]];pref=pref.concat(pth[k]);}' +
+      'app.echoToOE("SZLOGOVIS:"+JSON.stringify(chg));' +
+      'd.saveToOE("png");}' +
+      '}catch(e){app.echoToOE("SZERR:"+e);}');
+  };
+
+  // Crop a PNG to its alpha bounding box in a canvas; resolves to a PNG Blob.
+  const trimPngAlpha = (buf) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'image/png' }));
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = img.width, h = img.height;
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      const a = cx.getImageData(0, 0, w, h).data;
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        if (a[(y * w + x) * 4 + 3] > 0) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+      }
+      if (maxX < 0) { reject(new Error('LOGO group has no visible pixels')); return; }
+      const tw = maxX - minX + 1, th = maxY - minY + 1;
+      const out = document.createElement('canvas'); out.width = tw; out.height = th;
+      out.getContext('2d').drawImage(cv, minX, minY, tw, th, 0, 0, tw, th);
+      out.toBlob((b) => b ? resolve(b) : reject(new Error('PNG encode failed')), 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('PNG decode failed')); };
+    img.src = url;
+  });
+
+  // PNG bytes from the logo export: restore visibility, trim, download.
+  const onLogoBytes = async (buf) => {
+    restoreLogoVis();
+    try {
+      const blob = await trimPngAlpha(buf);
+      const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+      download(blob, base + '.png');
+      flashLogoExp('✓');
+    } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // ---- Batch export --------------------------------------------------------
@@ -514,6 +624,7 @@
   const batchMsg = document.querySelector('.batchmsg');
   const batchRow = document.querySelector('.batchrow');
   const batchInput = document.querySelector('.batchinput');
+  const batchHelp = document.querySelector('.batchhelp');
   const modeBtn = () => batchMode === 'seasons' ? seasonsBtn : batchBtn;    // the bolt driving the current run
   const resetBolts = () => { batchBtn.textContent = '⚡'; seasonsBtn.textContent = '⚡'; };
 
@@ -529,7 +640,7 @@
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: key(dn.p) === parentKey }));
     byRole('season').forEach((sn) => { if (sn !== S) changes.push({ p: sn.p, v: false }); });
     model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
-    changes.push(...seqOff(), ...seqGroupOff());
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
     return changes;
   };
   // Always-ON visibility for a "Season YYYY" year leaf: show it + the SEASONS group and its own
@@ -553,31 +664,111 @@
     model.singles.forEach((x) => { if (x !== SI) changes.push({ p: x.p, v: false }); });
     byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
     byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
-    changes.push(...seqOff(), ...seqGroupOff());
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
     return changes;
   };
   const singleSuffix = (SI) => SI.lab === 'SP' ? ' - Specials' : (SI.lab === 'CLS' ? ' - Season 1' : '');
-  // Show the s-layer (+ ancestors), hide the other convention leaves, AND switch on the matching
-  // "Season N"/"Specials" text layer (hiding the rest) so each file has its season number.
-  const conventionSuffix = (v) => v.t === 's' ? (v.n === 0 ? ' - Specials' : ' - Season ' + v.n) : '';
-  const showText = (changes, t, on) => { changes.push({ p: t.p, v: on }); if (on) for (let i = 1; i < t.p.length; i++) changes.push({ p: t.p.slice(0, i), v: true }); };
-  const buildConventionItems = (variants) => variants.map((v) => {
-    const changes = [];
-    variants.forEach((o) => changes.push({ p: o.p, v: false }));
-    changes.push({ p: v.p, v: true });
-    for (let i = 1; i < v.p.length; i++) changes.push({ p: v.p.slice(0, i), v: true });
-    if (v.t === 's' && v.n >= 1) {
-      batchSeasonText.forEach((t) => showText(changes, t, t.n === v.n));
-      batchSpecialsText.forEach((t) => changes.push({ p: t.p, v: false }));
-    } else if (v.t === 's' && v.n === 0) {
-      batchSeasonText.forEach((t) => changes.push({ p: t.p, v: false }));
-      batchSpecialsText.forEach((t) => showText(changes, t, true));
-    } else {
-      batchSeasonText.forEach((t) => changes.push({ p: t.p, v: false }));
-      batchSpecialsText.forEach((t) => changes.push({ p: t.p, v: false }));
+  // Name-tag language — mirror of buildTagItems in frontend/src/lib/photopeaBatch.ts (the tested
+  // spec, ported from CL2K batch export.jsx): aliases, s1-8 ranges, cls, smart Collection suffix,
+  // topmost-visible-wins duplicates, and text pairing (Season N / Specials / CLS / Collection).
+  const MAX_RANGE = 30;
+  const normName = (s) => String(s).toLowerCase().replace(/^\s+|\s+$/g, '').replace(/\s+/g, ' ');
+  const baseIsCollection = (base) => /collection$/i.test(String(base).replace(/\s*\{[^}]*\}\s*/g, ' ').replace(/\s+/g, ' ').trim());
+  const seasonTagOf = (n) => n === 0 ? { key: 's0', kind: 's', n: 0, sort: 100000 } : { key: 's' + n, kind: 's', n: n, sort: n };
+  const parseTagName = (nm, baseNorm) => {
+    if (nm === 'show' || nm === 'movie' || nm === 'poster' || nm === 'main' || (!!baseNorm && nm === baseNorm))
+      return { tags: [{ key: 'show', kind: 'main', n: -1, sort: 0 }], reject: null };
+    if (nm === 'c') return { tags: [{ key: 'c', kind: 'c', n: -1, sort: 200000 }], reject: null };
+    if (nm === 'cls') return { tags: [{ key: 'cls', kind: 'cls', n: 1, sort: 1.5 }], reject: null };
+    const m = /^s(\d{1,4})(?:-(\d{1,4}))?$/.exec(nm);
+    if (m) {
+      const start = parseInt(m[1], 10);
+      if (!m[2]) return { tags: [seasonTagOf(start)], reject: null };
+      const end = parseInt(m[2], 10);
+      if (end <= start) return { tags: [], reject: '"' + nm + '" was skipped: a range has to count upwards, like "s' + start + '-' + (start + 1) + '"' };
+      if (end - start + 1 > MAX_RANGE) return { tags: [], reject: '"' + nm + '" was skipped: it covers ' + (end - start + 1) + ' seasons, more than the ' + MAX_RANGE + ' a single range may expand to' };
+      const out = [];
+      for (let v = start; v <= end; v++) out.push(seasonTagOf(v));
+      return { tags: out, reject: null };
     }
-    return { suffix: conventionSuffix(v), changes };
-  });
+    return { tags: [], reject: null };
+  };
+  const showText = (changes, t, on) => { changes.push({ p: t.p, v: on }); if (on) for (let i = 1; i < t.p.length; i++) changes.push({ p: t.p.slice(0, i), v: true }); };
+  const buildTagItems = (variants, texts, baseName) => {
+    const warnings = [];
+    const baseNorm = normName(baseName);
+    const byKey = {}, keyOrder = [];
+    variants.forEach((rv) => {
+      const parsed = parseTagName(rv.nm, baseNorm);
+      if (parsed.reject) warnings.push(parsed.reject);
+      parsed.tags.forEach((tag) => {
+        if (!byKey[tag.key]) { byKey[tag.key] = []; keyOrder.push(tag.key); }
+        byKey[tag.key].push({ layer: rv, tag });
+      });
+    });
+    const chosen = [], seenK = {}, warnedCombos = {};
+    keyOrder.forEach((k) => {
+      const cands = byKey[k];
+      let pick = cands[0];
+      if (cands.length > 1) {
+        const vis = cands.find((c) => c.layer.v);
+        if (vis) pick = vis;
+        const names = [];
+        cands.forEach((c) => { if (names.indexOf(c.layer.nm) < 0) names.push(c.layer.nm); });
+        const combo = names.join('|');
+        if (names.length > 1 && !warnedCombos[combo]) {
+          warnedCombos[combo] = true;
+          warnings.push(cands.length + ' layers are tagged "' + names.join('" / "') + '" — exported ' +
+            (vis ? 'the topmost visible one' : 'the topmost one (none were visible)') + ' and ignored the rest.');
+        }
+      }
+      seenK[k] = true;
+      chosen.push(pick);
+    });
+    if (seenK['cls'] && seenK['s1'])
+      warnings.push('Both "s1" and "cls" are tagged — they export to the same " - Season 1" file, so the later one overwrites the other.');
+    chosen.sort((a, b) => a.tag.sort - b.tag.sort);
+    const collectionBase = baseIsCollection(baseName);
+    const items = chosen.map(({ layer, tag }) => {
+      const changes = [];
+      variants.forEach((o) => changes.push({ p: o.p, v: false }));
+      changes.push({ p: layer.p, v: true });
+      for (let i = 1; i < layer.p.length; i++) changes.push({ p: layer.p.slice(0, i), v: true });
+      const onOff = (list, onFor) => list.forEach((t) => (onFor(t) ? showText(changes, t, true) : changes.push({ p: t.p, v: false })));
+      onOff(texts.season, (t) => tag.kind === 's' && tag.n >= 1 && t.n === tag.n);
+      onOff(texts.specials, () => tag.kind === 's' && tag.n === 0);
+      onOff(texts.cls, () => tag.kind === 'cls');
+      onOff(texts.collection, () => tag.kind === 'c');
+      const suffix = tag.kind === 'main' ? ''
+        : tag.kind === 'c' ? (collectionBase ? '' : ' - Collection')
+        : tag.kind === 'cls' ? ' - Season 1'
+        : tag.n === 0 ? ' - Specials' : ' - Season ' + tag.n;
+      return { suffix: suffix, changes: changes, collection: tag.kind === 'c', key: tag.key };
+    });
+    return { items: items, warnings: warnings };
+  };
+  // Parse the tags-mode filter input: blank → null (run everything); otherwise a set of tag keys —
+  // tokens like "c", "cls", "main"/"show", "s3", "3", "s1-8" (comma/space separated).
+  const parseTagFilter = (str) => {
+    const toks = String(str || '').toLowerCase().split(/[\s,]+/).filter(Boolean);
+    if (!toks.length) return null;
+    const keys = {};
+    toks.forEach((t) => {
+      if (t === 'c') keys.c = 1;
+      else if (t === 'cls') keys.cls = 1;
+      else if (t === 'main' || t === 'show' || t === 'movie' || t === 'poster') keys.show = 1;
+      else {
+        const m = /^s?(\d{1,4})(?:-s?(\d{1,4}))?$/.exec(t);
+        if (m) {
+          const a = parseInt(m[1], 10);
+          const b = m[2] ? parseInt(m[2], 10) : a;
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          for (let n = lo; n <= hi && n - lo < 60; n++) keys['s' + n] = 1;
+        }
+      }
+    });
+    return keys;
+  };
   const parseRange = (str) => {
     const s = (str || '').trim();
     if (!s) return { start: null, end: null };
@@ -622,10 +813,13 @@
   const batchNext = () => {
     if (batchIdx >= batchItems.length) { batchFinish(); return; }
     batchNote('Exporting ' + (batchIdx + 1) + '/' + batchItems.length + '…');
-    send(batchItemScript(batchItems[batchIdx].changes));
+    const item = batchItems[batchIdx];
+    send(item.collection ? batchCollectionScript(item.changes) : batchItemScript(item.changes));
   };
   const onBatchBytes = async (buf) => {
-    download(buf, batchBase + batchItems[batchIdx].suffix + '.jpg');
+    const item = batchItems[batchIdx];
+    download(buf, batchBase + item.suffix + '.jpg');
+    if (item.collection && batchColMove) { send(collectionCleanupScript(batchColMove)); batchColMove = null; }   // undo the logo move before the next item (messages are processed in order)
     batchOk++; batchIdx++;
     await sleep(DL_GAP);   // browsers silently drop rapid back-to-back downloads — space them out
     batchNext();
@@ -638,20 +832,104 @@
   };
   const batchAbort = (msg) => { batchBusy = false; resetBolts(); batchNote('Stopped: ' + msg); };
 
-  const BATCH_SCAN = 'try{var d=app.activeDocument;var out=[],stx=[],spx=[];' +
-    'function sc(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);' +
-    'var nm=(""+L.name).replace(/^\\s+|\\s+$/g,"").toLowerCase();' +
-    'var m=nm.match(/^s(\\d+)$/);var sm=nm.match(/^season\\s*(\\d+)$/);' +
-    'if(m){out.push({t:"s",n:parseInt(m[1],10),p:here});}else if(nm=="main"){out.push({t:"main",p:here});}else if(nm=="show"){out.push({t:"show",p:here});}else if(nm=="c"){out.push({t:"c",p:here});}' +
-    'if(sm){stx.push({n:parseInt(sm[1],10),p:here});}else if(nm=="special"||nm=="specials"){spx.push({p:here});}' +
+  // Tags live in the root-level POSTER group when one exists (the template's poster container — the
+  // jsx's rule): only its DIRECT children are candidates there, where "poster"/PSD-name aliases are
+  // unambiguous. Without a POSTER group, fall back to a whole-tree scan — skipping the "poster"
+  // alias so the template's own POSTER group can never be swallowed as a variant and hidden.
+  const BATCH_SCAN = 'try{var d=app.activeDocument;var out=[],stx=[],spx=[],clx=[],cox=[];' +
+    'var bn=(""+d.name).replace(/\\.[^.]+$/,"").toLowerCase().replace(/^\\s+|\\s+$/g,"").replace(/\\s+/g," ");' +
+    'function nn(s){return (""+s).toLowerCase().replace(/^\\s+|\\s+$/g,"").replace(/\\s+/g," ");}' +
+    'var TAG=/^s\\d{1,4}(-\\d{1,4})?$/;' +
+    'function ali(nm){return nm=="show"||nm=="movie"||nm=="poster"||nm=="main"||(!!bn&&nm==bn);}' +
+    'var pg=-1;for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&nn(L.name)=="poster"){pg=i;break;}}' +
+    'if(pg>=0){var ks=d.layers[pg].layers;for(var i=0;i<ks.length;i++){var nm=nn(ks[i].name);' +
+    'if(TAG.test(nm)||nm=="c"||nm=="cls"||ali(nm)){out.push({nm:(!!bn&&nm==bn)?"show":nm,p:[pg,i],v:ks[i].visible});}}}' +
+    'function sc(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i];var here=pa.concat(i);var nm=nn(L.name);' +
+    'if(pg<0&&(TAG.test(nm)||nm=="show"||nm=="movie"||nm=="main"||nm=="c"||nm=="cls"||(!!bn&&nm==bn))){out.push({nm:(!!bn&&nm==bn)?"show":nm,p:here,v:L.visible});}' +
+    'var sm=nm.match(/^season\\s*0*(\\d+)$/);' +
+    'if(sm){stx.push({n:parseInt(sm[1],10),p:here});}else if(nm=="special"||nm=="specials"){spx.push({p:here});}else if(/^complete limited/.test(nm)){clx.push({p:here});}else if(nm=="collection"){cox.push({p:here});}' +
     'if(L.typename=="LayerSet"){sc(L.layers,here);}}}sc(d.layers,[]);' +
-    'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,name:d.name}));}catch(e){app.echoToOE("SZERR:"+e);}';
+    'app.echoToOE("SZBINIT:"+JSON.stringify({variants:out,seasonText:stx,specialsText:spx,clsText:clx,collectionText:cox,name:d.name}));}catch(e){app.echoToOE("SZERR:"+e);}';
+
+  // Batch prep: (1) gradient safety net — force every root-level GRADIENT group (whole subtree)
+  // visible and LEAVE it on (a nudged-off gradient otherwise ruins a whole batch; echoes whether
+  // anything changed); (2) jsx parity — manual collection logos (LOGO children named c/c1/c2…)
+  // are hidden so they only appear during the Collection placement, never on normal exports.
+  const GRAD_SCRIPT = 'try{var d=app.activeDocument,ch=0;function fv(g){if(!g.visible){g.visible=true;ch=1;}if(g.typename=="LayerSet"){for(var j=0;j<g.layers.length;j++)fv(g.layers[j]);}}' +
+    'for(var i=0;i<d.layers.length;i++){var L=d.layers[i];if(L.typename=="LayerSet"&&/^\\s*gradients?\\s*$/i.test(L.name))fv(L);}' +
+    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+    'var lg=fg(d.layers);' +
+    'if(lg){for(var i=0;i<lg.layers.length;i++){var nm=(""+lg.layers[i].name).replace(/^\\s+|\\s+$/g,"").toLowerCase();' +
+    'if(/^c\\d*$/.test(nm)&&lg.layers[i].visible){lg.layers[i].visible=false;}}}' +
+    'app.echoToOE("SZGRAD:"+ch);}catch(e){app.echoToOE("SZGRAD:0");}';
+
+  // Collection export: apply the item's visibility, then move the logo so its bottom sits on the
+  // collection ruler (181/1500 of canvas height from the bottom) by translating EVERY ART LAYER
+  // inside the LOGO group by the same integer dy — a rigid, exactly-reversible move using only
+  // ArtLayer.translate (the op Place Logo proves daily). Photopea's GROUP ops are off-limits:
+  // group translate throws, group duplicate hangs the script engine outright (verified). So no
+  // copies here — and no auto-shrink (a too-tall logo is placed at original size with a warning;
+  // scaling real layers isn't losslessly reversible). Direct LOGO children named c/c1/c2… are a
+  // manual collection-only logo: only they show for this export (visibility restored by cleanup).
+  // Echoes SZCOLMV:{dy,cv} so the panel builds the exact undo; any failure restores what moved,
+  // warns, and the export STILL runs, so the batch can never hang on placement.
+  // STEP 1 — read: apply the item's visibility, filter the manual-c layers, and echo the logo's
+  // bounds (union of individual layers' bounds — group-level calls misbehave in Photopea) as PLAIN
+  // NUMBERS. The panel computes dy in JS and sends the move as a literal (STEP 2): bounds arithmetic
+  // INSIDE a Photopea script sign-flips (the documented UnitValue trap — same reason Place Logo
+  // works this way). Fail paths export directly (bare) so the batch always advances.
+  const batchCollectionScript = (changes) => px(
+    'var dd=app.activeDocument;var ch=' + JSON.stringify(changes) + ';' +
+    'for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}' +
+    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+    'var lg=fg(dd.layers),cv=[];' +
+    'try{' +
+    'if(lg&&lg.visible){' +
+    'var man=[];for(var i=0;i<lg.layers.length;i++){if(/^c\\d*$/.test((""+lg.layers[i].name).replace(/^\\s+|\\s+$/g,"").toLowerCase()))man.push(i);}' +
+    'if(man.length){for(var i=0;i<lg.layers.length;i++){cv.push(lg.layers[i].visible);lg.layers[i].visible=(man.indexOf(i)>=0);}}' +
+    'var ul=1e9,ut=1e9,ur=-1e9,ub=-1e9;' +
+    'function lv(g,gv){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];var ev=gv&&L.visible;' +
+    'if(L.typename=="LayerSet"){lv(L,ev);}else if(ev){var bb=L.bounds;var x1=nv(bb[0]),y1=nv(bb[1]),x2=nv(bb[2]),y2=nv(bb[3]);' +
+    'if(x2-x1>0&&y2-y1>0){if(x1<ul)ul=x1;if(y1<ut)ut=y1;if(x2>ur)ur=x2;if(y2>ub)ub=y2;}}}}' +
+    'lv(lg,true);' +
+    'if(ur>ul&&ub>ut){app.echoToOE("SZCOLGEO:"+ul+","+ut+","+ur+","+ub+","+nv(dd.height)+"|"+JSON.stringify(cv));}' +
+    'else{if(cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}' +
+    'app.echoToOE("SZBWARN:The LOGO group has no visible content — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
+    '}else if(lg){app.echoToOE("SZBWARN:The LOGO group is hidden — Collection exported without a logo.");dd.saveToOE("jpg:0.90");}' +
+    'else{app.echoToOE("SZBWARN:No LOGO group — the Collection poster was exported without a logo.");dd.saveToOE("jpg:0.90");}' +
+    '}catch(pe){' +
+    'try{if(lg&&cv.length){for(var i=0;i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}}}catch(e3){}' +
+    'app.echoToOE("SZBWARN:Collection logo placement failed ("+pe+") — exported without repositioning the logo.");' +
+    'dd.saveToOE("jpg:0.90");}');
+
+  // STEP 2 — move + export: translate every art layer in LOGO by the LITERAL dy the panel computed,
+  // then export. Per-leaf try so one stubborn layer can't abort the export.
+  const collectionMoveScript = (dy) => px(
+    'var dd=app.activeDocument;' +
+    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+    'var lg=fg(dd.layers);' +
+    'if(lg&&' + dy + '!==0){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
+    'for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,' + dy + ');}catch(_e){}}}' +
+    'dd.saveToOE("jpg:0.90");');
+
+  // Undo the collection move: translate every art layer in LOGO back by -dy, restore the manual-c
+  // visibility, and sweep any __PFLTMPLOGO__ orphans left by older (copy-based) runs.
+  const collectionCleanupScript = (mv) => px(
+    'var d=app.activeDocument;' +
+    'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+    'var lg=fg(d.layers);' +
+    'if(lg){var lvs=[];function lv(g){for(var i=0;i<g.layers.length;i++){var L=g.layers[i];if(L.typename=="LayerSet"){lv(L);}else{lvs.push(L);}}}lv(lg);' +
+    'if(' + (mv.dy || 0) + '!==0){for(var i=0;i<lvs.length;i++){try{lvs[i].translate(0,' + (-(mv.dy || 0)) + ');}catch(_e){}}}' +
+    'var cv=' + JSON.stringify(mv.cv || []) + ';for(var i=0;i<cv.length&&i<lg.layers.length;i++){lg.layers[i].visible=cv[i];}' +
+    'if(!lg.visible)lg.visible=true;}' +
+    'function fx(ls){for(var i=ls.length-1;i>=0;i--){var L=ls[i];if(L.name=="__PFLTMPLOGO__"){L.remove();}else if(L.typename=="LayerSet"){fx(L.layers);}}}fx(d.layers);' +
+    'app.echoToOE("SZCLEAN:ok");');
 
   const startBatch = (mode) => {
     if (batchBusy) return;
     batchMode = mode;   // 'tags' (amber) or 'seasons' (blue) — the button picks the mode, no auto-detect
     batchOk = 0; batchIdx = 0;
-    batchBar.classList.remove('hidden'); batchRow.classList.add('hidden');
+    batchBar.classList.remove('hidden'); batchRow.classList.add('hidden'); batchHelp.classList.add('hidden');
     batchNote('Scanning…');
     send(BATCH_SCAN);
   };
@@ -662,18 +940,23 @@
     let init; try { init = JSON.parse(json); } catch (_) { batchNote('Scan failed.'); return; }
     batchBase = (init.name || pendingDocName || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
     batchStyle = detectedStyle;
-    batchSeasonText = init.seasonText || []; batchSpecialsText = init.specialsText || [];
-    const variants = init.variants || [];
     if (batchMode === 'tags') {
-      if (!variants.length) { batchNote('No name-tag layers (s0/s1…/main/show/c) in this document. For a single poster with a SEASONS group, use the blue ⚡ instead.'); return; }
+      const built = buildTagItems(init.variants || [],
+        { season: init.seasonText || [], specials: init.specialsText || [], cls: init.clsText || [], collection: init.collectionText || [] },
+        batchBase);
+      if (!built.items.length) { built.warnings.forEach((w) => note('Batch: ' + w)); batchNote('No name-tag layers (s0/s1…, s1-8, main/show/movie/poster, c, cls) in this document. For a single poster with a SEASONS group, use the blue ⚡ instead.'); return; }
       batchConvention = true;
-      batchItems = buildConventionItems(variants);
-      batchRow.classList.remove('hidden'); batchInput.style.display = 'none';
-      batchNote('Found ' + batchItems.length + ' tagged poster(s). Export all?');
+      batchItems = built.items;
+      batchWarnings = built.warnings;
+      batchRow.classList.remove('hidden'); batchInput.style.display = '';
+      batchInput.value = ''; batchInput.placeholder = 'blank = all · filter: c, cls, main, s1-8';
+      batchNote('Found ' + batchItems.length + ' tagged export(s)' + (built.warnings.length ? ' (' + built.warnings.length + ' warning(s))' : '') + '. Run all, or type a filter.');
     } else {
+      batchWarnings = [];
       if (!(byRole('season').length || model.singles.length)) { batchNote('No SEASONS group or season layers found. For layers tagged s0/s1…/main/show, use the amber ⚡ instead.'); return; }
       batchConvention = false;
-      batchRow.classList.remove('hidden'); batchInput.style.display = ''; batchInput.value = ''; batchInput.focus();
+      batchRow.classList.remove('hidden'); batchInput.style.display = '';
+      batchInput.value = ''; batchInput.placeholder = 'e.g. 8, 0-5, or blank = all'; batchInput.focus();
       batchNote('Which seasons? e.g. "8" (=1–8), "0-5" (0 = Specials), "2015-2020" (years), or blank = all.');
     }
   };
@@ -682,10 +965,15 @@
     if (!batchConvention) {
       const r = parseRange(batchInput.value);
       batchItems = (isYearRange(r) && byRole('year').length) ? yearItems(r.start, r.end) : seasonItems(r.start, r.end);
+    } else {
+      const fk = parseTagFilter(batchInput.value);
+      if (fk) batchItems = batchItems.filter((it) => fk[it.key]);
     }
     if (!batchItems.length) { batchNote('Nothing matched — nothing to export.'); return; }
     batchBusy = true; modeBtn().textContent = '…'; batchRow.classList.add('hidden');
-    batchIdx = 0; batchOk = 0;
+    batchWarnings.forEach((w) => note('Batch: ' + w));
+    batchIdx = 0; batchOk = 0; batchColMove = null;
+    send(GRAD_SCRIPT);   // gradient safety net first (runs before the first item — messages are ordered)
     batchNext();
   };
 
@@ -693,6 +981,7 @@
   // Show the detected style (CL2K/MM2K) and hide Place Logo for MM2K (text titles, no LOGO group).
   const updateDocUI = () => {
     logoBtn.style.display = (detectedStyle === 'MM2K') ? 'none' : '';   // Fit Poster stays
+    logoExpBtn.style.display = (detectedStyle === 'MM2K') ? 'none' : '';   // no LOGO group on MM2K → nothing to export
     styleName.textContent = detectedStyle || '—';
     styleName.className = 'style-name' + (detectedStyle === 'MM2K' ? ' mm2k' : detectedStyle === 'CL2K' ? ' cl2k' : '');
   };
@@ -700,17 +989,37 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { onBytes(d); return; }   // ArrayBuffer = saveToOE (JPG) result
+    if (typeof d !== 'string') { if (logoExpBusy) { onLogoBytes(d); } else { onBytes(d); } return; }   // ArrayBuffer = saveToOE result
     if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; }
     else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
     else if (d.startsWith('SZSIG:'))   { lastActiveSig = d.slice(6); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
     else if (d.startsWith('SZBINIT:')) { onBatchInit(d.slice(8)); }
+    else if (d.startsWith('SZGRAD:'))  { if (d.slice(7) === '1') note('The GRADIENT group had hidden layers — turned on and left visible in the PSD.'); }
+    else if (d.startsWith('SZBWARN:')) { note('Batch: ' + d.slice(8)); }
+    else if (d.startsWith('SZCOLGEO:')) {
+      // Logo bounds arrived as plain numbers — compute dy HERE (in-script bounds math sign-flips),
+      // remember the undo data, and send the literal move+export script.
+      const raw = d.slice(9);
+      const bar = raw.indexOf('|');
+      const nums = raw.slice(0, bar).split(',').map(parseFloat);
+      let cvv = []; try { cvv = JSON.parse(raw.slice(bar + 1)); } catch (_) {}
+      const top = nums[1], bottom = nums[3], H = nums[4];
+      const targetBottom = H - (181 / 1500) * H;
+      const allowedH = ((400 - 181) / 1500) * H;
+      if (bottom - top > allowedH) note('Batch: the logo is taller than fits above the collection ruler — placed at its original size, crossing the max height line.');
+      const dy = Math.round(targetBottom - bottom);
+      batchColMove = { dy: dy, cv: cvv };
+      send(collectionMoveScript(dy));
+    }
+    else if (d.startsWith('SZCLEAN:')) { /* collection logo restored — ack only */ }
     else if (d.startsWith('SZACT:'))   { const sig = d.slice(6); if (sig !== lastActiveSig && !jpgBusy && !placeBusy && !batchBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('SZGEO:'))   { onGeo(d.slice(6)); }
     else if (d.startsWith('SZRSZ:'))   { const p = d.slice(6).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
     else if (d.startsWith('SZPLACED:')){ finishPlace(true); }
     else if (d.startsWith('SZTRIM:'))  { flashTrim('✓'); }
-    else if (d.startsWith('SZERR:'))   { if (trimBusy) { flashTrim('✗'); list.insertAdjacentHTML('afterbegin', '<div class="msg">Trim failed: ' + d.slice(6) + '</div>'); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); } else { list.innerHTML = '<div class="msg">Error: ' + d.slice(6) + '</div>'; flashJpg('JPG'); } }
+    else if (d.startsWith('SZLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(10)); } catch (_) { logoRestore = null; } }
+    else if (d.startsWith('SZNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
+    else if (d.startsWith('SZERR:'))   { if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(6)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(6)); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); } else { note('Error: ' + d.slice(6)); flashJpg('JPG'); } }
     else if (d.startsWith('SZ:'))      { try { model = JSON.parse(d.slice(3)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     // SZVIS: ack handled optimistically in commit().
   });
@@ -720,16 +1029,25 @@
   logoBtn.addEventListener('click', startLogo);
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
+  logoExpBtn.addEventListener('click', exportLogo);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
   const boltClick = (mode) => {
-    if (batchBusy) return;
+    if (batchBusy || logoExpBusy) return;
     if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
     startBatch(mode);
   };
   batchBtn.addEventListener('click', () => boltClick('tags'));
   seasonsBtn.addEventListener('click', () => boltClick('seasons'));
   document.querySelector('[data-act="batch-run"]').addEventListener('click', runBatch);
+  document.querySelector('[data-act="batch-help"]').addEventListener('click', () => {
+    const rows = batchMode === 'tags'
+      ? [['blank', 'run everything'], ['c', 'Collection'], ['cls', 'Limited Series'], ['main / show', 'main poster'],
+         ['s3 or 3', 'one season'], ['0', 'Specials'], ['s1-8', 'a season range'], ['main, c', 'combine with commas']]
+      : [['blank', 'all seasons + Specials'], ['8', 'seasons 1-8'], ['3-6', 'that range'], ['0-5', 'includes Specials'], ['2015-2020', 'year layers']];
+    batchHelp.innerHTML = rows.map((r) => '<div><b>' + r[0] + '</b> — ' + r[1] + '</div>').join('');
+    batchHelp.classList.toggle('hidden');
+  });
   document.querySelector('[data-act="batch-cancel"]').addEventListener('click', closeBatch);
   batchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runBatch(); } });
 
@@ -745,7 +1063,7 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("SZACT:"+sig)}catch(e){}';
-  setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy) send(POLL); }, 1200);
+  setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the active document (press ⟳ to reload)
 })();
