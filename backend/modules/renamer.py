@@ -238,6 +238,18 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
     if not result["success"]:
         raise Exception(result.get("error", "Unknown error"))
 
+    # A missing drive folder (unmounted / never synced) scans as empty, so its items would
+    # read as unsourced and cleanup would prune their placed posters. Hand cleanup an empty
+    # map instead — "prune nothing", same as the standalone derivation's OSError path.
+    missing_dirs = [d for d in source_dirs if not os.path.isdir(d)]
+    if missing_dirs:
+        log_warning(
+            LogTags.RENAMER,
+            f"{len(missing_dirs)} poster drive folder(s) missing — skipping poster reconciliation for cleanup",
+            missing=missing_dirs,
+        )
+        result["poster_sourced"] = {}
+
     if result.get("stats") and not config_data.get("dry_run", False):
         stats = result["stats"]
         style_counts = stats.get("style_counts", {})
@@ -628,6 +640,9 @@ def run_rename_background_job(
                 (poster_result or {}).get("artwork_sourced")
                 if do_posters else (artwork_result or {}).get("artwork_sourced")
             )
+        # Poster slots the drives source per item; None on artwork-only runs (no poster
+        # scan happened) so cleanup derives it itself.
+        poster_sourced = (poster_result or {}).get("poster_sourced") if do_posters else None
 
         # Hand the media fetch and the match verdicts to the caller. A workflow runs cleanup
         # itself (this job skips its own); without this it re-fetched media and re-matched.
@@ -635,6 +650,7 @@ def run_rename_background_job(
             scan_out["media_dict"] = media_dict
             scan_out["artwork_boxes"] = scanned_artwork
             scan_out["artwork_sourced"] = artwork_sourced
+            scan_out["poster_sourced"] = poster_sourced
 
         # -- Asset cleanup (opt-in toggle, standalone runs only) --
         # Skipped for workflow children - the workflow runs cleanup at its own tail.
@@ -650,6 +666,7 @@ def run_rename_background_job(
                 media_dict=media_dict,  # same media (+ library selection) the rename just used
                 artwork_boxes=scanned_artwork,  # unfiltered scan from above; don't re-walk the drives
                 artwork_sourced=artwork_sourced,  # this run's match verdicts; don't re-match
+                poster_sourced=poster_sourced,
             )
             cleanup_summary = summarize_cleanup(cleanup_result)
 

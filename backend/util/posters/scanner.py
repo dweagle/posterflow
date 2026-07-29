@@ -11,11 +11,12 @@ from core.logging import log_debug, log_error, log_info, LogTags
 from util.constants import (
     illegal_chars_regex,
     remove_special_chars,
+    season_number_regex,
     season_pattern,
     unknown_year_regex,
     year_regex,
 )
-from util.data.construct import create_collection, create_movie, create_series
+from util.data.construct import SLOT_POSTER, create_collection, create_movie, create_series
 from util.data.extract import extract_ids, extract_year
 from util.data.normalization import normalize_titles
 
@@ -54,6 +55,21 @@ def is_artwork_file(filename: str) -> bool:
     """True for artwork (logo/background/squareart), nested ('square.png') or flat
     ('Title (Year) {tmdb-1}-square.png') form."""
     return artwork_type_of(filename) is not None
+
+
+def poster_slot_of(filename: str):
+    """The poster slot a destination file fills: a season number (int, 0 = Specials) or
+    SLOT_POSTER. Covers the nested 'Season01.jpg' form and the flat/drive
+    ' - Season 1' / '_Season01' / ' - Specials' forms. Artwork is never a poster slot —
+    check artwork_type_of first."""
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    m = re.fullmatch(r"Season\s*(\d{1,4})", stem, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    if season_pattern.search(stem):
+        m = season_number_regex.search(stem)
+        return int(m.group(1)) if m else 0
+    return SLOT_POSTER
 
 
 def scan_files_in_flat_folder(folder_path: str, exclude_artwork: bool = False, artwork_out: Optional[Dict[str, List[str]]] = None) -> List[Dict]:

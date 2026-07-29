@@ -45,6 +45,8 @@ function GDrives() {
   const [priorityPrompt, setPriorityPrompt] = useState<{show: boolean, driveId: number | null, driveName: string}>({show: false, driveId: null, driveName: ''})
   const [promptDontAsk, setPromptDontAsk] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(false)
+  const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{show: boolean, driveId: number | null, driveName: string}>({show: false, driveId: null, driveName: ''})
+  const [unsubscribeDeleteFiles, setUnsubscribeDeleteFiles] = useState(false)
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
   const { jobs } = useAppEvents()
@@ -172,12 +174,24 @@ function GDrives() {
     if (id != null) void doSubscribe(id, add)
   }
 
-  const handleUnsubscribe = async (driveId: number) => {
+  const handleUnsubscribe = (driveId: number) => {
+    const drive = drives.find(d => d.id === driveId)
+    setUnsubscribeDeleteFiles(false)
+    setUnsubscribeConfirm({ show: true, driveId, driveName: drive?.display_name || drive?.name || 'this drive' })
+  }
+
+  const doUnsubscribe = async (driveId: number, deleteDownloadedFiles: boolean) => {
+    setUnsubscribeConfirm({ show: false, driveId: null, driveName: '' })
     await fetchWithLogging(async () => {
-      const result = await unsubscribeDrive(driveId)
+      const result = await unsubscribeDrive(driveId, deleteDownloadedFiles)
       fetchDrives()
       if (result.removed_from_priority) {
         showToast('Unsubscribed. This drive was removed from Asset Manager → Drive Priority.', 'info')
+      }
+      if (deleteDownloadedFiles) {
+        showToast(result.files_deleted
+          ? 'Downloaded poster files deleted from disk.'
+          : 'No downloaded files found on disk to delete.', 'info')
       }
     }, 'Error unsubscribing:')
   }
@@ -912,6 +926,29 @@ function GDrives() {
         <label className="delete-files-checkbox">
           <input type="checkbox" checked={promptDontAsk} onChange={(e) => setPromptDontAsk(e.target.checked)} />
           <span>Don't ask again for poster drives</span>
+        </label>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={unsubscribeConfirm.show}
+        title="Unsubscribe from Drive?"
+        message={`Stop syncing "${unsubscribeConfirm.driveName}"? Posters placed from it are removed on the next rename + cleanup run.`}
+        confirmText="Unsubscribe"
+        cancelText="Cancel"
+        variant="info"
+        onConfirm={() => unsubscribeConfirm.driveId && doUnsubscribe(unsubscribeConfirm.driveId, unsubscribeDeleteFiles)}
+        onCancel={() => {
+          setUnsubscribeConfirm({ show: false, driveId: null, driveName: '' })
+          setUnsubscribeDeleteFiles(false)
+        }}
+      >
+        <label className="delete-files-checkbox">
+          <input
+            type="checkbox"
+            checked={unsubscribeDeleteFiles}
+            onChange={(e) => setUnsubscribeDeleteFiles(e.target.checked)}
+          />
+          <span>Also delete this drive's downloaded files from disk (resubscribing re-syncs from scratch)</span>
         </label>
       </ConfirmDialog>
 

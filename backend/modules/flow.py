@@ -709,6 +709,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     media_dict=rename_scan.get("media_dict"),
                     artwork_boxes=rename_scan.get("artwork_boxes"),
                     artwork_sourced=rename_scan.get("artwork_sourced"),
+                    poster_sourced=rename_scan.get("poster_sourced"),
                 )
                 cleanup_embed = {
                     "event_type": "success",

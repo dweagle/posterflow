@@ -66,6 +66,74 @@ def test_unsubscribe_drive(client, test_db):
     assert response.status_code == 200
     data = response.json()
     assert data["drive"]["subscribed"] is False
+    assert data["files_deleted"] is False
+    assert data["poster_records_deleted"] == 0
+
+
+def test_unsubscribe_default_keeps_local_files_and_records(client, test_db, tmp_path):
+    from models.poster import Poster
+
+    folder = tmp_path / "Keep_Drive"
+    folder.mkdir()
+    (folder / "Movie (2020).jpg").write_bytes(b"img")
+    drive = Drive(name="Keep Drive", drive_id="keep-1", style_type="MM2K",
+                  subscribed=True, custom_path=str(folder))
+    test_db.add(drive)
+    test_db.add(Poster(drive_id="keep-1", file_name="Movie (2020).jpg",
+                       file_path=str(folder / "Movie (2020).jpg")))
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/drives/{drive.id}/unsubscribe")
+    assert response.status_code == 200
+    assert folder.exists()
+    assert test_db.query(Poster).filter(Poster.drive_id == "keep-1").count() == 1
+
+
+def test_unsubscribe_delete_files_removes_folder_and_poster_records(client, test_db, tmp_path):
+    from models.poster import Poster
+
+    folder = tmp_path / "Bye_Drive"
+    folder.mkdir()
+    (folder / "Movie (2020).jpg").write_bytes(b"img")
+    drive = Drive(name="Bye Drive", drive_id="bye-1", style_type="MM2K",
+                  subscribed=True, custom_path=str(folder), sync_file_count=1)
+    other = Drive(name="Other Drive", drive_id="other-1", style_type="MM2K", subscribed=True)
+    test_db.add_all([drive, other])
+    test_db.add(Poster(drive_id="bye-1", file_name="Movie (2020).jpg",
+                       file_path=str(folder / "Movie (2020).jpg")))
+    test_db.add(Poster(drive_id="other-1", file_name="Other (2021).jpg",
+                       file_path="/gdrive/MM2K/Other_Drive/Other (2021).jpg"))
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/drives/{drive.id}/unsubscribe?delete_files=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["drive"]["subscribed"] is False
+    assert data["files_deleted"] is True
+    assert data["poster_records_deleted"] == 1
+
+    assert not folder.exists()
+    test_db.expire_all()
+    assert test_db.query(Poster).filter(Poster.drive_id == "bye-1").count() == 0
+    # Other drives' records are untouched.
+    assert test_db.query(Poster).filter(Poster.drive_id == "other-1").count() == 1
+    assert test_db.query(Drive).filter(Drive.drive_id == "bye-1").first().sync_file_count == 0
+
+
+def test_unsubscribe_delete_files_with_no_local_folder(client, test_db, tmp_path):
+    drive = Drive(name="Ghost Drive", drive_id="ghost-1", style_type="MM2K",
+                  subscribed=True, custom_path=str(tmp_path / "never-synced"))
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/drives/{drive.id}/unsubscribe?delete_files=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["drive"]["subscribed"] is False
+    assert data["files_deleted"] is False
 
 
 def test_unsubscribe_prunes_drive_from_poster_priority(client, test_db):

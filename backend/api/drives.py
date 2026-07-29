@@ -320,26 +320,49 @@ def subscribe_drive(drive_id: int, add_to_priority: bool = False, db: Session = 
     }
 
 @router.post("/{drive_id}/unsubscribe")
-def unsubscribe_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Unsubscribe from a drive"""
+def unsubscribe_drive(drive_id: int, delete_files: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Unsubscribe from a drive. With delete_files, also remove the downloaded local
+    folder and its poster index rows (resubscribing re-syncs from scratch)."""
     drive = db.query(Drive).filter(Drive.id == drive_id).first()
     if not drive:
         raise HTTPException(status_code=404, detail="Drive not found")
-    
+
     drive.subscribed = False
     removed_from_priority = _prune_drive_from_priority(db, drive.id)
+
+    files_deleted = False
+    poster_records_deleted = 0
+    if delete_files:
+        folder_path = drive.get_local_path(validate=False)
+        poster_records_deleted = db.query(Poster).filter(Poster.drive_id == drive.drive_id).delete()
+        if folder_path.exists():
+            try:
+                shutil.rmtree(folder_path)
+                files_deleted = True
+                log_info(LogTags.DRIVES, f"Deleted folder: {folder_path}")
+            except Exception as e:
+                log_error(LogTags.DRIVES, f"Failed to delete folder {folder_path}: {e}\n{traceback.format_exc()}")
+        drive.sync_file_count = 0
+        drive.last_files_transferred = 0
+        drive.last_synced = None
+
     db.commit()
     db.refresh(drive)
-    
+
     log_message = f"Unsubscribed from drive: {drive.name}"
     if removed_from_priority:
         log_message += " (removed from poster priority)"
+    if delete_files:
+        log_message += f" ({poster_records_deleted} poster records deleted"
+        log_message += ", local files deleted)" if files_deleted else ")"
     log_user_action(log_message)
     drive_response = DriveSchema.model_validate(drive).model_dump(mode="json")
     return {
         "message": f"Unsubscribed from {drive.name}",
         "drive": drive_response,
         "removed_from_priority": removed_from_priority,
+        "files_deleted": files_deleted,
+        "poster_records_deleted": poster_records_deleted,
     }
 
 @router.patch("/{drive_id}", response_model=DriveSchema)

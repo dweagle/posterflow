@@ -41,6 +41,7 @@ def maybe_run_asset_cleanup(
     media_dict: Optional[Dict[str, Any]] = None,
     artwork_boxes: Optional[List[Dict[str, Any]]] = None,
     artwork_sourced: Optional[Dict[int, set]] = None,
+    poster_sourced: Optional[Dict[int, set]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run asset cleanup at a run's tail when the toggle is enabled.
 
@@ -82,6 +83,7 @@ def maybe_run_asset_cleanup(
             library_setting_key=config_data.get("library_setting_key") or "asset_renamer_libraries",
             artwork_boxes=artwork_boxes,  # reuse the rename's drive scan instead of re-walking
             artwork_sourced=artwork_sourced,  # reuse the rename's match verdicts instead of re-matching
+            poster_sourced=poster_sourced,
         )
     except Exception as exc:
         # Deliberate boundary: cleanup is a post-action, so its failure must not fail the
@@ -100,7 +102,8 @@ def maybe_run_asset_cleanup(
             f"Asset cleanup {'(dry run) ' if dry_run else ''}summary: "
             f"removed {counts.get('removed_orphans', 0)} orphan(s), "
             f"{counts.get('removed_stale', 0)} stale duplicate(s), "
-            f"{counts.get('removed_artwork', 0)} orphaned artwork; "
+            f"{counts.get('removed_artwork', 0)} orphaned artwork, "
+            f"{counts.get('removed_posters', 0)} unsourced poster(s); "
             f"kept {counts.get('unknown_kept', 0)} unknown for review"
         ),
         triggered_by=triggered_by,
@@ -119,6 +122,7 @@ def summarize_cleanup(result: Optional[Dict[str, Any]]) -> Optional[str]:
     return (
         f"{prefix} {counts.get('removed_orphans', 0)} orphan + "
         f"{counts.get('removed_stale', 0)} stale folder(s) + "
-        f"{counts.get('removed_artwork', 0)} orphaned artwork; "
+        f"{counts.get('removed_artwork', 0)} orphaned artwork + "
+        f"{counts.get('removed_posters', 0)} unsourced poster(s); "
         f"{counts.get('unknown_kept', 0)} kept for review"
     )

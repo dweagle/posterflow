@@ -98,6 +98,72 @@ def _placements_from_files(
     return out
 
 
+def sourced_poster_slots_from_matched(matched: MediaDict) -> Dict[int, set]:
+    """Per live media item (keyed by ``id(media)``), the poster slots the subscribed drives
+    currently source: ``SLOT_POSTER`` plus season numbers (0 = specials). The poster mirror
+    of ``sourced_types_from_matched`` — the renamer hands its own match across so a
+    rename+cleanup run matches the library once and place/prune can't disagree. Unions
+    across boxes when several match the same media."""
+    sourced: Dict[int, set] = {}
+    for items in matched.values():
+        for item in items:
+            box_slots = (item.get("asset_ref") or {}).get("slots")
+            slots = box_slots if box_slots else _slots_from_files(item.get("files") or [])
+            provided: set = set()
+            poster = slots.get(SLOT_POSTER)
+            if poster and os.path.isfile(poster):
+                provided.add(SLOT_POSTER)
+            for season, path in (slots.get("seasons") or {}).items():
+                if path and os.path.isfile(path):
+                    provided.add(int(season))
+            if provided and item.get("media_ref") is not None:
+                sourced.setdefault(id(item["media_ref"]), set()).update(provided)
+    return sourced
+
+
+def subscribed_priority_drives(db: Session) -> List[Any]:
+    """The poster drives the renamer would use, in priority order. Raises ValueError when no
+    priority list is configured or none of its drives are subscribed."""
+    from models.drive import Drive
+
+    setting = get_setting(db, "poster_drive_priority")
+    if not setting or not setting.value:
+        raise ValueError("No poster drive priority configured")
+    try:
+        drive_ids = json.loads(setting.value).get("drive_ids", [])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid poster drive priority configuration: {exc}")
+    drives = []
+    for drive_id in drive_ids:
+        drive = db.query(Drive).filter(Drive.id == drive_id, Drive.subscribed == True).first()
+        if drive:
+            drives.append(drive)
+    if not drives:
+        raise ValueError("No poster drives in the priority list are subscribed")
+    return drives
+
+
+def sourced_poster_slots_by_media(db: Session, media_dict: MediaDict) -> Dict[int, set]:
+    """Standalone-cleanup half of the poster sourcing: scan the subscribed priority drives
+    and match them to the live media, mirroring artwork's ``sourced_types_by_media``. Raises
+    ValueError (no subscribed drives) / OSError (missing or empty drive folder) — expected
+    failures callers degrade to 'prune nothing'; a defect propagates."""
+    source_dirs = []
+    for drive in subscribed_priority_drives(db):
+        path = drive.get_local_path(validate=False)
+        if not path.is_dir():
+            raise OSError(f"Poster drive folder missing for '{drive.name}': {path}")
+        source_dirs.append(str(path))
+    assets_dict, prefix_index = get_assets_files(source_dirs)
+    if not assets_dict:
+        raise OSError("Poster drive scan found no assets (empty or unreadable drive folders)")
+    matched = match_assets_to_media(
+        media_dict, prefix_index, strict_folder_match=False,
+        label="poster drive sources", report_near_misses=False,
+    )
+    return sourced_poster_slots_from_matched(matched)
+
+
 class PosterRenameService:
     """Service for renaming posters to Plex-compatible format."""
 
@@ -1465,8 +1531,9 @@ class PosterRenameService:
             
             log_section_end(LogTags.RENAMER, "Poster Renamer Complete")
             
-            # The match verdicts, for cleanup: which artwork types the drives source per item.
-            # Handing this across means one library match per run and no place/prune disagreement.
+            # The match verdicts, for cleanup: which artwork types / poster slots the drives
+            # source per item. Handing this across means one library match per run and no
+            # place/prune disagreement.
             from services.artwork_scan import sourced_types_from_matched
             return {
                 "success": True,
@@ -1476,6 +1543,7 @@ class PosterRenameService:
                 "dry_run": dry_run,
                 "destination_dir": actual_destination,
                 "using_temp_folder": use_temp_folder,
+                "poster_sourced": sourced_poster_slots_from_matched(matched_assets),
                 "artwork_sourced": sourced_types_from_matched(matched_assets) if artwork_boxes else {},
             }
             

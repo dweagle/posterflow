@@ -46,8 +46,25 @@ vi.mock('../../src/components/AddCustomDriveModal', () => ({
   default: () => null,
 }))
 
+// Minimal functional stand-in: renders the dialog's buttons/children when open, so tests
+// can drive confirm flows without the real modal markup.
 vi.mock('../../src/components/ConfirmDialog', () => ({
-  default: () => null,
+  default: ({ isOpen, title, confirmText, cancelText, onConfirm, onCancel, children }: {
+    isOpen: boolean
+    title: string
+    confirmText?: string
+    cancelText?: string
+    onConfirm: () => void
+    onCancel: () => void
+    children?: React.ReactNode
+  }) =>
+    isOpen ? (
+      <div role="dialog" aria-label={title}>
+        {children}
+        <button onClick={onCancel}>{cancelText ?? 'Cancel'}</button>
+        <button onClick={onConfirm}>{confirmText ?? 'Confirm'}</button>
+      </div>
+    ) : null,
 }))
 
 const buildDrive = (overrides?: Partial<{
@@ -95,9 +112,8 @@ describe('GDrives', () => {
     expect(mockGetDrives).toHaveBeenCalled()
   })
 
-  // ConfirmDialog is mocked to null in this file, so drive the two outcomes via the
-  // remembered preference (which skips the popup) — this verifies the add-to-priority
-  // flag is threaded through subscribe correctly.
+  // Drive the two outcomes via the remembered preference (which skips the popup) — this
+  // verifies the add-to-priority flag is threaded through subscribe correctly.
   it('subscribes without adding to priority when preference is "never"', async () => {
     localStorage.setItem('posterflow.subscribeAddToPriority.poster', 'never')
     const user = userEvent.setup()
@@ -130,7 +146,7 @@ describe('GDrives', () => {
     })
   })
 
-  it('unsubscribes when subscribed action button is clicked', async () => {
+  it('unsubscribes after confirming the dialog, keeping files by default', async () => {
     const user = userEvent.setup()
     mockGetDrives.mockResolvedValue([buildDrive({ id: 7, subscribed: true })])
     mockUnsubscribeDrive.mockResolvedValue({})
@@ -140,8 +156,30 @@ describe('GDrives', () => {
     await screen.findByText('Test Drive')
     await user.click(screen.getByTitle('Unsubscribe from drive'))
 
+    // Confirm dialog opens; the API is not called until confirmed.
+    expect(mockUnsubscribeDrive).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Unsubscribe' }))
+
     await waitFor(() => {
-      expect(mockUnsubscribeDrive).toHaveBeenCalledWith(7)
+      expect(mockUnsubscribeDrive).toHaveBeenCalledWith(7, false)
+    })
+  })
+
+  it('unsubscribes with file deletion when the checkbox is ticked', async () => {
+    const user = userEvent.setup()
+    mockGetDrives.mockResolvedValue([buildDrive({ id: 7, subscribed: true })])
+    mockUnsubscribeDrive.mockResolvedValue({ files_deleted: true })
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Test Drive')
+    await user.click(screen.getByTitle('Unsubscribe from drive'))
+
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Unsubscribe' }))
+
+    await waitFor(() => {
+      expect(mockUnsubscribeDrive).toHaveBeenCalledWith(7, true)
     })
   })
 

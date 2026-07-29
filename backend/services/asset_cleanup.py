@@ -32,10 +32,11 @@ from core.logging import (
 from models.plex_upload import PlexUploadRecord
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
+from util.constants import season_pattern
 from util.posters.assets import get_assets_files
 from util.posters.index import search_matches
 from util.posters.match import collection_title_variants, is_match
-from util.posters.scanner import artwork_type_of, artwork_flat_base
+from util.posters.scanner import artwork_type_of, artwork_flat_base, poster_slot_of
 
 MEDIA_TYPES = ("movies", "series", "collections")
 
@@ -213,6 +214,7 @@ class AssetCleanupService:
         progress_callback: Optional[ProgressCallback] = None,
         artwork_boxes: Optional[List[Dict[str, Any]]] = None,
         artwork_sourced: Optional[Dict[int, set]] = None,
+        poster_sourced: Optional[Dict[int, set]] = None,
     ) -> Dict[str, Any]:
         """Reconcile the destination assets folder against the live media library.
 
@@ -288,6 +290,17 @@ class AssetCleanupService:
         # told apart from a down source, so it's never mass-deleted).
         globally_sourced_artwork = {t for types in artwork_sourced.values() for t in types}
 
+        # Poster slots the drives still source per item — the poster mirror of the artwork
+        # reconciliation, so posters placed from a since-unsubscribed drive get pruned too.
+        # Same expected-failure handling: no subscribed/readable drives → prune nothing.
+        if poster_sourced is None:
+            try:
+                from services.poster_renamer import sourced_poster_slots_by_media
+                poster_sourced = sourced_poster_slots_by_media(self.db, media_dict)
+            except (ValueError, OSError) as exc:
+                log_warning(LogTags.CLEANUP, f"No poster sources available; skipping poster reconciliation: {exc}")
+                poster_sourced = {}
+
         roots = [destination_dir]
         tmp_dir = os.path.join(destination_dir, "tmp")
         if os.path.isdir(tmp_dir):
@@ -307,9 +320,11 @@ class AssetCleanupService:
                 unsafe_types=unsafe_types,
                 ignore_set=ignore_set,
                 result=result,
-                # Artwork lives in the item folders under the main destination, not tmp/.
+                # Artwork lives in the item folders under the main destination, not tmp/;
+                # poster reconciliation likewise skips the transient tmp/ staging.
                 artwork_sourced=artwork_sourced if root == destination_dir else {},
                 globally_sourced_artwork=globally_sourced_artwork if root == destination_dir else set(),
+                poster_sourced=poster_sourced if root == destination_dir else {},
             )
 
         # ── Empty-folder sweep ─────────────────────────────────────────────
@@ -327,7 +342,7 @@ class AssetCleanupService:
             (
                 f"Cleanup {'(dry run) ' if dry_run else ''}complete in {elapsed:.2f}s — "
                 f"removed {counts['removed_orphans']} orphan(s), {counts['removed_stale']} stale duplicate(s), "
-                f"{counts['removed_artwork']} orphaned artwork; "
+                f"{counts['removed_artwork']} orphaned artwork, {counts['removed_posters']} unsourced poster(s); "
                 f"kept {counts['unknown_kept']} unknown for review"
             ),
             **counts,
@@ -349,10 +364,12 @@ class AssetCleanupService:
         result: Dict[str, Any],
         artwork_sourced: Optional[Dict[int, set]] = None,
         globally_sourced_artwork: Optional[set] = None,
+        poster_sourced: Optional[Dict[int, set]] = None,
     ) -> None:
         """Run grouping + classification + deletion for one scan root."""
         artwork_sourced = artwork_sourced or {}
         globally_sourced_artwork = globally_sourced_artwork or set()
+        poster_sourced = poster_sourced or {}
         log_info(LogTags.CLEANUP, f"Scanning {root} ...")
         try:
             assets_dict, prefix_index = get_assets_files([root], merge=False)
@@ -456,6 +473,13 @@ class AssetCleanupService:
                 dry_run=dry_run, result=result,
             )
 
+        # Non-empty means the poster drive scan/match succeeded — an empty map is a down
+        # source (or no drives) and must never mass-delete.
+        if poster_sourced:
+            self._prune_unsourced_posters(
+                groups, poster_sourced, ignore_set, dry_run=dry_run, result=result,
+            )
+
     def _remove_orphan_artwork(self, file_path: str, atype: str, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
         fname = os.path.basename(file_path)
         reason = f"orphaned {atype} (source removed from drives)"
@@ -535,6 +559,64 @@ class AssetCleanupService:
             file_path = os.path.join(destination_dir, fname)
             if os.path.isfile(file_path):
                 self._remove_orphan_artwork(file_path, atype, item=base, dry_run=dry_run, result=result)
+
+    def _remove_unsourced_poster(self, file_path: str, slot, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
+        fname = os.path.basename(file_path)
+        slot_desc = "poster" if slot == "poster" else ("specials poster" if slot == 0 else f"season {slot} poster")
+        reason = f"unsourced {slot_desc} (source removed from drives)"
+        log_info(LogTags.CLEANUP, f"  {'Would remove' if dry_run else 'Removing'}: {item} — {fname} — {reason}")
+        if not dry_run:
+            try:
+                os.remove(file_path)
+            except OSError as exc:
+                log_warning(LogTags.CLEANUP, f"Failed to remove unsourced poster {file_path}: {exc}")
+                return
+            self._purge_db_rows(file_path, like=False)
+        result["removed"].append({"name": fname, "path": file_path, "reason": reason})
+        result["counts"]["removed_posters"] += 1
+
+    def _prune_unsourced_posters(
+        self,
+        groups: List[Dict[str, Any]],
+        poster_sourced: Dict[int, set],
+        ignore_set: set[str],
+        *,
+        dry_run: bool,
+        result: Dict[str, Any],
+    ) -> None:
+        """Remove destination poster/season files no subscribed drive sources anymore — the
+        poster mirror of the artwork prune (the typical cause: a drive was unsubscribed but
+        its placed posters remained, so items still looked covered). Only matched (live-media)
+        assets are visited, per slot, so another drive's files and still-sourced seasons stay."""
+        # A folder/name can match several media; union what any of them source so a file some
+        # matched item still provides is never deleted.
+        provided_by_asset: Dict[int, set] = {}
+        assets_by_id: Dict[int, Dict[str, Any]] = {}
+        for group in groups:
+            provided = poster_sourced.get(id(group["media"]), set())
+            for asset in group["assets"]:
+                provided_by_asset.setdefault(id(asset), set()).update(provided)
+                assets_by_id[id(asset)] = asset
+
+        for asset_id, asset in assets_by_id.items():
+            folder_name = self._asset_folder_name(asset)
+            if folder_name and self._normalize_for_ignore(folder_name) in ignore_set:
+                continue
+            provided = provided_by_asset.get(asset_id, set())
+            for file_path in asset.get("files") or []:
+                fname = os.path.basename(file_path)
+                if artwork_type_of(fname) is not None:
+                    continue  # the artwork reconciliation's concern
+                # Ignore-list identity: the item folder (nested) or the season-stripped
+                # flat base ('Show (2020)_Season01' → 'Show (2020)').
+                base = folder_name or season_pattern.split(os.path.splitext(fname)[0])[0].strip()
+                if not folder_name and base and self._normalize_for_ignore(base) in ignore_set:
+                    continue
+                slot = poster_slot_of(fname)
+                if slot in provided:
+                    continue
+                if os.path.isfile(file_path):
+                    self._remove_unsourced_poster(file_path, slot, item=base or fname, dry_run=dry_run, result=result)
 
     # ── deletion + db reconciliation ───────────────────────────────────────
 
@@ -627,6 +709,7 @@ class AssetCleanupService:
                 "removed_orphans": 0,
                 "removed_stale": 0,
                 "removed_artwork": 0,
+                "removed_posters": 0,
                 "unknown_kept": 0,
                 "empty_swept": 0,
             },
