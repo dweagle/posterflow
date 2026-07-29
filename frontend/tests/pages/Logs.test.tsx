@@ -130,4 +130,44 @@ describe('Logs', () => {
     })
     expect(screen.getByText('workflow content')).toBeTruthy()
   })
+
+  const openWorkflowLog = async (user: ReturnType<typeof userEvent.setup>, content: string) => {
+    mockGetJobLogContent.mockResolvedValue({ content, filename: 'workflow.log' })
+    render(<Logs />)
+    await user.click(screen.getByRole('button', { name: 'Job Logs' }))
+    await screen.findByText('workflow.log')
+    await user.click(screen.getByText('workflow.log'))
+    await waitFor(() => expect(mockGetJobLogContent).toHaveBeenCalled())
+  }
+
+  it('searches the open job log only on submit, then restores the file on clear', async () => {
+    const user = userEvent.setup()
+    await openWorkflowLog(user, 'alpha line\nbeta line\nalpha again')
+    await screen.findByText('beta line')
+
+    await user.type(screen.getByPlaceholderText('Search this log file…'), 'alpha')
+    expect(screen.getByText('beta line')).toBeTruthy() // typing alone never filters
+
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('beta line')).toBeNull()
+    })
+    expect(document.querySelectorAll('mark.log-match').length).toBe(2)
+    expect(screen.getByText('2 / 2')).toBeTruthy()
+
+    await user.click(screen.getByTitle('Clear search'))
+    expect(screen.getByText('beta line')).toBeTruthy()
+  })
+
+  it('reports when a job log search has no matches', async () => {
+    const user = userEvent.setup()
+    await openWorkflowLog(user, 'alpha line\nbeta line')
+    await screen.findByText('beta line')
+
+    await user.type(screen.getByPlaceholderText('Search this log file…'), 'gamma')
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+
+    expect(await screen.findByText('No matches in this log file')).toBeTruthy()
+  })
 })

@@ -9,6 +9,11 @@ import './Logs.css'
 const LOGS_TAB_STORAGE_KEY = 'posterflow.logs.activeTab'
 type LogsTab = 'system' | 'job'
 
+// Job-log search keeps the newest N matches, mirroring the system search's server-side cap.
+const JOB_SEARCH_LIMIT = 10000
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 const isLogsTab = (value: string): value is LogsTab => {
   return ['system', 'job'].includes(value)
 }
@@ -136,10 +141,12 @@ function Logs() {
   const [selectedLog, setSelectedLog] = useState<{ type: string; file: JobLogFile } | null>(null)
   const [logContent, setLogContent] = useState<string>('')
   const [loadingContent, setLoadingContent] = useState(false)
-  // Find-in-file for the job log viewer (client-side; the whole file is already loaded).
+  // Find-in-file for the job log viewer — same shape as the system tab's whole-file search:
+  // typing does nothing, Enter/Search swaps the viewer for the matching lines only.
   const [jobSearch, setJobSearch] = useState('')
-  const [jobMatchIdx, setJobMatchIdx] = useState(-1)
-  const jobPaneRef = useRef<LogPaneHandle | null>(null)
+  const [jobFileSearch, setJobFileSearch] = useState<{ term: string; lines: number[]; total: number; truncated: boolean } | null>(null)
+  const [jobMatchIdx, setJobMatchIdx] = useState(0)
+  const jobSearchPaneRef = useRef<LogPaneHandle | null>(null)
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
     sync_one: true,
     sync_all: true,
@@ -452,37 +459,61 @@ function Logs() {
 
   const liveLines = useMemo(() => (liveContent || 'Waiting for log output...').split('\n'), [liveContent])
 
-  // Job log viewer: split once, find the matching line numbers for the find bar.
+  // Job log viewer: split the file once; searching only ever reads this array.
   const jobLines = useMemo(() => logContent.split('\n'), [logContent])
-  const jobMatchLines = useMemo(() => {
-    const term = jobSearch.trim().toLowerCase()
-    if (term.length < 2) return []
-    const out: number[] = []
-    jobLines.forEach((line, i) => {
-      if (line.toLowerCase().includes(term)) out.push(i)
-    })
-    return out
-  }, [jobLines, jobSearch])
+
+  // Runs on Enter / the Search button only. A case-insensitive regex avoids the per-line
+  // lowercase copies a 100k-line debug log would otherwise churn through.
+  const runJobSearch = () => {
+    const term = jobSearch.trim()
+    if (term.length < 2) return
+    const re = new RegExp(escapeRegExp(term), 'i')
+    const hits: number[] = []
+    for (let i = 0; i < jobLines.length; i++) {
+      if (re.test(jobLines[i])) hits.push(i)
+    }
+    const truncated = hits.length > JOB_SEARCH_LIMIT
+    const lines = truncated ? hits.slice(-JOB_SEARCH_LIMIT) : hits
+    setJobFileSearch({ term, lines, total: hits.length, truncated })
+    setJobMatchIdx(Math.max(0, lines.length - 1)) // start at the newest match
+  }
 
   const handleJobSearchChange = (value: string) => {
     setJobSearch(value)
-    setJobMatchIdx(-1)
+    if (jobFileSearch) setJobFileSearch(null) // edited term — results are stale, back to the file
+  }
+
+  const clearJobSearch = () => {
+    setJobSearch('')
+    setJobFileSearch(null)
   }
 
   // Opening a different file resets the find bar.
   useEffect(() => {
     setJobSearch('')
-    setJobMatchIdx(-1)
+    setJobFileSearch(null)
   }, [selectedLog])
 
+  // Every result row IS a match, so cycling steps row to row (with wraparound).
+  const jobMatchClamped = jobFileSearch ? Math.min(jobMatchIdx, Math.max(0, jobFileSearch.lines.length - 1)) : 0
   const cycleJobMatch = (direction: 1 | -1) => {
-    if (jobMatchLines.length === 0) return
-    const next = jobMatchIdx === -1
-      ? (direction === 1 ? 0 : jobMatchLines.length - 1)
-      : (jobMatchIdx + direction + jobMatchLines.length) % jobMatchLines.length
+    if (!jobFileSearch || jobFileSearch.lines.length === 0) return
+    const next = (jobMatchClamped + direction + jobFileSearch.lines.length) % jobFileSearch.lines.length
     setJobMatchIdx(next)
-    jobPaneRef.current?.scrollToItem(jobMatchLines[next])
+    jobSearchPaneRef.current?.scrollToItem(jobFileSearch.lines[next])
   }
+
+  // Held by reference so typing in the find box can't re-render the whole-file list.
+  const renderJobLine = useCallback((line: string) => <VirtualLogLine line={line} />, [])
+  const jobFileViewer = useMemo(() => (
+    <LogPane
+      key="job-file"
+      className="log-hang"
+      items={jobLines}
+      itemKey={(_line, index) => index}
+      renderItem={renderJobLine}
+    />
+  ), [jobLines, renderJobLine])
 
   // Clean up live WS on unmount or tab change
   useEffect(() => {
@@ -1295,33 +1326,40 @@ function Logs() {
                       <div className="logs-search-box">
                         <input
                           type="text"
-                          placeholder="Find in file…"
+                          placeholder="Search this log file…"
                           value={jobSearch}
                           onChange={(e) => handleJobSearchChange(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') cycleJobMatch(e.shiftKey ? -1 : 1)
-                            if (e.key === 'Escape') handleJobSearchChange('')
+                            if (e.key === 'Enter') runJobSearch()
+                            if (e.key === 'Escape') clearJobSearch()
                           }}
                         />
-                        {jobSearch !== '' && (
-                          <button className="logs-search-clear-inner" onClick={() => handleJobSearchChange('')} title="Clear">
+                        {(jobSearch.trim() !== '' || jobFileSearch) && (
+                          <button className="logs-search-clear-inner" onClick={clearJobSearch} title="Clear search">
                             <X size={12} />
                           </button>
                         )}
                       </div>
-                      {jobSearch.trim().length >= 2 && (
-                        <>
-                          <button className="btn-match-nav" onClick={() => cycleJobMatch(-1)} title="Previous match">
+                      <button className="btn-log-search" onClick={runJobSearch} disabled={jobSearch.trim().length < 2}>
+                        <Search size={14} />
+                        Search
+                      </button>
+                      {jobFileSearch && (
+                        <span
+                          className="logs-match-nav"
+                          title={`${jobFileSearch.total.toLocaleString()} matches in file${jobFileSearch.truncated ? `, showing last ${jobFileSearch.lines.length.toLocaleString()}` : ''}`}
+                        >
+                          <button className="btn-match-nav" onClick={() => cycleJobMatch(-1)} title="Previous (older) match">
                             <ChevronUp size={14} />
                           </button>
-                          <button className="btn-match-nav" onClick={() => cycleJobMatch(1)} title="Next match">
+                          <button className="btn-match-nav" onClick={() => cycleJobMatch(1)} title="Next (newer) match">
                             <ChevronDown size={14} />
                           </button>
                           <span className="logs-match-counter">
-                            {jobMatchLines.length === 0 ? '0 / 0'
-                              : `${jobMatchIdx === -1 ? '–' : jobMatchIdx + 1} / ${jobMatchLines.length.toLocaleString()}`}
+                            {jobFileSearch.lines.length === 0 ? '0 / 0'
+                              : `${(jobMatchClamped + 1).toLocaleString()} / ${jobFileSearch.lines.length.toLocaleString()}`}
                           </span>
-                        </>
+                        </span>
                       )}
                     </div>
                     <button
@@ -1340,20 +1378,28 @@ function Logs() {
                       </div>
                     ) : !logContent ? (
                       <div className="no-logs">Log file is empty</div>
+                    ) : jobFileSearch ? (
+                      jobFileSearch.lines.length === 0 ? (
+                        <div className="no-logs">No matches in this log file</div>
+                      ) : (
+                        <LogPane
+                          key="job-search"
+                          ref={jobSearchPaneRef}
+                          className="log-hang"
+                          items={jobFileSearch.lines}
+                          itemKey={(lineIndex) => lineIndex}
+                          renderItem={(lineIndex, index) => (
+                            <VirtualLogLine
+                              line={jobLines[lineIndex]}
+                              term={jobFileSearch.term}
+                              active={index === jobMatchClamped}
+                            />
+                          )}
+                          initialBottom
+                        />
+                      )
                     ) : (
-                      <LogPane
-                        ref={jobPaneRef}
-                        className="log-hang"
-                        items={jobLines}
-                        itemKey={(_line, index) => index}
-                        renderItem={(line, index) => (
-                          <VirtualLogLine
-                            line={line}
-                            term={jobSearch.trim().length >= 2 ? jobSearch.trim() : undefined}
-                            active={jobMatchIdx !== -1 && jobMatchLines[jobMatchIdx] === index}
-                          />
-                        )}
-                      />
+                      jobFileViewer
                     )}
                   </div>
                 </>
