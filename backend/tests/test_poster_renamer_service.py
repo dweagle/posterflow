@@ -168,6 +168,134 @@ def test_rename_posters_places_poster_and_artwork_and_counts(test_db, tmp_path, 
     assert sum(result["stats"]["style_counts"].values()) == 1
 
 
+def test_style_counts_attribute_by_drive_folder_not_index(test_db, tmp_path, monkeypatch):
+    """Style attribution comes from which drive folder the winning file sits under — it must
+    work with ZERO rows in the poster index. (The old index join binned a whole drive's
+    winners as 'Unknown' whenever its rows were missing/stale, and Unknown never renders in
+    the style lists, so still-subscribed drives' items vanished from the report.)"""
+    from models.drive import Drive
+    from util.data.normalization import normalize_titles
+
+    mm_root = tmp_path / "mm"; cl_root = tmp_path / "cl"
+    mm = _seed(mm_root, ["Movie One (2024).jpg"])
+    cl = _seed(cl_root, ["Movie Two (2023).jpg"])
+    test_db.add_all([
+        Drive(name="MM Drive", drive_id="mm-1", style_type="MM2K", subscribed=True, custom_path=str(mm_root)),
+        Drive(name="CL Drive", drive_id="cl-1", style_type="CL2K", subscribed=True, custom_path=str(cl_root)),
+    ])
+    test_db.commit()
+    # Deliberately NO Poster index rows.
+
+    def _box(title, year, tmdb_id, path):
+        return {"title": title, "year": year, "tmdb_id": tmdb_id, "tvdb_id": None, "imdb_id": None,
+                "normalized_title": normalize_titles(title), "type": "movies", "files": [path]}
+
+    matched = _matched(movies=[
+        {"title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)",
+         "files": [mm["Movie One (2024).jpg"]], "asset_ref": _box("Movie One", 2024, 1, mm["Movie One (2024).jpg"])},
+        {"title": "Movie Two", "year": 2023, "tmdb_id": 2, "folder": "Movie Two (2023)",
+         "files": [cl["Movie Two (2023).jpg"]], "asset_ref": _box("Movie Two", 2023, 2, cl["Movie Two (2023).jpg"])},
+    ])
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)"},
+                        {"title": "Movie Two", "year": 2023, "tmdb_id": 2, "folder": "Movie Two (2023)"}],
+             "series": [], "collections": []}
+
+    monkeypatch.setattr(
+        "services.poster_renamer.get_assets_files",
+        lambda source_dirs, per_dir_callback=None: (
+            [{"title": "Movie One", "files": [mm["Movie One (2024).jpg"]]},
+             {"title": "Movie Two", "files": [cl["Movie Two (2023).jpg"]]}],
+            {"m": []},
+        ),
+    )
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    result = PosterRenameService(test_db).rename_posters(
+        source_dirs=[str(mm_root), str(cl_root)], destination_dir=str(dest),
+        asset_folders=True, dry_run=False, media_dict=media,
+    )
+
+    assert result["success"] is True
+    assert result["stats"]["style_counts"] == {"MM2K": 1, "CL2K": 1}
+    fallback_titles = {item["title"] for item in result["stats"]["style_fallbacks"]["MM2K"]}
+    assert fallback_titles == {"Movie One"}
+
+
+def test_mark_processed_stamps_rows_by_drive_and_name_despite_stale_path(test_db, tmp_path, monkeypatch):
+    """Processed-marking joins rows by (drive, file name) — the sync engine's row identity —
+    so a row whose STORED path drifted from the scan's spelling (symlinks, moved storage)
+    still gets stamped instead of staying 'unprocessed' forever."""
+    from models.drive import Drive
+    from models.poster import Poster
+    from util.data.normalization import normalize_titles
+
+    mm_root = tmp_path / "mm"
+    mm = _seed(mm_root, ["Movie One (2024).jpg"])
+    drive = Drive(name="MM Drive", drive_id="mm-1", style_type="MM2K", subscribed=True, custom_path=str(mm_root))
+    row = Poster(drive_id="mm-1", file_name="Movie One (2024).jpg",
+                 file_path="/old/stale/spelling/Movie One (2024).jpg")  # old exact-path lookup would miss
+    test_db.add_all([drive, row])
+    test_db.commit()
+
+    path = mm["Movie One (2024).jpg"]
+    matched = _matched(movies=[{
+        "title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)",
+        "files": [path],
+        "asset_ref": {"title": "Movie One", "year": 2024, "tmdb_id": 1, "tvdb_id": None, "imdb_id": None,
+                      "normalized_title": normalize_titles("Movie One"), "type": "movies", "files": [path]},
+    }])
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)"}],
+             "series": [], "collections": []}
+
+    monkeypatch.setattr(
+        "services.poster_renamer.get_assets_files",
+        lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [path]}], {"m": []}),
+    )
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    result = PosterRenameService(test_db).rename_posters(
+        source_dirs=[str(mm_root)], destination_dir=str(dest),
+        asset_folders=True, dry_run=False, media_dict=media,
+    )
+
+    assert result["success"] is True
+    test_db.expire_all()
+    assert test_db.query(Poster).filter(Poster.drive_id == "mm-1").first().last_processed is not None
+    assert test_db.query(Drive).filter(Drive.drive_id == "mm-1").first().last_rename_processed is not None
+
+
+def test_style_counts_unknown_for_file_outside_any_drive(test_db, tmp_path, monkeypatch):
+    """A winner not under any known drive folder still lands in 'Unknown' rather than crashing."""
+    from util.data.normalization import normalize_titles
+
+    stray = _seed(tmp_path / "stray", ["Movie One (2024).jpg"])
+    path = stray["Movie One (2024).jpg"]
+    matched = _matched(movies=[{
+        "title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)",
+        "files": [path],
+        "asset_ref": {"title": "Movie One", "year": 2024, "tmdb_id": 1, "tvdb_id": None, "imdb_id": None,
+                      "normalized_title": normalize_titles("Movie One"), "type": "movies", "files": [path]},
+    }])
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)"}],
+             "series": [], "collections": []}
+
+    monkeypatch.setattr(
+        "services.poster_renamer.get_assets_files",
+        lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [path]}], {"m": []}),
+    )
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    result = PosterRenameService(test_db).rename_posters(
+        source_dirs=[str(tmp_path / "stray")], destination_dir=str(dest),
+        asset_folders=True, dry_run=False, media_dict=media,
+    )
+
+    assert result["stats"]["style_counts"] == {"Unknown": 1}
+
+
 def test_artwork_bypasses_tmp_staging(test_db, tmp_path, monkeypatch):
     """With tmp/ staging on, the poster is staged in tmp/ but artwork goes straight to the real
     destination — so the border replacer (which only processes tmp/) never sees the artwork."""

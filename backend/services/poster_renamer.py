@@ -6,7 +6,6 @@ import shutil
 import traceback
 
 import requests
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pathvalidate import is_valid_filename, sanitize_filename
@@ -1449,19 +1448,31 @@ class PosterRenameService:
             from models.drive import Drive
             from datetime import datetime, timezone
 
+            # Drive lookup by source-path prefix (longest wins) — shared by the style
+            # breakdown and the processed-marking below. Replaces per-file joins against
+            # the poster index's stored paths, which missed whenever a drive's rows were
+            # absent or spelled differently than the scan (styles binned as "Unknown",
+            # rows left forever unprocessed).
+            drives_by_prefix: List[tuple] = []
+            for drive in self.db.query(Drive).all():
+                prefix = str(drive.get_local_path(validate=False)).rstrip(os.sep) + os.sep
+                drives_by_prefix.append((prefix, drive))
+            drives_by_prefix.sort(key=lambda entry: (-len(entry[0]), entry[0]))
+
+            def _drive_of(path: str):
+                for prefix, mapped_drive in drives_by_prefix:
+                    if path.startswith(prefix):
+                        return mapped_drive
+                return None
+
             style_counts: Dict[str, int] = {}
             style_fallbacks: Dict[str, List[Dict]] = {}  # style -> list of {title, year, type, season}
 
             if winning_source_files:
                 for dest_path, entry in winning_source_files.items():
                     src_file, title, year, tmdb_type, season, f_tmdb_id, f_tvdb_id, f_imdb_id, f_poster_url, f_available = entry
-                    resolved_src = str(Path(src_file).resolve())
-                    poster = self.db.query(Poster).filter(Poster.file_path == resolved_src).first()
-                    if poster:
-                        drive = self.db.query(Drive).filter(Drive.drive_id == poster.drive_id).first()
-                        style = drive.style_type if drive else "Unknown"
-                    else:
-                        style = "Unknown"
+                    src_drive = _drive_of(str(src_file))
+                    style = (src_drive.style_type or "Unknown") if src_drive else "Unknown"
 
                     style_counts[style] = style_counts.get(style, 0) + 1
                     style_fallbacks.setdefault(style, []).append({
@@ -1493,16 +1504,31 @@ class PosterRenameService:
                 now = datetime.now(timezone.utc)
                 marked_count = 0
                 drives_updated = set()
-                
-                # Mark source files that were actually processed (copied or verified as identical)
+
+                # Mark source files that were actually processed (copied or verified as
+                # identical) — stamped by (drive, file name), the sync engine's own row
+                # identity, batched per drive. The old per-file stored-path lookup missed
+                # whenever the index's spelling drifted from the scan's.
+                names_by_drive: Dict[str, set] = {}
                 for file_path in processed_source_files:
-                    resolved_path = str(Path(file_path).resolve())
-                    poster = self.db.query(Poster).filter(Poster.file_path == resolved_path).first()
-                    if poster:
-                        poster.last_processed = now
-                        drives_updated.add(poster.drive_id)
-                        marked_count += 1
-                
+                    src_drive = _drive_of(str(file_path))
+                    if src_drive:
+                        names_by_drive.setdefault(src_drive.drive_id, set()).add(os.path.basename(file_path))
+
+                for drive_id, names in names_by_drive.items():
+                    name_list = sorted(names)
+                    drive_marked = 0
+                    # Chunked IN() to stay under SQLite's bound-parameter limit.
+                    for start in range(0, len(name_list), 500):
+                        drive_marked += (
+                            self.db.query(Poster)
+                            .filter(Poster.drive_id == drive_id, Poster.file_name.in_(name_list[start:start + 500]))
+                            .update({"last_processed": now}, synchronize_session=False)
+                        )
+                    if drive_marked:
+                        marked_count += drive_marked
+                        drives_updated.add(drive_id)
+
                 self.db.commit()
                 
                 # Update drive stats
