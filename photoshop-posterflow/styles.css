@@ -1,0 +1,65 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #1f1f24;
+  color: #e6e6e6;
+  overflow: hidden;
+}
+body { display: flex; flex-direction: column; height: 100vh; }
+
+.style-head { flex-shrink: 0; padding: 2px 8px; background: #23232a; border-bottom: 1px solid #3a3a42; text-align: center; }
+.style-name { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #8a8a94; }
+.style-name.cl2k { color: #3fae62; }
+.style-name.mm2k { color: #5a86f0; }
+
+.head { flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 3px 2px; background: #2a2a31; border-bottom: 1px solid #3a3a42; }
+.head sp-action-button { margin: 0 1px; }
+
+sp-action-button.bolt-tags { background-color: #8a5a1c; }
+sp-action-button.bolt-seasons { background-color: #2b5c9e; }
+
+.tools { flex-shrink: 0; display: flex; justify-content: center; padding: 3px 2px; border-bottom: 1px solid #3a3a42; }
+.tools sp-action-button { margin: 0 2px; }
+
+.batchbar { flex-shrink: 0; padding: 5px 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
+.batchbar.hidden { display: none; }
+.batchmsg { color: #cfcfcf; font-size: 10px; margin-bottom: 4px; }
+.batchrow { display: flex; align-items: center; }
+.batchrow.hidden { display: none; }
+.batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6; border-radius: 4px; padding: 4px 6px; }
+.batchinput.hidden { display: none; }
+.batchrow sp-action-button { margin-left: 4px; }
+.batchhelp { color: #99aaaa; font-size: 10px; line-height: 1.6; margin-top: 4px; }
+.batchhelp b { color: #cfcfcf; font-weight: 600; }
+.batchhelp.hidden { display: none; }
+
+.notes { flex-shrink: 0; }
+
+.linkbar { flex-shrink: 0; padding: 5px 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
+.linkbar.hidden { display: none; }
+.linkmsg { color: #cfcfcf; font-size: 10px; margin-bottom: 4px; }
+.linkbar sp-textfield { width: 100%; margin-bottom: 4px; }
+.linkrow { display: flex; justify-content: center; }
+.linkrow sp-action-button { margin: 0 2px; }
+
+.singles, .sequels { flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 5px 6px 2px 6px; border-bottom: 1px solid #3a3a42; }
+.singles.hidden, .sequels.hidden { display: none; }
+.rowlabel { color: #99aaaa; font-size: 10px; margin-right: 4px; }
+
+/* overflow-y: scroll (not auto) — the gutter is ALWAYS reserved, so the chips' width never changes
+   when the scrollbar comes and goes (UXP doesn't re-center already-laid-out rows on gutter changes). */
+.list { display: block; overflow-y: scroll; padding: 5px 6px; flex-grow: 1; flex-shrink: 1; min-height: 0; }
+.chiprow { display: flex; justify-content: center; align-items: center; }
+.msg { padding: 4px; color: #99aaaa; font-size: 10px; }
+
+.chip { display: inline-block; vertical-align: top; min-width: 14px; text-align: center; background: #2a2a31; border: 1px solid #3a3a42; color: #cfcfcf; border-radius: 5px; font-size: 10px; line-height: 1.2; padding: 1px 4px; cursor: pointer; margin: 0 3px 3px 0; }
+.chip.on { background: #2e7d46; border-color: #3fae62; color: #ffffff; }
+.chip.off { background: #4a4a55; border-color: #5a5a66; color: #e6e6e6; }
+.chip.grp { display: block; font-weight: 700; margin-right: 0; }
+.chip.grp.on { background: #3b6bd6; border-color: #5a86f0; }
+.chip.num { width: 28px; padding-left: 0; padding-right: 0; padding-top: 3px; padding-bottom: 3px; }
+
+.trimbar { flex-shrink: 0; display: flex; justify-content: center; padding: 3px; border-top: 1px solid #3a3a42; background: #23232a; }
+.trimbar sp-action-button { margin: 0 2px; }
+
+.hidden { display: none; }

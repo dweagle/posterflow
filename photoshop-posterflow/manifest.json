@@ -1,0 +1,48 @@
+{
+  "manifestVersion": 5,
+  "id": "com.posterflow.makertools",
+  "name": "Posterflow",
+  "version": "1.0.0",
+  "main": "index.html",
+  "host": {
+    "app": "PS",
+    "minVersion": "23.3.0"
+  },
+  "icons": [
+    {
+      "width": 48,
+      "height": 48,
+      "path": "icons/icon.png",
+      "scale": [1, 2],
+      "theme": ["darkest", "dark", "medium", "light", "lightest", "all"],
+      "species": ["pluginList"]
+    }
+  ],
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "posterflowPanel",
+      "label": { "default": "Posterflow" },
+      "minimumSize": { "width": 200, "height": 400 },
+      "maximumSize": { "width": 600, "height": 1600 },
+      "preferredDockedSize": { "width": 220, "height": 430 },
+      "preferredFloatingSize": { "width": 220, "height": 430 },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel.png",
+          "scale": [1, 2],
+          "theme": ["darkest", "dark", "medium", "light", "lightest", "all"],
+          "species": ["generic"]
+        }
+      ]
+    }
+  ],
+  "requiredPermissions": {
+    "localFileSystem": "request",
+    "network": {
+      "domains": "all"
+    }
+  }
+}

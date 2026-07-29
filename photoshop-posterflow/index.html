@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <!-- Posterflow UXP panel. Buttons are native Spectrum widgets (custom-styled buttons render with
+       wrong text metrics in UXP); chips/rows are plain divs. main.js binds by data-act.
+       UXP renders a SUBSET of HTML/CSS with silent failures - understand why the current
+       structure exists before restyling or restructuring. -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="style-head"><span class="style-name" data-el="style">—</span></div>
+
+  <div class="head">
+    <sp-action-button size="s" data-act="save" title="Save the poster PSD back over the file you opened">💾</sp-action-button>
+    <sp-action-button size="s" data-act="jpg" title="Export flattened JPG to the image folder (Alt-click to choose a different folder)">JPG</sp-action-button>
+    <sp-action-button size="s" class="bolt-tags" data-act="batch" title="Name-tag batch: one JPG per tagged layer (s0/s1/main/show/c)">⚡</sp-action-button>
+    <sp-action-button size="s" class="bolt-seasons" data-act="batch-seasons" title="Seasons from one poster: pick a range and export Season 1..N (+ Specials)">⚡</sp-action-button>
+    <sp-action-button size="s" data-act="refresh" title="Reload layers from the active document">⟳</sp-action-button>
+  </div>
+
+  <div class="tools">
+    <sp-action-button size="s" data-act="logo" title="Resize and place the SELECTED layer as a logo, using Maker Tools' formula">Place Logo</sp-action-button>
+    <sp-action-button size="s" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</sp-action-button>
+  </div>
+
+  <div class="batchbar hidden">
+    <div class="batchmsg"></div>
+    <div class="batchrow hidden">
+      <input class="batchinput" type="text" placeholder="e.g. 8, 0-5, or blank = all" />
+      <sp-action-button size="s" data-act="batch-run">Run</sp-action-button>
+      <sp-action-button size="s" data-act="batch-help" title="Show what you can type here">?</sp-action-button>
+      <sp-action-button size="s" data-act="batch-cancel" title="Cancel">✕</sp-action-button>
+    </div>
+    <div class="batchhelp hidden"></div>
+  </div>
+
+  <div class="notes"></div>
+  <div class="singles hidden"></div>
+  <div class="sequels hidden"></div>
+  <div class="list"><div class="msg">Open a poster PSD, then press the reload button.</div></div>
+
+  <div class="linkbar hidden">
+    <div class="linkmsg"></div>
+    <sp-textfield class="linkurl" placeholder="http://server:8357 (https on Mac)"></sp-textfield>
+    <sp-textfield class="linkpass" type="password" placeholder="App password (if set)"></sp-textfield>
+    <div class="linkrow">
+      <sp-action-button size="s" data-act="link-save">Save</sp-action-button>
+      <sp-action-button size="s" data-act="link-toggle">Enable</sp-action-button>
+      <sp-action-button size="s" data-act="link-close" title="Close">✕</sp-action-button>
+    </div>
+  </div>
+
+  <div class="trimbar">
+    <sp-action-button size="s" data-act="trim" title="Trim off-canvas pixels from ALL layers. Shrinks the saved file, no visible change. Save after.">Trim</sp-action-button>
+    <sp-action-button size="s" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG">Logo</sp-action-button>
+    <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders — the next JPG / Logo export asks again">📂</sp-action-button>
+    <sp-action-button size="s" data-act="link" title="Posterflow server link — exports queued as 'PS' in the web app open here automatically">🔗</sp-action-button>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
