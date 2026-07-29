@@ -138,6 +138,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "psd_open_photopea",
     "psd_photopea_same_tab",
     "psd_poster_fit_border",
+    "psd_default_editor",
+    "logo_export_folder",
     # Sidebar layout
     "sidebar_config",
     # Community Requests maker preferences

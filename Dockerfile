@@ -56,6 +56,9 @@ COPY --chown=posterflow:posterflow backend/ .
 # Copy VERSION file for version display
 COPY --chown=posterflow:posterflow VERSION /VERSION
 
+# Native Photoshop UXP plugin — served as a downloadable .ccx from the PSD settings modal
+COPY --chown=posterflow:posterflow photoshop-posterflow/ /app/photoshop-posterflow/
+
 # Copy built frontend from frontend-builder stage
 COPY --from=frontend-builder --chown=posterflow:posterflow /frontend/dist /app/frontend/dist
 

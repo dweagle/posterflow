@@ -4,6 +4,7 @@ import re
 import threading
 import time
 import traceback
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
@@ -1878,6 +1879,7 @@ SETTING_PSD_TEMPLATE_PATH = "psd_template_path"                   # CL2K templat
 SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
 SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
 SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"       # CL2K image export folder
+SETTING_LOGO_EXPORT_FOLDER = "logo_export_folder"                 # panel Logo button PNGs (CL2K-only feature, one folder)
 # MM2K counterparts — the CL2K keys above stay the default; these apply when the request is MM2K.
 SETTING_PSD_EXPORT_FOLDER_MM2K = "psd_export_folder_mm2k"
 SETTING_PSD_TEMPLATE_PATH_MM2K = "psd_template_path_mm2k"
@@ -2002,8 +2004,9 @@ class PsdExportRequest(BaseModel):
     use_existing: bool = False       # When True: open existing PSD in export folder and inject layers into it
     confirm_overwrite: bool = False  # When True: proceed with a New Export even if a PSD for this title exists
     poster_layer_names: list[str] = []  # Per-poster layer names aligned to poster_paths — a tagged poster
-                                     # (e.g. "s1"/"s0"/"main"/"show"/"c") is named so the plugin's batch
-                                     # recognizes it as a variant; "" leaves the default title-based name
+                                     # (e.g. "s1"/"s0"/"main"/"show"/"c"/"cls"/"s2015") is named so the
+                                     # plugin's batch recognizes it as a variant; "" leaves the default
+                                     # title-based name
     backdrop_layer_names: list[str] = []  # Same, aligned to backdrop_paths — a tagged backdrop keeps the
                                      # backdrop fit (scaled to height, no crop) but gets a variant name
 
@@ -2677,6 +2680,150 @@ async def save_image_export(filename: str, request: Request, style: str = "", db
         raise HTTPException(status_code=500, detail=f"Failed to save image: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True})
+
+
+@router.put("/logo-exports/{filename}")
+async def save_logo_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a logo PNG (the panel's Logo button — the PSD's LOGO group, trimmed) to the
+    configured logo export folder.
+
+    One folder for all styles: logos only exist on CL2K templates (MM2K uses text titles).
+    400s when unconfigured so the panel falls back to a browser download.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_LOGO_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No logo export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported logo", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Logo export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save logo: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True})
+
+
+# ---------------------------------------------------------------------------
+# Photoshop plugin download
+# ---------------------------------------------------------------------------
+
+_PS_PLUGIN_EXCLUDE_DIRS = {"test", "__pycache__"}
+
+
+def _photoshop_plugin_dir() -> Path | None:
+    """Locate the bundled UXP plugin folder: /app/photoshop-posterflow in the image,
+    <repo>/photoshop-posterflow when running from a checkout."""
+    here = Path(__file__).resolve()
+    for base in (here.parents[1], here.parents[2]):
+        candidate = base / "photoshop-posterflow"
+        if (candidate / "manifest.json").exists():
+            return candidate
+    return None
+
+
+@router.get("/photoshop-plugin.ccx")
+def download_photoshop_plugin() -> Response:
+    """The native Photoshop panel packaged as an installable .ccx (a zip of the plugin folder
+    with manifest.json at its root). Offered from the PSD settings modal so users don't need
+    GitHub; double-clicking the file installs it via Creative Cloud."""
+    plugin_dir = _photoshop_plugin_dir()
+    if plugin_dir is None:
+        raise HTTPException(status_code=404, detail="Photoshop plugin files are not bundled in this build.")
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(plugin_dir.rglob("*")):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(plugin_dir)
+            if rel.parts[0] in _PS_PLUGIN_EXCLUDE_DIRS or path.suffix == ".md":
+                continue
+            zf.write(path, rel.as_posix())
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="posterflow-photoshop.ccx"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Photoshop open queue
+# ---------------------------------------------------------------------------
+# The browser can't launch Photoshop, so the native UXP panel polls this queue: the web UI
+# enqueues an exported PSD here (instead of opening Photopea) and the panel downloads + opens it.
+# In-memory on purpose — the app runs a single worker and an open-request is transient; a restart
+# dropping pending opens is harmless (re-export re-queues).
+
+_PS_OPEN_QUEUE: list[dict] = []
+_PS_OPEN_QUEUE_LOCK = threading.Lock()
+_PS_OPEN_TTL = 600.0   # seconds an unclaimed open request stays alive
+
+
+class PhotoshopQueueRequest(BaseModel):
+    filename: str      # "<name>.psd" as saved in the style's export folder
+    style: str = ""    # CL2K/MM2K — folder routing for download and save-back
+    name: str = ""     # display/base name (no extension); defaults to the filename stem
+
+
+def _prune_ps_queue(now: float) -> None:
+    _PS_OPEN_QUEUE[:] = [it for it in _PS_OPEN_QUEUE if now - it["ts"] < _PS_OPEN_TTL]
+
+
+@router.post("/photoshop-queue")
+def enqueue_photoshop_open(payload: PhotoshopQueueRequest, db: Session = Depends(get_db)) -> Response:
+    """Queue an exported PSD for the Photoshop panel to open.
+
+    The item carries a ready-to-fetch download URL: when a password is set, a signed file-scoped
+    ?token=&exp= is minted (same mechanism as the Photopea files:[url] load) since the GET route
+    authenticates by token, not Bearer. Re-queuing the same file+style replaces the pending entry.
+    """
+    _validate_psd_filename(payload.filename)
+    style = _normalize_psd_style(payload.style)
+    psd_url = f"/api/maker-tools/psd-exports/{quote(payload.filename)}?style={quote(style)}"
+    minted = mint_psd_access_token(db, payload.filename)
+    if minted:
+        token, exp = minted
+        psd_url += f"&token={token}&exp={exp}"
+    now = time.time()
+    with _PS_OPEN_QUEUE_LOCK:
+        _prune_ps_queue(now)
+        _PS_OPEN_QUEUE[:] = [it for it in _PS_OPEN_QUEUE if not (it["filename"] == payload.filename and it["style"] == style)]
+        _PS_OPEN_QUEUE.append({
+            "filename": payload.filename,
+            "style": style,
+            "name": (payload.name or payload.filename[:-4]).strip(),
+            "psd_url": psd_url,
+            "ts": now,
+        })
+        pending = len(_PS_OPEN_QUEUE)
+    log_user_action("Queued PSD for Photoshop", filename=payload.filename, style=style)
+    return JSONResponse({"queued": True, "pending": pending})
+
+
+@router.get("/photoshop-queue")
+def poll_photoshop_queue(client: str = "") -> Response:
+    """Return and CLAIM every pending open request (the poll empties the queue).
+
+    Polled by the Photoshop panel every few seconds while it is open. First poller wins a given
+    item, so an export is only ever opened once even with several Photoshop machines connected.
+    """
+    now = time.time()
+    with _PS_OPEN_QUEUE_LOCK:
+        _prune_ps_queue(now)
+        items = [{k: it[k] for k in ("filename", "style", "name", "psd_url")} for it in _PS_OPEN_QUEUE]
+        _PS_OPEN_QUEUE.clear()
+    if items:
+        log_user_action("Photoshop panel claimed queued PSDs", count=len(items), client=client or "unknown")
+    return JSONResponse({"items": items})
 
 
 @router.post("/monitor/config", response_model=MakerMonitorConfig)

@@ -2212,3 +2212,78 @@ def test_merge_still_retains_sequential_show_missing_from_current_run():
     assert len(retained) == 1
     assert retained[0].season_number == 3
     assert len(current[0].shows) == 2
+
+
+# ---------------------------------------------------------------------------
+# Photoshop open queue
+# ---------------------------------------------------------------------------
+
+def _ps_queue_reset():
+    from api import maker_tools as mt
+    mt._PS_OPEN_QUEUE.clear()
+
+
+def test_photoshop_queue_enqueue_then_poll_claims_and_empties():
+    from api import maker_tools as mt
+    _ps_queue_reset()
+    with patch.object(mt, "mint_psd_access_token", return_value=None):
+        resp = mt.enqueue_photoshop_open(
+            mt.PhotoshopQueueRequest(filename="Show (2020) {tmdb-1}.psd", style="MM2K", name="Show (2020) {tmdb-1}"),
+            db=MagicMock(),
+        )
+    assert json.loads(resp.body) == {"queued": True, "pending": 1}
+
+    polled = json.loads(mt.poll_photoshop_queue(client="ps-1").body)
+    assert len(polled["items"]) == 1
+    item = polled["items"][0]
+    assert item["filename"] == "Show (2020) {tmdb-1}.psd"
+    assert item["style"] == "MM2K"
+    assert item["psd_url"].startswith("/api/maker-tools/psd-exports/Show%20%282020%29%20%7Btmdb-1%7D.psd?style=MM2K")
+    assert "token=" not in item["psd_url"]   # no password → no signed token
+
+    # the poll CLAIMED the item — a second poll gets nothing
+    assert json.loads(mt.poll_photoshop_queue().body) == {"items": []}
+
+
+def test_photoshop_queue_reenqueue_replaces_pending_entry():
+    from api import maker_tools as mt
+    _ps_queue_reset()
+    with patch.object(mt, "mint_psd_access_token", return_value=None):
+        for _ in range(2):
+            mt.enqueue_photoshop_open(mt.PhotoshopQueueRequest(filename="A.psd", style="CL2K"), db=MagicMock())
+        resp = mt.enqueue_photoshop_open(mt.PhotoshopQueueRequest(filename="B.psd", style="CL2K"), db=MagicMock())
+    assert json.loads(resp.body)["pending"] == 2   # A replaced itself; A + B remain
+    polled = json.loads(mt.poll_photoshop_queue().body)
+    assert [it["filename"] for it in polled["items"]] == ["A.psd", "B.psd"]
+
+
+def test_photoshop_queue_signs_download_url_when_password_set():
+    from api import maker_tools as mt
+    _ps_queue_reset()
+    with patch.object(mt, "mint_psd_access_token", return_value=("sig123", 1900000000)):
+        mt.enqueue_photoshop_open(mt.PhotoshopQueueRequest(filename="A.psd", style=""), db=MagicMock())
+    item = json.loads(mt.poll_photoshop_queue().body)["items"][0]
+    assert item["style"] == "CL2K"   # blank style normalizes to the default
+    assert "token=sig123" in item["psd_url"] and "exp=1900000000" in item["psd_url"]
+
+
+def test_photoshop_queue_rejects_bad_filenames():
+    from api import maker_tools as mt
+    from fastapi import HTTPException
+    _ps_queue_reset()
+    for bad in ("../evil.psd", "x/evil.psd", "notapsd.txt"):
+        with pytest.raises(HTTPException):
+            mt.enqueue_photoshop_open(mt.PhotoshopQueueRequest(filename=bad), db=MagicMock())
+
+
+def test_photoshop_plugin_ccx_contains_manifest_and_excludes_tests():
+    import zipfile as _zipfile
+    from api import maker_tools as mt
+    resp = mt.download_photoshop_plugin()
+    zf = _zipfile.ZipFile(BytesIO(resp.body))
+    names = zf.namelist()
+    assert "manifest.json" in names
+    assert "main.js" in names and "remote.js" in names
+    assert any(n.startswith("icons/") for n in names)
+    assert not any(n.startswith("test/") for n in names)
+    assert not any(n.endswith(".md") for n in names)
