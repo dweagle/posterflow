@@ -245,29 +245,31 @@ export default function PosterStyleModal({
         </div>
 
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose}>Close</button>
-          <button
-            className="btn-secondary"
-            onClick={handleAddToLists}
-            disabled={publishing || items.length === 0}
-            title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
-          >
-            {publishing ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
-            Add All to List
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
-            disabled={publishing || items.length === 0}
-            title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
-          >
-            <ListChecks size={14} />
-            Create List
-          </button>
-          <button className="btn-primary" onClick={onDownload}>
-            <Download size={14} />
-            Download List
-          </button>
+          <div className="modal-footer-actions">
+            <button className="btn-secondary" onClick={onClose}>Close</button>
+            <button
+              className="btn-secondary"
+              onClick={handleAddToLists}
+              disabled={publishing || items.length === 0}
+              title={isConnected ? 'Publish these items to the Community Lists tab for makers' : 'Connect Discord to publish to Community Lists'}
+            >
+              {publishing ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
+              Add All to List
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+              disabled={publishing || items.length === 0}
+              title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+            >
+              <ListChecks size={14} />
+              Create List
+            </button>
+            <button className="btn-primary" onClick={onDownload}>
+              <Download size={14} />
+              Download List
+            </button>
+          </div>
         </div>
       </div>
     </div>

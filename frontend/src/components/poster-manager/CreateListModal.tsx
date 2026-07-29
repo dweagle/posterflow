@@ -172,16 +172,18 @@ export default function CreateListModal({ items, submitting, onAdd, onClose, sty
 
         <div className="modal-footer">
           {styleControl}
-          <button className="btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={() => onAdd([...selected])}
-            disabled={submitting || count === 0 || !canAdd}
-            title={!canAdd ? 'Select a poster style (CL2K or MM2K)' : undefined}
-          >
-            {submitting ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
-            {' '}Add {count} to Lists
-          </button>
+          <div className="modal-footer-actions">
+            <button className="btn-secondary" onClick={onClose} disabled={submitting}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => onAdd([...selected])}
+              disabled={submitting || count === 0 || !canAdd}
+              title={!canAdd ? 'Select a poster style (CL2K or MM2K)' : undefined}
+            >
+              {submitting ? <Loader2 size={14} className="spin-icon" /> : <ListPlus size={14} />}
+              {' '}Add {count} to Lists
+            </button>
+          </div>
         </div>
       </div>
     </div>

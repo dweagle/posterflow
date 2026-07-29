@@ -652,33 +652,35 @@ function UnmatchedItemsModal({
           {isConnected && !hideCommunity && (
             <PublishStyleToggle value={publishStyle} onChange={setPublishStyle} disabled={publishing} />
           )}
-          <button className="btn-secondary" onClick={onClose}>Close</button>
-          {!hideCommunity && (
-            <>
-              <button
-                className="btn-secondary"
-                onClick={handleAddToLists}
-                disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
-                title={
-                  !isConnected ? 'Connect Discord to publish to Community Lists'
-                  : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
-                  : 'Publish these items to the Community Lists tab for makers'
-                }
-              >
-                {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
-                Add All to List
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
-                disabled={publishing || allItems.length === 0}
-                title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
-              >
-                <ListChecks size={16} />
-                Create List
-              </button>
-            </>
-          )}
+          <div className="modal-footer-actions">
+            <button className="btn-secondary" onClick={onClose}>Close</button>
+            {!hideCommunity && (
+              <>
+                <button
+                  className="btn-secondary"
+                  onClick={handleAddToLists}
+                  disabled={publishing || sortedItems.length === 0 || (isConnected && !publishStyle)}
+                  title={
+                    !isConnected ? 'Connect Discord to publish to Community Lists'
+                    : !publishStyle ? 'Pick a poster style (CL2K or MM2K) first'
+                    : 'Publish these items to the Community Lists tab for makers'
+                  }
+                >
+                  {publishing ? <Loader2 size={16} className="spin-icon" /> : <ListPlus size={16} />}
+                  Add All to List
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => { if (!isConnected || !token) { login(); return } setCreateListOpen(true) }}
+                  disabled={publishing || allItems.length === 0}
+                  title={isConnected ? 'Choose specific items to publish to Community Lists' : 'Connect Discord to publish to Community Lists'}
+                >
+                  <ListChecks size={16} />
+                  Create List
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

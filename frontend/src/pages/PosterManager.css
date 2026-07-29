@@ -2493,8 +2493,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
   flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .unmatched-item-meta .item-title {
@@ -5534,8 +5535,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 /* These two footers hold the style toggle plus the action buttons. The toggle's
    margin-right:auto pushes the buttons to the right; keep them at a fixed content
-   size, vertically centered and compact, so nothing stretches into tall blocks.
-   Buttons wrap individually on narrow widths. */
+   size, vertically centered and compact, so nothing stretches into tall blocks. */
 .list-items-modal .modal-footer,
 .create-list-modal .modal-footer {
   align-items: center;
@@ -5546,6 +5546,39 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   flex: 0 0 auto;
   padding: 0.5rem 1rem;
   white-space: nowrap;
+}
+
+/* The action buttons travel as one group so they drop below the style toggle
+   together instead of splitting around it, and wrap among themselves (still
+   right-aligned) when the group itself is too wide. */
+.modal-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.75rem;
+  /* Shrinkable, or the group's one-line width wins and it overflows instead. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Narrow modals: give the style toggle its own line and let the buttons stretch
+   to share the row, so wrapped rows line up edge to edge instead of leaving one
+   button hanging off on its own. */
+@media (max-width: 640px) {
+  .list-items-modal .modal-footer .publish-style-toggle,
+  .create-list-modal .modal-footer .publish-style-toggle {
+    flex: 1 0 100%;
+    margin-right: 0;
+  }
+  .list-items-modal .modal-footer .modal-footer-actions,
+  .create-list-modal .modal-footer .modal-footer-actions {
+    flex: 1 1 100%;
+  }
+  .list-items-modal .modal-footer .modal-footer-actions button,
+  .create-list-modal .modal-footer .modal-footer-actions button {
+    flex: 1 1 auto;
+  }
 }
 
 /* Border style + overlay frame controls */
