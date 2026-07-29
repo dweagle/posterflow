@@ -218,6 +218,8 @@ export {
   exportToPsd,
   posterLayerNames,
   openPhotopeaWithPsd,
+  enqueuePhotoshopOpen,
+  downloadPhotoshopPlugin,
   uploadPsdToExportFolder,
   checkTmdbPosterAvailability,
   getMakerMonitorConfig,

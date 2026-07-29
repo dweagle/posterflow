@@ -566,6 +566,32 @@ const ensurePpListener = (): void => {
  * Needs the user to allow Photopea's "local network access" prompt (public photopea.com reaching
  * the LAN/localhost server) + CORS on the PSD GET. Photopea API: https://www.photopea.com/api/
  */
+/**
+ * Download the bundled Photoshop panel as an installable .ccx (authenticated blob fetch,
+ * saved via a temporary anchor — a plain link couldn't carry the Bearer header).
+ */
+export const downloadPhotoshopPlugin = async (): Promise<void> => {
+  const { default: axios } = await import('axios')
+  const resp = await axios.get('/api/maker-tools/photoshop-plugin.ccx', { responseType: 'blob' })
+  const url = URL.createObjectURL(resp.data as Blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'posterflow-photoshop.ccx'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Queue an exported PSD for the native Photoshop panel: the panel polls
+ * /photoshop-queue every few seconds and downloads + opens claimed items itself.
+ */
+export const enqueuePhotoshopOpen = async (filename: string, style: string, name: string): Promise<void> => {
+  const { default: axios } = await import('axios')
+  await axios.post('/api/maker-tools/photoshop-queue', { filename, style, name })
+}
+
 export const openPhotopeaWithPsd = (
   psdUrl: string,
   filename: string,
@@ -606,7 +632,8 @@ export const openPhotopeaWithPsd = (
   // recolor prefix). Inlined rather than a remote URL so it survives mixed-content/CORS/LNA blocking.
   // The published gallery "PosterFlow" uses a SOLID-color version of the same mark, so the two are
   // easy to tell apart (gradient = in-app "PosterFlow (App)"; solid = installed gallery one).
-  // w/h: fix the panel to 184px wide — fits 5 season chips per row.
+  // w/h: 196px wide — 5 season chips per row (160px) + padding (16) + the ALWAYS-reserved scrollbar
+  // gutter (the list uses overflow-y: scroll so chip wrapping never changes when it appears).
   const icon = pluginIcon
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
   // editor boots. Photopea names the doc from the URL basename (trimmed + now %-encoded since the path
@@ -620,7 +647,7 @@ export const openPhotopeaWithPsd = (
   const config = {
     files: [psdUrl],
     script: `try{var d=app.activeDocument;if(d&&d.name!==${JSON.stringify(docName)})d.name=${JSON.stringify(docName)};}catch(e){}`,
-    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 184, h: 420 }] },
+    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 196, h: 420 }] },
   }
   const w = window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
   if (sameTab) {

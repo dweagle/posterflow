@@ -26,6 +26,7 @@ import {
   type TmdbTvDetails,
   type PosterAvailability,
   openPhotopeaWithPsd,
+  enqueuePhotoshopOpen,
   exportToPsd,
   posterLayerNames,
   uploadPsdToExportFolder,
@@ -241,6 +242,7 @@ export type PsdConfig = {
   imageExportFolderMm2k: string
   openPhotopea: boolean        // shared toggle across both styles
   sameTab: boolean             // reuse one Photopea tab (separate docs) instead of a new tab each export
+  defaultEditor: 'photopea' | 'photoshop'  // where the export buttons send a saved PSD by default
   // Not PSD-related, but this is the settings-derived config every card already receives:
   // gates the gallery's TheTVDB source tab on a configured API key.
   tvdbEnabled: boolean
@@ -250,7 +252,7 @@ export type PsdConfig = {
 export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
-  openPhotopea: false, sameTab: false, tvdbEnabled: false,
+  openPhotopea: false, sameTab: false, defaultEditor: 'photopea', tvdbEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -264,6 +266,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     imageExportFolderMm2k: (s.psd_image_export_folder_mm2k || '').trim(),
     openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
     sameTab: (s.psd_photopea_same_tab || '').trim().toLowerCase() === 'true',
+    defaultEditor: (s.psd_default_editor || '').trim().toLowerCase() === 'photoshop' ? 'photoshop' : 'photopea',
     // tvdb_api_key is sensitive, so it comes back masked when set — presence is all we need.
     tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
   }
@@ -322,6 +325,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [posterTags, setPosterTags] = useState<Record<string, string>>({})   // file_path → convention name (poster OR backdrop images)
   const [tagTarget, setTagTarget] = useState<{ path: string; backdrop: boolean } | null>(null)   // image whose tag popup is open
   const [tagDecade, setTagDecade] = useState(1)   // Tag popup: which season decade (1, 11, 21…) is expanded
+  const [tagYear, setTagYear] = useState('')      // Tag popup: season-year entry ("2015" → tag "s2015")
 
   // Export style: defaults to the request's style, but the toolbar toggle can override it so an
   // MM2K request can also be built in CL2K (and vice-versa). Each style has its own template +
@@ -336,6 +340,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       setPsdConfig(psdConfigProp)
     }
   }, [psdConfigProp])
+
+  // Per-export editor target — starts on the settings default, flippable next to the export buttons.
+  const [psdEditor, setPsdEditor] = useState<'photopea' | 'photoshop'>('photopea')
+  useEffect(() => { setPsdEditor(psdConfig.defaultEditor) }, [psdConfig.defaultEditor])
   useEffect(() => {
     if (psdConfigProp === undefined) {
       getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => { /* non-blocking */ })
@@ -590,7 +598,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         return
       }
       if (result.mode === 'photopea') {
-        if (result.openPhotopea) {
+        if (!result.openPhotopea) {
+          showToast(`PSD saved: ${result.filename}`, 'success')
+        } else if (psdEditor === 'photoshop') {
+          // Queue for the native Photoshop panel — it polls the server and opens the PSD itself
+          // (the browser can't launch Photoshop). The panel needs its server connection configured.
+          await enqueuePhotoshopOpen(result.filename, result.style, result.filename.replace(/\.psd$/i, ''))
+          showToast(`Queued ${result.filename} for Photoshop…`, 'success')
+        } else {
           // Photopea fetches the exported PSD itself (files:[url]) and the plugin panel adds the
           // seasons / save / JPG buttons. Works on http LAN once the user allows Photopea's
           // one-time "local network access" prompt. In same-tab mode later exports are added as
@@ -603,8 +618,6 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               : `Opening ${result.filename} in Photopea…`,
             'success',
           )
-        } else {
-          showToast(`PSD saved: ${result.filename}`, 'success')
         }
       } else {
         const url = URL.createObjectURL(result.blob)
@@ -623,9 +636,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, posterTags, psdConfig.sameTab, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, posterTags, psdConfig.sameTab, psdEditor, showToast])
 
-  // Tag a specific poster with a plugin-convention name (s1/s0/main/show/c). Tagging just STORES the
+  // Tag a specific poster with a plugin-convention name (s1/s0/main/show/c/cls/s<year>). Tagging just STORES the
   // name (and selects the poster); it's applied when the user later hits New/Use-Existing Export,
   // which names that poster's injected layer so the plugin's ⚡ batch recognizes it.
   const handleTag = useCallback((filePath: string, name: string, backdrop: boolean) => {
@@ -785,6 +798,24 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </button>
         ))}
       </div>
+      {psdConfig.openPhotopea && (
+        <div className="tmdb-psd-style-toggle" role="group" aria-label="Open exports in">
+          {([['photopea', 'Pea'], ['photoshop', 'PS']] as const).map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              className={`tmdb-psd-style-opt${psdEditor === val ? ' active' : ''}`}
+              onClick={() => setPsdEditor(val)}
+              disabled={psdExporting}
+              title={val === 'photopea'
+                ? 'Open exports in Photopea (browser tab)'
+                : 'Queue exports for the Photoshop panel — it downloads and opens them automatically'}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <button
         type="button"
         className="tmdb-psd-export-btn tmdb-psd-export-btn--new"
@@ -1030,7 +1061,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                     <button type="button" className="tmdb-tag-close" onClick={() => setTagTarget(null)} aria-label="Close"><X size={15} /></button>
                   </div>
                   <div className="tmdb-tag-roles">
-                    {([['main', 'Movie'], ['show', 'Show'], ['s0', 'Specials'], ['c', 'Collection']] as const).map(([val, label]) => (
+                    {([['main', 'Movie'], ['show', 'Show'], ['s0', 'Specials'], ['c', 'Collection'], ['cls', 'Limited Series']] as const).map(([val, label]) => (
                       <button key={val} type="button" className={`tmdb-tag-chip role${cur === val ? ' active' : ''}`} onClick={() => handleTag(tagTarget.path, val, tagTarget.backdrop)}>{label}</button>
                     ))}
                   </div>
@@ -1044,6 +1075,24 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                     {Array.from({ length: 10 }, (_, i) => tagDecade + i).map((n) => (
                       <button key={n} type="button" className={`tmdb-tag-chip num${cur === `s${n}` ? ' active' : ''}`} onClick={() => handleTag(tagTarget.path, `s${n}`, tagTarget.backdrop)}>{n}</button>
                     ))}
+                  </div>
+                  <div className="tmdb-tag-sub">Season year</div>
+                  <div className="tmdb-tag-year">
+                    <input
+                      type="number"
+                      className="tmdb-tag-yearinput"
+                      placeholder="e.g. 2015"
+                      value={tagYear}
+                      onChange={(e) => setTagYear(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={`tmdb-tag-chip num${cur === `s${tagYear}` ? ' active' : ''}`}
+                      disabled={!/^(19|20)\d\d$/.test(tagYear)}
+                      onClick={() => handleTag(tagTarget.path, `s${tagYear}`, tagTarget.backdrop)}
+                    >
+                      Tag year
+                    </button>
                   </div>
                   {cur && (
                     <button type="button" className="tmdb-tag-untag" onClick={() => handleUntag(tagTarget.path, tagTarget.backdrop)}>Remove tag “{cur}”</button>
@@ -1116,7 +1165,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                           type="button"
                                           className={`tmdb-psd-tag-btn${posterTags[img.file_path] ? ' tagged' : ''}`}
                                           onClick={() => { setTagTarget({ path: img.file_path, backdrop: false }); setTagDecade(1) }}
-                                          title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/collection) for the plugin batch'}
+                                          title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/c/cls or a season year) for the plugin batch'}
                                         >
                                           {posterTags[img.file_path] ?? <Tag size={11} />}
                                         </button>
@@ -1202,7 +1251,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                 type="button"
                                 className={`tmdb-psd-tag-btn${posterTags[img.file_path] ? ' tagged' : ''}`}
                                 onClick={() => { setTagTarget({ path: img.file_path, backdrop: role === 'backdrop' }); setTagDecade(1) }}
-                                title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/collection) for the plugin batch'}
+                                title={posterTags[img.file_path] ? `Tagged “${posterTags[img.file_path]}” — click to change` : 'Tag this image as a poster variant (s1/s0/main/show/c/cls or a season year) for the plugin batch'}
                               >
                                 {posterTags[img.file_path] ?? <Tag size={11} />}
                               </button>

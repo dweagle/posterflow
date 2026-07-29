@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { BookOpen, Check, CircleHelp, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { BookOpen, Check, CircleHelp, Info, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -15,6 +15,7 @@ import {
   runMakerMonitor,
   saveBulkSettings,
   saveMakerMonitorConfig,
+  downloadPhotoshopPlugin,
   searchTmdb,
   TmdbSearchFilter,
   TmdbSearchResult,
@@ -67,6 +68,54 @@ function parseTmdbHomepage(homepage: string | undefined): { tmdb_id: number; med
   return m ? { media_type: m[1] as 'movie' | 'tv', tmdb_id: Number(m[2]) } : null
 }
 
+// Small info button that pops the field's description on demand — keeps the settings modal
+// compact. Matches the app's info-button convention (blue lucide Info icon, dark #252525 popup,
+// like the drive-id tooltip on GDrives). Dismissed by clicking anywhere — outside or on the popup.
+function InfoTip({ children }: { children: ReactNode }) {
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null)
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const open = pos !== null
+  useEffect(() => {
+    if (!open) return
+    const close = () => setPos(null)
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) close()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('scroll', close, true)   // the modal body scrolls under a fixed popup
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('scroll', close, true)
+    }
+  }, [open])
+  const toggle = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    if (open) { setPos(null); return }
+    // Fixed positioning so the scrolling modal body can't clip the popup; flip above the icon
+    // when there isn't room below.
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 296))
+    if (r.bottom + 190 > window.innerHeight) setPos({ bottom: window.innerHeight - r.top + 4, left })
+    else setPos({ top: r.bottom + 4, left })
+  }
+  return (
+    <span className="psd-info-wrap" ref={wrapRef}>
+      <button type="button" className="psd-info-btn" aria-label="More info" onClick={toggle}>
+        <Info size={13} />
+      </button>
+      {open && (
+        <span
+          className="psd-info-pop"
+          style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPos(null) }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  )
+}
+
 function MakerTools() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -96,6 +145,8 @@ function MakerTools() {
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
+  const [logoExportFolder, setLogoExportFolder] = useState('')
+  const [psdDefaultEditor, setPsdDefaultEditor] = useState<'photopea' | 'photoshop'>('photopea')
   const [psdExportFolderMm2k, setPsdExportFolderMm2k] = useState('')
   const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
   const [psdImageExportFolderMm2k, setPsdImageExportFolderMm2k] = useState('')
@@ -186,6 +237,8 @@ function MakerTools() {
       setPsdSameTab(cfg.sameTab)
       setTvdbEnabled(cfg.tvdbEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
+      setLogoExportFolder((settings.logo_export_folder || '').trim())
+      setPsdDefaultEditor(cfg.defaultEditor)
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
     })
@@ -242,6 +295,8 @@ function MakerTools() {
         psd_open_photopea: String(psdOpenPhotopea),
         psd_photopea_same_tab: String(psdSameTab),
         psd_poster_fit_border: String(psdPosterFitBorder),
+        logo_export_folder: logoExportFolder.trim(),
+        psd_default_editor: psdDefaultEditor,
       })
       showToast('PSD settings saved', 'success')
       setShowPsdConfigModal(false)
@@ -349,8 +404,9 @@ function MakerTools() {
     imageExportFolderMm2k: psdImageExportFolderMm2k,
     openPhotopea: psdOpenPhotopea,
     sameTab: psdSameTab,
+    defaultEditor: psdDefaultEditor,
     tvdbEnabled,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, tvdbEnabled])
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, tvdbEnabled])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))
@@ -813,7 +869,7 @@ function MakerTools() {
                         <li><strong>Use Existing PSD</strong> — opens an already-saved PSD from your export folder and injects any selected poster/logo/backdrop layers into it, preserving all your existing work (borders, text, effects). With no images selected it simply opens the existing file. It must be named <code>{'{'}title{'}'} ({'{'}year{'}'}).psd</code> and placed in the configured export folder. If no matching file is found, a prompt will guide you to either place the file there manually or upload it directly from your computer.</li>
                       </ul>
                     </li>
-                    <li><strong>Open in Photopea</strong> — if the "Open in Photopea" toggle is enabled in Configure, the exported PSD opens directly in Photopea instead of downloading. By default each export opens its own tab; enable "Reuse one Photopea tab" to add exports as separate documents in a single tab (each still saves back to its own PSD)</li>
+                    <li><strong>Open After Export</strong> — if the "Open After Export" toggle is enabled in Configure, the exported PSD opens in the selected editor: Photopea in a new tab, or queued for the Photoshop panel. By default each Photopea export opens its own tab; enable "Reuse one Photopea tab" to add exports as separate documents in a single tab (each still saves back to its own PSD)</li>
                     <li><strong>Multiple posters</strong> — you can add more than one poster; each becomes its own layer in the PSD</li>
                   </ul>
                 </div>
@@ -898,113 +954,14 @@ function MakerTools() {
             </div>
             <div className="modal-body">
               <div className="maker-card">
-                <small className="muted" style={{ display: 'block', marginBottom: '0.75rem', lineHeight: 1.6 }}>
-                  Exports are routed by the request's poster style — a <strong>CL2K</strong> request uses the
-                  CL2K settings below, an <strong>MM2K</strong> request uses the MM2K settings. Plain TMDB
-                  searches (no style tag) default to <strong>CL2K</strong>. Any folder left blank falls back to
-                  a browser download for that style.
-                </small>
-
-                <div style={{ fontWeight: 600, margin: '0.25rem 0 0.5rem' }}>CL2K posters</div>
-                <label>
-                  CL2K PSD Export Folder
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. When set, exported CL2K PSD files are saved to this folder instead of downloading
-                    to your browser. Must be an absolute container-side path (e.g. <code>/config/psd_exports</code>).
-                    Leave blank for download-only.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdExportFolder}
-                    onChange={(e) => setPsdExportFolder(e.target.value)}
-                    placeholder="/config/psd_exports"
-                  />
-                </label>
-                <label>
-                  CL2K Image Export Folder
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button land.
-                    Set an absolute container-side path (e.g. <code>/config/poster_jpgs</code>) to save there, or
-                    leave blank to download images in your browser instead. Photopea's own Export As
-                    (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdImageExportFolder}
-                    onChange={(e) => setPsdImageExportFolder(e.target.value)}
-                    placeholder="(leave blank to download)"
-                  />
-                </label>
-                <label>
-                  CL2K PSD Template File
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Override the bundled CL2K default PSD template with your own. Provide an absolute
-                    container-side path to a <code>.psd</code> file (e.g. <code>/config/cl2k_template.psd</code>).
-                    The poster image is injected into the <strong>POSTER</strong> group and the logo into the <strong>LOGO</strong> group.
-                    Leave blank to use the built-in default template.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdTemplatePath}
-                    onChange={(e) => setPsdTemplatePath(e.target.value)}
-                    placeholder="/config/cl2k_template.psd"
-                  />
-                </label>
-
-                <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>MM2K posters</div>
-                <label>
-                  MM2K PSD Export Folder
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. When set, exported MM2K PSD files are saved to this folder instead of downloading
-                    to your browser. Must be an absolute container-side path (e.g. <code>/config/psd_exports_mm2k</code>).
-                    Leave blank for download-only.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdExportFolderMm2k}
-                    onChange={(e) => setPsdExportFolderMm2k(e.target.value)}
-                    placeholder="/config/psd_exports_mm2k"
-                  />
-                </label>
-                <label>
-                  MM2K Image Export Folder
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button land.
-                    Set an absolute container-side path (e.g. <code>/config/poster_jpgs_mm2k</code>) to save there, or
-                    leave blank to download images in your browser instead. Photopea's own Export As
-                    (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdImageExportFolderMm2k}
-                    onChange={(e) => setPsdImageExportFolderMm2k(e.target.value)}
-                    placeholder="(leave blank to download)"
-                  />
-                </label>
-                <label>
-                  MM2K PSD Template File
-                  <small className="muted" style={{ display: 'block', margin: '0.25rem 0 0.5rem' }}>
-                    Override the bundled MM2K default PSD template with your own. Provide an absolute
-                    container-side path to a <code>.psd</code> file (e.g. <code>/config/mm2k_template.psd</code>).
-                    The poster image is injected into the <strong>POSTER</strong> group (MM2K templates use text titles, not a <strong>LOGO</strong> group).
-                    Leave blank to use the built-in MM2K default template.
-                  </small>
-                  <input
-                    type="text"
-                    value={psdTemplatePathMm2k}
-                    onChange={(e) => setPsdTemplatePathMm2k(e.target.value)}
-                    placeholder="/config/mm2k_template.psd"
-                  />
-                </label>
-
                 <div className="maker-setting-row">
                   <div>
                     <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
-                    <small className="muted" style={{ display: 'block', marginTop: '0.2rem' }}>
+                    <InfoTip>
                       Default export fills the full canvas. Enable this to scale posters to the canvas width
                       minus a 25px border on each side, preserve aspect ratio, and align the poster 25px
                       from the top edge.
-                    </small>
+                    </InfoTip>
                   </div>
                   <label className="toggle-switch" style={{ flexShrink: 0 }}>
                     <input
@@ -1017,13 +974,14 @@ function MakerTools() {
                 </div>
                 <div className="maker-setting-row">
                   <div>
-                    <span style={{ fontWeight: 500 }}>Open in Photopea</span>
-                    <small className="muted" style={{ display: 'block', marginTop: '0.2rem' }}>
-                      When enabled, exported PSD files automatically open in{' '}
-                      <a href="https://www.photopea.com" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>Photopea</a>{' '}
-                      in a new tab. Requires PosterFlow to be accessible over HTTPS. If no export folder
-                      is configured, files are saved temporarily to <code>/config/psd_cache</code>.
-                    </small>
+                    <span style={{ fontWeight: 500 }}>Open After Export</span>
+                    <InfoTip>
+                      When enabled, exported PSD files automatically open in the selected Default Editor —
+                      Photopea in a new tab (requires PosterFlow to be accessible over HTTPS), or queued for
+                      the Photoshop panel. When disabled, exports just save to the export folder and the
+                      Pea/PS toggle is hidden on the maker cards. If no export folder is configured, files
+                      are saved temporarily to <code>/config/psd_cache</code>.
+                    </InfoTip>
                   </div>
                   <label className="toggle-switch" style={{ flexShrink: 0 }}>
                     <input
@@ -1034,26 +992,199 @@ function MakerTools() {
                     <span className="toggle-slider" />
                   </label>
                 </div>
-                <div className="maker-setting-row" style={{ opacity: psdOpenPhotopea ? 1 : 0.5 }}>
-                  <div>
-                    <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
-                    <small className="muted" style={{ display: 'block', marginTop: '0.2rem' }}>
-                      When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
-                      {' '}instead of a new tab each time — handy for making one title in two styles side by side.
-                      The first export opens the tab; later exports are added to it (each still saves back to its
-                      own PSD). If you close that tab, the next export opens a fresh one.
-                    </small>
+                {psdOpenPhotopea && (
+                  <div className="maker-setting-row">
+                    <div>
+                      <span style={{ fontWeight: 500 }}>Default Editor</span>
+                      <InfoTip>
+                        Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
+                        next to the export buttons starts on this choice. Photoshop mode queues the export for
+                        the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
+                        itself); the panel needs its server connection configured.
+                      </InfoTip>
+                      <div style={{ display: 'flex', flexDirection: 'row', gap: '1.25rem', marginTop: '0.45rem' }}>
+                        {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
+                          <label
+                            key={val}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', alignSelf: 'flex-start', cursor: 'pointer' }}
+                          >
+                            <input
+                              type="radio"
+                              name="psd-default-editor"
+                              checked={psdDefaultEditor === val}
+                              onChange={() => setPsdDefaultEditor(val)}
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="psd-ccx-link"
+                        title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
+                        onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
+                      >
+                        Download the Photoshop panel (.ccx)
+                      </button>
+                    </div>
                   </div>
-                  <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={psdSameTab}
-                      disabled={!psdOpenPhotopea}
-                      onChange={(e) => setPsdSameTab(e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
+                )}
+                {psdOpenPhotopea && (
+                  <div className="maker-setting-row">
+                    <div>
+                      <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
+                      <InfoTip>
+                        When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
+                        {' '}instead of a new tab each time — handy for making one title in two styles side by side.
+                        The first export opens the tab; later exports are added to it (each still saves back to its
+                        own PSD). If you close that tab, the next export opens a fresh one.
+                      </InfoTip>
+                    </div>
+                    <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={psdSameTab}
+                        onChange={(e) => setPsdSameTab(e.target.checked)}
+                      />
+                      <span className="toggle-slider" />
+                    </label>
+                  </div>
+                )}
+
+                <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
+                  Style Folders
+                  <InfoTip>
+                    Exports are routed by the request's poster style — a <strong>CL2K</strong> request uses
+                    the CL2K settings, an <strong>MM2K</strong> request uses the MM2K settings. Plain TMDB
+                    searches (no style tag) default to <strong>CL2K</strong>. Any folder left blank falls
+                    back to a browser download for that style.
+                  </InfoTip>
                 </div>
+                <div className="psd-style-cols">
+                  <div>
+                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#3fae62' }}>CL2K</div>
+                    <label>
+                      PSD Export Folder
+                      <InfoTip>
+                        Optional. When set, exported CL2K PSD files are saved to this folder instead of
+                        downloading to your browser. Must be an absolute container-side path
+                        (e.g. <code>/config/psd_exports</code>). Leave blank for download-only — except with
+                        Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
+                        instead (Photopea and the Photoshop panel both load from and save back to that folder).
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdExportFolder}
+                        onChange={(e) => setPsdExportFolder(e.target.value)}
+                        placeholder="/config/psd_exports"
+                      />
+                    </label>
+                    <label>
+                      Image Export Folder
+                      <InfoTip>
+                        Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button
+                        land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs</code>).
+                        When blank, Photopea falls back to downloading images in your browser, and the
+                        Photoshop panel falls back to its own local save folder (it asks once and remembers).
+                        PSDs opened locally in Photoshop always use the panel's folder and ignore this
+                        setting. Photopea's own
+                        Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdImageExportFolder}
+                        onChange={(e) => setPsdImageExportFolder(e.target.value)}
+                        placeholder="(blank = download)"
+                      />
+                    </label>
+                    <label>
+                      PSD Template File
+                      <InfoTip>
+                        Override the bundled CL2K default PSD template with your own. Provide an absolute
+                        container-side path to a <code>.psd</code> file (e.g. <code>/config/cl2k_template.psd</code>).
+                        The poster image is injected into the <strong>POSTER</strong> group and the logo into
+                        the <strong>LOGO</strong> group. Leave blank to use the built-in default template.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdTemplatePath}
+                        onChange={(e) => setPsdTemplatePath(e.target.value)}
+                        placeholder="/config/cl2k_template.psd"
+                      />
+                    </label>
+                    <label>
+                      Logo Export Folder
+                      <InfoTip>
+                        Optional. Where the panel's in-box <strong>Logo</strong> button saves the PSD's
+                        <strong> LOGO</strong> group as a trimmed transparent PNG (named like the poster). Set an
+                        absolute container-side path (e.g. <code>/config/logos</code>). When blank, Photopea
+                        falls back to a browser download, and the Photoshop panel falls back to its own local
+                        logo folder (it asks once and remembers). CL2K only — MM2K templates have no LOGO
+                        group.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={logoExportFolder}
+                        onChange={(e) => setLogoExportFolder(e.target.value)}
+                        placeholder="(blank = download)"
+                      />
+                    </label>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#5a86f0' }}>MM2K</div>
+                    <label>
+                      PSD Export Folder
+                      <InfoTip>
+                        Optional. When set, exported MM2K PSD files are saved to this folder instead of
+                        downloading to your browser. Must be an absolute container-side path
+                        (e.g. <code>/config/psd_exports_mm2k</code>). Leave blank for download-only — except with
+                        Open After Export enabled, where a blank path saves to <code>/config/psd_cache</code>
+                        instead (Photopea and the Photoshop panel both load from and save back to that folder).
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdExportFolderMm2k}
+                        onChange={(e) => setPsdExportFolderMm2k(e.target.value)}
+                        placeholder="/config/psd_exports_mm2k"
+                      />
+                    </label>
+                    <label>
+                      Image Export Folder
+                      <InfoTip>
+                        Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button
+                        land. Set an absolute container-side path (e.g. <code>/config/poster_jpgs_mm2k</code>).
+                        When blank, Photopea falls back to downloading images in your browser, and the
+                        Photoshop panel falls back to its own local save folder (it asks once and remembers).
+                        PSDs opened locally in Photoshop always use the panel's folder and ignore this
+                        setting. Photopea's own
+                        Export As (<code>Ctrl+Shift+Alt+S</code>) uses its native download popup, not this folder.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdImageExportFolderMm2k}
+                        onChange={(e) => setPsdImageExportFolderMm2k(e.target.value)}
+                        placeholder="(blank = download)"
+                      />
+                    </label>
+                    <label>
+                      PSD Template File
+                      <InfoTip>
+                        Override the bundled MM2K default PSD template with your own. Provide an absolute
+                        container-side path to a <code>.psd</code> file (e.g. <code>/config/mm2k_template.psd</code>).
+                        The poster image is injected into the <strong>POSTER</strong> group (MM2K templates use
+                        text titles, not a <strong>LOGO</strong> group). Leave blank to use the built-in MM2K
+                        default template.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={psdTemplatePathMm2k}
+                        onChange={(e) => setPsdTemplatePathMm2k(e.target.value)}
+                        placeholder="/config/mm2k_template.psd"
+                      />
+                    </label>
+                  </div>
+                </div>
+
               </div>
             </div>
             <div className="modal-footer">
