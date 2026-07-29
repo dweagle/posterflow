@@ -482,6 +482,34 @@ def _encode(data: bytes, im: Image.Image, subtype: str, transformed: bool) -> by
     return data
 
 
+def prepare_artwork_payload(data: bytes, subtype: str, *, crop: Optional[tuple[int, int, int, int]] = None,
+                            make_white: bool = False) -> bytes:
+    """Decode raw image bytes, apply the optional square crop / white recolor, and encode for the
+    subtype (logo → PNG, background/squareart → JPEG). Raises ValueError on unreadable input or a
+    too-small crop."""
+    im = _open_image(data)
+    if im is None:
+        raise ValueError("downloaded file is not a readable image")
+
+    transformed = False
+    if crop is not None:
+        x, y, w, h = (int(v) for v in crop)
+        iw, ih = im.size
+        x = max(0, min(x, iw - 1)); y = max(0, min(y, ih - 1))
+        w = max(1, min(w, iw - x)); h = max(1, min(h, ih - y))
+        # Enforce a 500px minimum square when the source is big enough to allow it (the UI already
+        # prevents this; this guards direct API calls).
+        if min(w, h) < 500 and min(iw, ih) >= 500:
+            raise ValueError("square art crop must be at least 500×500")
+        im = im.crop((x, y, x + w, y + h))
+        transformed = True
+    if subtype == "logo" and make_white:
+        im = make_logo_white(im)
+        transformed = True
+
+    return _encode(data, im, subtype, transformed)
+
+
 def save_candidate(*, source_dir: Path, is_asset_drive: bool, item: FinderItem, subtype: str,
                    source: str, ref: str, session: requests.Session,
                    make_white: bool = False, confirm_overwrite: bool = False,
@@ -508,27 +536,7 @@ def save_candidate(*, source_dir: Path, is_asset_drive: bool, item: FinderItem, 
     data = _download_bytes(session, _resolve_url(source, ref))
     if not data:
         raise ValueError("could not download the selected image")
-    im = _open_image(data)
-    if im is None:
-        raise ValueError("downloaded file is not a readable image")
-
-    transformed = False
-    if crop is not None:
-        x, y, w, h = (int(v) for v in crop)
-        iw, ih = im.size
-        x = max(0, min(x, iw - 1)); y = max(0, min(y, ih - 1))
-        w = max(1, min(w, iw - x)); h = max(1, min(h, ih - y))
-        # Enforce a 500px minimum square when the source is big enough to allow it (the UI already
-        # prevents this; this guards direct API calls).
-        if min(w, h) < 500 and min(iw, ih) >= 500:
-            raise ValueError("square art crop must be at least 500×500")
-        im = im.crop((x, y, x + w, y + h))
-        transformed = True
-    if subtype == "logo" and make_white:
-        im = make_logo_white(im)
-        transformed = True
-
-    payload = _encode(data, im, subtype, transformed)
+    payload = prepare_artwork_payload(data, subtype, crop=crop, make_white=make_white)
     result = place_asset_file(source_dir, subtype, filename, payload, is_asset_drive=is_asset_drive)
     return {
         "status": "added",

@@ -145,7 +145,10 @@ function MakerTools() {
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
-  const [logoExportFolder, setLogoExportFolder] = useState('')
+  const [logoExportFolder, setLogoExportFolder] = useState('')          // panel Logo button (Photopea/Photoshop)
+  const [artworkLogoExportFolder, setArtworkLogoExportFolder] = useState('')   // gallery logo save button
+  const [backgroundExportFolder, setBackgroundExportFolder] = useState('')
+  const [squareartExportFolder, setSquareartExportFolder] = useState('')
   const [psdDefaultEditor, setPsdDefaultEditor] = useState<'photopea' | 'photoshop'>('photopea')
   const [psdExportFolderMm2k, setPsdExportFolderMm2k] = useState('')
   const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
@@ -238,6 +241,9 @@ function MakerTools() {
       setTvdbEnabled(cfg.tvdbEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
       setLogoExportFolder((settings.logo_export_folder || '').trim())
+      setArtworkLogoExportFolder((settings.artwork_logo_export_folder || '').trim())
+      setBackgroundExportFolder((settings.background_export_folder || '').trim())
+      setSquareartExportFolder((settings.squareart_export_folder || '').trim())
       setPsdDefaultEditor(cfg.defaultEditor)
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -296,6 +302,9 @@ function MakerTools() {
         psd_photopea_same_tab: String(psdSameTab),
         psd_poster_fit_border: String(psdPosterFitBorder),
         logo_export_folder: logoExportFolder.trim(),
+        artwork_logo_export_folder: artworkLogoExportFolder.trim(),
+        background_export_folder: backgroundExportFolder.trim(),
+        squareart_export_folder: squareartExportFolder.trim(),
         psd_default_editor: psdDefaultEditor,
       })
       showToast('PSD settings saved', 'success')
@@ -405,8 +414,11 @@ function MakerTools() {
     openPhotopea: psdOpenPhotopea,
     sameTab: psdSameTab,
     defaultEditor: psdDefaultEditor,
+    logoFolderSet: !!artworkLogoExportFolder.trim(),
+    backgroundFolderSet: !!backgroundExportFolder.trim(),
+    squareartFolderSet: !!squareartExportFolder.trim(),
     tvdbEnabled,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, tvdbEnabled])
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, artworkLogoExportFolder, backgroundExportFolder, squareartExportFolder, tvdbEnabled])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))
@@ -954,102 +966,161 @@ function MakerTools() {
             </div>
             <div className="modal-body">
               <div className="maker-card">
-                <div className="maker-setting-row">
+                {/* Top half: toggle settings on the left, artwork export folders on the right. */}
+                <div className="psd-style-cols">
                   <div>
-                    <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
-                    <InfoTip>
-                      Default export fills the full canvas. Enable this to scale posters to the canvas width
-                      minus a 25px border on each side, preserve aspect ratio, and align the poster 25px
-                      from the top edge.
-                    </InfoTip>
-                  </div>
-                  <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={psdPosterFitBorder}
-                      onChange={(e) => setPsdPosterFitBorder(e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-                <div className="maker-setting-row">
-                  <div>
-                    <span style={{ fontWeight: 500 }}>Open After Export</span>
-                    <InfoTip>
-                      When enabled, exported PSD files automatically open in the selected Default Editor —
-                      Photopea in a new tab (requires PosterFlow to be accessible over HTTPS), or queued for
-                      the Photoshop panel. When disabled, exports just save to the export folder and the
-                      Pea/PS toggle is hidden on the maker cards. If no export folder is configured, files
-                      are saved temporarily to <code>/config/psd_cache</code>.
-                    </InfoTip>
-                  </div>
-                  <label className="toggle-switch" style={{ flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={psdOpenPhotopea}
-                      onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-                {psdOpenPhotopea && (
-                  <div className="maker-setting-row">
-                    <div>
-                      <span style={{ fontWeight: 500 }}>Default Editor</span>
-                      <InfoTip>
-                        Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
-                        next to the export buttons starts on this choice. Photoshop mode queues the export for
-                        the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
-                        itself); the panel needs its server connection configured.
-                      </InfoTip>
-                      <div style={{ display: 'flex', flexDirection: 'row', gap: '1.25rem', marginTop: '0.45rem' }}>
-                        {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
-                          <label
-                            key={val}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', alignSelf: 'flex-start', cursor: 'pointer' }}
-                          >
-                            <input
-                              type="radio"
-                              name="psd-default-editor"
-                              checked={psdDefaultEditor === val}
-                              onChange={() => setPsdDefaultEditor(val)}
-                            />
-                            {label}
-                          </label>
-                        ))}
+                    <div className="maker-setting-row">
+                      <div>
+                        <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
+                        <InfoTip>
+                          Default export fills the full canvas. Enable this to scale posters to the canvas width
+                          minus a 25px border on each side, preserve aspect ratio, and align the poster 25px
+                          from the top edge.
+                        </InfoTip>
                       </div>
-                      <button
-                        type="button"
-                        className="psd-ccx-link"
-                        title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
-                        onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
-                      >
-                        Download the Photoshop panel (.ccx)
-                      </button>
+                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={psdPosterFitBorder}
+                          onChange={(e) => setPsdPosterFitBorder(e.target.checked)}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
                     </div>
+                    <div className="maker-setting-row">
+                      <div>
+                        <span style={{ fontWeight: 500 }}>Open After Export</span>
+                        <InfoTip>
+                          When enabled, exported PSD files automatically open in the selected Default Editor —
+                          Photopea in a new tab (requires PosterFlow to be accessible over HTTPS), or queued for
+                          the Photoshop panel. When disabled, exports just save to the export folder and the
+                          Pea/PS toggle is hidden on the maker cards. If no export folder is configured, files
+                          are saved temporarily to <code>/config/psd_cache</code>.
+                        </InfoTip>
+                      </div>
+                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={psdOpenPhotopea}
+                          onChange={(e) => setPsdOpenPhotopea(e.target.checked)}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                    </div>
+                    {psdOpenPhotopea && (
+                      <div className="maker-setting-row">
+                        <div>
+                          <span style={{ fontWeight: 500 }}>Default Editor</span>
+                          <InfoTip>
+                            Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
+                            next to the export buttons starts on this choice. Photoshop mode queues the export for
+                            the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
+                            itself); the panel needs its server connection configured.
+                          </InfoTip>
+                          <div style={{ display: 'flex', flexDirection: 'row', gap: '1.25rem', marginTop: '0.45rem' }}>
+                            {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
+                              <label
+                                key={val}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', alignSelf: 'flex-start', cursor: 'pointer' }}
+                              >
+                                <input
+                                  type="radio"
+                                  name="psd-default-editor"
+                                  checked={psdDefaultEditor === val}
+                                  onChange={() => setPsdDefaultEditor(val)}
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            className="psd-ccx-link"
+                            title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
+                            onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
+                          >
+                            Download the Photoshop panel (.ccx)
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {psdOpenPhotopea && (
+                      <div className="maker-setting-row">
+                        <div>
+                          <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
+                          <InfoTip>
+                            When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
+                            {' '}instead of a new tab each time — handy for making one title in two styles side by side.
+                            The first export opens the tab; later exports are added to it (each still saves back to its
+                            own PSD). If you close that tab, the next export opens a fresh one.
+                          </InfoTip>
+                        </div>
+                        <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={psdSameTab}
+                            onChange={(e) => setPsdSameTab(e.target.checked)}
+                          />
+                          <span className="toggle-slider" />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                )}
-                {psdOpenPhotopea && (
-                  <div className="maker-setting-row">
-                    <div>
-                      <span style={{ fontWeight: 500 }}>Reuse one Photopea tab</span>
+                  <div>
+                    <div style={{ fontWeight: 600, margin: '0 0 0.5rem' }}>
+                      Artwork Export Folders
                       <InfoTip>
-                        When enabled, exports open as <strong>separate documents in a single Photopea tab</strong>
-                        {' '}instead of a new tab each time — handy for making one title in two styles side by side.
-                        The first export opens the tab; later exports are added to it (each still saves back to its
-                        own PSD). If you close that tab, the next export opens a fresh one.
+                        Power the maker cards&apos; green gallery buttons — logo/backdrop saves and the
+                        poster crop-into-square-art tool — which write files named for artwork drives
+                        (<code>Title (Year) {'{ids}'} - logo.png</code> / <code>- background.jpg</code> /{' '}
+                        <code>- squareart.jpg</code>). Leave a folder blank to hide its button.
                       </InfoTip>
                     </div>
-                    <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                    <label>
+                      Logo Export Folder
+                      <InfoTip>
+                        Optional. Where the gallery&apos;s logo save button writes
+                        <code> - logo.png</code> files. Set an absolute container-side path
+                        (e.g. <code>/config/artwork/logos</code>). Separate from the CL2K panel logo
+                        folder below, which the Photopea/Photoshop <strong>Logo</strong> button uses.
+                      </InfoTip>
                       <input
-                        type="checkbox"
-                        checked={psdSameTab}
-                        onChange={(e) => setPsdSameTab(e.target.checked)}
+                        type="text"
+                        value={artworkLogoExportFolder}
+                        onChange={(e) => setArtworkLogoExportFolder(e.target.value)}
+                        placeholder="(blank = no save button)"
                       />
-                      <span className="toggle-slider" />
+                    </label>
+                    <label>
+                      Background Export Folder
+                      <InfoTip>
+                        Optional. Where the gallery&apos;s backdrop save button writes
+                        <code> - background.jpg</code> files. Set an absolute container-side path
+                        (e.g. <code>/config/artwork/backgrounds</code>).
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={backgroundExportFolder}
+                        onChange={(e) => setBackgroundExportFolder(e.target.value)}
+                        placeholder="(blank = no save button)"
+                      />
+                    </label>
+                    <label>
+                      Square Art Export Folder
+                      <InfoTip>
+                        Optional. Where the gallery&apos;s poster crop tool writes
+                        <code> - squareart.jpg</code> files. Set an absolute container-side path
+                        (e.g. <code>/config/artwork/squareart</code>).
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={squareartExportFolder}
+                        onChange={(e) => setSquareartExportFolder(e.target.value)}
+                        placeholder="(blank = no crop button)"
+                      />
                     </label>
                   </div>
-                )}
+                </div>
 
                 <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
                   Style Folders
@@ -1184,6 +1255,7 @@ function MakerTools() {
                     </label>
                   </div>
                 </div>
+
 
               </div>
             </div>

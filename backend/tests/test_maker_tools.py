@@ -2276,6 +2276,116 @@ def test_photoshop_queue_rejects_bad_filenames():
             mt.enqueue_photoshop_open(mt.PhotoshopQueueRequest(filename=bad), db=MagicMock())
 
 
+# ---------------------------------------------------------------------------
+# Save gallery artwork to the export folders (POST /artwork-exports)
+# ---------------------------------------------------------------------------
+
+def _artwork_image_bytes(mode: str = "RGBA", fmt: str = "PNG", size: tuple[int, int] = (10, 4)) -> bytes:
+    buf = BytesIO()
+    Image.new(mode, size, (255, 0, 0, 255) if mode == "RGBA" else (255, 0, 0)).save(buf, fmt)
+    return buf.getvalue()
+
+
+def _artwork_request(**overrides):
+    from api import maker_tools as mt
+    base = dict(path="/logo.png", subtype="logo", title="Show", media_type="tv", year=2020, tmdb_id=1)
+    base.update(overrides)
+    return mt.SaveGalleryArtworkRequest(**base)
+
+
+def test_save_gallery_artwork_requires_configured_folder():
+    from api import maker_tools as mt
+    from fastapi import HTTPException
+    with patch.object(mt, "get_setting_value", return_value=""):
+        with pytest.raises(HTTPException) as exc:
+            mt.save_gallery_artwork(_artwork_request(), db=MagicMock())
+    assert exc.value.status_code == 400
+
+
+def test_save_gallery_artwork_rejects_bad_path_and_subtype():
+    from api import maker_tools as mt
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        mt.save_gallery_artwork(_artwork_request(path="/../evil.png"), db=MagicMock())
+    assert exc.value.status_code == 400
+    with pytest.raises(HTTPException) as exc:
+        mt.save_gallery_artwork(_artwork_request(subtype="poster"), db=MagicMock())
+    assert exc.value.status_code == 400
+
+
+def test_save_gallery_artwork_reads_subtype_folder_setting(tmp_path):
+    from api import maker_tools as mt
+    with patch.object(mt, "get_setting_value", return_value=str(tmp_path)) as gsv, \
+         patch.object(mt, "_fetch_tmdb_image_bytes", return_value=_artwork_image_bytes("RGB", "JPEG")):
+        mt.save_gallery_artwork(_artwork_request(subtype="background", path="/bg.jpg"), db=MagicMock())
+        assert gsv.call_args[0][1] == mt.SETTING_BACKGROUND_EXPORT_FOLDER
+        # Gallery logo saves use their own folder, NOT the panel's logo_export_folder.
+        mt.save_gallery_artwork(_artwork_request(), db=MagicMock())
+    assert gsv.call_args[0][1] == mt.SETTING_ARTWORK_LOGO_EXPORT_FOLDER
+
+
+def test_save_gallery_logo_writes_canonical_png(tmp_path):
+    from api import maker_tools as mt
+    # JPEG source → re-encoded to PNG under IDarr's canonical " - logo.png" name.
+    with patch.object(mt, "get_setting_value", return_value=str(tmp_path)), \
+         patch.object(mt, "_fetch_tmdb_image_bytes", return_value=_artwork_image_bytes("RGB", "JPEG")):
+        resp = json.loads(mt.save_gallery_artwork(_artwork_request(path="/logo.jpg"), db=MagicMock()).body)
+    assert resp["status"] == "added"
+    written = resp["written"]
+    assert written.endswith(" - logo.png") and "{tmdb-1}" in written and "Show (2020)" in written
+    saved = Image.open(tmp_path / written)
+    assert saved.format == "PNG"
+
+
+def test_save_gallery_background_writes_canonical_jpg(tmp_path):
+    from api import maker_tools as mt
+    with patch.object(mt, "get_setting_value", return_value=str(tmp_path)), \
+         patch.object(mt, "_fetch_tmdb_image_bytes", return_value=_artwork_image_bytes("RGB", "JPEG")):
+        resp = json.loads(mt.save_gallery_artwork(_artwork_request(subtype="background", path="/bg.jpg"), db=MagicMock()).body)
+    written = resp["written"]
+    assert written.endswith(" - background.jpg")
+    assert Image.open(tmp_path / written).format == "JPEG"
+
+
+def test_save_gallery_squareart_crops_to_square(tmp_path):
+    from api import maker_tools as mt
+    src = _artwork_image_bytes("RGB", "JPEG", size=(1000, 1500))
+    with patch.object(mt, "get_setting_value", return_value=str(tmp_path)), \
+         patch.object(mt, "_fetch_tmdb_image_bytes", return_value=src):
+        resp = json.loads(mt.save_gallery_artwork(
+            _artwork_request(subtype="squareart", path="/poster.jpg", crop_x=100, crop_y=200, crop_size=800),
+            db=MagicMock()).body)
+    written = resp["written"]
+    assert written.endswith(" - squareart.jpg")
+    saved = Image.open(tmp_path / written)
+    assert saved.format == "JPEG" and saved.size == (800, 800)
+
+
+def test_save_gallery_artwork_rejects_crop_on_non_squareart():
+    from api import maker_tools as mt
+    from fastapi import HTTPException
+    with patch.object(mt, "get_setting_value", return_value="/tmp/x"):
+        with pytest.raises(HTTPException) as exc:
+            mt.save_gallery_artwork(_artwork_request(subtype="background", crop_size=800), db=MagicMock())
+    assert exc.value.status_code == 400
+
+
+def test_save_gallery_artwork_exists_then_overwrites_on_confirm(tmp_path):
+    from api import maker_tools as mt
+    with patch.object(mt, "get_setting_value", return_value=str(tmp_path)), \
+         patch.object(mt, "_fetch_tmdb_image_bytes", return_value=_artwork_image_bytes()) as fetch:
+        first = json.loads(mt.save_gallery_artwork(_artwork_request(), db=MagicMock()).body)
+        existing = tmp_path / first["written"]
+        # Same name already on disk → "exists", and nothing is downloaded.
+        fetch.reset_mock()
+        second = json.loads(mt.save_gallery_artwork(_artwork_request(), db=MagicMock()).body)
+        assert second == {"status": "exists", "written": first["written"]}
+        fetch.assert_not_called()
+        confirmed = json.loads(mt.save_gallery_artwork(_artwork_request(confirm_overwrite=True), db=MagicMock()).body)
+    assert confirmed["status"] == "added"
+    assert existing.exists()
+
+
 def test_photoshop_plugin_ccx_contains_manifest_and_excludes_tests():
     import zipfile as _zipfile
     from api import maker_tools as mt

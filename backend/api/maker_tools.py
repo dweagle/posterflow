@@ -1880,6 +1880,16 @@ SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
 SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
 SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"       # CL2K image export folder
 SETTING_LOGO_EXPORT_FOLDER = "logo_export_folder"                 # panel Logo button PNGs (CL2K-only feature, one folder)
+# Gallery save buttons (artwork-drive names) — logo is a separate folder from the panel's above.
+SETTING_ARTWORK_LOGO_EXPORT_FOLDER = "artwork_logo_export_folder"
+SETTING_BACKGROUND_EXPORT_FOLDER = "background_export_folder"
+SETTING_SQUAREART_EXPORT_FOLDER = "squareart_export_folder"
+# subtype → the folder setting its gallery save button writes into
+_ARTWORK_EXPORT_FOLDER_KEYS = {
+    "logo": SETTING_ARTWORK_LOGO_EXPORT_FOLDER,
+    "background": SETTING_BACKGROUND_EXPORT_FOLDER,
+    "squareart": SETTING_SQUAREART_EXPORT_FOLDER,
+}
 # MM2K counterparts — the CL2K keys above stay the default; these apply when the request is MM2K.
 SETTING_PSD_EXPORT_FOLDER_MM2K = "psd_export_folder_mm2k"
 SETTING_PSD_TEMPLATE_PATH_MM2K = "psd_template_path_mm2k"
@@ -2711,6 +2721,87 @@ async def save_logo_export(filename: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=500, detail=f"Failed to save logo: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True})
+
+
+class SaveGalleryArtworkRequest(BaseModel):
+    path: str                        # TMDB file_path ('/abc.png') or absolute TVDB artwork URL
+    subtype: str = "logo"            # logo | background | squareart — picks the export folder + name tag
+    title: str
+    media_type: str = "movie"        # movie | tv | collection
+    year: int | None = None
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
+    confirm_overwrite: bool = False
+    # squareart only: crop rect in the SOURCE image's own pixels (square side crop_size)
+    crop_x: int | None = None
+    crop_y: int | None = None
+    crop_size: int | None = None
+
+
+@router.post("/artwork-exports")
+def save_gallery_artwork(request: SaveGalleryArtworkRequest, db: Session = Depends(get_db)) -> JSONResponse:
+    """Fetch a gallery image (TMDB/TheTVDB) server-side and save it into the subtype's configured
+    export folder under IDarr's canonical artwork name (`Title (Year) {ids} - logo.png` /
+    ` - background.jpg` / ` - squareart.jpg`), so the file is ready to drop onto an artwork
+    drive. Square art takes a crop rect to cut a square out of a poster.
+
+    Returns status "exists" (without downloading) when a same-named file is already in the
+    folder and confirm_overwrite is False, mirroring the Artwork Finder's add flow.
+    """
+    from services import artwork_finder as af
+
+    folder_key = _ARTWORK_EXPORT_FOLDER_KEYS.get(request.subtype)
+    if folder_key is None:
+        raise HTTPException(status_code=400, detail="subtype must be logo, background, or squareart")
+    if not _is_export_ref_valid(request.path):
+        raise HTTPException(status_code=400, detail="Invalid image path")
+    folder = (get_setting_value(db, folder_key) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail=f"No {request.subtype} export folder configured.")
+    media_type = (request.media_type or "").strip().lower()
+    if media_type not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+    crop = None
+    if request.crop_size is not None:
+        if request.subtype != "squareart":
+            raise HTTPException(status_code=400, detail="crop only applies to squareart")
+        if request.crop_size <= 0:
+            raise HTTPException(status_code=400, detail="crop size must be positive")
+        crop = (request.crop_x or 0, request.crop_y or 0, request.crop_size, request.crop_size)
+
+    item = af.FinderItem(title=request.title.strip(), year=request.year, tmdb_id=request.tmdb_id,
+                         tvdb_id=request.tvdb_id, imdb_id=(request.imdb_id or None), media_type=media_type)
+    filename = af.build_filename(item, request.subtype)
+    dest = Path(folder) / filename
+    if dest.exists() and not request.confirm_overwrite:
+        return JSONResponse({"status": "exists", "written": filename})
+
+    try:
+        content = _fetch_tmdb_image_bytes(request.path, "")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _tmdb_raise_http("image download", exc=exc)
+    if not content:
+        raise HTTPException(status_code=502, detail="Failed to fetch or convert the image.")
+    try:
+        # Crop / encode per subtype (logo → PNG, background/squareart → JPEG), via the
+        # Artwork Finder's own pipeline so the bytes match a scope add exactly.
+        content = af.prepare_artwork_payload(content, request.subtype, crop=crop)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
+    except Exception as exc:
+        log_error(LogTags.API, f"Gallery artwork save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save {request.subtype}: {exc}")
+
+    log_user_action("Saved gallery artwork to export folder", subtype=request.subtype,
+                    filename=filename, folder=folder)
+    return JSONResponse({"status": "added", "written": filename})
 
 
 # ---------------------------------------------------------------------------

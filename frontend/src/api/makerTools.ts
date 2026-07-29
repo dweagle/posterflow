@@ -401,6 +401,36 @@ export const getArtworkTaggedDownloadUrl = (
   return `/api/artwork-finder/tmdb-download?${params.toString()}`
 }
 
+export interface SaveGalleryArtworkResponse {
+  status: 'added' | 'exists'
+  written: string
+}
+
+/** Fetch a gallery image server-side and save it into the subtype's configured export folder
+ * under the canonical artwork-drive name (`Title (Year) {ids} - <subtype>.<ext>`). Square art
+ * takes a crop rect (source-image pixels) to cut a square out of a poster. */
+export const saveGalleryArtworkToFolder = async (
+  item: { title: string; media_type: string; year?: string | number | null; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null },
+  filePath: string,
+  subtype: ArtworkSubtype,
+  opts?: { confirmOverwrite?: boolean; crop?: { x: number; y: number; size: number } },
+): Promise<SaveGalleryArtworkResponse> => {
+  return postData<SaveGalleryArtworkResponse>('/api/maker-tools/artwork-exports', {
+    path: filePath,
+    subtype,
+    title: item.title,
+    media_type: item.media_type,
+    year: item.year ? Number(item.year) : undefined,
+    tmdb_id: item.tmdb_id ?? undefined,
+    tvdb_id: item.tvdb_id ?? undefined,
+    imdb_id: item.imdb_id ?? undefined,
+    confirm_overwrite: opts?.confirmOverwrite ?? false,
+    crop_x: opts?.crop?.x,
+    crop_y: opts?.crop?.y,
+    crop_size: opts?.crop?.size,
+  })
+}
+
 export interface PsdExportRequest {
   title: string
   year: string

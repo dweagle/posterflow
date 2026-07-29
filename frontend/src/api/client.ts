@@ -256,6 +256,8 @@ export {
   startArtworkPull,
   getGracenoteImageProxyUrl,
   getArtworkTaggedDownloadUrl,
+  type SaveGalleryArtworkResponse,
+  saveGalleryArtworkToFolder,
 } from './makerTools'
 
 export {

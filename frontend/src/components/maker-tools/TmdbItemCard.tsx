@@ -5,9 +5,11 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  Crop as CropIcon,
   Download,
   Eraser,
   FileDown,
+  FolderDown,
   FolderOpen,
   Globe,
   Image,
@@ -36,6 +38,8 @@ import {
   getTvdbImages,
   getTvdbSeasonImages,
   getArtworkTaggedDownloadUrl, // canonical download names
+  saveGalleryArtworkToFolder,
+  type ArtworkSubtype,
   getTmdbOriginCountry,
   getTvDetails,
   getApiErrorMessage,
@@ -43,6 +47,7 @@ import {
 } from '../../api/client'
 import { useToast } from '../Toast'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
+import SquareCropModal from './SquareCropModal'
 import ServiceLinks from './ServiceLinks'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
@@ -243,6 +248,11 @@ export type PsdConfig = {
   openPhotopea: boolean        // shared toggle across both styles
   sameTab: boolean             // reuse one Photopea tab (separate docs) instead of a new tab each export
   defaultEditor: 'photopea' | 'photoshop'  // where the export buttons send a saved PSD by default
+  // Artwork export folders configured → gallery images get save-to-folder / crop-to-square
+  // buttons that write files named for artwork drives.
+  logoFolderSet: boolean
+  backgroundFolderSet: boolean
+  squareartFolderSet: boolean
   // Not PSD-related, but this is the settings-derived config every card already receives:
   // gates the gallery's TheTVDB source tab on a configured API key.
   tvdbEnabled: boolean
@@ -252,7 +262,8 @@ export type PsdConfig = {
 export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
-  openPhotopea: false, sameTab: false, defaultEditor: 'photopea', tvdbEnabled: false,
+  openPhotopea: false, sameTab: false, defaultEditor: 'photopea',
+  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -267,6 +278,9 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     openPhotopea: (s.psd_open_photopea || '').trim().toLowerCase() === 'true',
     sameTab: (s.psd_photopea_same_tab || '').trim().toLowerCase() === 'true',
     defaultEditor: (s.psd_default_editor || '').trim().toLowerCase() === 'photoshop' ? 'photoshop' : 'photopea',
+    logoFolderSet: !!(s.artwork_logo_export_folder || '').trim(),
+    backgroundFolderSet: !!(s.background_export_folder || '').trim(),
+    squareartFolderSet: !!(s.squareart_export_folder || '').trim(),
     // tvdb_api_key is sensitive, so it comes back masked when set — presence is all we need.
     tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
   }
@@ -361,6 +375,13 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [appleTvStorefront, setAppleTvStorefront] = useState('143441')
   const appleTvOriginFetchedRef = useRef(false)  // origin country resolved once per card
 
+  // Save-artwork-to-folder state (gallery logos/backdrops/poster crops → the subtype's configured
+  // export folder, artwork-drive names). Keys are `${subtype}:${file_path}`.
+  const [artworkSaving, setArtworkSaving] = useState<Record<string, boolean>>({})
+  const [artworkSaved, setArtworkSaved] = useState<Record<string, string>>({})   // key → written filename
+  const [artworkOverwriteConfirm, setArtworkOverwriteConfirm] = useState<{ subtype: ArtworkSubtype; path: string; filename: string; crop?: { x: number; y: number; size: number } } | null>(null)
+  const [squareCropTarget, setSquareCropTarget] = useState<TmdbImage | null>(null)   // poster open in the crop modal
+
   // Poster lightbox
   const [previewPoster, setPreviewPoster] = useState<string | null>(null)
 
@@ -452,6 +473,29 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       URL.revokeObjectURL(objectUrl)
     } catch {
       showToast('Failed to download image', 'error')
+    }
+  }, [item, showToast])
+
+  // Save a gallery image straight into the subtype's configured export folder, named for artwork
+  // drives (Title (Year) {ids} - logo.png / - background.jpg / - squareart.jpg) so it can be
+  // dropped into an artwork scope as-is. Square art carries the crop rect from the crop modal.
+  const handleSaveArtwork = useCallback(async (subtype: ArtworkSubtype, filePath: string, opts?: { confirmOverwrite?: boolean; crop?: { x: number; y: number; size: number } }) => {
+    const key = `${subtype}:${filePath}`
+    const label = subtype === 'squareart' ? 'square art' : subtype
+    setArtworkSaving((m) => ({ ...m, [key]: true }))
+    try {
+      const res = await saveGalleryArtworkToFolder(item, filePath, subtype, opts)
+      if (res.status === 'exists') {
+        setArtworkOverwriteConfirm({ subtype, path: filePath, filename: res.written, crop: opts?.crop })
+        return
+      }
+      setArtworkSaved((m) => ({ ...m, [key]: res.written }))
+      if (subtype === 'squareart') setSquareCropTarget(null)
+      showToast(`Saved ${res.written} to the ${label} folder`, 'success')
+    } catch (err) {
+      showToast(getApiErrorMessage(err, `Failed to save ${label}`), 'error')
+    } finally {
+      setArtworkSaving((m) => ({ ...m, [key]: false }))
     }
   }, [item, showToast])
 
@@ -1285,6 +1329,31 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                             >
                               <Download size={12} />
                             </button>
+                            {((role === 'logo' && psdConfig.logoFolderSet) || (role === 'backdrop' && psdConfig.backgroundFolderSet)) && (() => {
+                              const subtype: ArtworkSubtype = role === 'logo' ? 'logo' : 'background'
+                              const key = `${subtype}:${img.file_path}`
+                              return (
+                                <button
+                                  type="button"
+                                  className="tmdb-gallery-save"
+                                  title={artworkSaved[key] ? `Saved as ${artworkSaved[key]}` : `Save to the ${subtype} export folder, named for artwork drives`}
+                                  onClick={() => void handleSaveArtwork(subtype, img.file_path)}
+                                  disabled={!!artworkSaving[key] || !!artworkSaved[key]}
+                                >
+                                  {artworkSaved[key] ? <Check size={12} /> : <FolderDown size={12} />}
+                                </button>
+                              )
+                            })()}
+                            {role === 'poster' && psdConfig.squareartFolderSet && (
+                              <button
+                                type="button"
+                                className="tmdb-gallery-save"
+                                title="Crop into square art → saves to the square art export folder, named for artwork drives"
+                                onClick={() => setSquareCropTarget(img)}
+                              >
+                                <CropIcon size={12} />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1294,7 +1363,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               )
           }
         </div>
-      ); return galleryPortalId && galleryPortalEl ? createPortal(_panel, galleryPortalEl) : _panel })()} 
+      ); return galleryPortalId && galleryPortalEl ? createPortal(_panel, galleryPortalEl) : _panel })()}
 
       {/* Poster lightbox */}
       {previewPoster && (
@@ -1329,10 +1398,88 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               >
                 <Download size={13} /> Download
               </button>
+              {((galleryPreviewRole === 'logo' && psdConfig.logoFolderSet) || (galleryPreviewRole === 'backdrop' && psdConfig.backgroundFolderSet)) && (() => {
+                const subtype: ArtworkSubtype = galleryPreviewRole === 'logo' ? 'logo' : 'background'
+                const key = `${subtype}:${galleryPreview.file_path}`
+                return (
+                  <button
+                    type="button"
+                    className="btn-toolbar"
+                    style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#4caf50' }}
+                    title={`Save to the ${subtype} export folder, named for artwork drives`}
+                    onClick={() => void handleSaveArtwork(subtype, galleryPreview.file_path)}
+                    disabled={!!artworkSaving[key] || !!artworkSaved[key]}
+                  >
+                    {artworkSaved[key] ? <><Check size={13} /> Saved</> : <><FolderDown size={13} /> {subtype === 'logo' ? 'To Logo Folder' : 'To Background Folder'}</>}
+                  </button>
+                )
+              })()}
+              {galleryPreviewRole === 'poster' && galleryPreviewSeason == null && psdConfig.squareartFolderSet && (
+                <button
+                  type="button"
+                  className="btn-toolbar"
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#4caf50' }}
+                  title="Crop into square art → saves to the square art export folder, named for artwork drives"
+                  onClick={() => { setSquareCropTarget(galleryPreview); setGalleryPreview(null) }}
+                >
+                  <CropIcon size={13} /> Crop → Square
+                </button>
+              )}
             </div>
           </div>
           <button type="button" className="tmdb-lightbox-close" onClick={() => setGalleryPreview(null)}>×</button>
         </div>
+      )}
+
+      {/* Artwork save overwrite confirm modal */}
+      {artworkOverwriteConfirm && (() => {
+        const label = artworkOverwriteConfirm.subtype === 'squareart' ? 'square art' : artworkOverwriteConfirm.subtype
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content schedule-modal">
+              <div className="modal-header">
+                <h2>Overwrite Existing {label === 'square art' ? 'Square Art' : label === 'logo' ? 'Logo' : 'Background'}?</h2>
+                <button className="modal-close" onClick={() => setArtworkOverwriteConfirm(null)}>×</button>
+              </div>
+              <div className="modal-body">
+                <p style={{ color: '#ccc', lineHeight: 1.6, marginBottom: '0.75rem' }}>
+                  Your {label} export folder already has a file with this name:
+                </p>
+                <div className="psd-not-found-filename">
+                  <code>{artworkOverwriteConfirm.filename}</code>
+                </div>
+                <p style={{ marginTop: '1rem', color: '#ffb74d', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                  Continuing will replace it with this {label}.
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button className="btn-secondary" onClick={() => setArtworkOverwriteConfirm(null)}>Cancel</button>
+                <button
+                  className="btn-primary"
+                  style={{ justifyContent: 'center', background: '#f44336' }}
+                  onClick={() => {
+                    const o = artworkOverwriteConfirm
+                    setArtworkOverwriteConfirm(null)
+                    void handleSaveArtwork(o.subtype, o.path, { confirmOverwrite: true, crop: o.crop })
+                  }}
+                >
+                  Overwrite
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Crop a poster into square art → saves to the square art export folder */}
+      {squareCropTarget && (
+        <SquareCropModal
+          imageUrl={squareCropTarget.url_full}
+          title={item.year ? `${item.title} (${item.year})` : item.title}
+          saving={!!artworkSaving[`squareart:${squareCropTarget.file_path}`]}
+          onCancel={() => setSquareCropTarget(null)}
+          onSave={(crop) => void handleSaveArtwork('squareart', squareCropTarget.file_path, { crop })}
+        />
       )}
 
       {/* PSD overwrite confirm modal */}

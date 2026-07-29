@@ -1739,6 +1739,30 @@
   background: rgba(100, 181, 246, 0.12);
 }
 
+/* Save-to-logo-folder — sits flush against the download icon (only that one carries the
+   auto margin pushing the pair to the row's edge), green to tell the two apart. */
+.tmdb-gallery-save {
+  display: inline-flex;
+  align-items: center;
+  color: #4caf50;
+  background: none;
+  border: none;
+  padding: 0.1rem 0.15rem;
+  flex-shrink: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tmdb-gallery-save:hover {
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.tmdb-gallery-save:disabled {
+  cursor: default;
+  background: none;
+}
+
 /* ── PSD export: thumb wrapper + select button ─────────────────────────── */
 .tmdb-gallery-thumb-wrapper {
   position: relative;
@@ -2570,17 +2594,35 @@
 .psd-style-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 1.25rem;
-  align-items: start;
+  /* stretch (default) so the middle divider runs the full height of the taller column */
 }
 
 .psd-style-cols > div {
   min-width: 0;
 }
 
+/* Divider down the middle: the gap lives as padding on each column so the line sits centered. */
+.psd-style-cols > div:first-child {
+  padding-right: 1.25rem;
+}
+
+.psd-style-cols > div + div {
+  border-left: 1px solid #404040;
+  padding-left: 1.25rem;
+}
+
 @media (max-width: 700px) {
   .psd-style-cols {
     grid-template-columns: 1fr;
+  }
+
+  .psd-style-cols > div:first-child {
+    padding-right: 0;
+  }
+
+  .psd-style-cols > div + div {
+    border-left: none;
+    padding-left: 0;
   }
 }
 
