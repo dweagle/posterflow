@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from services.sync_base import BaseSyncService
-from models.artwork_drive import ArtworkDrive
+from models.artwork_drive import ArtworkDrive, ARTWORK_TYPES, ARTWORK_TYPE_SUBFOLDERS
 from models.artwork import Artwork
 from util.data.extract import extract_ids, extract_year
 from core.logging import LogTags, log_debug
@@ -12,7 +12,7 @@ from core.logging import LogTags, log_debug
 ARTWORK_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 
 # Artwork drive layout: each subtype lives in its own subfolder.
-ARTWORK_SUBFOLDER_SUBTYPES = [("logo", "logos"), ("background", "backgrounds"), ("squareart", "squareart")]
+ARTWORK_SUBFOLDER_SUBTYPES = [(t, ARTWORK_TYPE_SUBFOLDERS[t]) for t in ARTWORK_TYPES]
 
 # Strip a trailing " - logo"/" - background"/" - squareart" suffix when parsing a title.
 _SUBTYPE_SUFFIX_RE = re.compile(r"\s*-\s*(?:logo|background|squareart)s?\s*$", re.IGNORECASE)
@@ -20,16 +20,19 @@ _ID_TAG_RE = re.compile(r"\{[^}]*\}")
 _YEAR_PAREN_RE = re.compile(r"\(\d{4}\)")
 
 
-def scan_artwork_files(folder: Path) -> list[dict[str, Any]]:
+def scan_artwork_files(folder: Path, types: list[str] | None = None) -> list[dict[str, Any]]:
     """Walk the logos/backgrounds/squareart subfolders and return one dict per image file.
 
     Subtype comes from which subfolder the file is in. Files outside those three
     subfolders are ignored. Shared by the sync indexer and the live drive scan.
+    `types` limits the walk to a drive's subscribed artwork types (None = all).
     """
     results: list[dict[str, Any]] = []
     if not folder.exists() or not folder.is_dir():
         return results
     for subtype, subfolder_name in ARTWORK_SUBFOLDER_SUBTYPES:
+        if types is not None and subtype not in types:
+            continue
         sub = folder / subfolder_name
         if not sub.is_dir():
             continue
@@ -91,11 +94,20 @@ class ArtworkSyncService(BaseSyncService):
     def _get_local_path(self, drive) -> Path:
         return drive.get_local_path(validate=False)
 
-    def _scan_local_files(self, folder: Path) -> list[dict[str, Any]]:
-        return scan_artwork_files(folder)
+    def _scan_local_files(self, folder: Path, drive=None) -> list[dict[str, Any]]:
+        return scan_artwork_files(folder, self._drive_types(drive))
 
-    def _disk_keys(self, folder: Path) -> set:
-        return {s['path'] for s in scan_artwork_files(folder)}
+    def _disk_keys(self, folder: Path, drive=None) -> set:
+        return {s['path'] for s in scan_artwork_files(folder, self._drive_types(drive))}
+
+    def _remote_exclude_dirs(self, drive) -> list[str]:
+        """Skip the subfolders for artwork types this drive isn't subscribed to."""
+        return list(drive.excluded_subfolders) if drive is not None else []
+
+    @staticmethod
+    def _drive_types(drive) -> list[str] | None:
+        """Types this drive syncs — leftovers from a deselected type stay out of the index."""
+        return list(drive.synced_type_list) if drive is not None else None
 
     def _file_key(self, file_info: dict) -> Any:
         return file_info['path']
@@ -136,7 +148,7 @@ class ArtworkSyncService(BaseSyncService):
         drive folder and upsert Artwork rows. Returns total, per-type counts, add/update/delete.
         """
         folder = drive.get_local_path(validate=False)
-        scanned = scan_artwork_files(folder)
+        scanned = scan_artwork_files(folder, drive.synced_type_list)
         scanned_paths = {s['path'] for s in scanned}
 
         existing = (

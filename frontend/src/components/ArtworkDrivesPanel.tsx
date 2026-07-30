@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   getArtworkDrives, subscribeArtworkDrive, unsubscribeArtworkDrive, syncArtworkDrive, syncAllArtworkDrives,
   updateArtworkDrive, createCustomArtworkDrive, deleteArtworkDrive, reloadArtworkDrives,
-  ArtworkDrive, getApiErrorMessage,
+  ArtworkDrive, ARTWORK_TYPES, ARTWORK_TYPE_LABELS, type ArtworkType, getApiErrorMessage,
 } from '../api/client'
 import AddCustomDriveModal from './AddCustomDriveModal'
+import ArtworkSubscribeModal from './ArtworkSubscribeModal'
 import DriveEditModal from './DriveEditModal'
 import ConfirmDialog from './ConfirmDialog'
 import GdriveStorageModal from './GdriveStorageModal'
@@ -29,6 +30,15 @@ type CustomDriveModalInput = {
   sync_enabled: boolean
 }
 
+type DriveUpdates = { custom_path: string | null; sync_enabled: boolean; drive_id?: string; synced_types?: ArtworkType[] }
+
+// Indexed count for one artwork type, so a type being switched off can say what it will delete.
+const typeCount = (drive: ArtworkDrive, type: ArtworkType): number =>
+  type === 'logo' ? drive.logo_count : type === 'background' ? drive.background_count : drive.squareart_count
+
+const typeCounts = (drive: ArtworkDrive): Partial<Record<ArtworkType, number>> =>
+  Object.fromEntries(ARTWORK_TYPES.map(t => [t, typeCount(drive, t)]))
+
 // Panel for artwork drives (logos / backdrops / square art). Mirrors the poster-drive
 // grid card-for-card and button-for-button; the only difference is the "Artwork" badge
 // (no MM2K/CL2K style). Priority is managed on Asset Manager → Drive Priority (Artwork scope), not here.
@@ -45,8 +55,8 @@ function ArtworkDrivesPanel() {
   const [showStorageModal, setShowStorageModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; driveId: number | null; driveName: string; isDeprecated: boolean }>({ show: false, driveId: null, driveName: '', isDeprecated: false })
   const [deleteFiles, setDeleteFiles] = useState(false)
-  const [priorityPrompt, setPriorityPrompt] = useState<{ show: boolean; driveId: number | null; driveName: string }>({ show: false, driveId: null, driveName: '' })
-  const [promptDontAsk, setPromptDontAsk] = useState(false)
+  const [subscribePrompt, setSubscribePrompt] = useState<{ driveId: number; driveName: string; askPriority: boolean } | null>(null)
+  const [typeRemoval, setTypeRemoval] = useState<{ driveId: number; driveName: string; updates: DriveUpdates; removed: ArtworkType[]; fileCount: number } | null>(null)
   const { showToast } = useToast()
   const { jobs } = useAppEvents()
   const navigate = useNavigate()
@@ -105,17 +115,28 @@ function ArtworkDrivesPanel() {
   }
 
   const handleSubscribe = (driveId: number) => {
-    const pref = getAddToPriorityPref('artwork')
-    if (pref === 'always') { void doSubscribe(driveId, true); return }
-    if (pref === 'never') { void doSubscribe(driveId, false); return }
     const drive = drives.find(d => d.id === driveId)
-    setPromptDontAsk(false)
-    setPriorityPrompt({ show: true, driveId, driveName: drive?.display_name || drive?.name || 'this drive' })
+    setSubscribePrompt({
+      driveId,
+      driveName: drive?.display_name || drive?.name || 'this drive',
+      // Priority is only asked while the pref is still 'ask'; the type question always shows.
+      askPriority: getAddToPriorityPref('artwork') === 'ask',
+    })
   }
 
-  const doSubscribe = async (driveId: number, addToPriority: boolean) => {
+  const resolveSubscribePrompt = (types: ArtworkType[], addToPriority: boolean, dontAskAgain: boolean) => {
+    const prompt = subscribePrompt
+    setSubscribePrompt(null)
+    if (!prompt) return
+    const pref = getAddToPriorityPref('artwork')
+    const add = pref === 'ask' ? addToPriority : pref === 'always'
+    if (pref === 'ask' && dontAskAgain) setAddToPriorityPref('artwork', addToPriority ? 'always' : 'never')
+    void doSubscribe(prompt.driveId, add, types)
+  }
+
+  const doSubscribe = async (driveId: number, addToPriority: boolean, types?: ArtworkType[]) => {
     try {
-      const result = await subscribeArtworkDrive(driveId, addToPriority)
+      const result = await subscribeArtworkDrive(driveId, addToPriority, types)
       fetchDrives()
       showToast(
         result?.added_to_priority
@@ -123,19 +144,15 @@ function ArtworkDrivesPanel() {
           : 'Subscribed. Remember to add this drive to your list in Asset Manager → Drive Priority (Artwork).',
         'info',
       )
+      if (types && types.length < ARTWORK_TYPES.length) {
+        showToast(`Syncing ${types.map(t => ARTWORK_TYPE_LABELS[t].toLowerCase()).join(' + ')} only.`, 'info')
+      }
       if (result?.scan_job_id) {
         showToast('Initial scan queued. Check Dashboard for progress.', 'info')
       }
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to subscribe'), 'error')
     }
-  }
-
-  const resolvePriorityPrompt = (add: boolean) => {
-    if (promptDontAsk) setAddToPriorityPref('artwork', add ? 'always' : 'never')
-    const id = priorityPrompt.driveId
-    setPriorityPrompt({ show: false, driveId: null, driveName: '' })
-    if (id != null) void doSubscribe(id, add)
   }
 
   const handleUnsubscribe = async (driveId: number) => {
@@ -209,12 +226,27 @@ function ArtworkDrivesPanel() {
     }
   }
 
-  const handleSaveDrive = async (driveId: number, updates: { custom_path: string | null; sync_enabled: boolean; drive_id?: string }) => {
+  const handleSaveDrive = async (driveId: number, updates: DriveUpdates) => {
+    const drive = drives.find(d => d.id === driveId)
+    // Dropping a type deletes its synced files, so confirm before the PATCH does it.
+    if (drive && updates.synced_types) {
+      const removed = drive.synced_types.filter(t => !updates.synced_types!.includes(t))
+      const fileCount = removed.reduce((total, t) => total + typeCount(drive, t), 0)
+      if (removed.length > 0 && fileCount > 0) {
+        setTypeRemoval({ driveId, driveName: drive.display_name || drive.name, updates, removed, fileCount })
+        return
+      }
+    }
+    await applyDriveUpdate(driveId, updates)
+  }
+
+  const applyDriveUpdate = async (driveId: number, updates: DriveUpdates) => {
     try {
       await updateArtworkDrive(driveId, {
         custom_path: updates.custom_path || null,
         sync_enabled: updates.sync_enabled,
         drive_id: updates.drive_id,
+        synced_types: updates.synced_types,
       })
       fetchDrives()
       setEditingDrive(null)
@@ -420,10 +452,15 @@ function ArtworkDrivesPanel() {
         </p>
         {drive.artwork_count > 0 && (
           <div className="artwork-type-counts">
-            <span>{drive.logo_count.toLocaleString()} logos</span>
-            <span>{drive.background_count.toLocaleString()} backdrops</span>
-            <span>{drive.squareart_count.toLocaleString()} square art</span>
+            {drive.synced_types.includes('logo') && <span>{drive.logo_count.toLocaleString()} logos</span>}
+            {drive.synced_types.includes('background') && <span>{drive.background_count.toLocaleString()} backdrops</span>}
+            {drive.synced_types.includes('squareart') && <span>{drive.squareart_count.toLocaleString()} square art</span>}
           </div>
+        )}
+        {drive.synced_types.length < ARTWORK_TYPES.length && (
+          <span className="artwork-type-badge" title="This drive only syncs the artwork types listed">
+            {drive.synced_types.map(t => ARTWORK_TYPE_LABELS[t]).join(' + ')} only
+          </span>
         )}
         <p className="last-synced">
           {drive.last_synced
@@ -553,8 +590,18 @@ function ArtworkDrivesPanel() {
       {editingDrive && (
         <DriveEditModal
           drive={editingDrive}
+          artworkTypeCounts={typeCounts(editingDrive)}
           onClose={() => setEditingDrive(null)}
           onSave={handleSaveDrive}
+        />
+      )}
+
+      {subscribePrompt && (
+        <ArtworkSubscribeModal
+          driveName={subscribePrompt.driveName}
+          askPriority={subscribePrompt.askPriority}
+          onCancel={() => setSubscribePrompt(null)}
+          onConfirm={resolveSubscribePrompt}
         />
       )}
 
@@ -573,20 +620,21 @@ function ArtworkDrivesPanel() {
       )}
 
       <ConfirmDialog
-        isOpen={priorityPrompt.show}
-        title="Add to Drive Priority?"
-        message={`Also add "${priorityPrompt.driveName}" to your Drive Priority list so it's used for matching? You can reorder or remove it anytime in Asset Manager → Drive Priority (Artwork).`}
-        confirmText="Add to Priority"
-        cancelText="Just Subscribe"
-        variant="info"
-        onConfirm={() => resolvePriorityPrompt(true)}
-        onCancel={() => resolvePriorityPrompt(false)}
-      >
-        <label className="delete-files-checkbox">
-          <input type="checkbox" checked={promptDontAsk} onChange={(e) => setPromptDontAsk(e.target.checked)} />
-          <span>Don't ask again for artwork drives</span>
-        </label>
-      </ConfirmDialog>
+        isOpen={typeRemoval !== null}
+        title="Remove synced artwork?"
+        message={typeRemoval
+          ? `Turning off ${typeRemoval.removed.map(t => ARTWORK_TYPE_LABELS[t].toLowerCase()).join(' and ')} for "${typeRemoval.driveName}" deletes ${typeRemoval.fileCount.toLocaleString()} already-synced file(s) from its local folder. Future syncs will skip those folders.`
+          : ''}
+        confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          const pending = typeRemoval
+          setTypeRemoval(null)
+          if (pending) void applyDriveUpdate(pending.driveId, pending.updates)
+        }}
+        onCancel={() => setTypeRemoval(null)}
+      />
 
       <ConfirmDialog
         isOpen={deleteConfirm.show}

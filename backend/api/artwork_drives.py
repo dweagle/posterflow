@@ -6,11 +6,11 @@ from uuid import uuid4
 import traceback
 import shutil
 import json
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 from datetime import datetime, timezone
 
 from database import get_db
-from models.artwork_drive import ArtworkDrive
+from models.artwork_drive import ArtworkDrive, ARTWORK_TYPES, ARTWORK_TYPE_SUBFOLDERS
 from models.artwork import Artwork
 from models.job import Job, JOB_STATUS_PENDING, JOB_STATUSES_ACTIVE
 from models.setting import get_setting, upsert_setting
@@ -35,6 +35,7 @@ class ArtworkDriveSchema(BaseModel):
     subscribed: bool
     sync_enabled: bool
     priority: int
+    synced_types: List[str] = list(ARTWORK_TYPES)
     custom_path: str | None
     is_custom: bool
     is_deprecated: bool
@@ -46,6 +47,15 @@ class ArtworkDriveSchema(BaseModel):
     logo_count: int = 0
     background_count: int = 0
     squareart_count: int = 0
+
+    @field_validator('synced_types', mode='before')
+    @classmethod
+    def split_synced_types(cls, value: Any) -> List[str]:
+        """The column stores CSV; the API speaks lists. Mirrors ArtworkDrive.synced_type_list."""
+        if isinstance(value, str):
+            picked = {t.strip() for t in value.split(',') if t.strip()}
+            return [t for t in ARTWORK_TYPES if t in picked] or list(ARTWORK_TYPES)
+        return value
 
     @field_serializer('last_synced', 'last_rename_processed')
     def serialize_datetime(self, value: datetime | None) -> str | None:
@@ -64,6 +74,7 @@ class ArtworkDriveUpdateRequest(BaseModel):
     subscribed: bool | None = None
     sync_enabled: bool | None = None
     drive_id: str | None = None
+    synced_types: List[str] | None = None
 
 
 class CustomArtworkDriveRequest(BaseModel):
@@ -73,6 +84,11 @@ class CustomArtworkDriveRequest(BaseModel):
     priority: int = 0
     subscribed: bool = True
     sync_enabled: bool = True
+    synced_types: List[str] | None = None
+
+
+class ArtworkSubscribeRequest(BaseModel):
+    synced_types: List[str] | None = None
 
 
 class ArtworkDrivePriorityRequest(BaseModel):
@@ -115,6 +131,7 @@ def list_artwork_drives(db: Session = Depends(get_db)) -> List[ArtworkDriveSchem
             'subscribed': drive.subscribed,
             'sync_enabled': drive.sync_enabled,
             'priority': drive.priority,
+            'synced_types': drive.synced_type_list,
             'custom_path': drive.custom_path,
             'is_custom': drive.is_custom,
             'is_deprecated': drive.is_deprecated,
@@ -130,6 +147,62 @@ def list_artwork_drives(db: Session = Depends(get_db)) -> List[ArtworkDriveSchem
         result.append(ArtworkDriveSchema(**drive_dict))
 
     return result
+
+
+def _normalize_synced_types(types: List[str] | None) -> List[str]:
+    """Validate a requested type selection into canonical order. At least one is required —
+    a drive that syncs nothing should be unsubscribed, not silently empty."""
+    if types is None:
+        return list(ARTWORK_TYPES)
+    picked = {str(t).strip().lower() for t in types if str(t).strip()}
+    unknown = picked - set(ARTWORK_TYPES)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown artwork type(s): {', '.join(sorted(unknown))}")
+    selected = [t for t in ARTWORK_TYPES if t in picked]
+    if not selected:
+        raise HTTPException(status_code=400, detail="Select at least one artwork type")
+    return selected
+
+
+def _apply_synced_types(db: Session, drive: ArtworkDrive, types: List[str]) -> Dict[str, Any]:
+    """Set a drive's artwork types and clear out any type it just dropped.
+
+    rclone can't do the cleanup itself: excluded paths are invisible to the transfer, so the
+    files it stops pulling would sit on disk indexed forever. Delete the subfolder and its rows
+    here instead, while we still know which types went away.
+    """
+    previous = set(drive.synced_type_list)
+    removed = [t for t in ARTWORK_TYPES if t in previous and t not in set(types)]
+    drive.synced_types = ",".join(types)
+
+    if not removed:
+        return {"removed_types": [], "files_deleted": 0, "records_deleted": 0}
+
+    local_root = drive.get_local_path(validate=False)
+    files_deleted = 0
+    for artwork_type in removed:
+        folder = local_root / ARTWORK_TYPE_SUBFOLDERS[artwork_type]
+        if not folder.exists():
+            continue
+        try:
+            files_deleted += sum(1 for f in folder.rglob('*') if f.is_file())
+            shutil.rmtree(folder)
+            log_info(LogTags.DRIVES, f"Removed {artwork_type} folder for '{drive.name}': {folder}", drive=drive.name)
+        except Exception as e:
+            log_error(LogTags.DRIVES, f"Failed to remove {folder}: {e}\n{traceback.format_exc()}", drive=drive.name)
+
+    records_deleted = (
+        db.query(Artwork)
+        .filter(Artwork.artwork_drive_id == drive.drive_id, Artwork.artwork_type.in_(removed))
+        .delete(synchronize_session=False)
+    )
+    drive.sync_file_count = max((drive.sync_file_count or 0) - files_deleted, 0)
+    log_info(
+        LogTags.DRIVES,
+        f"Artwork drive '{drive.name}' dropped {', '.join(removed)}: {files_deleted} file(s), {records_deleted} record(s) removed",
+        drive=drive.name,
+    )
+    return {"removed_types": removed, "files_deleted": files_deleted, "records_deleted": records_deleted}
 
 
 def _append_artwork_drive_to_priority(db: Session, drive_id: int) -> bool:
@@ -153,8 +226,13 @@ def _append_artwork_drive_to_priority(db: Session, drive_id: int) -> bool:
 
 
 @router.post("/{drive_id}/subscribe")
-def subscribe_artwork_drive(drive_id: int, add_to_priority: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Subscribe to an artwork drive for syncing."""
+def subscribe_artwork_drive(
+    drive_id: int,
+    add_to_priority: bool = False,
+    request: ArtworkSubscribeRequest | None = None,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Subscribe to an artwork drive for syncing, optionally limiting which artwork types it pulls."""
     from api.jobs import _run_job_task
 
     drive = db.query(ArtworkDrive).filter(ArtworkDrive.id == drive_id).first()
@@ -162,11 +240,20 @@ def subscribe_artwork_drive(drive_id: int, add_to_priority: bool = False, db: Se
         raise HTTPException(status_code=404, detail="Artwork drive not found")
 
     drive.subscribed = True
+    # No explicit selection (bulk subscribe) keeps what the drive already had, so a re-subscribe
+    # doesn't quietly re-download types the user turned off earlier.
+    requested_types = request.synced_types if request else None
+    selected_types = _normalize_synced_types(requested_types) if requested_types else drive.synced_type_list
+    cleanup = _apply_synced_types(db, drive, selected_types)
     added_to_priority = _append_artwork_drive_to_priority(db, drive.id) if add_to_priority else False
     db.commit()
     db.refresh(drive)
 
-    log_user_action(f"Subscribed to artwork drive: {drive.name}" + (" (added to artwork priority)" if added_to_priority else ""))
+    types_note = "" if len(selected_types) == len(ARTWORK_TYPES) else f" ({', '.join(selected_types)} only)"
+    log_user_action(
+        f"Subscribed to artwork drive: {drive.name}{types_note}"
+        + (" (added to artwork priority)" if added_to_priority else "")
+    )
 
     # Auto-scan the local folder for drives with GDrive sync disabled, so files already on
     # disk are indexed immediately after subscribe (mirrors poster subscribe behaviour).
@@ -194,6 +281,7 @@ def subscribe_artwork_drive(drive_id: int, add_to_priority: bool = False, db: Se
         "drive": ArtworkDriveSchema.model_validate(drive).model_dump(mode="json"),
         "added_to_priority": added_to_priority,
         "scan_job_id": scan_job_id,
+        **cleanup,
     }
 
 
@@ -241,6 +329,13 @@ def update_artwork_drive(drive_id: int, request: ArtworkDriveUpdateRequest, db: 
         drive.sync_enabled = request.sync_enabled
         changes.append(f"sync_enabled={request.sync_enabled}")
 
+    if request.synced_types is not None:
+        selected_types = _normalize_synced_types(request.synced_types)
+        cleanup = _apply_synced_types(db, drive, selected_types)
+        changes.append(f"synced_types={','.join(selected_types)}")
+        if cleanup["removed_types"]:
+            changes.append(f"dropped {cleanup['files_deleted']} file(s) for {', '.join(cleanup['removed_types'])}")
+
     if request.drive_id is not None:
         if not drive.is_custom:
             raise HTTPException(status_code=400, detail="Google Drive ID can only be changed for custom drives")
@@ -278,6 +373,7 @@ def create_custom_artwork_drive(request: CustomArtworkDriveRequest, db: Session 
         is_custom=True,
         subscribed=request.subscribed,
         sync_enabled=request.sync_enabled,
+        synced_types=",".join(_normalize_synced_types(request.synced_types)),
     )
     db.add(drive)
     db.commit()

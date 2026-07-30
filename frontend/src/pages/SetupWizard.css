@@ -151,7 +151,7 @@
   margin-bottom: 0.875rem;
 }
 
-.form-group label {
+.form-group label:not(.artwork-type-option) {
   display: block;
   margin-bottom: 0.5rem;
   color: #ccc;

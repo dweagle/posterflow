@@ -4,6 +4,13 @@ from pathlib import Path
 from database import Base
 from core.logging import log_warning
 
+# Canonical artwork types and the drive subfolder each one lives in. Lives on the model
+# (not the sync service) so migrations, API and sync all read the same source.
+ARTWORK_TYPES = ("logo", "background", "squareart")
+ARTWORK_TYPE_SUBFOLDERS = {"logo": "logos", "background": "backgrounds", "squareart": "squareart"}
+ALL_ARTWORK_TYPES_CSV = ",".join(ARTWORK_TYPES)
+
+
 class ArtworkDrive(Base):
     """
     Represents a Google Drive containing artwork (logos, backgrounds, square art).
@@ -20,6 +27,9 @@ class ArtworkDrive(Base):
     subscribed = Column(Boolean, default=False)
     sync_enabled = Column(Boolean, default=True, nullable=False)  # If False, rclone is skipped but local folder is still scanned
     priority = Column(Integer, default=0)  # Higher = syncs first / preferred source when merging
+    # Which artwork types this drive syncs, comma-separated. Unselected types are filtered out
+    # of the rclone transfer, so a user can take logos only, backdrops only, or any mix.
+    synced_types = Column(String, nullable=False, default=ALL_ARTWORK_TYPES_CSV, server_default=ALL_ARTWORK_TYPES_CSV)
     custom_path = Column(String, nullable=True)  # Custom sync path for this drive
     is_custom = Column(Boolean, default=False)  # True if user-added drive
     is_deprecated = Column(Boolean, default=False)  # True if removed from preset list
@@ -32,6 +42,25 @@ class ArtworkDrive(Base):
 
     def __repr__(self) -> str:
         return f"<ArtworkDrive(name='{self.name}', priority={self.priority}, subscribed={self.subscribed})>"
+
+    @property
+    def synced_type_list(self) -> list[str]:
+        """Artwork types this drive syncs, in canonical order. An empty/garbage value means
+        all three — a drive that syncs nothing is never what a stored value should imply."""
+        picked = {t.strip() for t in (self.synced_types or "").split(",") if t.strip()}
+        selected = [t for t in ARTWORK_TYPES if t in picked]
+        return selected or list(ARTWORK_TYPES)
+
+    @property
+    def synced_subfolders(self) -> list[str]:
+        """Drive subfolders this drive pulls (e.g. ['logos', 'backgrounds'])."""
+        return [ARTWORK_TYPE_SUBFOLDERS[t] for t in self.synced_type_list]
+
+    @property
+    def excluded_subfolders(self) -> list[str]:
+        """Drive subfolders to keep out of the transfer (empty when all types are selected)."""
+        selected = set(self.synced_type_list)
+        return [ARTWORK_TYPE_SUBFOLDERS[t] for t in ARTWORK_TYPES if t not in selected]
 
     def get_local_path(self, validate: bool = True) -> Path:
         """

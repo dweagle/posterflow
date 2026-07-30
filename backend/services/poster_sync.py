@@ -27,7 +27,7 @@ class PosterSyncService(BaseSyncService):
     asset_label = "posters"
     third_field_label = "path"
 
-    def _scan_local_files(self, folder: Path) -> list[dict[str, Any]]:
+    def _scan_local_files(self, folder: Path, drive=None) -> list[dict[str, Any]]:
         files: list[dict[str, Any]] = []
         with os.scandir(folder) as it:
             for entry in it:
@@ -36,7 +36,7 @@ class PosterSyncService(BaseSyncService):
                     files.append({'name': entry.name, 'path': Path(entry.path), 'size': st.st_size, 'mtime': st.st_mtime})
         return files
 
-    def _disk_keys(self, folder: Path) -> set:
+    def _disk_keys(self, folder: Path, drive=None) -> set:
         keys: set = set()
         if folder.exists() and folder.is_dir():
             try:

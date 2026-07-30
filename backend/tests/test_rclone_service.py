@@ -128,6 +128,53 @@ def test_sync_folder_restricts_to_poster_filetypes_and_size(monkeypatch, tmp_pat
     assert SYNC_MAX_FILE_SIZE == "250M"
 
 
+def test_sync_folder_excludes_requested_subfolders_before_the_include(monkeypatch, tmp_path):
+    """A drive syncing only some of its subfolders (e.g. artwork types) must exclude the rest
+    ahead of the '+' include — rclone is first-match-wins, so a later exclude never fires."""
+    from services.rclone import JUNK_FILTER_ARGS, SYNC_INCLUDE_REGEX
+
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
+    service = RcloneService()
+    monkeypatch.setattr(service, "_get_credentials", lambda: ("id", "secret", '{"token":"abc"}', None))
+    monkeypatch.setattr(service, "_sync_refreshed_token_to_db", lambda _original: None)
+
+    captured = {}
+
+    class _FakeProcess:
+        stdout = iter([])
+        returncode = 0
+
+        def wait(self):
+            return None
+
+    monkeypatch.setattr("services.rclone.subprocess.Popen", lambda args, **_kw: (captured.update(args=args), _FakeProcess())[1])
+
+    result = service.sync_folder("drive-123", tmp_path / "local", exclude_dirs=["backgrounds", "squareart"])
+    assert result["success"] is True
+
+    args = captured["args"]
+    filter_rules = [args[i + 1] for i, flag in enumerate(args) if flag == "--filter"]
+    junk_rules = [JUNK_FILTER_ARGS[i] for i in range(1, len(JUNK_FILTER_ARGS), 2)]
+    assert filter_rules == junk_rules + ["- /backgrounds/**", "- /squareart/**", f"+ {SYNC_INCLUDE_REGEX}", "- **"]
+    # Excluded paths are invisible to the transfer, so local copies must not be pruned here.
+    assert "--delete-excluded" not in args
+
+
+def test_sync_folder_rejects_malformed_exclude_dirs(monkeypatch, tmp_path):
+    """Exclude names go straight into a filter rule, so anything path-like is refused."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    monkeypatch.setattr("services.rclone.shutil.which", lambda _binary: "/usr/bin/rclone")
+    service = RcloneService()
+
+    for bad in ("../escape", "nested/dir", "", "with\nnewline"):
+        with pytest.raises(ValueError):
+            service._dir_exclude_filter_args([bad])
+
+    assert service._dir_exclude_filter_args(None) == ()
+    assert service._dir_exclude_filter_args(["logos"]) == ("--filter", "- /logos/**")
+
+
 def test_upload_folder_excludes_junk_and_prunes_it_only_in_mirror_mode(monkeypatch, tmp_path):
     """Synology/QNAP/OS metadata never uploads, and a mirror sync also deletes junk that
     reached the drive before these filters existed. Copy mode must never delete anything."""

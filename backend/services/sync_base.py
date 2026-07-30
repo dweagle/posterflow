@@ -64,13 +64,18 @@ class BaseSyncService:
     def _get_local_path(self, drive) -> Path:
         return drive.get_local_path()
 
-    def _scan_local_files(self, folder: Path) -> list[dict[str, Any]]:
-        """One dict per synced file: {'name', 'path', 'size', 'mtime', ...type-specific}."""
+    def _scan_local_files(self, folder: Path, drive=None) -> list[dict[str, Any]]:
+        """One dict per synced file: {'name', 'path', 'size', 'mtime', ...type-specific}.
+        `drive` lets a subclass narrow the scan to what that drive subscribes to."""
         raise NotImplementedError
 
-    def _disk_keys(self, folder: Path) -> set:
+    def _disk_keys(self, folder: Path, drive=None) -> set:
         """Match keys currently on disk — a light scan for the pre-sync cleanup."""
         raise NotImplementedError
+
+    def _remote_exclude_dirs(self, drive) -> list[str]:
+        """Top-level remote folders rclone should skip for this drive (none by default)."""
+        return []
 
     def _file_key(self, file_info: dict) -> Any:
         """Match key for a scanned file (file_name for posters, file_path for artwork)."""
@@ -135,7 +140,7 @@ class BaseSyncService:
             local_folder = self._get_local_path(drive)
 
             # Pre-sync cleanup: drop DB rows for files missing from disk so a re-download counts as "added".
-            disk_keys = self._disk_keys(local_folder)
+            disk_keys = self._disk_keys(local_folder, drive)
             db_key_ids = (
                 self.db.query(self.content_model.id, self._key_col)
                 .filter(self._drive_col == drive.drive_id)
@@ -209,7 +214,11 @@ class BaseSyncService:
                 log_info(self.log_tag, f"Drive '{drive.name}' is local-folder-only (sync disabled or manual drive); skipping rclone and scanning local files only", drive=drive.name)
                 result = {"success": True, "files_transferred": 0}
             else:
-                result = self.rclone.sync_folder(drive.drive_id, local_folder, drive_name=drive.name, progress_callback=file_progress_callback)
+                result = self.rclone.sync_folder(
+                    drive.drive_id, local_folder, drive_name=drive.name,
+                    progress_callback=file_progress_callback,
+                    exclude_dirs=self._remote_exclude_dirs(drive),
+                )
 
             # Phase 2: validate (70%)
             if progress_callback:
@@ -269,7 +278,7 @@ class BaseSyncService:
 
             log_debug(self.log_tag, f"{STEP_INDENT}Scanning local folder: {local_folder}", drive=drive.name, path=str(local_folder))
             try:
-                local_files = self._scan_local_files(local_folder)
+                local_files = self._scan_local_files(local_folder, drive)
             except Exception as e:
                 log_error(self.log_tag, f"Error scanning local folder: {e}", drive=drive.name, error=str(e), path=str(local_folder))
                 update_job_state(self.db, job, status=JOB_STATUS_FAILED, error=f"Failed to scan local folder: {e}", completed_at=datetime.now(timezone.utc))
@@ -431,6 +440,9 @@ class BaseSyncService:
             progress_callback("preparing", 0, 100, "Preparing drives for sync...")
 
         sync_tasks = []
+        # Drives stay in this map rather than in the task dicts — the task dicts cross into
+        # rclone's worker threads, and ORM objects must not follow them there.
+        drives_by_db_id: dict[int, Any] = {}
         for drive_id in drive_ids:
             drive = self.db.query(self.drive_model).filter(self.drive_model.id == drive_id).first()
             if not drive:
@@ -438,6 +450,7 @@ class BaseSyncService:
                 continue
             is_local_only = self._is_local_only(drive)
             result_key = drive.drive_id if (drive.drive_id and drive.drive_id.strip()) else f"local-only-{drive.id}"
+            drives_by_db_id[drive.id] = drive
             sync_tasks.append({
                 'drive_id': drive.drive_id,
                 'drive_name': drive.name,
@@ -445,6 +458,7 @@ class BaseSyncService:
                 'local_folder': self._get_local_path(drive),
                 'is_local_only': is_local_only,
                 'result_key': result_key,
+                'exclude_dirs': self._remote_exclude_dirs(drive),
                 'job_id': job_id,
             })
 
@@ -458,7 +472,7 @@ class BaseSyncService:
 
         # Pre-sync cleanup per drive.
         for task in sync_tasks:
-            disk_keys = self._disk_keys(task['local_folder'])
+            disk_keys = self._disk_keys(task['local_folder'], drives_by_db_id.get(task['db_id']))
             db_key_ids = (
                 self.db.query(self.content_model.id, self._key_col)
                 .filter(self._drive_col == task['drive_id'])
@@ -585,7 +599,7 @@ class BaseSyncService:
 
                 log_debug(self.log_tag, f"{STEP_INDENT}Scanning local folder: {local_folder}", drive=drive_name)
                 try:
-                    local_files = self._scan_local_files(local_folder)
+                    local_files = self._scan_local_files(local_folder, drives_by_db_id.get(task.get('db_id')))
                 except OSError as e:
                     import traceback
                     log_error(self.log_tag, f"Error scanning {local_folder}: {str(e)}\n{traceback.format_exc()}", drive=drive_name, error=str(e))

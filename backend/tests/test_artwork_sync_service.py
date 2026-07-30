@@ -30,7 +30,7 @@ def test_artwork_sync_indexes_files_by_subtype(test_db, monkeypatch, tmp_path):
     drive, job = _drive_and_job(test_db, folder)
     service = ArtworkSyncService(test_db)
     monkeypatch.setattr(service.rclone, "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {"success": True, "files_transferred": 2})
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {"success": True, "files_transferred": 2})
 
     result = service.sync_drive(drive.id, job.id)
 
@@ -65,7 +65,7 @@ def test_artwork_sync_self_heals_orphaned_rows(test_db, monkeypatch, tmp_path):
 
     service = ArtworkSyncService(test_db)
 
-    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None):
+    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
         gone.unlink()  # rclone removed it during the sync
         return {"success": True, "files_transferred": 0}
 
@@ -88,7 +88,7 @@ def _run_with_progress(test_db, monkeypatch, tmp_path, events):
 
     service = ArtworkSyncService(test_db)
 
-    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None):
+    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
         for filename, checked, transferred, phase, hint in events:
             progress_callback(filename, checked, transferred, phase, hint)
         return {"success": True, "files_transferred": 0}
@@ -117,3 +117,51 @@ def test_checking_message_passes_the_rclone_count_through(test_db, monkeypatch, 
     msgs = _run_with_progress(test_db, monkeypatch, tmp_path, [("Checking files: 4,321/9,000", 4321, 0, "checking", 0)])
 
     assert any("4,321" in m for m in msgs), f"checking count not surfaced: {msgs}"
+
+
+# --- Per-drive artwork type selection ---
+
+def test_drive_synced_types_default_to_all_and_exclude_nothing(test_db, tmp_path):
+    drive, _ = _drive_and_job(test_db, tmp_path / "artwork" / "MakerA")
+
+    assert drive.synced_type_list == ["logo", "background", "squareart"]
+    assert drive.excluded_subfolders == []
+    assert ArtworkSyncService(test_db)._remote_exclude_dirs(drive) == []
+
+
+def test_logos_only_drive_excludes_the_other_subfolders_from_rclone(test_db, tmp_path):
+    drive, _ = _drive_and_job(test_db, tmp_path / "artwork" / "MakerA")
+    drive.synced_types = "logo"
+    test_db.commit()
+
+    assert drive.synced_type_list == ["logo"]
+    assert ArtworkSyncService(test_db)._remote_exclude_dirs(drive) == ["backgrounds", "squareart"]
+
+
+def test_sync_indexes_only_the_drives_selected_types(test_db, monkeypatch, tmp_path):
+    """Files left over in a deselected type's folder must stay out of the index — rclone can't
+    delete what its filters hide, so the scan is what keeps them from coming back."""
+    folder = tmp_path / "artwork" / "MakerA"
+    (folder / "logos").mkdir(parents=True)
+    (folder / "backgrounds").mkdir(parents=True)
+    (folder / "logos" / "Inception (2010) {tmdb-27205} - logo.png").write_bytes(b"i")
+    (folder / "backgrounds" / "Inception (2010) {tmdb-27205} - background.jpg").write_bytes(b"i")
+
+    drive, job = _drive_and_job(test_db, folder)
+    drive.synced_types = "logo"
+    test_db.commit()
+
+    service = ArtworkSyncService(test_db)
+    captured = {}
+
+    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
+        captured["exclude_dirs"] = exclude_dirs
+        return {"success": True, "files_transferred": 1}
+
+    monkeypatch.setattr(service.rclone, "sync_folder", _fake_sync)
+    result = service.sync_drive(drive.id, job.id)
+
+    assert result["success"] is True
+    assert captured["exclude_dirs"] == ["backgrounds", "squareart"]
+    rows = test_db.query(Artwork).filter(Artwork.artwork_drive_id == "maker-a").all()
+    assert [r.artwork_type for r in rows] == ["logo"]

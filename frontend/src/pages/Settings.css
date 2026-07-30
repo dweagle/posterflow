@@ -1618,7 +1618,8 @@ details[open] .feature-events-summary::before {
   margin-bottom: 0.85rem;
 }
 
-.modal-body .form-group label {
+/* Field captions only — rows that are themselves flex controls opt out (see ArtworkTypePicker) */
+.modal-body .form-group label:not(.artwork-type-option) {
   font-size: 0.85rem;
   margin-bottom: 0.35rem;
   display: block;

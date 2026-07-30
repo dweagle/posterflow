@@ -65,7 +65,7 @@
   margin-bottom: 0;
 }
 
-.modal-body label:not(.checkbox-label):not(.delete-files-checkbox):not(.creq-custom-request-label):not(.sort-label) {
+.modal-body label:not(.checkbox-label):not(.delete-files-checkbox):not(.creq-custom-request-label):not(.sort-label):not(.artwork-type-option) {
   display: block;
   color: #ccc;
   font-weight: 500;

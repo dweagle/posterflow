@@ -130,7 +130,7 @@ def scan_artwork_drive_boxes(db: Session) -> List[Dict[str, Any]]:
         source_priority[str(folder)] = prio
         by_stem: Dict[str, Dict[str, Any]] = {}
         n_files = 0
-        for s in scan_artwork_files(folder):
+        for s in scan_artwork_files(folder, drive.synced_type_list):
             slot = ARTWORK_TYPE_TO_NAME.get(s["artwork_type"])
             if not slot:
                 continue

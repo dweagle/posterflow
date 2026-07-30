@@ -18,6 +18,9 @@ export {
 export {
   type ArtworkDrive,
   type ArtworkDrivePriority,
+  ARTWORK_TYPES,
+  ARTWORK_TYPE_LABELS,
+  ARTWORK_TYPE_FOLDERS,
   createCustomArtworkDrive,
   deleteArtworkDrive,
   getArtworkDrives,

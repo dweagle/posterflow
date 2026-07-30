@@ -79,3 +79,107 @@ def test_unsubscribe_artwork_drive(client, test_db):
     response = client.post(f"/api/artwork-drives/{drive.id}/unsubscribe")
     assert response.status_code == 200
     assert response.json()["drive"]["subscribed"] is False
+
+
+# --- Per-drive artwork type selection ---
+
+def test_subscribe_with_selected_types_stores_only_those(client, test_db):
+    drive = ArtworkDrive(name="Art Types", drive_id="art-types", subscribed=False, sync_enabled=True)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/artwork-drives/{drive.id}/subscribe", json={"synced_types": ["logo"]})
+    assert response.status_code == 200
+    assert response.json()["drive"]["synced_types"] == ["logo"]
+
+    test_db.refresh(drive)
+    assert drive.synced_type_list == ["logo"]
+
+
+def test_subscribe_defaults_to_all_types(client, test_db):
+    drive = ArtworkDrive(name="Art All", drive_id="art-all", subscribed=False, sync_enabled=True)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/artwork-drives/{drive.id}/subscribe")
+    assert response.status_code == 200
+    assert response.json()["drive"]["synced_types"] == ["logo", "background", "squareart"]
+
+
+def test_update_rejects_empty_or_unknown_types(client, test_db):
+    drive = ArtworkDrive(name="Art Bad", drive_id="art-bad", subscribed=True, sync_enabled=True)
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    assert client.patch(f"/api/artwork-drives/{drive.id}", json={"synced_types": []}).status_code == 400
+    assert client.patch(f"/api/artwork-drives/{drive.id}", json={"synced_types": ["poster"]}).status_code == 400
+
+    test_db.refresh(drive)
+    assert drive.synced_type_list == ["logo", "background", "squareart"]
+
+
+def test_dropping_a_type_deletes_its_files_and_rows(client, test_db, tmp_path):
+    """rclone filters hide the folder rather than prune it, so the drop has to clean up here —
+    otherwise the deselected files sit on disk indexed forever."""
+    from models.artwork import Artwork
+
+    folder = tmp_path / "artwork" / "ArtDrop"
+    (folder / "logos").mkdir(parents=True)
+    (folder / "backgrounds").mkdir(parents=True)
+    logo = folder / "logos" / "Inception (2010) - logo.png"
+    background = folder / "backgrounds" / "Inception (2010) - background.jpg"
+    logo.write_bytes(b"l")
+    background.write_bytes(b"b")
+
+    drive = ArtworkDrive(name="Art Drop", drive_id="art-drop", subscribed=True, sync_enabled=True, custom_path=str(folder))
+    test_db.add(drive)
+    test_db.add(Artwork(artwork_drive_id="art-drop", file_path=str(logo), file_name=logo.name, artwork_type="logo"))
+    test_db.add(Artwork(artwork_drive_id="art-drop", file_path=str(background), file_name=background.name, artwork_type="background"))
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/artwork-drives/{drive.id}", json={"synced_types": ["logo"]})
+    assert response.status_code == 200
+    assert response.json()["synced_types"] == ["logo"]
+
+    assert logo.exists()
+    assert not (folder / "backgrounds").exists()
+    rows = test_db.query(Artwork).filter(Artwork.artwork_drive_id == "art-drop").all()
+    assert [r.artwork_type for r in rows] == ["logo"]
+
+
+def test_adding_a_type_back_keeps_existing_files(client, test_db, tmp_path):
+    from models.artwork import Artwork
+
+    folder = tmp_path / "artwork" / "ArtAdd"
+    (folder / "logos").mkdir(parents=True)
+    logo = folder / "logos" / "Inception (2010) - logo.png"
+    logo.write_bytes(b"l")
+
+    drive = ArtworkDrive(name="Art Add", drive_id="art-add", subscribed=True, sync_enabled=True,
+                         custom_path=str(folder), synced_types="logo")
+    test_db.add(drive)
+    test_db.add(Artwork(artwork_drive_id="art-add", file_path=str(logo), file_name=logo.name, artwork_type="logo"))
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.patch(f"/api/artwork-drives/{drive.id}", json={"synced_types": ["logo", "background"]})
+    assert response.status_code == 200
+    assert response.json()["synced_types"] == ["logo", "background"]
+    assert logo.exists()
+    assert test_db.query(Artwork).filter(Artwork.artwork_drive_id == "art-add").count() == 1
+
+
+def test_resubscribe_without_types_keeps_the_previous_selection(client, test_db):
+    """Bulk subscribe sends no selection — it must not silently re-enable types the user dropped."""
+    drive = ArtworkDrive(name="Art Keep", drive_id="art-keep", subscribed=False, sync_enabled=True, synced_types="logo")
+    test_db.add(drive)
+    test_db.commit()
+    test_db.refresh(drive)
+
+    response = client.post(f"/api/artwork-drives/{drive.id}/subscribe")
+    assert response.status_code == 200
+    assert response.json()["drive"]["synced_types"] == ["logo"]

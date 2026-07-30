@@ -1,5 +1,7 @@
 import { useState, type MouseEvent } from 'react'
 import { useToast } from './Toast'
+import ArtworkTypePicker from './ArtworkTypePicker'
+import { type ArtworkType } from '../api/client'
 import './DriveEditModal.css'
 
 interface DriveEditModalProps {
@@ -11,16 +13,22 @@ interface DriveEditModalProps {
     subscribed: boolean
     sync_enabled: boolean
     custom_path: string | null
+    /** Artwork drives only — present means the type picker is shown. */
+    synced_types?: ArtworkType[]
   }
+  /** Indexed counts per artwork type, so the picker can show what's on disk. */
+  artworkTypeCounts?: Partial<Record<ArtworkType, number>>
   onClose: () => void
-  onSave: (driveId: number, updates: { custom_path: string | null; sync_enabled: boolean; drive_id?: string }) => void
+  onSave: (driveId: number, updates: { custom_path: string | null; sync_enabled: boolean; drive_id?: string; synced_types?: ArtworkType[] }) => void
 }
 
-function DriveEditModal({ drive, onClose, onSave }: DriveEditModalProps) {
+function DriveEditModal({ drive, artworkTypeCounts, onClose, onSave }: DriveEditModalProps) {
   const initiallyManual = drive.is_custom && drive.drive_id.startsWith('manual-')
   const [customPath, setCustomPath] = useState(drive.custom_path || '')
   const [driveId, setDriveId] = useState(initiallyManual ? '' : (drive.drive_id || ''))
   const [syncEnabled, setSyncEnabled] = useState(drive.sync_enabled)
+  const [syncedTypes, setSyncedTypes] = useState<ArtworkType[]>(drive.synced_types || [])
+  const isArtwork = drive.synced_types !== undefined
   const { showToast } = useToast()
 
   const handleSave = () => {
@@ -28,10 +36,15 @@ function DriveEditModal({ drive, onClose, onSave }: DriveEditModalProps) {
       showToast('Google Drive ID is required when GDrive sync is enabled', 'error')
       return
     }
+    if (isArtwork && syncedTypes.length === 0) {
+      showToast('Select at least one artwork type', 'error')
+      return
+    }
 
     onSave(drive.id, {
       custom_path: customPath || null,
       sync_enabled: syncEnabled,
+      ...(isArtwork ? { synced_types: syncedTypes } : {}),
       ...(drive.is_custom
         ? {
             // For custom drives: pass drive_id so the backend can keep/generate the manual- ID
@@ -93,6 +106,17 @@ function DriveEditModal({ drive, onClose, onSave }: DriveEditModalProps) {
             <label>Drive Name</label>
             <input type="text" value={drive.name} disabled />
           </div>
+
+          {isArtwork && (
+            <div className="form-group">
+              <label>Artwork to sync</label>
+              <ArtworkTypePicker value={syncedTypes} onChange={setSyncedTypes} counts={artworkTypeCounts} />
+              <small>Only the folders you pick are downloaded on the next sync.</small>
+              <small style={{ color: '#ffb74d' }}>
+                Unchecking a type deletes its already-synced files from this drive's local folder.
+              </small>
+            </div>
+          )}
 
           {drive.is_custom && syncEnabled && (
             <div className="form-group">

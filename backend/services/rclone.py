@@ -100,6 +100,21 @@ class RcloneService:
             raise ValueError("Invalid drive_id format")
         return f"gdrive,root_folder_id={normalized_drive_id}:"
 
+    def _dir_exclude_filter_args(self, exclude_dirs: Optional[List[str]]) -> tuple:
+        """'- /<dir>/**' rules for top-level remote folders to leave out of a transfer.
+
+        Anchored to the remote root so a matching name deeper in the tree isn't caught.
+        These must be emitted BEFORE the '+' include rule — rclone filters are
+        first-match-wins, so a later exclude would never be reached.
+        """
+        args: List[str] = []
+        for name in exclude_dirs or []:
+            clean = str(name or "").strip().strip("/")
+            if not clean or "/" in clean or any(char in clean for char in ("\x00", "\n", "\r")):
+                raise ValueError(f"Invalid exclude directory: {name!r}")
+            args.extend(("--filter", f"- /{clean}/**"))
+        return tuple(args)
+
     def _sanitize_remote_relative_path(self, remote_path: str) -> str:
         """Normalize remote relative path and reject control characters/traversal segments."""
         normalized_path = str(remote_path or "").strip()
@@ -257,17 +272,22 @@ scope = drive.readonly
         local_path: Path,
         drive_name: Optional[str] = None,
         progress_callback: Optional[SyncProgressCallback] = None,
+        exclude_dirs: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Sync entire Google Drive folder to local path using rclone sync.
-        
+
         Args:
             drive_id: Google Drive folder ID
             local_path: Local path to sync to
             drive_name: Optional drive name for logging
             progress_callback: Optional callback function(filename, files_checked, files_transferred, phase)
                              called during sync to report progress. Phase is 'checking' or 'transferring'.
-            
+            exclude_dirs: Top-level remote folders to skip entirely (e.g. artwork types the drive
+                          isn't subscribed to). Excluded files are invisible to the sync, so local
+                          copies are left alone rather than deleted — callers that want them gone
+                          remove them explicitly.
+
         Returns:
             dict with 'success' (bool) and 'files_transferred' (int)
         """
@@ -286,10 +306,13 @@ scope = drive.readonly
             local_path.mkdir(parents=True, exist_ok=True)
             
             remote_path = self._build_remote_root_path(drive_id)
-            
+            dir_exclude_args = self._dir_exclude_filter_args(exclude_dirs)
+
             display_name = drive_name or drive_id
             log_info(LogTags.RCLONE, f"Syncing '{display_name}' -> {local_path}")
-            
+            if dir_exclude_args:
+                log_info(LogTags.RCLONE, f"{SYNC_RESULT_INDENT}Skipping folders: {', '.join(exclude_dirs)}", drive=display_name)
+
             # Run rclone sync with streaming output
             process = subprocess.Popen(  # nosec B603
                 [
@@ -297,6 +320,7 @@ scope = drive.readonly
                     '--config', str(self.config_path),
                     *auth_args,
                     *JUNK_FILTER_ARGS,  # NAS/OS junk stays on the drive it came from
+                    *dir_exclude_args,  # Unsubscribed folders, before the include (first-match-wins)
                     '--filter', f'+ {SYNC_INCLUDE_REGEX}',  # Only pull poster/PSD file types...
                     '--filter', '- **',  # ...and nothing else
                     '--max-size', SYNC_MAX_FILE_SIZE,  # Skip oversized files (disk-fill protection)
@@ -954,7 +978,8 @@ scope = drive.readonly
         Sync multiple Google Drive folders sequentially or in parallel.
         
         Args:
-            sync_tasks: List of dicts with 'drive_id', 'drive_name', 'local_folder', and optional 'task_index'
+            sync_tasks: List of dicts with 'drive_id', 'drive_name', 'local_folder', and optional
+                        'task_index' / 'exclude_dirs'
             max_workers: Maximum number of parallel rclone processes (default 1 for sequential)
             progress_callback: Optional callback function(task_index, drive_name, filename, files_checked, 
                              files_transferred, phase) for file transfer progress during each drive sync.
@@ -970,6 +995,7 @@ scope = drive.readonly
             drive_name = task['drive_name']
             local_folder = task['local_folder']
             task_index = task.get('task_index', 0)
+            exclude_dirs = task.get('exclude_dirs')
 
             # If the batch was stopped, abort before starting this drive's rclone
             # process so a cancelled Sync All doesn't briefly spin up the next drive.
@@ -984,7 +1010,7 @@ scope = drive.readonly
                 file_callback = lambda filename, files_checked, files_transferred, phase, transfer_total=0: progress_callback(task_index, drive_name, filename, files_checked, files_transferred, phase, transfer_total)
             
             try:
-                success = self.sync_folder(drive_id, local_folder, drive_name=drive_name, progress_callback=file_callback)
+                success = self.sync_folder(drive_id, local_folder, drive_name=drive_name, progress_callback=file_callback, exclude_dirs=exclude_dirs)
                 return drive_id, {'success': success, 'drive_name': drive_name}
             except JobCancelled:
                 # Propagate so the whole batch aborts instead of marking this

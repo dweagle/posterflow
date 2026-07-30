@@ -701,6 +701,21 @@
   margin: 0;
 }
 
+/* Badge naming a drive's artwork subset. .drive-meta is a stretch flex column, so it needs
+   align-self + fit-content to stay as wide as its text instead of filling the card. */
+.artwork-type-badge {
+  align-self: center;
+  width: fit-content;
+  margin: 0.35rem auto 0;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #4a3a1a;
+  border-radius: 4px;
+  background-color: #2a2416;
+  color: #ffb74d;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
 .artwork-empty {
   display: flex;
   flex-direction: column;

@@ -85,7 +85,7 @@ def test_sync_drive_completes_with_mocked_rclone_success(test_db, monkeypatch, t
     monkeypatch.setattr(
         service.rclone,
         "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {
             "success": True,
             "files_transferred": 0,
         },
@@ -133,7 +133,7 @@ def test_sync_creates_poster_records_for_new_files(test_db, monkeypatch, tmp_pat
     monkeypatch.setattr(
         service.rclone,
         "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {
             "success": True,
             "files_transferred": 2,
         },
@@ -181,7 +181,7 @@ def test_sync_updates_poster_record_when_file_changes(test_db, monkeypatch, tmp_
     monkeypatch.setattr(
         service.rclone,
         "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {
             "success": True,
             "files_transferred": 1,
         },
@@ -221,7 +221,7 @@ def test_sync_removes_db_records_for_deleted_files(test_db, monkeypatch, tmp_pat
     test_db.add(existing_poster)
     test_db.commit()
 
-    def _fake_sync_deletes_file(drive_id, local_path, drive_name=None, progress_callback=None):
+    def _fake_sync_deletes_file(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
         # Simulate rclone removing the file (e.g., it was deleted from the remote)
         existing_path.unlink()
         return {"success": True, "files_transferred": 1}
@@ -267,7 +267,7 @@ def test_sync_pre_cleanup_removes_stale_db_records_before_rclone(test_db, monkey
     test_db.commit()
 
     # Rclone "re-downloads" the file — write it before service runs
-    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None):
+    def _fake_sync(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
         stale_path.write_bytes(b"re-downloaded")
         return {"success": True, "files_transferred": 1}
 
@@ -369,7 +369,7 @@ def test_sync_fast_path_skips_db_update_when_nothing_changed(test_db, monkeypatc
 
     service = PosterSyncService(test_db)
     monkeypatch.setattr(service.rclone, "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {"success": True, "files_transferred": 0})
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {"success": True, "files_transferred": 0})
 
     result = service.sync_drive(drive_id=drive.id, job_id=job.id)
 
@@ -490,7 +490,7 @@ def test_sync_single_initial_metadata_fill_does_not_reprocess(test_db, monkeypat
 
     service = PosterSyncService(test_db)
     monkeypatch.setattr(service.rclone, "sync_folder",
-        lambda drive_id, local_path, drive_name=None, progress_callback=None: {"success": True, "files_transferred": 0})
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None: {"success": True, "files_transferred": 0})
 
     result = service.sync_drive(drive.id, job.id)
 
