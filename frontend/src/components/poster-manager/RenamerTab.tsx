@@ -156,6 +156,9 @@ function RenamerTab({
               ))}
             </div>
             <small>Pick which asset types this run processes. Posters come from your poster drives; logos, backgrounds and square art come from your synced artwork drives. <strong style={{ color: '#f59e0b' }}>Unmatched detection checks only the selected asset types.</strong> Click <strong>Save Settings</strong> to apply.</small>
+            {includeLoaded && include.some((t) => t !== 'posters') && (
+              <small className="kometa-asset-note"><strong>Running Kometa against this folder?</strong> Keep <code>dimensional_asset_rename: false</code> in Kometa's settings. When enabled, Kometa treats wide images as backdrops and renames placed <code>logo.png</code> files to <code>background.png</code>.</small>
+            )}
           </div>
 
           <div className="config-subgroup-heading config-subgroup-divider">

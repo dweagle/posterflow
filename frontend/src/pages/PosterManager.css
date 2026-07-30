@@ -3718,6 +3718,16 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   align-self: flex-start;
 }
 
+/* Kometa dimensional_asset_rename footgun: it renames placed logos to background.png. */
+.field-group small.kometa-asset-note {
+  color: #f59e0b;
+  display: block;
+  margin-top: 0.4rem;
+}
+.field-group small.kometa-asset-note code {
+  font-size: 0.95em;
+}
+
 /* Reserve toggle-row height so gated (load-deferred) toggles don't shift layout. */
 .renamer-config-card .toggle-field {
   min-height: 24px;
