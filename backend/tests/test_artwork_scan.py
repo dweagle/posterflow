@@ -180,7 +180,7 @@ def test_sourced_types_reuses_a_supplied_scan(test_db, tmp_path, monkeypatch):
 
     media = {"movies": [_movie("Inception", 2010, 27205, "Inception (2010)")], "series": [], "collections": []}
     sourced = ascan.sourced_types_by_media(test_db, media, boxes)
-    assert sourced[id(media["movies"][0])] == {"logo"}
+    assert sourced[id(media["movies"][0])] == {"logo": {".png"}}
 
 
 def test_include_filter_is_placement_time_slot_names(test_db):

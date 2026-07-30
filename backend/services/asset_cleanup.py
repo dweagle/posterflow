@@ -213,7 +213,7 @@ class AssetCleanupService:
         library_setting_key: str = "asset_renamer_libraries",
         progress_callback: Optional[ProgressCallback] = None,
         artwork_boxes: Optional[List[Dict[str, Any]]] = None,
-        artwork_sourced: Optional[Dict[int, set]] = None,
+        artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
         poster_sourced: Optional[Dict[int, set]] = None,
     ) -> Dict[str, Any]:
         """Reconcile the destination assets folder against the live media library.
@@ -362,7 +362,7 @@ class AssetCleanupService:
         unsafe_types: set[str],
         ignore_set: set[str],
         result: Dict[str, Any],
-        artwork_sourced: Optional[Dict[int, set]] = None,
+        artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
         globally_sourced_artwork: Optional[set] = None,
         poster_sourced: Optional[Dict[int, set]] = None,
     ) -> None:
@@ -480,9 +480,10 @@ class AssetCleanupService:
                 groups, poster_sourced, ignore_set, dry_run=dry_run, result=result,
             )
 
-    def _remove_orphan_artwork(self, file_path: str, atype: str, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
+    def _remove_orphan_artwork(self, file_path: str, atype: str, *, item: str, dry_run: bool, result: Dict[str, Any],
+                               why: str = "source removed from drives") -> None:
         fname = os.path.basename(file_path)
-        reason = f"orphaned {atype} (source removed from drives)"
+        reason = f"orphaned {atype} ({why})"
         log_info(LogTags.CLEANUP, f"  {'Would remove' if dry_run else 'Removing'}: {item} — {fname} — {reason}")
         if not dry_run:
             try:
@@ -493,31 +494,49 @@ class AssetCleanupService:
         result["removed"].append({"name": fname, "path": file_path, "reason": reason})
         result["counts"]["removed_artwork"] += 1
 
+    @staticmethod
+    def _stale_artwork_why(fname: str, exts: Optional[set]) -> Optional[str]:
+        """Why a placed artwork file of a globally-sourced type should be removed, or None to
+        keep it. ``exts`` is what the item's sources produce for that type (None = type not
+        sourced for this item). Placement copies the source extension, so a sourced type with
+        a non-matching extension is a stale leftover (e.g. background.png beside the live
+        background.jpg — or minted by an outside tool like Kometa's dimensional_asset_rename)."""
+        if exts is None:
+            return "source removed from drives"
+        if os.path.splitext(fname)[1].lower() not in exts:
+            return f"stale extension; drives source {'/'.join(sorted(exts))}"
+        return None
+
     def _prune_orphaned_artwork(
         self,
         groups: List[Dict[str, Any]],
         destination_dir: str,
-        artwork_sourced: Dict[int, set],
+        artwork_sourced: Dict[int, Dict[str, set]],
         globally_sourced: set,
         ignore_set: set[str],
         *,
         dry_run: bool,
         result: Dict[str, Any],
     ) -> None:
-        """Remove artwork the drives no longer provide, in both nested (item folder) and flat
-        (``{name} - {type}.ext`` at the root) layouts. Only matched (live-media) folders/items
-        are visited, so a down media source is never touched; globally_sourced gates per type
-        so an empty source can't mass-delete."""
-        # A folder/name can match several media; union what any of them source so a file some
-        # matched item still provides is never deleted.
-        provided_by_asset: Dict[int, set] = {}          # nested: id(asset) -> types
+        """Remove artwork the drives no longer provide — a type nothing sources anymore, or a
+        wrong-extension leftover for a type they still do — in both nested (item folder) and
+        flat (``{name} - {type}.ext`` at the root) layouts. Only matched (live-media)
+        folders/items are visited, so a down media source is never touched; globally_sourced
+        gates per type so an empty source can't mass-delete."""
+        # A folder/name can match several media; union what any of them source (type -> source
+        # extensions) so a file some matched item still provides is never deleted.
+        def _merge(dst: Dict[str, set], src: Dict[str, set]) -> None:
+            for atype, exts in src.items():
+                dst.setdefault(atype, set()).update(exts)
+
+        provided_by_asset: Dict[int, Dict[str, set]] = {}   # nested: id(asset) -> type -> exts
         assets_by_id: Dict[int, Dict[str, Any]] = {}
-        provided_by_base: Dict[str, set] = {}           # flat: canonical name -> types
+        provided_by_base: Dict[str, Dict[str, set]] = {}    # flat: canonical name -> type -> exts
         for group in groups:
-            provided = artwork_sourced.get(id(group["media"]), set())
-            provided_by_base.setdefault(self._canonical_name(group["media"]), set()).update(provided)
+            provided = artwork_sourced.get(id(group["media"]), {})
+            _merge(provided_by_base.setdefault(self._canonical_name(group["media"]), {}), provided)
             for asset in group["assets"]:
-                provided_by_asset.setdefault(id(asset), set()).update(provided)
+                _merge(provided_by_asset.setdefault(id(asset), {}), provided)
                 assets_by_id[id(asset)] = asset
 
         # ── Nested: scan each matched item folder (artwork is filtered out of asset["files"]).
@@ -528,18 +547,21 @@ class AssetCleanupService:
             folder_name = self._asset_folder_name(asset)
             if folder_name and self._normalize_for_ignore(folder_name) in ignore_set:
                 continue
-            provided = provided_by_asset.get(asset_id, set())
+            provided = provided_by_asset.get(asset_id, {})
             try:
                 entries = os.listdir(folder_path)
             except OSError:
                 continue  # folder already gone (e.g. removed as a stale duplicate)
             for fname in entries:
                 atype = artwork_type_of(fname)  # internal type, or None for non-artwork
-                if atype is None or atype not in globally_sourced or atype in provided:
+                if atype is None or atype not in globally_sourced:
+                    continue
+                why = self._stale_artwork_why(fname, provided.get(atype))
+                if why is None:
                     continue
                 file_path = os.path.join(folder_path, fname)
                 if os.path.isfile(file_path):
-                    self._remove_orphan_artwork(file_path, atype, item=folder_name or os.path.basename(folder_path), dry_run=dry_run, result=result)
+                    self._remove_orphan_artwork(file_path, atype, item=folder_name or os.path.basename(folder_path), dry_run=dry_run, result=result, why=why)
 
         # ── Flat: reconcile "{canonical}-square.ext" files at the destination root.
         try:
@@ -554,11 +576,14 @@ class AssetCleanupService:
             if base is None or self._normalize_for_ignore(base) in ignore_set:
                 continue
             provided = provided_by_base.get(base)  # None → not a matched healthy item; leave it
-            if provided is None or atype in provided:
+            if provided is None:
+                continue
+            why = self._stale_artwork_why(fname, provided.get(atype))
+            if why is None:
                 continue
             file_path = os.path.join(destination_dir, fname)
             if os.path.isfile(file_path):
-                self._remove_orphan_artwork(file_path, atype, item=base, dry_run=dry_run, result=result)
+                self._remove_orphan_artwork(file_path, atype, item=base, dry_run=dry_run, result=result, why=why)
 
     def _remove_unsourced_poster(self, file_path: str, slot, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
         fname = os.path.basename(file_path)

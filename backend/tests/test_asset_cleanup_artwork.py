@@ -78,7 +78,7 @@ def test_prunes_artwork_whose_source_left_the_drive(test_db, tmp_path, monkeypat
     # The Matrix lost its logo source (keeps background); Inception still sources its logo.
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): {"background"}, id(by_title["Inception"]): {"logo"}}
+        return {id(by_title["The Matrix"]): {"background": {".jpg"}}, id(by_title["Inception"]): {"logo": {".png"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False, delete_unknown=False)
@@ -88,6 +88,55 @@ def test_prunes_artwork_whose_source_left_the_drive(test_db, tmp_path, monkeypat
     assert (dest / "The Matrix (1999)" / "poster.jpg").exists()        # not artwork → untouched
     assert (dest / "Inception (2010)" / "logo.png").exists()           # still sourced → kept
     assert result["counts"]["removed_artwork"] == 1
+
+
+def test_prunes_stale_extension_for_a_still_sourced_type(test_db, tmp_path, monkeypatch):
+    """A file whose TYPE is still sourced but whose extension no drive produces is a stale
+    leftover — e.g. Kometa's dimensional_asset_rename turning a placed logo.png into
+    background.png. A type-only check kept it forever; the extension check prunes it."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg", "logo.png", "background.png", "background.jpg"])
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("Marvel")],
+    }
+
+    def sourced(md):
+        by_title = {m["title"]: m for m in md["movies"]}
+        return {id(by_title["The Matrix"]): {"logo": {".png"}, "background": {".jpg"}}}
+
+    _patch_sourced(monkeypatch, sourced)
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=False)
+
+    assert not (dest / "The Matrix (1999)" / "background.png").exists()  # stale extension → removed
+    assert (dest / "The Matrix (1999)" / "background.jpg").exists()      # the live placed file → kept
+    assert (dest / "The Matrix (1999)" / "logo.png").exists()            # sourced type + ext → kept
+    assert result["counts"]["removed_artwork"] == 1
+
+
+def test_keeps_placed_file_when_source_extension_matches(test_db, tmp_path, monkeypatch):
+    """Extension pruning follows the SOURCE extension, not a hardcoded convention — a drive
+    that genuinely sources a .png background keeps its placed background.png."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg", "background.png"])
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("Marvel")],
+    }
+
+    def sourced(md):
+        by_title = {m["title"]: m for m in md["movies"]}
+        return {id(by_title["The Matrix"]): {"background": {".png"}}}
+
+    _patch_sourced(monkeypatch, sourced)
+    result = _run(test_db, dest, media, dry_run=False)
+
+    assert (dest / "The Matrix (1999)" / "background.png").exists()
+    assert result["counts"]["removed_artwork"] == 0
 
 
 def test_conservative_when_a_type_has_no_source_anywhere(test_db, tmp_path, monkeypatch):
@@ -183,7 +232,7 @@ def test_down_media_source_never_wipes_its_artwork(test_db, tmp_path, monkeypatc
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): {"logo"}, id(by_title["Inception"]): set()}
+        return {id(by_title["The Matrix"]): {"logo": {".png"}}, id(by_title["Inception"]): {}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -208,7 +257,7 @@ def test_dry_run_reports_but_does_not_remove(test_db, tmp_path, monkeypatch):
     # logo is globally sourced (Inception), but The Matrix no longer sources it.
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): set(), id(by_title["Inception"]): {"logo"}}
+        return {id(by_title["The Matrix"]): {}, id(by_title["Inception"]): {"logo": {".png"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=True)
@@ -232,7 +281,7 @@ def test_ignore_list_protects_a_folders_artwork(test_db, tmp_path, monkeypatch):
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): set(), id(by_title["Inception"]): {"logo"}}
+        return {id(by_title["The Matrix"]): {}, id(by_title["Inception"]): {"logo": {".png"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -273,12 +322,12 @@ def test_sourced_types_drops_a_type_when_its_file_is_removed(test_db, tmp_path):
     movie_id = id(media["movies"][0])
 
     sourced = sourced_types_by_media(test_db, media)
-    assert sourced[movie_id] == {"logo", "background"}
+    assert sourced[movie_id] == {"logo": {".png"}, "background": {".jpg"}}
 
     # Remove the logo from the drive, rescan.
     (drive_root / "logos" / "Inception (2010) {tmdb-27205}.png").unlink()
     sourced = sourced_types_by_media(test_db, media)
-    assert sourced[movie_id] == {"background"}
+    assert sourced[movie_id] == {"background": {".jpg"}}
 
 
 def test_sourced_types_raises_without_subscribed_drives(test_db):
@@ -309,7 +358,7 @@ def test_sourced_matches_collection_tmdb_on_ref(test_db, tmp_path):
     coll_id = id(media["collections"][0])
 
     sourced = sourced_types_by_media(test_db, media)
-    assert sourced.get(coll_id) == {"logo"}
+    assert sourced.get(coll_id) == {"logo": {".png"}}
 
 
 # ── flat layout (Use Asset Folders off) ─────────────────────────────────────
@@ -337,7 +386,7 @@ def test_flat_prunes_artwork_whose_source_left(test_db, tmp_path, monkeypatch):
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): {"background"}, id(by_title["Inception"]): {"logo"}}
+        return {id(by_title["The Matrix"]): {"background": {".jpg"}}, id(by_title["Inception"]): {"logo": {".png"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -346,6 +395,32 @@ def test_flat_prunes_artwork_whose_source_left(test_db, tmp_path, monkeypatch):
     assert (dest / "The Matrix (1999)-background.jpg").exists()     # still sourced → kept
     assert (dest / "The Matrix (1999).jpg").exists()                  # poster → untouched
     assert (dest / "Inception (2010)-logo.png").exists()           # still sourced → kept
+    assert result["counts"]["removed_artwork"] == 1
+
+
+def test_flat_prunes_stale_extension(test_db, tmp_path, monkeypatch):
+    """Flat layout mirror of the stale-extension prune."""
+    dest = tmp_path / "assets"
+    dest.mkdir()
+    _flat(dest, "The Matrix (1999).jpg")
+    _flat(dest, "The Matrix (1999)-background.png")   # stale (Kometa-style leftover)
+    _flat(dest, "The Matrix (1999)-background.jpg")   # the live placed file
+
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("Marvel")],
+    }
+
+    def sourced(md):
+        by_title = {m["title"]: m for m in md["movies"]}
+        return {id(by_title["The Matrix"]): {"background": {".jpg"}}}
+
+    _patch_sourced(monkeypatch, sourced)
+    result = _run(test_db, dest, media, dry_run=False)
+
+    assert not (dest / "The Matrix (1999)-background.png").exists()
+    assert (dest / "The Matrix (1999)-background.jpg").exists()
     assert result["counts"]["removed_artwork"] == 1
 
 
@@ -387,7 +462,7 @@ def test_flat_reconciliation_only_touches_matched_items(test_db, tmp_path, monke
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["The Matrix"]): {"logo"}, id(by_title["Inception"]): set()}
+        return {id(by_title["The Matrix"]): {"logo": {".png"}}, id(by_title["Inception"]): {}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)

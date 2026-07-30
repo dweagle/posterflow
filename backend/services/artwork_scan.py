@@ -229,11 +229,11 @@ def sourced_types_by_media(
     db: Session,
     media_dict: Dict[str, List[Dict[str, Any]]],
     boxes: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[int, set]:
-    """Per live media item (keyed by ``id(media)``), the artwork TYPES the subscribed drives
-    currently provide (logo/background/squareart). Cleanup reconciles placed artwork against
-    this to prune what a drive no longer sources. Raises (via the scan) when no artwork drives
-    are subscribed — callers treat that as 'prune nothing'.
+) -> Dict[int, Dict[str, set]]:
+    """Per live media item (keyed by ``id(media)``), the artwork the subscribed drives
+    currently provide, as ``{artwork_type: {source extensions}}``. Cleanup reconciles placed
+    artwork against this to prune what a drive no longer sources. Raises (via the scan) when
+    no artwork drives are subscribed — callers treat that as 'prune nothing'.
 
     ``boxes`` reuses a scan the caller already did (the Asset Renamer's), so a rename+cleanup
     run walks the artwork drives once instead of twice. It MUST be the unfiltered scan — an
@@ -247,18 +247,27 @@ def sourced_types_by_media(
     return sourced_types_from_matched(matched)
 
 
-def sourced_types_from_matched(matched: Dict[str, List[Dict[str, Any]]]) -> Dict[int, set]:
-    """Derive the per-item sourced artwork types from an ALREADY-matched result — the renamer
+def sourced_types_from_matched(matched: Dict[str, List[Dict[str, Any]]]) -> Dict[int, Dict[str, set]]:
+    """Derive the per-item sourced artwork from an ALREADY-matched result — the renamer
     hands its own match across so a rename+cleanup run matches the library once, and the two
-    can't disagree about who owns what."""
-    sourced: Dict[int, set] = {}
+    can't disagree about who owns what.
+
+    Values map artwork type -> the SOURCE file extensions. Placement copies the source
+    extension, so this also tells cleanup which placed filename is the live one — a file of a
+    sourced type whose extension no drive produces (e.g. a stale ``background.png`` beside the
+    live ``background.jpg``) is prunable instead of being kept forever by a type-only check.
+    Unions across boxes when several match the same media."""
+    sourced: Dict[int, Dict[str, set]] = {}
     for items in matched.values():
         for item in items:
             slots = (item.get("asset_ref") or {}).get("slots") or {}
-            types = {
-                _SLOT_TO_TYPE[s] for s in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE)
-                if slots.get(s) and os.path.isfile(slots[s])
-            }
-            if types and item.get("media_ref") is not None:
-                sourced[id(item["media_ref"])] = types
+            provided: Dict[str, set] = {}
+            for s in (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE):
+                path = slots.get(s)
+                if path and os.path.isfile(path):
+                    provided.setdefault(_SLOT_TO_TYPE[s], set()).add(os.path.splitext(path)[1].lower())
+            if provided and item.get("media_ref") is not None:
+                merged = sourced.setdefault(id(item["media_ref"]), {})
+                for atype, exts in provided.items():
+                    merged.setdefault(atype, set()).update(exts)
     return sourced
