@@ -92,7 +92,7 @@ def test_prunes_posters_whose_drive_was_unsubscribed(test_db, tmp_path, monkeypa
     # Inception is still sourced; The Matrix's only drive was unsubscribed.
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["Inception"]): {"poster"}}
+        return {id(by_title["Inception"]): {"poster": {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -116,7 +116,7 @@ def test_prunes_only_unsourced_season_files(test_db, tmp_path, monkeypatch):
 
     # Drives still source the main poster and season 1; season 2's source is gone.
     def sourced(md):
-        return {id(md["series"][0]): {"poster", 1}}
+        return {id(md["series"][0]): {"poster": {".jpg"}, 1: {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -201,7 +201,7 @@ def test_down_media_source_never_touches_its_posters(test_db, tmp_path, monkeypa
     }
 
     def sourced(md):
-        return {id(md["movies"][0]): {"poster"}}
+        return {id(md["movies"][0]): {"poster": {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -225,7 +225,7 @@ def test_ignore_list_protects_a_folders_posters(test_db, tmp_path, monkeypatch):
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["Inception"]): {"poster"}}
+        return {id(by_title["Inception"]): {"poster": {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -246,13 +246,106 @@ def test_dry_run_reports_but_does_not_remove(test_db, tmp_path, monkeypatch):
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["Inception"]): {"poster"}}
+        return {id(by_title["Inception"]): {"poster": {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=True)
 
     assert (dest / "The Matrix (1999)" / "poster.jpg").exists()
     assert result["counts"]["removed_posters"] == 1
+
+
+def test_prunes_stale_extension_beside_the_live_poster(test_db, tmp_path, monkeypatch):
+    """Placement copies the SOURCE extension, so when a drive switches .png → .jpg the old
+    poster.png lingers. A slot-only check kept it forever (and kept the item looking covered)."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg", "poster.png"])
+    _make_folder(dest, "Living Show (2015)", ["Season01.jpg", "Season01.png"])
+
+    show = _series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42, seasons=[1])
+    media = {
+        "movies": [_movie("The Matrix", 1999, "/m/The Matrix (1999)")],
+        "series": [show],
+        "collections": [_collection("Marvel")],
+    }
+
+    def sourced(md):
+        return {
+            id(md["movies"][0]): {"poster": {".jpg"}},
+            id(md["series"][0]): {1: {".jpg"}},
+        }
+
+    _patch_sourced(monkeypatch, sourced)
+    result = _run(test_db, dest, media, dry_run=False)
+
+    assert (dest / "The Matrix (1999)" / "poster.jpg").exists()        # live extension → kept
+    assert not (dest / "The Matrix (1999)" / "poster.png").exists()    # stale extension → removed
+    assert (dest / "Living Show (2015)" / "Season01.jpg").exists()
+    assert not (dest / "Living Show (2015)" / "Season01.png").exists()
+    assert result["counts"]["removed_posters"] == 2
+
+
+def test_keeps_an_extension_any_matching_drive_still_sources(test_db, tmp_path, monkeypatch):
+    """Two drives sourcing different extensions union, so neither placed copy is pruned."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg", "poster.png"])
+
+    media = _full_media([_movie("The Matrix", 1999, "/m/The Matrix (1999)")])
+    _patch_sourced(monkeypatch, lambda md: {id(md["movies"][0]): {"poster": {".jpg", ".png"}}})
+    result = _run(test_db, dest, media, dry_run=False)
+
+    assert (dest / "The Matrix (1999)" / "poster.jpg").exists()
+    assert (dest / "The Matrix (1999)" / "poster.png").exists()
+    assert result["counts"]["removed_posters"] == 0
+
+
+# ── tmp/ staging ────────────────────────────────────────────────────────────
+
+
+def test_prunes_unsourced_posters_from_tmp_staging(test_db, tmp_path, monkeypatch):
+    """tmp/ is preserved across runs as the border replacer's incremental source, so pruning
+    only the destination left the staged copy to be copied back (or re-rendered as
+    'missing_destination') on the next run — a place/prune loop. Prune both."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg"])
+    _make_folder(dest, "Inception (2010)", ["poster.jpg"])
+    _make_folder(dest / "tmp", "The Matrix (1999)", ["poster.jpg"])
+    _make_folder(dest / "tmp", "Inception (2010)", ["poster.jpg"])
+
+    media = _full_media([
+        _movie("The Matrix", 1999, "/m/The Matrix (1999)"),
+        _movie("Inception", 2010, "/m/Inception (2010)"),
+    ])
+
+    def sourced(md):
+        by_title = {m["title"]: m for m in md["movies"]}
+        return {id(by_title["Inception"]): {"poster": {".jpg"}}}
+
+    _patch_sourced(monkeypatch, sourced)
+    result = _run(test_db, dest, media, dry_run=False)
+
+    # Unsourced: gone from BOTH roots, so nothing can copy it forward next run.
+    assert not (dest / "The Matrix (1999)" / "poster.jpg").exists()
+    assert not (dest / "tmp" / "The Matrix (1999)" / "poster.jpg").exists()
+    # Still sourced: untouched in both.
+    assert (dest / "Inception (2010)" / "poster.jpg").exists()
+    assert (dest / "tmp" / "Inception (2010)" / "poster.jpg").exists()
+    assert result["counts"]["removed_posters"] == 2
+
+
+def test_tmp_staging_respects_the_empty_sourced_guard(test_db, tmp_path, monkeypatch):
+    """The 'never mass-delete on a broken drive scan' guard covers tmp/ the same as dest."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Matrix (1999)", ["poster.jpg"])
+    _make_folder(dest / "tmp", "The Matrix (1999)", ["poster.jpg"])
+
+    media = _full_media([_movie("The Matrix", 1999, "/m/The Matrix (1999)")])
+    _patch_sourced(monkeypatch, lambda md: {})
+    result = _run(test_db, dest, media, dry_run=False)
+
+    assert (dest / "The Matrix (1999)" / "poster.jpg").exists()
+    assert (dest / "tmp" / "The Matrix (1999)" / "poster.jpg").exists()
+    assert result["counts"]["removed_posters"] == 0
 
 
 # ── flat layout (Use Asset Folders off) ─────────────────────────────────────
@@ -275,7 +368,7 @@ def test_flat_prunes_unsourced_poster(test_db, tmp_path, monkeypatch):
 
     def sourced(md):
         by_title = {m["title"]: m for m in md["movies"]}
-        return {id(by_title["Inception"]): {"poster"}}
+        return {id(by_title["Inception"]): {"poster": {".jpg"}}}
 
     _patch_sourced(monkeypatch, sourced)
     result = _run(test_db, dest, media, dry_run=False)
@@ -311,11 +404,11 @@ def test_sourced_poster_slots_drop_when_drive_file_removed(test_db, tmp_path):
     show_id = id(media["series"][0])
 
     sourced = sourced_poster_slots_by_media(test_db, media)
-    assert sourced[show_id] == {"poster", 1}
+    assert sourced[show_id] == {"poster": {".jpg"}, 1: {".jpg"}}
 
     (drive_root / "Living Show (2015) - Season 1.jpg").unlink()
     sourced = sourced_poster_slots_by_media(test_db, media)
-    assert sourced[show_id] == {"poster"}
+    assert sourced[show_id] == {"poster": {".jpg"}}
 
 
 def test_sourced_poster_slots_raise_without_subscribed_drives(test_db, tmp_path):

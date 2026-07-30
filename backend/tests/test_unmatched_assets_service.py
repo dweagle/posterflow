@@ -40,6 +40,42 @@ def test_detect_unmatched_returns_empty_when_asset_scan_fails(test_db, monkeypat
     assert result["unmatched"]["movies"] == []
 
 
+def test_empty_destination_reports_everything_missing_not_complete(test_db, monkeypatch):
+    """An empty destination walk means nothing is PLACED, not that nothing is MISSING.
+    get_assets_files returns (None, None) when it finds nothing; that used to skip the match
+    pass entirely and store an all-zero '100% complete' summary, hiding a down/empty mount."""
+    service = UnmatchedAssetsService(test_db)
+
+    monkeypatch.setattr(
+        "services.unmatched_assets.get_assets_files",
+        lambda _source_dirs, merge=False, exclude_artwork=False, artwork_out=None: (None, None),
+    )
+
+    media_dict = {
+        "movies": [
+            {
+                "title": "Some Movie", "normalized_title": "somemovie", "alternate_titles": [],
+                "normalized_alternate_titles": [], "year": 2024, "tmdb_id": 101, "tvdb_id": None,
+                "imdb_id": None, "status": "released", "instance": "Plex A",
+            },
+        ],
+        "series": [],
+        "collections": [],
+    }
+
+    result = service.detect_unmatched(media_dict, ["/tmp/organized"])
+
+    assert result["summary"]["movies"]["total"] == 1
+    assert result["summary"]["movies"]["unmatched"] == 1
+    assert result["summary"]["grand_total"]["percent_complete"] == 0.0
+    assert [m["title"] for m in result["unmatched"]["movies"]] == ["Some Movie"]
+
+    saved = json.loads(
+        test_db.query(Setting).filter(Setting.key == "poster_unmatched_stats").first().value
+    )
+    assert saved["summary"]["grand_total"]["unmatched"] == 1
+
+
 def test_detect_unmatched_successful_flow_saves_results(test_db, monkeypatch):
     service = UnmatchedAssetsService(test_db)
 

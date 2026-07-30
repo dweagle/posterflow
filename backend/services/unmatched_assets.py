@@ -14,7 +14,7 @@ from models.setting import get_setting, upsert_setting
 from util.constants import season_pattern
 from util.posters.assets import get_assets_files
 from util.posters.scanner import _is_asset_folders
-from util.posters.index import search_matches
+from util.posters.index import create_new_empty_index, search_matches
 from util.posters.match import (
     collection_title_variants, is_match, match_assets_to_media, media_source_refs,
 )
@@ -681,7 +681,12 @@ class UnmatchedAssetsService:
                     progress_callback("error", 0, 100, f"Scan failed: {e}")
                 return self._combined_failure(check_posters, bool(enabled_art))
 
-            poster_match_active = check_posters and bool(poster_assets)
+            # A walk that found nothing means nothing is PLACED, not that nothing is missing.
+            # Match against an empty index so every eligible item reports unmatched — skipping
+            # the pass here used to store an all-zero "100% complete" summary instead.
+            if prefix_index is None:
+                prefix_index = create_new_empty_index()
+            poster_match_active = check_posters
 
             # Artwork indexes: from the shared walk when posters ran (fallback re-scan on structure
             # mismatch), else its own walk for an artwork-only run.
@@ -720,7 +725,12 @@ class UnmatchedAssetsService:
                 if poster_assets:
                     log_success(LogTags.UNMATCHED, f"Found {len(poster_assets):,} organized poster assets", count=len(poster_assets))
                 else:
-                    log_warning(LogTags.UNMATCHED, "No poster assets found in destination folder")
+                    log_warning(
+                        LogTags.UNMATCHED,
+                        "No poster assets found in destination folder — every eligible item will "
+                        "report as missing a poster. Check the destination path is mounted and readable.",
+                        destination=destination_dir,
+                    )
             if enabled_art:
                 total_art = sum(len(artwork_by_type.get(t, [])) for t in enabled_art)
                 log_success(LogTags.UNMATCHED, f"Found {total_art:,} artwork asset(s) on disk across {len(enabled_art)} type(s)", count=total_art)
@@ -801,20 +811,12 @@ class UnmatchedAssetsService:
             poster_result: Dict[str, Any] = {}
             poster_summary = None
             if check_posters:
-                if poster_match_active:
-                    poster_summary = self._calculate_stats(unmatched, media_dict)
-                    try:
-                        self._save_results(poster_summary, unmatched)
-                    except Exception as e:
-                        log_error(LogTags.UNMATCHED, f"Failed to save results to database: {e}", error=str(e))
-                    poster_result = {"summary": poster_summary, "unmatched": unmatched, "last_run": datetime.now(timezone.utc).isoformat()}
-                else:
-                    empty = self._empty_result()
-                    try:
-                        self._save_results(empty["summary"], empty["unmatched"])
-                    except Exception as e:
-                        log_debug(LogTags.UNMATCHED, f"Failed to persist empty poster result: {e}")
-                    poster_result = empty
+                poster_summary = self._calculate_stats(unmatched, media_dict)
+                try:
+                    self._save_results(poster_summary, unmatched)
+                except Exception as e:
+                    log_error(LogTags.UNMATCHED, f"Failed to save results to database: {e}", error=str(e))
+                poster_result = {"summary": poster_summary, "unmatched": unmatched, "last_run": datetime.now(timezone.utc).isoformat()}
 
             # --- Artwork finalize (store) + per-type complete lines ---
             artwork_payload: Dict[str, Any] | None = None

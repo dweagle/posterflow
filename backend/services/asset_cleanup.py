@@ -214,7 +214,7 @@ class AssetCleanupService:
         progress_callback: Optional[ProgressCallback] = None,
         artwork_boxes: Optional[List[Dict[str, Any]]] = None,
         artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
-        poster_sourced: Optional[Dict[int, set]] = None,
+        poster_sourced: Optional[Dict[int, Dict[Any, set]]] = None,
     ) -> Dict[str, Any]:
         """Reconcile the destination assets folder against the live media library.
 
@@ -320,11 +320,17 @@ class AssetCleanupService:
                 unsafe_types=unsafe_types,
                 ignore_set=ignore_set,
                 result=result,
-                # Artwork lives in the item folders under the main destination, not tmp/;
-                # poster reconciliation likewise skips the transient tmp/ staging.
+                # Artwork lives in the item folders under the main destination, never tmp/ —
+                # it's placed straight to the real destination, so tmp/ artwork is residue the
+                # renamer's own staging prune removes.
                 artwork_sourced=artwork_sourced if root == destination_dir else {},
                 globally_sourced_artwork=globally_sourced_artwork if root == destination_dir else set(),
-                poster_sourced=poster_sourced if root == destination_dir else {},
+                # Posters ARE reconciled in tmp/. It is not transient — it's preserved across
+                # runs as the border replacer's incremental source, so a staged poster whose
+                # drive was unsubscribed is copied back to the destination on the next run
+                # (or re-rendered by the border pass as "missing_destination") right after this
+                # prune removed it. Pruning the staged copy too ends that place/prune loop.
+                poster_sourced=poster_sourced,
             )
 
         # ── Empty-folder sweep ─────────────────────────────────────────────
@@ -364,7 +370,7 @@ class AssetCleanupService:
         result: Dict[str, Any],
         artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
         globally_sourced_artwork: Optional[set] = None,
-        poster_sourced: Optional[Dict[int, set]] = None,
+        poster_sourced: Optional[Dict[int, Dict[Any, set]]] = None,
     ) -> None:
         """Run grouping + classification + deletion for one scan root."""
         artwork_sourced = artwork_sourced or {}
@@ -585,10 +591,25 @@ class AssetCleanupService:
             if os.path.isfile(file_path):
                 self._remove_orphan_artwork(file_path, atype, item=base, dry_run=dry_run, result=result, why=why)
 
-    def _remove_unsourced_poster(self, file_path: str, slot, *, item: str, dry_run: bool, result: Dict[str, Any]) -> None:
+    @staticmethod
+    def _stale_poster_why(fname: str, exts: Optional[set]) -> Optional[str]:
+        """Why a placed poster/season file should be removed, or None to keep it. ``exts`` is
+        what the item's sources produce for that slot (None = slot not sourced). Placement
+        copies the source extension, so a sourced slot with a non-matching extension is a stale
+        leftover (e.g. poster.png beside the live poster.jpg) — the poster mirror of
+        ``_stale_artwork_why``. The border replacer preserves the filename, so a bordered
+        destination file still carries its source extension."""
+        if exts is None:
+            return "source removed from drives"
+        if os.path.splitext(fname)[1].lower() not in exts:
+            return f"stale extension; drives source {'/'.join(sorted(exts))}"
+        return None
+
+    def _remove_unsourced_poster(self, file_path: str, slot, *, item: str, dry_run: bool, result: Dict[str, Any],
+                                 why: str = "source removed from drives") -> None:
         fname = os.path.basename(file_path)
         slot_desc = "poster" if slot == "poster" else ("specials poster" if slot == 0 else f"season {slot} poster")
-        reason = f"unsourced {slot_desc} (source removed from drives)"
+        reason = f"unsourced {slot_desc} ({why})"
         log_info(LogTags.CLEANUP, f"  {'Would remove' if dry_run else 'Removing'}: {item} — {fname} — {reason}")
         if not dry_run:
             try:
@@ -603,31 +624,34 @@ class AssetCleanupService:
     def _prune_unsourced_posters(
         self,
         groups: List[Dict[str, Any]],
-        poster_sourced: Dict[int, set],
+        poster_sourced: Dict[int, Dict[Any, set]],
         ignore_set: set[str],
         *,
         dry_run: bool,
         result: Dict[str, Any],
     ) -> None:
-        """Remove destination poster/season files no subscribed drive sources anymore — the
-        poster mirror of the artwork prune (the typical cause: a drive was unsubscribed but
+        """Remove destination poster/season files the subscribed drives no longer provide — a
+        slot nothing sources anymore, or a wrong-extension leftover for a slot they still do.
+        The poster mirror of the artwork prune (the typical cause: a drive was unsubscribed but
         its placed posters remained, so items still looked covered). Only matched (live-media)
         assets are visited, per slot, so another drive's files and still-sourced seasons stay."""
-        # A folder/name can match several media; union what any of them source so a file some
-        # matched item still provides is never deleted.
-        provided_by_asset: Dict[int, set] = {}
+        # A folder/name can match several media; union what any of them source (slot -> source
+        # extensions) so a file some matched item still provides is never deleted.
+        provided_by_asset: Dict[int, Dict[Any, set]] = {}
         assets_by_id: Dict[int, Dict[str, Any]] = {}
         for group in groups:
-            provided = poster_sourced.get(id(group["media"]), set())
+            provided = poster_sourced.get(id(group["media"]), {})
             for asset in group["assets"]:
-                provided_by_asset.setdefault(id(asset), set()).update(provided)
+                merged = provided_by_asset.setdefault(id(asset), {})
+                for slot, exts in provided.items():
+                    merged.setdefault(slot, set()).update(exts)
                 assets_by_id[id(asset)] = asset
 
         for asset_id, asset in assets_by_id.items():
             folder_name = self._asset_folder_name(asset)
             if folder_name and self._normalize_for_ignore(folder_name) in ignore_set:
                 continue
-            provided = provided_by_asset.get(asset_id, set())
+            provided = provided_by_asset.get(asset_id, {})
             for file_path in asset.get("files") or []:
                 fname = os.path.basename(file_path)
                 if artwork_type_of(fname) is not None:
@@ -638,10 +662,11 @@ class AssetCleanupService:
                 if not folder_name and base and self._normalize_for_ignore(base) in ignore_set:
                     continue
                 slot = poster_slot_of(fname)
-                if slot in provided:
+                why = self._stale_poster_why(fname, provided.get(slot))
+                if why is None:
                     continue
                 if os.path.isfile(file_path):
-                    self._remove_unsourced_poster(file_path, slot, item=base or fname, dry_run=dry_run, result=result)
+                    self._remove_unsourced_poster(file_path, slot, item=base or fname, dry_run=dry_run, result=result, why=why)
 
     # ── deletion + db reconciliation ───────────────────────────────────────
 

@@ -97,26 +97,32 @@ def _placements_from_files(
     return out
 
 
-def sourced_poster_slots_from_matched(matched: MediaDict) -> Dict[int, set]:
+def sourced_poster_slots_from_matched(matched: MediaDict) -> Dict[int, Dict[Any, set]]:
     """Per live media item (keyed by ``id(media)``), the poster slots the subscribed drives
-    currently source: ``SLOT_POSTER`` plus season numbers (0 = specials). The poster mirror
-    of ``sourced_types_from_matched`` — the renamer hands its own match across so a
-    rename+cleanup run matches the library once and place/prune can't disagree. Unions
-    across boxes when several match the same media."""
-    sourced: Dict[int, set] = {}
+    currently source — ``SLOT_POSTER`` plus season numbers (0 = specials) — each mapped to the
+    SOURCE file extensions. The poster mirror of ``sourced_types_from_matched`` — the renamer
+    hands its own match across so a rename+cleanup run matches the library once and place/prune
+    can't disagree. Unions across boxes when several match the same media.
+
+    Extensions ride along because placement copies the source extension, so they also tell
+    cleanup which placed filename is the live one (a stale ``poster.png`` beside the live
+    ``poster.jpg`` is prunable instead of being kept forever by a slot-only check)."""
+    sourced: Dict[int, Dict[Any, set]] = {}
     for items in matched.values():
         for item in items:
             box_slots = (item.get("asset_ref") or {}).get("slots")
             slots = box_slots if box_slots else _slots_from_files(item.get("files") or [])
-            provided: set = set()
+            provided: Dict[Any, set] = {}
             poster = slots.get(SLOT_POSTER)
             if poster and os.path.isfile(poster):
-                provided.add(SLOT_POSTER)
+                provided.setdefault(SLOT_POSTER, set()).add(os.path.splitext(poster)[1].lower())
             for season, path in (slots.get("seasons") or {}).items():
                 if path and os.path.isfile(path):
-                    provided.add(int(season))
+                    provided.setdefault(int(season), set()).add(os.path.splitext(path)[1].lower())
             if provided and item.get("media_ref") is not None:
-                sourced.setdefault(id(item["media_ref"]), set()).update(provided)
+                merged = sourced.setdefault(id(item["media_ref"]), {})
+                for slot, exts in provided.items():
+                    merged.setdefault(slot, set()).update(exts)
     return sourced
 
 
@@ -142,7 +148,7 @@ def subscribed_priority_drives(db: Session) -> List[Any]:
     return drives
 
 
-def sourced_poster_slots_by_media(db: Session, media_dict: MediaDict) -> Dict[int, set]:
+def sourced_poster_slots_by_media(db: Session, media_dict: MediaDict) -> Dict[int, Dict[Any, set]]:
     """Standalone-cleanup half of the poster sourcing: scan the subscribed priority drives
     and match them to the live media, mirroring artwork's ``sourced_types_by_media``. Raises
     ValueError (no subscribed drives) / OSError (missing or empty drive folder) — expected

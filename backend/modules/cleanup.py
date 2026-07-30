@@ -41,7 +41,7 @@ def maybe_run_asset_cleanup(
     media_dict: Optional[Dict[str, Any]] = None,
     artwork_boxes: Optional[List[Dict[str, Any]]] = None,
     artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
-    poster_sourced: Optional[Dict[int, set]] = None,
+    poster_sourced: Optional[Dict[int, Dict[Any, set]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run asset cleanup at a run's tail when the toggle is enabled.
 
