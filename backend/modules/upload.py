@@ -28,6 +28,7 @@ from database import SessionLocal
 from models.drive import Drive
 from models.setting import get_setting, upsert_setting
 from util.poster_settings import get_poster_destination
+from util.posters.scanner import is_artwork_file
 from models.job import (
     Job,
     JOB_STATUS_RUNNING,
@@ -503,6 +504,7 @@ def _run_webhook_preupload_rename_pass(
         copied_count = 0
         skipped_count = 0
         error_count = 0
+        skipped_artwork = 0
 
         for item in os.listdir(tmp_source_dir):
             src_path = os.path.join(tmp_source_dir, item)
@@ -520,6 +522,11 @@ def _run_webhook_preupload_rename_pass(
                             os.makedirs(os.path.join(dest_root, dir_name), exist_ok=True)
 
                         for file_name in files:
+                            # Artwork is never staged (it's placed straight to the real
+                            # destination), so any artwork in tmp/ is residue — don't spread it.
+                            if is_artwork_file(file_name):
+                                skipped_artwork += 1
+                                continue
                             src_file = os.path.join(root, file_name)
                             dest_file = os.path.join(dest_root, file_name)
 
@@ -530,7 +537,9 @@ def _run_webhook_preupload_rename_pass(
                             shutil.copy2(src_file, dest_file)
                             copied_count += 1
                 elif os.path.isfile(src_path):
-                    if os.path.exists(dest_path) and filecmp.cmp(src_path, dest_path, shallow=False):
+                    if is_artwork_file(item):
+                        skipped_artwork += 1
+                    elif os.path.exists(dest_path) and filecmp.cmp(src_path, dest_path, shallow=False):
                         skipped_count += 1
                     else:
                         shutil.copy2(src_path, dest_path)
@@ -544,6 +553,13 @@ def _run_webhook_preupload_rename_pass(
                     staging_dir=tmp_source_dir,
                 )
 
+        if skipped_artwork:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Skipped {skipped_artwork} artwork file(s) found in tmp/ staging — artwork is never staged, so these are residue and were not copied to the destination",
+                title=parsed_payload.get("title"),
+                skipped_artwork=skipped_artwork,
+            )
         log_info(
             LogTags.UPLOADER,
             "Webhook pre-upload tmp promotion complete",

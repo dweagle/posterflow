@@ -39,6 +39,7 @@ from services.discord_notifications import send_discord_notification, send_major
 from services.community_reconcile import reconcile_community_lists
 from core.hooks import run_post_job_hook, HOOK_KEY_RENAMER
 from util.poster_settings import ASSET_TYPES, get_asset_include, get_poster_destination
+from util.posters.scanner import is_artwork_file
 
 
 def _extract_target_name(rename_message: str) -> str:
@@ -128,22 +129,25 @@ def _build_progress_callback(
     return rename_progress
 
 
-def _prune_dead_symlinks(tmp_dir: str) -> tuple[int, int]:
-    """Remove dangling symlinks (and folders left empty by their removal) from tmp/.
+def _prune_tmp_staging(tmp_dir: str) -> tuple[int, int, int]:
+    """Remove dangling symlinks, stray artwork, and folders left empty by their removal
+    from tmp/.
 
     A staged symlink goes dead when its gdrive source poster is removed/renamed. Those
     stale links accumulate forever (rename only touches matched items, cleanup only
-    removes orphans), so prune them here. Only dangling links and the folders they leave
-    empty are removed — valid entries are untouched so their mtimes stay intact for the
-    stat-based "needs new poster?" short-circuit.
+    removes orphans), so prune them here. Artwork (logo/background/square) is never staged
+    — it's placed straight to the real destination — so any artwork file in tmp/ is residue
+    the tmp→destination copy must not spread. Valid poster entries are untouched so their
+    mtimes stay intact for the stat-based "needs new poster?" short-circuit.
 
     Returns:
-        Tuple of (removed_links, removed_dirs).
+        Tuple of (removed_links, removed_artwork, removed_dirs).
     """
     removed_links = 0
+    removed_artwork = 0
     removed_dirs = 0
     if not os.path.isdir(tmp_dir):
-        return (0, 0)
+        return (0, 0, 0)
 
     # Bottom-up so a folder emptied by link removal is seen as empty when we reach it.
     for root, _dirs, files in os.walk(tmp_dir, topdown=False):
@@ -155,6 +159,12 @@ def _prune_dead_symlinks(tmp_dir: str) -> tuple[int, int]:
                     removed_links += 1
                 except OSError as exc:
                     log_warning(LogTags.RENAMER, f"Could not remove dead symlink {path}: {exc}", path=path, error=str(exc))
+            elif is_artwork_file(name):
+                try:
+                    os.remove(path)
+                    removed_artwork += 1
+                except OSError as exc:
+                    log_warning(LogTags.RENAMER, f"Could not remove stray artwork {path}: {exc}", path=path, error=str(exc))
         if root != tmp_dir:
             try:
                 if not os.listdir(root):
@@ -162,7 +172,7 @@ def _prune_dead_symlinks(tmp_dir: str) -> tuple[int, int]:
                     removed_dirs += 1
             except OSError:
                 pass
-    return (removed_links, removed_dirs)
+    return (removed_links, removed_artwork, removed_dirs)
 
 
 def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwork_slot_filter=None):
@@ -275,16 +285,18 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
 
     border_ran_successfully = False
 
-    # Prune stale staging symlinks (source removed/renamed on the drive) before
-    # border/copy runs over tmp/, so one dead link can't poison those steps and
+    # Prune stale staging symlinks (source removed/renamed on the drive) and stray artwork
+    # before border/copy runs over tmp/, so one dead link can't poison those steps and
     # cruft doesn't accumulate. Valid entries' mtimes are left intact.
     if not skip_border_post_processing and not config_data.get("dry_run", False):
-        pruned_links, pruned_dirs = _prune_dead_symlinks(os.path.join(dest_dir, "tmp"))
-        if pruned_links or pruned_dirs:
+        pruned_links, pruned_artwork, pruned_dirs = _prune_tmp_staging(os.path.join(dest_dir, "tmp"))
+        if pruned_links or pruned_artwork or pruned_dirs:
             log_info(
                 LogTags.RENAMER,
-                f"Pruned {pruned_links} dead staging symlink(s) and {pruned_dirs} empty folder(s) from tmp/",
+                f"Pruned {pruned_links} dead staging symlink(s), {pruned_artwork} stray artwork file(s) "
+                f"and {pruned_dirs} empty folder(s) from tmp/",
                 removed_links=pruned_links,
+                removed_artwork=pruned_artwork,
                 removed_dirs=pruned_dirs,
             )
 
@@ -374,6 +386,7 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                     copied_count = 0
                     skipped_count = 0
                     failed_count = 0
+                    skipped_artwork = 0
 
                     # Copy a single staged file to its destination. Isolated so one
                     # bad file (e.g. a dangling symlink whose gdrive source is gone)
@@ -420,13 +433,28 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
                                     os.makedirs(os.path.join(dest_root, dir_name), exist_ok=True)
 
                                 for file_name in files:
+                                    # Artwork is never staged (it's placed straight to the real
+                                    # destination), so any artwork in tmp/ is residue — don't spread it.
+                                    if is_artwork_file(file_name):
+                                        skipped_artwork += 1
+                                        continue
                                     _copy_one(
                                         os.path.join(root, file_name),
                                         os.path.join(dest_root, file_name),
                                     )
 
                         elif os.path.isfile(src_path):
+                            if is_artwork_file(item):
+                                skipped_artwork += 1
+                                continue
                             _copy_one(src_path, dest_path)
+
+                    if skipped_artwork:
+                        log_warning(
+                            LogTags.RENAMER,
+                            f"Skipped {skipped_artwork} artwork file(s) found in tmp/ staging — artwork is never staged, so these are residue and were not copied to the destination",
+                            skipped_artwork=skipped_artwork,
+                        )
 
                     if failed_count:
                         log_warning(
