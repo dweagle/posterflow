@@ -6,7 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-07-28
+## [0.13.0] - 2026-07-31
 ### Added
 - Drives: unsubscribing now asks before removing, with an opt-in to delete the drive's downloaded files. Asset Cleanup prunes posters from unsubscribed drives so they stop skewing style counts.
 - Artwork Drives: each drive can now sync only the artwork types you want. Pick types when subscribing or in the drive's settings; turning a type off deletes its already-synced files (with a confirmation).
