@@ -12,6 +12,11 @@ type LogsTab = 'system' | 'job'
 // Job-log search keeps the newest N matches, mirroring the system search's server-side cap.
 const JOB_SEARCH_LIMIT = 10000
 
+// Plain-DOM panes freeze the tab when a whole 100k-line file mounts in one commit, so the
+// viewer and the search results each mount a window of rows and extend it on scroll
+// (slicing is instant — the file is already in memory).
+const JOB_PANE_WINDOW = 2000
+
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 const isLogsTab = (value: string): value is LogsTab => {
@@ -147,6 +152,12 @@ function Logs() {
   const [jobFileSearch, setJobFileSearch] = useState<{ term: string; lines: number[]; total: number; truncated: boolean } | null>(null)
   const [jobMatchIdx, setJobMatchIdx] = useState(0)
   const jobSearchPaneRef = useRef<LogPaneHandle | null>(null)
+  // Mounted-row windows: file viewer grows from the top of the file, search results
+  // grow upward from the newest match.
+  const [jobViewCount, setJobViewCount] = useState(JOB_PANE_WINDOW)
+  const [jobResultCount, setJobResultCount] = useState(JOB_PANE_WINDOW)
+  // A match above the mounted window can't be scrolled to until its row commits.
+  const pendingMatchScrollRef = useRef<number | null>(null)
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
     sync_one: true,
     sync_all: true,
@@ -475,45 +486,83 @@ function Logs() {
     const truncated = hits.length > JOB_SEARCH_LIMIT
     const lines = truncated ? hits.slice(-JOB_SEARCH_LIMIT) : hits
     setJobFileSearch({ term, lines, total: hits.length, truncated })
+    setJobResultCount(JOB_PANE_WINDOW)
     setJobMatchIdx(Math.max(0, lines.length - 1)) // start at the newest match
   }
 
   const handleJobSearchChange = (value: string) => {
     setJobSearch(value)
-    if (jobFileSearch) setJobFileSearch(null) // edited term — results are stale, back to the file
+    if (jobFileSearch) {
+      setJobFileSearch(null) // edited term — results are stale, back to the file
+      setJobViewCount(JOB_PANE_WINDOW) // the file pane remounts at the top — mount only the window
+    }
   }
 
   const clearJobSearch = () => {
     setJobSearch('')
     setJobFileSearch(null)
+    setJobViewCount(JOB_PANE_WINDOW)
   }
 
   // Opening a different file resets the find bar.
   useEffect(() => {
     setJobSearch('')
     setJobFileSearch(null)
+    setJobViewCount(JOB_PANE_WINDOW)
   }, [selectedLog])
+
+  // First rendered match index; rows before this exist only as the header note.
+  const jobResultOffset = jobFileSearch ? Math.max(0, jobFileSearch.lines.length - jobResultCount) : 0
+  const extendJobResults = useCallback(() => {
+    if (!jobFileSearch) return
+    setJobResultCount(count => Math.min(Math.max(jobFileSearch.lines.length, JOB_PANE_WINDOW), count + JOB_PANE_WINDOW))
+  }, [jobFileSearch])
 
   // Every result row IS a match, so cycling steps row to row (with wraparound).
   const jobMatchClamped = jobFileSearch ? Math.min(jobMatchIdx, Math.max(0, jobFileSearch.lines.length - 1)) : 0
   const cycleJobMatch = (direction: 1 | -1) => {
     if (!jobFileSearch || jobFileSearch.lines.length === 0) return
-    const next = (jobMatchClamped + direction + jobFileSearch.lines.length) % jobFileSearch.lines.length
+    const total = jobFileSearch.lines.length
+    const next = (jobMatchClamped + direction + total) % total
     setJobMatchIdx(next)
-    jobSearchPaneRef.current?.scrollToItem(jobFileSearch.lines[next])
+    if (next >= jobResultOffset) {
+      jobSearchPaneRef.current?.scrollToItem(jobFileSearch.lines[next])
+    } else {
+      setJobResultCount(Math.min(total, Math.ceil((total - next) / JOB_PANE_WINDOW) * JOB_PANE_WINDOW))
+      pendingMatchScrollRef.current = jobFileSearch.lines[next]
+    }
   }
+
+  useEffect(() => {
+    if (pendingMatchScrollRef.current == null) return
+    jobSearchPaneRef.current?.scrollToItem(pendingMatchScrollRef.current)
+    pendingMatchScrollRef.current = null
+  })
 
   // Held by reference so typing in the find box can't re-render the whole-file list.
   const renderJobLine = useCallback((line: string) => <VirtualLogLine line={line} />, [])
+  const jobViewLines = useMemo(
+    () => (jobLines.length > jobViewCount ? jobLines.slice(0, jobViewCount) : jobLines),
+    [jobLines, jobViewCount]
+  )
+  const extendJobView = useCallback(() => {
+    setJobViewCount(count => Math.min(Math.max(jobLines.length, JOB_PANE_WINDOW), count + JOB_PANE_WINDOW))
+  }, [jobLines])
   const jobFileViewer = useMemo(() => (
     <LogPane
       key="job-file"
       className="log-hang"
-      items={jobLines}
+      items={jobViewLines}
       itemKey={(_line, index) => index}
       renderItem={renderJobLine}
+      onEndReached={extendJobView}
+      footer={jobLines.length > jobViewLines.length ? (
+        <div className="logs-history-note">
+          — {(jobLines.length - jobViewLines.length).toLocaleString()} more lines — keep scrolling —
+        </div>
+      ) : null}
     />
-  ), [jobLines, renderJobLine])
+  ), [jobLines, jobViewLines, renderJobLine, extendJobView])
 
   // Clean up live WS on unmount or tab change
   useEffect(() => {
@@ -1386,15 +1435,21 @@ function Logs() {
                           key="job-search"
                           ref={jobSearchPaneRef}
                           className="log-hang"
-                          items={jobFileSearch.lines}
+                          items={jobFileSearch.lines.slice(jobResultOffset)}
                           itemKey={(lineIndex) => lineIndex}
                           renderItem={(lineIndex, index) => (
                             <VirtualLogLine
                               line={jobLines[lineIndex]}
                               term={jobFileSearch.term}
-                              active={index === jobMatchClamped}
+                              active={jobResultOffset + index === jobMatchClamped}
                             />
                           )}
+                          onStartReached={extendJobResults}
+                          header={jobResultOffset > 0 ? (
+                            <div className="logs-history-note">
+                              — {jobResultOffset.toLocaleString()} older matches — scroll up to load —
+                            </div>
+                          ) : null}
                           initialBottom
                         />
                       )

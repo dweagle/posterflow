@@ -21,16 +21,20 @@ type LogPaneProps<T> = {
   onPinnedChange?: (pinned: boolean) => void
   // Fires when scrolled near the top (history paging). Caller guards re-entry.
   onStartReached?: () => void
+  // Fires when scrolled near the bottom (window extension). Caller guards re-entry.
+  onEndReached?: () => void
   header?: ReactNode
+  footer?: ReactNode
   className?: string
   ref?: Ref<LogPaneHandle>
 }
 
 const PIN_THRESHOLD_PX = 160
 const TOP_REACH_PX = 80
+const END_REACH_PX = 160
 const GESTURE_WINDOW_MS = 500
 
-function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom = false, onPinnedChange, onStartReached, header, className, ref }: LogPaneProps<T>) {
+function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom = false, onPinnedChange, onStartReached, onEndReached, header, footer, className, ref }: LogPaneProps<T>) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(follow)
   const gestureAtRef = useRef(0)
@@ -41,6 +45,8 @@ function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom 
   onPinnedChangeRef.current = onPinnedChange
   const onStartReachedRef = useRef(onStartReached)
   onStartReachedRef.current = onStartReached
+  const onEndReachedRef = useRef(onEndReached)
+  onEndReachedRef.current = onEndReached
 
   const setPinned = useCallback((value: boolean) => {
     if (pinnedRef.current === value) return
@@ -114,6 +120,7 @@ function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom 
       }
     }
     if (onStartReachedRef.current && el.scrollTop < TOP_REACH_PX) onStartReachedRef.current()
+    if (onEndReachedRef.current && el.scrollHeight - el.scrollTop - el.clientHeight < END_REACH_PX) onEndReachedRef.current()
   }
 
   // Scroll bookkeeping after every commit: glue while pinned, land at the tail when
@@ -161,6 +168,7 @@ function LogPane<T>({ items, itemKey, renderItem, follow = false, initialBottom 
           </div>
         )
       })}
+      {footer}
     </div>
   )
 }

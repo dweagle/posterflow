@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Logs from '../../src/pages/Logs'
@@ -163,11 +163,58 @@ describe('Logs', () => {
   it('reports when a job log search has no matches', async () => {
     const user = userEvent.setup()
     await openWorkflowLog(user, 'alpha line\nbeta line')
-    await screen.findByText('beta line')
-
     await user.type(screen.getByPlaceholderText('Search this log file…'), 'gamma')
     await user.click(screen.getByRole('button', { name: 'Search' }))
 
     expect(await screen.findByText('No matches in this log file')).toBeTruthy()
+  })
+
+  const mountedRows = () => document.querySelectorAll('.log-pane-row').length
+
+  it('mounts large files as a window that extends on scroll', async () => {
+    const user = userEvent.setup()
+    const content = Array.from({ length: 4100 }, (_, i) => `line ${i}`).join('\n')
+    await openWorkflowLog(user, content)
+    await screen.findByText('line 0')
+
+    // Only the first window is in the DOM, with a note about the rest.
+    expect(mountedRows()).toBe(2000)
+    expect(screen.getByText(`— ${(2100).toLocaleString()} more lines — keep scrolling —`)).toBeTruthy()
+
+    // jsdom has zero heights, so any scroll counts as "near the bottom".
+    fireEvent.scroll(document.querySelector('.log-pane')!)
+    expect(mountedRows()).toBe(4000)
+
+    fireEvent.scroll(document.querySelector('.log-pane')!)
+    expect(mountedRows()).toBe(4100)
+    expect(screen.queryByText(/more lines — keep scrolling/)).toBeNull()
+  })
+
+  it('windows large search results but counts every match', async () => {
+    const user = userEvent.setup()
+    const content = Array.from({ length: 3000 }, (_, i) => `alpha ${i}`).join('\n')
+    await openWorkflowLog(user, content)
+    await screen.findByText('alpha 0')
+
+    await user.type(screen.getByPlaceholderText('Search this log file…'), 'alpha')
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+
+    // Newest 2000 matches mounted, older ones behind the scroll-up note; counter shows all.
+    await waitFor(() => expect(mountedRows()).toBe(2000))
+    const rows = document.querySelectorAll('.log-pane-row')
+    expect(rows[0].textContent).toBe('alpha 1000')
+    expect(rows[rows.length - 1].textContent).toBe('alpha 2999')
+    expect(screen.getByText(`— ${(1000).toLocaleString()} older matches — scroll up to load —`)).toBeTruthy()
+    expect(screen.getByText(`${(3000).toLocaleString()} / ${(3000).toLocaleString()}`)).toBeTruthy()
+
+    // Cycling wraps to the oldest match, which forces the window to grow around it.
+    await user.click(screen.getByTitle('Next (newer) match'))
+    expect(mountedRows()).toBe(3000)
+    expect(screen.getByText(`1 / ${(3000).toLocaleString()}`)).toBeTruthy()
+
+    // Editing the term returns to the file, again mounting only its window.
+    await user.type(screen.getByPlaceholderText('Search this log file…'), 'x')
+    await waitFor(() => expect(mountedRows()).toBe(2000))
+    expect(document.querySelectorAll('mark.log-match').length).toBe(0)
   })
 })
