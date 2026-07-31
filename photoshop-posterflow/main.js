@@ -431,14 +431,27 @@ const linkUrl   = document.querySelector('.linkurl');
 const linkPass  = document.querySelector('.linkpass');
 const linkToggleBtn = document.querySelector('[data-act="link-toggle"]');
 
+let linkStatus = null;   // last poll result: null = none yet, { ok: true } | { ok: false, msg }
+
+function updateLinkMsg() {
+  const cfg = R.getConfig();
+  if (!(cfg.enabled && cfg.url)) {
+    linkMsg.textContent = 'Posterflow server link is off. Enter the server URL (and app password if one is set), Save, then Enable.';
+  } else if (!linkStatus) {
+    linkMsg.textContent = 'Connecting to ' + R.baseUrl(cfg) + '…';
+  } else if (linkStatus.ok) {
+    linkMsg.textContent = 'Connected to ' + R.baseUrl(cfg) + ' — "PS" exports open here automatically.';
+  } else {
+    linkMsg.textContent = 'Can\'t reach ' + R.baseUrl(cfg) + ' — ' + linkStatus.msg + '. (Plain http works on Windows only; Mac needs https.)';
+  }
+}
+
 function refreshLinkBar() {
   const cfg = R.getConfig();
   linkUrl.value = cfg.url || '';
   linkPass.value = cfg.password || '';
   linkToggleBtn.textContent = cfg.enabled ? 'Disable' : 'Enable';
-  linkMsg.textContent = cfg.enabled && cfg.url
-    ? 'Polling ' + cfg.url + ' — "PS" exports open here automatically. (Plain http works on Windows only; Mac needs https.)'
-    : 'Posterflow server link is off. Enter the server URL (and app password if one is set), Save, then Enable.';
+  updateLinkMsg();
 }
 document.querySelector('[data-act="link"]').addEventListener('click', () => {
   if (linkBar.classList.contains('hidden')) { refreshLinkBar(); linkBar.classList.remove('hidden'); }
@@ -450,6 +463,7 @@ document.querySelector('[data-act="link-save"]').addEventListener('click', () =>
   cfg.url = String(linkUrl.value || '').trim();
   cfg.password = String(linkPass.value || '');
   R.setConfig(cfg);
+  linkStatus = null;
   refreshLinkBar();
   note('Posterflow server link saved.');
 });
@@ -458,6 +472,7 @@ linkToggleBtn.addEventListener('click', () => {
   cfg.url = String(linkUrl.value || '').trim() || cfg.url;
   cfg.enabled = !cfg.enabled;
   R.setConfig(cfg);
+  linkStatus = null;
   refreshLinkBar();
   note(cfg.enabled ? 'Posterflow link enabled — watching the queue.' : 'Posterflow link disabled.');
 });
@@ -469,11 +484,17 @@ setInterval(async () => {
   if (busy || batchBusy) return;
   if (!R.isConfigured(R.getConfig())) return;
   let items;
-  try { items = await R.pollQueue(); pollErrNoted = false; }
+  try { items = await R.pollQueue(); }
   catch (e) {
-    if (!pollErrNoted) { pollErrNoted = true; note('Posterflow link: ' + (e && e.message ? e.message : e)); }
+    const msg = e && e.message ? e.message : String(e);
+    linkStatus = { ok: false, msg };
+    updateLinkMsg();
+    if (!pollErrNoted) { pollErrNoted = true; note('Posterflow link: ' + msg); }
     return;
   }
+  pollErrNoted = false;
+  linkStatus = { ok: true };
+  updateLinkMsg();
   for (const item of items) {
     try {
       note('Opening "' + item.filename + '" from Posterflow…');
