@@ -6,6 +6,31 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-28
+### Added
+- Drives: unsubscribing now asks before removing, with an opt-in to delete the drive's downloaded files. Asset Cleanup prunes posters from unsubscribed drives so they stop skewing style counts.
+- Artwork Drives: each drive can now sync only the artwork types you want. Pick types when subscribing or in the drive's settings; turning a type off deletes its already-synced files (with a confirmation).
+- Photoshop: ported the Photopea plugin to native Photoshop — season/single/sequel/year chips, save/JPG/logo exports, tag batches with collection logos, and a PosterFlow server link that auto-opens queued exports. Downloadable as an installable .ccx from the PSD settings modal.
+- Photopea Plugin: expanded tag language from Berzerker's batch script (ranges, aliases, cls, Collection suffix, dedupe, filterable runs) plus collection logo placement.
+- Photopea/Photoshop Plugin: logo-group PNG export and Season-YYYY year chips in both panels.
+- Maker Tools: a new editor toggle lets each export target Photopea or the Photoshop plugin.
+- Maker Tools: gallery logos and backdrops get a save-to-folder button, and posters get the square-art crop tool — each saves to its configured export folder using the artwork-drive filename, with an overwrite confirmation.
+- Asset Renamer: the Include selection now warns Kometa users to keep `dimensional_asset_rename: false` — with it on, Kometa renames placed logos to backgrounds in the assets folder.
+- Border Replacer: solid border colors now carry over when switching to gradient borders, including holiday preset defaults.
+
+### Changed
+- Maker Tools: the tag picker now covers the full plugin tag language, and the PSD settings modal is reorganized into a compact two-column layout with a Photoshop plugin download link.
+- Community Lists: the claimed items filter now includes open items for makers.
+
+### Fixed
+- Renamer: style attribution now resolves by drive folder, so whole drives no longer vanish from the style report as "Unknown".
+- Renamer: the tmp/ staging prune now removes stray artwork files, and tmp→destination copies skip artwork — artwork is placed straight to its real destination, so tmp residue no longer spreads.
+- Unmatched Assets: an empty or unreadable destination folder no longer reports "100% complete" — every eligible item is counted as missing, and the log says why.
+- Asset Cleanup: stale posters left when a drive changes image format (a `poster.png` beside the live `poster.jpg`) are now pruned, matching artwork handling.
+- Asset Cleanup: posters from unsubscribed drives are removed from `tmp/` as well as the destination, so they stop being copied back and re-deleted on every run.
+- Job Logs: log search no longer freezes during searching of large logs.
+- Missing Posters / Poster Style modals: the per-item buttons (TMDB, Maker, Google, TPDB, Request) now wrap onto another line on narrow screens instead of overflowing.
+
 ## [0.12.3] - 2026-07-27
 ### Added
 - Artwork Drives: added the Bostafari drive.
