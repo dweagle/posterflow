@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-31
+### Added
+- Artwork Drives: added the BZ artwork drive.
+
+### Changed
+- Photoshop Plugin: clearer server link status messaging.  (Plugin will have to be reinstalled using the .ccx package. Settings will be saved.)
+
 ## [0.13.0] - 2026-07-31
 ### Added
 - Poster Drives: added the Chodeus CL2K drive.
