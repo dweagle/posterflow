@@ -8,6 +8,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [0.13.0] - 2026-07-31
 ### Added
+- Poster Drives: added the Chodeus CL2K drive.
 - Drives: unsubscribing now asks before removing, with an opt-in to delete the drive's downloaded files. Asset Cleanup prunes posters from unsubscribed drives so they stop skewing style counts.
 - Artwork Drives: each drive can now sync only the artwork types you want. Pick types when subscribing or in the drive's settings; turning a type off deletes its already-synced files (with a confirmation).
 - Photoshop: ported the Photopea plugin to native Photoshop — season/single/sequel/year chips, save/JPG/logo exports, tag batches with collection logos, and a PosterFlow server link that auto-opens queued exports. Downloadable as an installable .ccx from the PSD settings modal.
