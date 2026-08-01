@@ -260,6 +260,7 @@ export interface ArtworkCandidate {
   ref: string
   width: number | null
   height: number | null
+  language?: string | null        // ISO 639-1, or null when the image is textless
   off_white_pct?: number | null   // logos only, when evaluated
   is_white?: boolean | null
 }

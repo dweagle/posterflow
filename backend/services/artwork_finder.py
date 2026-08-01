@@ -183,11 +183,19 @@ def tmdb_images(item: FinderItem, api_key: str) -> dict:
                      include_image_language="en,null") or {}
 
 
-def textless_backdrops(images: dict, min_width: int) -> list[dict]:
-    """All textless backdrops >= min_width, best first (interactive candidate list)."""
-    cands = [b for b in (images.get("backdrops") or [])
-             if b.get("iso_639_1") is None and (b.get("width") or 0) >= min_width]
-    cands.sort(key=lambda b: (b.get("vote_average") or 0, b.get("width") or 0), reverse=True)
+def backdrop_candidates(images: dict, min_width: int, *, textless_only: bool = True) -> list[dict]:
+    """Backdrops best first — textless ahead of language-tagged, then best-voted, then widest.
+
+    Batch auto-pick keeps ``textless_only``: unattended it must not grab a small or text-laden
+    backdrop. The interactive browser passes False and lists everything, because obscure titles
+    often have nothing on TMDB but 1280px or text-tagged backdrops — filtering those away left
+    the user staring at an empty list with no way to loosen it."""
+    cands = list(images.get("backdrops") or [])
+    if textless_only:
+        cands = [b for b in cands
+                 if b.get("iso_639_1") is None and (b.get("width") or 0) >= min_width]
+    cands.sort(key=lambda b: (0 if b.get("iso_639_1") is None else 1,
+                              -(b.get("vote_average") or 0), -(b.get("width") or 0)))
     return cands
 
 
@@ -342,11 +350,12 @@ def _resolve_url(source: str, ref: str) -> str:
 # ------------------------------------------------------------------ candidate listing
 
 
-def tvdb_candidate_groups(item: FinderItem, api_key: str, pin: str, min_backdrop_width: int) -> dict:
+def tvdb_candidate_groups(item: FinderItem, api_key: str, pin: str, min_backdrop_width: int,
+                          *, textless_backgrounds: bool = True) -> dict:
     """TheTVDB's logos / backgrounds / posters for an item, already in candidate shape.
 
-    Mirrors the TMDB pickers: logos are PNG-only (a clear logo needs transparency), backgrounds
-    are textless and wide enough, posters are textless-first."""
+    Mirrors the TMDB pickers: logos are PNG-only (a clear logo needs transparency), posters are
+    textless-first, and backgrounds follow the same textless/min-width rule as ``backdrop_candidates``."""
     resolved = tvdb_service.resolve_tvdb_id(media_type=item.media_type, tvdb_id=item.tvdb_id,
                                             imdb_id=item.imdb_id, api_key=api_key, pin=pin)
     if not resolved or item.is_collection:
@@ -357,13 +366,18 @@ def tvdb_candidate_groups(item: FinderItem, api_key: str, pin: str, min_backdrop
     grouped = tvdb_service.group_artwork(records, tvdb_service.artwork_types(api_key, pin), "en+textless")
 
     def shape(entries):
-        return [{"source": "tvdb", "ref": e["file_path"], "width": e.get("width"), "height": e.get("height")}
+        return [{"source": "tvdb", "ref": e["file_path"], "width": e.get("width"),
+                 "height": e.get("height"), "language": e.get("language")}
                 for e in entries]
+
+    backgrounds = grouped["backdrops"]   # already textless-first, then best-scored
+    if textless_backgrounds:
+        backgrounds = [b for b in backgrounds
+                       if b["language"] is None and (b.get("width") or 0) >= min_backdrop_width]
 
     return {
         "logos": shape([l for l in grouped["logos"] if str(l["file_path"]).lower().endswith(".png")]),
-        "backgrounds": shape([b for b in grouped["backdrops"]
-                              if b["language"] is None and (b.get("width") or 0) >= min_backdrop_width]),
+        "backgrounds": shape(backgrounds),
         "posters": shape(grouped["posters"]),
     }
 
@@ -372,7 +386,8 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     plex: Optional[PlexMetadataProvider], session: requests.Session,
                     min_backdrop_width: int = 1920, evaluate_white: bool = False,
                     white_top_n: int = 8, source: str = "tmdb",
-                    tvdb_creds: Optional[tuple[str, str]] = None) -> dict:
+                    tvdb_creds: Optional[tuple[str, str]] = None,
+                    textless_backgrounds: bool = True) -> dict:
     """Candidates per requested type, from one source at a time.
 
     ``source='tmdb'`` is the default pairing: logos/backgrounds/posters from TMDB plus square art
@@ -380,26 +395,31 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
     TMDB's, so they aren't offered). ``source='tvdb'`` swaps in TheTVDB and yields no square art,
     which TVDB doesn't carry either.
 
+    ``textless_backgrounds`` keeps the strict auto-pick rule (textless and >= min_backdrop_width);
+    the interactive browser passes False so the user sees every backdrop and judges it themselves.
+
     Returns {"logos": [...], "backgrounds": [...], "squareart": [...], "plex_available": bool}.
-    Each candidate: {source, ref, width, height, off_white_pct?, is_white?}."""
+    Each candidate: {source, ref, width, height, language, off_white_pct?, is_white?}."""
     out: dict[str, Any] = {"logos": [], "backgrounds": [], "squareart": [], "posters": [],
                            "plex_available": plex is not None}
 
     use_tvdb = source == "tvdb"
     if use_tvdb:
         key, pin = tvdb_creds or ("", "")
-        groups = tvdb_candidate_groups(item, key, pin, min_backdrop_width)
+        groups = tvdb_candidate_groups(item, key, pin, min_backdrop_width,
+                                       textless_backgrounds=textless_backgrounds)
     else:
         tmdb_imgs = tmdb_images(item, tmdb_api_key) if item.tmdb_id else {}
         groups = {
-            "logos": [{"source": "tmdb", "ref": c["file_path"],
-                       "width": c.get("width"), "height": c.get("height")}
+            "logos": [{"source": "tmdb", "ref": c["file_path"], "width": c.get("width"),
+                       "height": c.get("height"), "language": c.get("iso_639_1")}
                       for c in logo_candidates(tmdb_imgs)],
-            "backgrounds": [{"source": "tmdb", "ref": b["file_path"],
-                             "width": b.get("width"), "height": b.get("height")}
-                            for b in textless_backdrops(tmdb_imgs, min_backdrop_width)],
-            "posters": [{"source": "tmdb", "ref": p["file_path"],
-                         "width": p.get("width"), "height": p.get("height")}
+            "backgrounds": [{"source": "tmdb", "ref": b["file_path"], "width": b.get("width"),
+                             "height": b.get("height"), "language": b.get("iso_639_1")}
+                            for b in backdrop_candidates(tmdb_imgs, min_backdrop_width,
+                                                         textless_only=textless_backgrounds)],
+            "posters": [{"source": "tmdb", "ref": p["file_path"], "width": p.get("width"),
+                         "height": p.get("height"), "language": p.get("iso_639_1")}
                         for p in poster_candidates(tmdb_imgs)],
         }
 

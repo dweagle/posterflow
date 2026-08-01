@@ -46,14 +46,26 @@ def test_make_logo_white_forces_white_keeps_alpha():
 # ---------------------------------------------------------------- pickers
 
 
-def test_textless_backdrops_sorted_best_first():
-    images = {"backdrops": [
+def _backdrops() -> dict:
+    return {"backdrops": [
         {"file_path": "/c.jpg", "iso_639_1": None, "width": 1920, "vote_average": 5},
         {"file_path": "/d.jpg", "iso_639_1": None, "width": 3840, "vote_average": 8},
         {"file_path": "/e.jpg", "iso_639_1": "en", "width": 3840, "vote_average": 10},
+        {"file_path": "/f.jpg", "iso_639_1": None, "width": 1280, "vote_average": 9},
     ]}
-    out = af.textless_backdrops(images, 1920)
+
+
+def test_backdrop_candidates_strict_drops_text_and_narrow():
+    # Auto-pick's rule: textless only, at least min_width wide, best first.
+    out = af.backdrop_candidates(_backdrops(), 1920)
     assert [b["file_path"] for b in out] == ["/d.jpg", "/c.jpg"]
+
+
+def test_backdrop_candidates_browse_lists_everything_textless_first():
+    # The interactive browser keeps the narrow (/f) and text-tagged (/e) ones — obscure titles
+    # often have nothing else — but ranks textless ahead of them.
+    out = af.backdrop_candidates(_backdrops(), 1920, textless_only=False)
+    assert [b["file_path"] for b in out] == ["/f.jpg", "/d.jpg", "/c.jpg", "/e.jpg"]
 
 
 def test_logo_candidates_png_only_sorted():

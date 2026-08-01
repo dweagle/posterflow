@@ -33,6 +33,7 @@ class Candidate(BaseModel):
     ref: str               # tmdb file_path ("/xxx.png"), or an absolute gracenote/TVDB CDN url
     width: Optional[int] = None
     height: Optional[int] = None
+    language: Optional[str] = None          # ISO 639-1, or None when the image is textless
     off_white_pct: Optional[float] = None   # logos only, when evaluated
     is_white: Optional[bool] = None
 
@@ -161,7 +162,6 @@ def get_candidates(
     imdb_id: Optional[str] = None,
     types: str = "logo,background,squareart,poster",
     evaluate_white: bool = True,
-    min_backdrop_width: int = 1920,
     source: str = "tmdb",
     db: Session = Depends(get_db),
 ) -> CandidatesResponse:
@@ -169,7 +169,11 @@ def get_candidates(
 
     ``source=tmdb`` (the default) lists TMDB logos/backgrounds/posters plus square art from Plex's
     Gracenote provider. ``source=tvdb`` lists TheTVDB's instead — it's only ever called when the
-    user picks that tab, and it carries no square art."""
+    user picks that tab, and it carries no square art.
+
+    Backgrounds are listed unfiltered here (textless first), unlike the batch pull's strict
+    textless/min-width rule — browsing is a human choice, and the strict rule left obscure titles
+    showing nothing at all."""
     src = str(source or "tmdb").strip().lower()
     if src not in ("tmdb", "tvdb"):
         raise HTTPException(status_code=400, detail="source must be tmdb or tvdb")
@@ -192,8 +196,8 @@ def get_candidates(
     plex = af.PlexMetadataProvider(token, session) if token else None
     try:
         result = af.list_candidates(item, wanted, tmdb_api_key=key, plex=plex, session=session,
-                                    min_backdrop_width=min_backdrop_width, evaluate_white=evaluate_white,
-                                    source=src, tvdb_creds=tvdb_creds)
+                                    evaluate_white=evaluate_white, source=src, tvdb_creds=tvdb_creds,
+                                    textless_backgrounds=False)
     except tvdb.TvdbError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
     return CandidatesResponse(**result)

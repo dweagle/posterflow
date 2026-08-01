@@ -449,6 +449,13 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                     the one worth showing; the TVDB tab labels its own. */}
                                 {c.source === 'gracenote' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Plex</span>}
                                 {c.source === 'tvdb' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>TVDB</span>}
+                                {/* TL / language code, same badge the TMDB search gallery uses. Square art is a
+                                    single Plex image with no language, so it gets none. */}
+                                {key !== 'squareart' && (c.language === null
+                                  ? <span className="tmdb-gallery-lang" title="Textless">TL</span>
+                                  : c.language
+                                    ? <span className="tmdb-gallery-lang" title={`Tagged ${c.language.toUpperCase()} — likely has text`}>{c.language.toUpperCase()}</span>
+                                    : null)}
                                 {c.width && c.height ? <span className="tmdb-gallery-dims">{c.width}×{c.height}</span> : null}
                                 {key === 'logo' && typeof c.off_white_pct === 'number' && (
                                   <span className={`badge ${c.is_white ? 'badge-green' : 'badge-orange'}`} style={{ fontSize: '0.62rem' }} title={c.is_white ? 'Passes the white filter' : 'Off-white %'}>

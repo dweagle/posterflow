@@ -58,6 +58,29 @@ def test_candidates_returns_grouped_shape(client, test_db, monkeypatch):
     assert data["posters"][0]["ref"] == "/p.jpg"
 
 
+def test_candidates_browse_backgrounds_are_unfiltered(client, test_db, monkeypatch):
+    # Browsing must not apply the batch pull's textless/min-width rule: obscure titles often have
+    # nothing on TMDB but narrow or text-tagged backdrops, and filtering left the card empty.
+    _set_tmdb_key(test_db)
+    seen: dict = {}
+
+    def fake_list(*args, **kwargs):
+        seen.update(kwargs)
+        return {
+            "logos": [], "squareart": [], "posters": [], "plex_available": False,
+            "backgrounds": [{"source": "tmdb", "ref": "/b.jpg", "width": 1280, "height": 720,
+                             "language": "en"}],
+        }
+
+    monkeypatch.setattr("services.artwork_finder.list_candidates", fake_list)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 105, "media_type": "movie", "title": "Back to the Future", "year": 1985})
+    assert resp.status_code == 200
+    assert seen["textless_backgrounds"] is False
+    # the language rides along so the card can badge it
+    assert resp.json()["backgrounds"][0]["language"] == "en"
+
+
 def test_add_and_crop_accept_string_or_empty_year(client, test_db, tmp_path, monkeypatch):
     # The UI passes the TMDB result's year verbatim: a string, and '' when unknown
     # (collections especially). Both must parse, not 422.
