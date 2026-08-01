@@ -14,6 +14,7 @@ Plex/Gracenote is used ONLY for square art (TMDB has none) — its logos/backdro
 TMDB's, so they aren't offered.
 """
 import io
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -597,14 +598,71 @@ def _item_keys(item: FinderItem) -> set:
     return keys
 
 
-def build_scope_artwork_index(source_dir: Path) -> dict:
+def build_scope_identity_index(db, sync_target_index: int, source_dir: Path) -> dict:
+    """IDarr's own resolved identity for each of the scope's files, keyed by lowercased filename.
+
+    An artwork filename can't express which TMDB namespace its id belongs to — only a {tvdb-…} tag
+    marks a series — so a show TheTVDB doesn't list ("Cunk on...", tv 79063) parses as a movie and
+    inherits whatever movie owns that number ("The Unkabogable Praybeyt Benjamin"). IDarr already
+    resolved every file against TMDB and cached the answer per filename, so read that instead of
+    re-guessing from the name or spending a lookup per file. Empty dict if the scope has never run."""
+    from api.idarr import SETTING_MAKER_IDARR_CONFIG
+    from models.idarr import resolve_idarr_scope_token
+    from services.idarr_runner import IdarrRunner
+
+    try:
+        setting = get_setting(db, SETTING_MAKER_IDARR_CONFIG)
+        targets = json.loads(setting.value).get("sync_targets") or [] if setting and setting.value else []
+        if not (0 <= sync_target_index < len(targets)):
+            return {}
+        token = resolve_idarr_scope_token(targets[sync_target_index], sync_target_index)
+        if not token:
+            return {}
+        runner = IdarrRunner(db)
+        runner._scope_token = token   # no public setter; the runner only sets it from a run config
+        return runner._load_cache_filename_index()
+    except Exception:
+        return {}   # a browse/pull must never fail because the cache is unreadable
+
+
+def _parse_with_identity(file_path: Path, identity: Optional[dict]) -> dict:
+    """Parse an asset filename, then let IDarr's cached identity correct what the name can't say.
+
+    Only the type is overridden outright (filenames have no namespace marker); ids are filled in
+    where the name carries none, never overwritten — the file's own tags stay authoritative."""
+    from services.idarr_runner import IdarrRunner
+
+    parsed = IdarrRunner._parse_asset_no_season_hint(file_path)
+    cached = (identity or {}).get(file_path.name.strip().lower())
+    if not cached:
+        return parsed
+    if cached.get("asset_type"):
+        parsed["type"] = cached["asset_type"]
+    for key in ("tmdb_id", "tvdb_id", "imdb_id"):
+        if parsed.get(key) is None and cached.get(key) is not None:
+            parsed[key] = cached[key]
+    return parsed
+
+
+def finder_from_parsed_asset(parsed: dict) -> FinderItem:
+    """A FinderItem from an IDarr-parsed asset dict (shared by the scope index and the item list)."""
+    idarr_to_media = {"movie": "movie", "tv_series": "tv", "collection": "collection"}
+    return FinderItem(
+        title=str(parsed.get("title") or ""),
+        year=parsed.get("year") if isinstance(parsed.get("year"), int) else None,
+        tmdb_id=parsed.get("tmdb_id"), tvdb_id=parsed.get("tvdb_id"),
+        imdb_id=parsed.get("imdb_id"),
+        media_type=idarr_to_media.get(str(parsed.get("type") or "").lower(), "movie"),
+    )
+
+
+def build_scope_artwork_index(source_dir: Path, identity: Optional[dict] = None) -> dict:
     """Index the scope's existing artwork per subtype by match KEYS (ids + title), not exact
     filenames — so an item whose source metadata carries a different imdb/tmdb than the file on
     disk still counts as "already have" (an exact-name check pulled duplicates that IDarr then
-    flagged as conflicts). Files are parsed with IDarr's own parser."""
-    from services.idarr_runner import IMAGE_EXTENSIONS, IdarrRunner
+    flagged as conflicts). Files are parsed with IDarr's own parser, corrected by its cache."""
+    from services.idarr_runner import IMAGE_EXTENSIONS
 
-    idarr_to_media = {"movie": "movie", "tv_series": "tv", "collection": "collection"}
     index: dict = {t: set() for t in SUBTYPE_EXT}
     for subtype, sub in (("logo", "logos"), ("background", "backgrounds"), ("squareart", "squareart")):
         folder = source_dir / sub
@@ -614,17 +672,10 @@ def build_scope_artwork_index(source_dir: Path) -> dict:
             if not f.is_file() or f.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
             try:
-                parsed = IdarrRunner._parse_asset_no_season_hint(f)
+                parsed = _parse_with_identity(f, identity)
             except Exception:
                 continue
-            fi = FinderItem(
-                title=str(parsed.get("title") or ""),
-                year=parsed.get("year") if isinstance(parsed.get("year"), int) else None,
-                tmdb_id=parsed.get("tmdb_id"), tvdb_id=parsed.get("tvdb_id"),
-                imdb_id=parsed.get("imdb_id"),
-                media_type=idarr_to_media.get(str(parsed.get("type") or "").lower(), "movie"),
-            )
-            index[subtype] |= _item_keys(fi)
+            index[subtype] |= _item_keys(finder_from_parsed_asset(parsed))
     return index
 
 

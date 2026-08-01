@@ -267,9 +267,12 @@ def scope_items(sync_target_index: int, db: Session = Depends(get_db)) -> dict:
     source_dir, _is_asset_drive, label = _resolve_artwork_scope(db, sync_target_index)
     from modules.artwork_pull import _items_from_scope
 
-    index = af.build_scope_artwork_index(source_dir)
+    # IDarr's cache carries the type it actually resolved each file to, which the filename can't
+    # always say — a series TheTVDB doesn't list has no {tvdb-…} tag and otherwise reads as a movie.
+    identity = af.build_scope_identity_index(db, sync_target_index, source_dir)
+    index = af.build_scope_artwork_index(source_dir, identity)
     items = []
-    for it in _items_from_scope(source_dir):
+    for it in _items_from_scope(source_dir, identity):
         # Every item is checked for all three types, collections included. No source serves
         # collection logos or square art, so the batch pull still clamps collections to
         # backgrounds — but this is the browse view, and hiding the gap hid the drive's

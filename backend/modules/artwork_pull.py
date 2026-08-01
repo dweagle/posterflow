@@ -24,6 +24,7 @@ from models.job import (
 from models.setting import get_setting
 from services import artwork_finder as af
 from util.data.extract import extract_ids, extract_year
+from util.data.normalization import normalize_titles
 from util.posters.scanner import process_files
 
 TAG = LogTags.ARTWORK_PULL
@@ -82,8 +83,36 @@ def _items_from_poster_drives(db, drive_ids) -> list[af.FinderItem]:
     return list(out.values())
 
 
-def _items_from_scope(source_dir: Path) -> list[af.FinderItem]:
-    from services.idarr_runner import IMAGE_EXTENSIONS, IdarrRunner
+def _add_scope_item(out: dict[str, af.FinderItem], fi: af.FinderItem) -> None:
+    """Index a scope file's item, keeping BOTH sides of an id clash instead of dropping one.
+
+    A scope item legitimately spans the three folders under one name, so a repeat key is normally
+    the same item. A repeat key under a *different* title is not — it's two titles wearing one id,
+    which happens when a show's file carries only a {tmdb-…}: the number is namespaced by TMDB, so
+    tv 79063 ("Cunk on...") and movie 79063 ("The Unkabogable Praybeyt Benjamin") collide once the
+    filename's missing tvdb tag makes both look like movies. setdefault silently ate one of them."""
+    key = _dedup_key(fi)
+    kept = out.get(key)
+    if kept is None:
+        out[key] = fi
+    elif normalize_titles(kept.title) != normalize_titles(fi.title):
+        out.setdefault(f"{key}|{normalize_titles(fi.title)}", fi)
+
+
+def _namespace_is_guessed(item: af.FinderItem, source: str) -> bool:
+    """True when a scope item's movie/tv namespace came from the filename shape, not from an id.
+
+    Asset filenames prove the type only with a {tvdb-…} tag (series) or a "Collection" in the name;
+    everything else defaults to movie. A bare {tmdb-…} proves nothing on its own — the same number
+    is a different title in each TMDB namespace — so these have to be verified before the pull, or
+    it writes one title's artwork under another's name. Files carrying an {imdb-tt…} are left
+    trusted: an IMDb id is namespace-specific, and IDarr wrote it alongside the tmdb id."""
+    return (source == "scope" and item.media_type == "movie"
+            and bool(item.tmdb_id) and not item.tvdb_id and not item.imdb_id)
+
+
+def _items_from_scope(source_dir: Path, identity: Optional[dict] = None) -> list[af.FinderItem]:
+    from services.idarr_runner import IMAGE_EXTENSIONS
     out: dict[str, af.FinderItem] = {}
     for sub in ("logos", "backgrounds", "squareart"):
         folder = source_dir / sub
@@ -93,12 +122,12 @@ def _items_from_scope(source_dir: Path) -> list[af.FinderItem]:
             if not f.is_file() or f.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
             try:
-                parsed = IdarrRunner._parse_asset_no_season_hint(f)
+                parsed = af._parse_with_identity(f, identity)
             except Exception:
                 continue
             fi = _finder_from_idarr(parsed)
             if fi:
-                out.setdefault(_dedup_key(fi), fi)
+                _add_scope_item(out, fi)
     return list(out.values())
 
 
@@ -141,11 +170,11 @@ def _items_from_libraries(db) -> list[af.FinderItem]:
     return list(out.values())
 
 
-def _resolve_items(db, source: str, config_data: dict) -> list[af.FinderItem]:
+def _resolve_items(db, source: str, config_data: dict, identity: Optional[dict] = None) -> list[af.FinderItem]:
     if source == "poster_drives":
         return _items_from_poster_drives(db, config_data.get("drive_ids"))
     if source == "scope":
-        return _items_from_scope(Path(str(config_data.get("source_dir") or "")))
+        return _items_from_scope(Path(str(config_data.get("source_dir") or "")), identity)
     if source == "list":
         return _items_from_list(str(config_data.get("paste") or ""))
     if source == "libraries":
@@ -220,7 +249,10 @@ def run_artwork_pull_background_job(job_id: int, config_data: dict[str, Any]) ->
             raise RuntimeError("Invalid artwork scope (needs an IDarr asset scope).")
 
         update_job_state(db, job, progress=3, message="Collecting items...")
-        items = _resolve_items(db, source, config_data)
+        # IDarr's cached per-filename identity corrects what asset names can't express (a tmdb id's
+        # namespace); both the item list and the already-have index have to read the same one.
+        identity = af.build_scope_identity_index(db, int(config_data.get("sync_target_index") or 0), source_dir)
+        items = _resolve_items(db, source, config_data, identity)
         log_info(TAG, f"Source '{source}': {len(items)} unique items; types={types}; dry_run={dry_run}"
                       f"{'; FORCE re-fetch (overwriting existing)' if force_refetch else ''}")
         update_job_state(db, job, progress=5, message=f"{len(items)} items to check")
@@ -230,7 +262,7 @@ def run_artwork_pull_background_job(job_id: int, config_data: dict[str, Any]) ->
         plex = af.PlexMetadataProvider(token, session) if token else None
         # Id-based already-have index (not exact filenames): a source whose metadata carries a
         # different imdb/tmdb than the file on disk must still count as "have".
-        scope_index = af.build_scope_artwork_index(source_dir)
+        scope_index = af.build_scope_artwork_index(source_dir, identity)
         if "squareart" in types and plex is None:
             log_warning(TAG, "No Plex token — square art will be skipped (Plex is its only source).")
 
@@ -246,7 +278,9 @@ def run_artwork_pull_background_job(job_id: int, config_data: dict[str, Any]) ->
             check_cancelled(job_id)
             if skip_unreleased and item.is_unreleased:
                 skipped_unreleased += 1     # before resolve: no TMDB call spent on future items
-            elif af.resolve_tmdb_identity(item, tmdb_key, known_identity=known_identity) is None:
+            elif af.resolve_tmdb_identity(
+                    item, tmdb_key,
+                    known_identity=known_identity and not _namespace_is_guessed(item, source)) is None:
                 unresolved += 1
             else:
                 # force_refetch ignores the already-have index: everything is re-pulled and existing

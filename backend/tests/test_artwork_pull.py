@@ -183,6 +183,75 @@ def test_is_unreleased_matches_unmatched_classification():
     assert not mk(None).is_unreleased          # no status (drives/scope/list items) = not skipped
 
 
+def test_items_from_scope_keeps_both_sides_of_a_tmdb_namespace_clash(tmp_path):
+    """A tmdb number means different titles in the movie and tv namespaces. A show's file carrying
+    only a {tmdb-…} parses as a movie, colliding with the real movie of that id — dedup used to drop
+    whichever was scanned second, silently losing it from the drive tab."""
+    (tmp_path / "logos").mkdir()
+    (tmp_path / "backgrounds").mkdir()
+    (tmp_path / "logos" / "Cunk on... (2018) {tmdb-79063} - logo.png").write_bytes(_png())
+    (tmp_path / "backgrounds" /
+     "The Unkabogable Praybeyt Benjamin (2011) {tmdb-79063} {imdb-tt2073059} - background.jpg").write_bytes(_png())
+
+    titles = sorted(i.title for i in ap._items_from_scope(tmp_path))
+    assert titles == ["Cunk on...", "The Unkabogable Praybeyt Benjamin"]
+
+    # The same item across folders is still one item — only differing titles split.
+    (tmp_path / "squareart").mkdir()
+    (tmp_path / "squareart" / "Cunk on... (2018) {tmdb-79063} - squareart.jpg").write_bytes(_png())
+    assert len(ap._items_from_scope(tmp_path)) == 2
+
+
+def test_idarr_cached_identity_fixes_a_namespace_the_filename_cannot_express(tmp_path):
+    """A series TheTVDB doesn't list gets no {tvdb-…} tag, so its file reads as a movie and takes on
+    whatever movie owns its tmdb number — here it inherited that movie's background as "already
+    have". IDarr resolved the file to tv_series and cached that, so the scan must use it."""
+    (tmp_path / "logos").mkdir()
+    (tmp_path / "backgrounds").mkdir()
+    (tmp_path / "logos" / "Cunk on... (2018) {tmdb-79063} - logo.png").write_bytes(_png())
+    (tmp_path / "backgrounds" /
+     "The Unkabogable Praybeyt Benjamin (2011) {tmdb-79063} {imdb-tt2073059} - background.jpg").write_bytes(_png())
+
+    def cunk(items):
+        return next(i for i in items if i.title.startswith("Cunk"))
+
+    # Filename alone: typed movie, and the movie's background masks its own gap.
+    plain = cunk(ap._items_from_scope(tmp_path))
+    assert plain.media_type == "movie"
+    assert af.scope_has_artwork(af.build_scope_artwork_index(tmp_path), plain, "background") is True
+
+    identity = {"cunk on... (2018) {tmdb-79063} - logo.png":
+                {"asset_type": "tv_series", "tmdb_id": 79063, "tvdb_id": None, "imdb_id": None}}
+    fixed = cunk(ap._items_from_scope(tmp_path, identity))
+    assert fixed.media_type == "tv"
+    index = af.build_scope_artwork_index(tmp_path, identity)
+    assert af.scope_has_artwork(index, fixed, "background") is False   # gap no longer masked
+    assert af.scope_has_artwork(index, fixed, "logo") is True
+
+
+def test_cached_identity_never_overwrites_an_id_the_filename_carries(tmp_path):
+    """The file's own tags stay authoritative — the cache only fills blanks and fixes the type."""
+    (tmp_path / "logos").mkdir()
+    f = tmp_path / "logos" / "Dune (2021) {tmdb-438631} - logo.png"
+    f.write_bytes(_png())
+    parsed = af._parse_with_identity(f, {f.name.lower(): {
+        "asset_type": "movie", "tmdb_id": 999, "tvdb_id": None, "imdb_id": "tt0000001"}})
+    assert parsed["tmdb_id"] == 438631      # filename wins
+    assert parsed["imdb_id"] == "tt0000001"  # blank filled from cache
+
+
+def test_namespace_is_guessed_only_for_unproven_scope_items():
+    """Only a {tvdb-…} tag or a 'Collection' in the name proves an asset file's type, so a scope
+    item holding nothing but a {tmdb-…} has to have its namespace verified before the pull."""
+    mk = lambda **kw: af.FinderItem(title="X", year=2018, tmdb_id=1, media_type="movie", **kw)
+    assert ap._namespace_is_guessed(mk(), "scope")
+    assert not ap._namespace_is_guessed(mk(), "poster_drives")      # arr told us the type
+    assert not ap._namespace_is_guessed(mk(tvdb_id=9), "scope")     # tvdb tag proves series
+    assert not ap._namespace_is_guessed(mk(imdb_id="tt1"), "scope")  # imdb id is namespace-specific
+    assert not ap._namespace_is_guessed(
+        af.FinderItem(title="X", year=None, tmdb_id=1, media_type="collection"), "scope")
+
+
 def test_items_from_libraries_carry_status(monkeypatch):
     class FakeSvc:
         def __init__(self, db):
