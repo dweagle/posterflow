@@ -370,9 +370,20 @@ export interface ArtworkScopeItem {
   missing: ArtworkSubtype[]
 }
 
-/** Enumerate the scope's items with what each is missing (the browsable scope-backfill view). */
-export const getArtworkScopeItems = async (syncTargetIndex: number): Promise<{ items: ArtworkScopeItem[]; total: number; scope_label: string }> => {
-  return getData(`/api/artwork-finder/scope-items?sync_target_index=${syncTargetIndex}`)
+/** Where the browsable gap list draws its items from. 'scope' walks the artwork drive's own files,
+ * so it can only report gaps for items that already have some artwork; the others enumerate your
+ * poster scopes / drives, which is the only way an item with no artwork yet appears at all.
+ * 'poster_scope' needs itemScopeIndex — the sync target whose posters to list. */
+export type ArtworkItemSource = 'scope' | 'poster_scope' | 'poster_drives'
+
+/** Enumerate items from `source` with what artwork each is missing from the scope. */
+export const getArtworkScopeItems = async (
+  syncTargetIndex: number,
+  source: ArtworkItemSource = 'scope',
+  itemScopeIndex?: number | null,
+): Promise<{ items: ArtworkScopeItem[]; total: number; scope_label: string; source: ArtworkItemSource }> => {
+  const scoped = source === 'poster_scope' && itemScopeIndex != null ? `&item_scope_index=${itemScopeIndex}` : ''
+  return getData(`/api/artwork-finder/scope-items?sync_target_index=${syncTargetIndex}&source=${source}${scoped}`)
 }
 
 /** Proxy URL for previewing a Gracenote (*.plex.tv) image (square art / clear logo). */

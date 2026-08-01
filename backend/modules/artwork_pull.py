@@ -83,6 +83,21 @@ def _items_from_poster_drives(db, drive_ids) -> list[af.FinderItem]:
     return list(out.values())
 
 
+def _items_from_poster_dir(source_dir: Path) -> list[af.FinderItem]:
+    """Items from one poster folder — an IDarr poster sync target's own files.
+
+    Distinct from _items_from_poster_drives, which unions every subscribed GDrive drive: this is the
+    library you actually keep, so its gaps are the ones worth acting on."""
+    out: dict[str, af.FinderItem] = {}
+    if not source_dir.is_dir():
+        return []
+    for it in (process_files(str(source_dir)) or []):
+        fi = _finder_from_scanner(it)
+        if fi:
+            out.setdefault(_dedup_key(fi), fi)
+    return list(out.values())
+
+
 def _add_scope_item(out: dict[str, af.FinderItem], fi: af.FinderItem) -> None:
     """Index a scope file's item, keeping BOTH sides of an id clash instead of dropping one.
 
@@ -175,6 +190,8 @@ def _resolve_items(db, source: str, config_data: dict, identity: Optional[dict] 
         return _items_from_poster_drives(db, config_data.get("drive_ids"))
     if source == "scope":
         return _items_from_scope(Path(str(config_data.get("source_dir") or "")), identity)
+    if source == "poster_scope":
+        return _items_from_poster_dir(Path(str(config_data.get("poster_source_dir") or "")))
     if source == "list":
         return _items_from_list(str(config_data.get("paste") or ""))
     if source == "libraries":

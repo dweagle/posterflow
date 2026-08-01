@@ -4,6 +4,7 @@ import {
   getApiErrorMessage,
   getArtworkScopeItems,
   searchTmdb,
+  type ArtworkItemSource,
   type ArtworkScopeItem,
   type TmdbSearchFilter,
 } from '../../api/client'
@@ -70,6 +71,11 @@ function LazyPosterCard({ item, syncTargetIndex, scopeLabel }: {
 type Props = {
   syncTargetIndex: number | null
   scopeLabel: string | null
+  /** Which item source to list — chosen by the buttons in the subtab row above this panel. */
+  source: ArtworkItemSource
+  itemScopeIndex: number | null
+  sourceLabel: string
+  sourceHint: string
 }
 
 // Map a scope item onto the shared unmatched-card shape (poster_url unknown — the scope holds
@@ -92,7 +98,9 @@ function toMergedItem(it: ArtworkScopeItem, index: number): MergedArtworkItem {
 
 const PAGE_SIZE = 50   // cards rendered at a time; more stream in as the list scrolls
 
-export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) {
+export default function DriveItemsPanel({
+  syncTargetIndex, scopeLabel, source, itemScopeIndex, sourceLabel, sourceHint,
+}: Props) {
   const { showToast } = useToast()
   const [items, setItems] = useState<ArtworkScopeItem[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -109,12 +117,13 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
     }
     let cancelled = false
     setLoading(true)
-    getArtworkScopeItems(syncTargetIndex)
+    setItems(null)
+    getArtworkScopeItems(syncTargetIndex, source, itemScopeIndex)
       .then((res) => { if (!cancelled) setItems(res.items) })
-      .catch((e) => { if (!cancelled) showToast(getApiErrorMessage(e, 'Failed to scan the drive'), 'error') })
+      .catch((e) => { if (!cancelled) showToast(getApiErrorMessage(e, 'Failed to scan for items'), 'error') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [syncTargetIndex, showToast])
+  }, [syncTargetIndex, source, itemScopeIndex, showToast])
 
   const merged = useMemo(() => (items ?? []).map(toMergedItem), [items])
   const gapCount = useMemo(() => merged.filter((it) => it.missing.length > 0).length, [merged])
@@ -142,7 +151,7 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
   // below the list streams in the next page as it approaches the viewport.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [query, filter, missingOnly, syncTargetIndex, items])
+  }, [query, filter, missingOnly, syncTargetIndex, source, items])
 
   const shownItems = useMemo(() => visibleItems.slice(0, visibleCount), [visibleItems, visibleCount])
 
@@ -168,22 +177,46 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
     )
   }
 
+  // Says what the buttons in the subtab row are showing, and — for every source but the drive
+  // itself — that the gaps are still measured against the selected artwork scope.
+  const sourceNote = (
+    <small className="muted" style={{ display: 'block', margin: '0 0 10px' }}>
+      {sourceHint}
+      {source !== 'scope' && ` Gaps are measured against ${scopeLabel || 'this scope'}.`}
+    </small>
+  )
+
   if (loading || items === null) {
-    return <p className="muted" style={{ padding: '1rem 0' }}>Scanning {scopeLabel || 'the drive'}…</p>
+    return (
+      <>
+        {sourceNote}
+        <p className="muted" style={{ padding: '1rem 0' }}>
+          {source === 'scope' ? `Scanning ${scopeLabel || 'the drive'}…` : `Collecting items from ${sourceLabel}…`}
+        </p>
+      </>
+    )
   }
 
   if (items.length === 0) {
     return (
-      <div className="unmatched-maker-empty">
-        <AlertCircle size={44} />
-        <h3>Drive is empty</h3>
-        <p>No artwork found in {scopeLabel || 'this scope'} yet — add some from the Find &amp; Add or Batch Pull tabs.</p>
-      </div>
+      <>
+        {sourceNote}
+        <div className="unmatched-maker-empty">
+          <AlertCircle size={44} />
+          <h3>{source === 'scope' ? 'Drive is empty' : 'Nothing to list'}</h3>
+          <p>
+            {source === 'scope'
+              ? `No artwork found in ${scopeLabel || 'this scope'} yet — pick a poster scope above to see what's missing, or add some from Find & Add or Batch Pull.`
+              : `No items found in ${sourceLabel}.`}
+          </p>
+        </div>
+      </>
     )
   }
 
   return (
     <>
+      {sourceNote}
       <div className="unmatched-maker-controls">
         <div className="maker-result-tabs" role="tablist" aria-label="Drive item category tabs">
           {FILTER_TABS.filter((t) => t === 'all' || counts[t] > 0).map((t) => (
@@ -224,13 +257,18 @@ export default function DriveItemsPanel({ syncTargetIndex, scopeLabel }: Props) 
           Only items missing artwork
         </label>
         <span className="muted" style={{ fontSize: '0.8rem' }}>
-          {merged.length.toLocaleString()} items in the drive · {gapCount.toLocaleString()} with gaps
+          {merged.length.toLocaleString()} items in {source === 'scope' ? 'the drive' : sourceLabel}
+          {' · '}{gapCount.toLocaleString()} with gaps
           {visibleItems.length !== (missingOnly ? gapCount : merged.length) ? ` · showing ${visibleItems.length}` : ''}
         </span>
       </div>
 
       {visibleItems.length === 0 ? (
-        <p className="tmdb-empty">{missingOnly && !query ? 'Nothing is missing artwork — the drive is complete.' : 'No items match your filter.'}</p>
+        <p className="tmdb-empty">
+          {missingOnly && !query
+            ? `Nothing is missing artwork — ${scopeLabel || 'this scope'} covers everything here.`
+            : 'No items match your filter.'}
+        </p>
       ) : (
         <div style={{ marginTop: 8 }}>
           {shownItems.map((it) => (

@@ -4,6 +4,7 @@ import json
 
 from PIL import Image
 
+import services.artwork_finder as af
 from api.idarr import SETTING_MAKER_IDARR_CONFIG
 from models.setting import upsert_setting
 
@@ -173,6 +174,66 @@ def test_scope_items_reports_missing_types(client, test_db, tmp_path):
     # though no source auto-fills collection logos / square art.
     assert sorted(by_title["Harry Potter Collection"]["missing"]) == ["logo", "squareart"]
     assert by_title["Harry Potter Collection"]["media_type"] == "collection"
+
+
+def test_scope_items_other_sources_surface_items_with_no_artwork(client, test_db, tmp_path, monkeypatch):
+    """source=scope walks the scope's own files, so an item with NO artwork there has nothing to
+    enumerate and can never appear — which is why collections the user owns but has never pulled for
+    looked "missing from the list". The other sources enumerate elsewhere and measure gaps against
+    the scope, so those items finally show up with everything marked missing."""
+    import modules.artwork_pull as ap
+    _set_asset_scope(test_db, str(tmp_path))
+    (tmp_path / "backgrounds").mkdir()
+    (tmp_path / "backgrounds" / "Alien Collection {tmdb-8091} - background.jpg").write_bytes(_jpg_bytes(size=(20, 20)))
+
+    assert [i["title"] for i in client.get(
+        "/api/artwork-finder/scope-items", params={"sync_target_index": 0}).json()["items"]] == ["Alien Collection"]
+
+    monkeypatch.setattr(ap, "_items_from_poster_drives", lambda db, ids: [
+        af.FinderItem(title="Alien Collection", year=None, tmdb_id=8091, media_type="collection"),
+        af.FinderItem(title="1980s Collection", year=None, tmdb_id=None, media_type="collection"),
+    ])
+    data = client.get("/api/artwork-finder/scope-items",
+                      params={"sync_target_index": 0, "source": "poster_drives"}).json()
+    assert data["source"] == "poster_drives"
+    by_title = {i["title"]: i for i in data["items"]}
+    assert sorted(by_title["1980s Collection"]["missing"]) == ["background", "logo", "squareart"]
+    assert sorted(by_title["Alien Collection"]["missing"]) == ["logo", "squareart"]   # bg already there
+
+    assert client.get("/api/artwork-finder/scope-items",
+                      params={"sync_target_index": 0, "source": "nope"}).status_code == 400
+
+
+def test_scope_items_poster_scope_lists_one_sync_target(client, test_db, tmp_path):
+    """Poster scopes get a button each: a gap list is only actionable against the library you
+    actually keep, and the artwork/PSD scopes aren't poster libraries."""
+    art, posters, psds = tmp_path / "art", tmp_path / "posters", tmp_path / "psds"
+    for p in (art, posters, psds):
+        p.mkdir()
+    upsert_setting(test_db, SETTING_MAKER_IDARR_CONFIG, json.dumps({"sync_targets": [
+        {"personal_drive_id": "a", "source_dir": str(art), "label": "PlexArt", "is_asset_drive": True},
+        {"personal_drive_id": "b", "source_dir": str(posters), "label": "CL2K Drive"},
+        {"personal_drive_id": "c", "source_dir": str(psds), "label": "PSDs", "is_psd_drive": True},
+    ]}))
+    test_db.commit()
+    (posters / "Alien Collection {tmdb-8091}.jpg").write_bytes(_jpg_bytes(size=(20, 20)))
+    (art / "backgrounds").mkdir()
+    (art / "backgrounds" / "Alien Collection {tmdb-8091} - background.jpg").write_bytes(_jpg_bytes(size=(20, 20)))
+
+    resp = client.get("/api/artwork-finder/scope-items",
+                      params={"sync_target_index": 0, "source": "poster_scope", "item_scope_index": 1})
+    assert resp.status_code == 200, resp.text
+    item = resp.json()["items"][0]
+    assert item["title"] == "Alien Collection"
+    assert sorted(item["missing"]) == ["logo", "squareart"]   # measured against the ARTWORK scope
+
+    # A PSD or artwork scope isn't a poster library, and the index is required.
+    assert client.get("/api/artwork-finder/scope-items", params={
+        "sync_target_index": 0, "source": "poster_scope", "item_scope_index": 2}).status_code == 400
+    assert client.get("/api/artwork-finder/scope-items", params={
+        "sync_target_index": 0, "source": "poster_scope", "item_scope_index": 0}).status_code == 400
+    assert client.get("/api/artwork-finder/scope-items", params={
+        "sync_target_index": 0, "source": "poster_scope"}).status_code == 400
 
 
 def test_scope_items_year_less_movie_with_imdb_id_is_not_a_collection(client, test_db, tmp_path):

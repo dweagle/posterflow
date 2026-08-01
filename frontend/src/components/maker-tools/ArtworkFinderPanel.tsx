@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Clapperboard as MovieIcon, FolderOpen, HardDrive, Play, Search, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   searchTmdb,
+  type ArtworkItemSource,
   type TmdbSearchFilter,
   type TmdbSearchResult,
 } from '../../api/client'
@@ -13,9 +14,37 @@ import BatchPullPanel from './BatchPullPanel'
 import DriveItemsPanel from './DriveItemsPanel'
 import { useArtworkScopes } from './useArtworkScopes'
 
+type ItemSource = {
+  key: string
+  label: string
+  hint: string
+  source: ArtworkItemSource
+  itemScopeIndex: number | null
+}
+
 export default function ArtworkFinderPanel() {
   const navigate = useNavigate()
-  const { scopes, selectedValue, selected, onSelectScope, scopesLoaded } = useArtworkScopes()
+  const { scopes, posterScopes, selectedValue, selected, onSelectScope, scopesLoaded } = useArtworkScopes()
+
+  // What My Drive lists. The artwork scope only knows the files it holds, so an item with no
+  // artwork at all has nothing to enumerate and can never appear under it — the poster scopes are
+  // how those show up. One button per poster scope, since a gap list is only actionable against
+  // the library you actually keep.
+  const itemSources: ItemSource[] = useMemo(() => [
+    { key: 'scope', label: 'This drive', source: 'scope', itemScopeIndex: null,
+      hint: "Items that already have artwork here, and which types they're still missing." },
+    ...posterScopes.map((s) => ({
+      key: `poster:${s.index}`, label: s.label, source: 'poster_scope' as ArtworkItemSource,
+      itemScopeIndex: s.index,
+      hint: `Everything in ${s.label} — including items with no artwork here yet.`,
+    })),
+  ], [posterScopes])
+
+  const [itemSourceKey, setItemSourceKey] = useState('scope')
+  const itemSource = useMemo(
+    () => itemSources.find((s) => s.key === itemSourceKey) ?? itemSources[0],
+    [itemSources, itemSourceKey],
+  )
 
   const [mode, setMode] = useState<'search' | 'batch' | 'drive'>('search')
   const batchRunRef = useRef<(() => void) | null>(null)
@@ -76,12 +105,35 @@ export default function ArtworkFinderPanel() {
         <button type="button" className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>Find &amp; Add</button>
         <button type="button" className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch Pull</button>
         <button type="button" className={mode === 'drive' ? 'active' : ''} onClick={() => setMode('drive')}>My Drive</button>
+
+        {/* My Drive's item sources ride in the same row, in their own colour: they don't switch
+            panels like the tabs to their left, they switch what that one panel is listing. */}
+        {mode === 'drive' && (
+          <>
+            <span className="pf-subtabs-divider" aria-hidden="true" />
+            {itemSources.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                className={`pf-subtab-source${itemSourceKey === s.key ? ' active' : ''}`}
+                onClick={() => setItemSourceKey(s.key)}
+                title={s.hint}
+              >
+                {s.label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {mode === 'drive' ? (
         <DriveItemsPanel
           syncTargetIndex={selected ? selected.index : null}
           scopeLabel={selected ? selected.label : null}
+          source={itemSource.source}
+          itemScopeIndex={itemSource.itemScopeIndex}
+          sourceHint={itemSource.hint}
+          sourceLabel={itemSource.label}
         />
       ) : mode === 'batch' ? (
         <BatchPullPanel

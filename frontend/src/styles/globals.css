@@ -183,6 +183,29 @@ input, textarea, select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  align-items: center;
+}
+
+/* Secondary buttons that can share the subtab row: they don't switch panels, they change what the
+   active panel is listing. Amber instead of the tabs' blue so the two roles never read as one set.
+   Same box metrics as .pf-subtabs button, so the row stays on one baseline. */
+.pf-subtabs button.pf-subtab-source.active {
+  background: #d9a441;
+  border-color: #d9a441;
+  color: #1a1a1a;
+}
+
+.pf-subtabs button.pf-subtab-source:not(.active):hover {
+  border-color: #d9a441;
+  color: #f0c273;
+}
+
+/* Separates the panel tabs from the secondary buttons sharing their row. */
+.pf-subtabs-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.1rem 0.25rem;
+  background: #424242;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

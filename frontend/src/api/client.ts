@@ -252,6 +252,7 @@ export {
   type ArtworkPullSource,
   type ArtworkPullRequest,
   type ArtworkScopeItem,
+  type ArtworkItemSource,
   getArtworkScopeItems,
   getArtworkCandidates,
   addArtwork,

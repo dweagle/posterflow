@@ -126,8 +126,8 @@ def _make_item(*, title: str, media_type: str, year: Optional[int], tmdb_id: Opt
                          tvdb_id=tvdb_id, imdb_id=(imdb_id or None), media_type=mt)
 
 
-def _resolve_artwork_scope(db: Session, index: int) -> tuple[Path, bool, str]:
-    """(source_dir, is_asset_drive, label) for the selected IDarr sync target, or 400."""
+def _resolve_sync_target(db: Session, index: int) -> dict:
+    """The IDarr sync target at `index`, validated to exist and carry a source_dir, or 400."""
     setting = get_setting(db, SETTING_MAKER_IDARR_CONFIG)
     if not setting or not setting.value:
         raise HTTPException(status_code=400, detail="IDarr is not configured. Add an artwork scope on the IDarr page first.")
@@ -140,14 +140,26 @@ def _resolve_artwork_scope(db: Session, index: int) -> tuple[Path, bool, str]:
         raise HTTPException(status_code=400, detail="No IDarr sync targets configured.")
     if index < 0 or index >= len(targets):
         raise HTTPException(status_code=400, detail=f"sync_target_index must be 0..{len(targets) - 1}")
-    target = targets[index]
-    source_dir = str(target.get("source_dir") or "").strip()
-    if not source_dir:
+    if not str(targets[index].get("source_dir") or "").strip():
         raise HTTPException(status_code=400, detail="Selected scope is missing source_dir.")
+    return targets[index]
+
+
+def _resolve_artwork_scope(db: Session, index: int) -> tuple[Path, bool, str]:
+    """(source_dir, is_asset_drive, label) for the selected IDarr sync target, or 400."""
+    target = _resolve_sync_target(db, index)
     if not bool(target.get("is_asset_drive")):
         raise HTTPException(status_code=400,
                             detail="Selected scope is not an artwork scope. Enable 'Assets Drive' on that IDarr sync target.")
-    return Path(source_dir), True, str(target.get("label") or "")
+    return Path(str(target["source_dir"]).strip()), True, str(target.get("label") or "")
+
+
+def _resolve_poster_scope(db: Session, index: int) -> Path:
+    """source_dir of a poster sync target — one that holds posters, not artwork or PSDs."""
+    target = _resolve_sync_target(db, index)
+    if target.get("is_asset_drive") or target.get("is_psd_drive"):
+        raise HTTPException(status_code=400, detail="item_scope_index must be a poster scope (not an artwork or PSD scope).")
+    return Path(str(target["source_dir"]).strip())
 
 
 # ------------------------------------------------------------------ endpoints
@@ -259,20 +271,40 @@ def crop_square(request: CropSquareRequest, db: Session = Depends(get_db)) -> Ad
     return AddResponse(success=True, source_dir=str(source_dir), **result)
 
 
+SCOPE_ITEM_SOURCES = ("scope", "poster_scope", "poster_drives")
+
+
 @router.get("/scope-items")
-def scope_items(sync_target_index: int, db: Session = Depends(get_db)) -> dict:
-    """Enumerate the selected artwork scope's items with what each is missing — the browsable
-    counterpart of the batch 'scope backfill'. Presence uses the same id-based index as the
-    batch pull, so id spelling differences between files never misreport a gap."""
-    source_dir, _is_asset_drive, label = _resolve_artwork_scope(db, sync_target_index)
-    from modules.artwork_pull import _items_from_scope
+def scope_items(sync_target_index: int, source: str = "scope",
+                item_scope_index: Optional[int] = None,
+                db: Session = Depends(get_db)) -> dict:
+    """Enumerate items with what artwork each is missing from the selected scope — the browsable
+    counterpart of the batch pull, over the same item sources it offers.
+
+    ``source=scope`` walks the artwork scope's own files, so it can only ever report gaps for items
+    that already have some artwork there. The rest enumerate elsewhere — one poster sync target
+    (``poster_scope`` + ``item_scope_index``) or every subscribed drive (``poster_drives``) — which
+    is the only way an item with NO artwork yet shows up at all. Presence always uses the batch
+    pull's id-based index, so id spelling differences never misreport a gap."""
+    src = str(source or "scope").strip().lower()
+    if src not in SCOPE_ITEM_SOURCES:
+        raise HTTPException(status_code=400, detail=f"source must be one of {', '.join(SCOPE_ITEM_SOURCES)}")
+    source_dir, is_asset_drive, label = _resolve_artwork_scope(db, sync_target_index)
+    poster_dir = ""
+    if src == "poster_scope":
+        if item_scope_index is None:
+            raise HTTPException(status_code=400, detail="source=poster_scope needs item_scope_index.")
+        poster_dir = str(_resolve_poster_scope(db, item_scope_index))
+    from modules.artwork_pull import _resolve_items
 
     # IDarr's cache carries the type it actually resolved each file to, which the filename can't
     # always say — a series TheTVDB doesn't list has no {tvdb-…} tag and otherwise reads as a movie.
     identity = af.build_scope_identity_index(db, sync_target_index, source_dir)
     index = af.build_scope_artwork_index(source_dir, identity)
+    config_data = {"source_dir": str(source_dir), "is_asset_drive": is_asset_drive,
+                   "poster_source_dir": poster_dir}
     items = []
-    for it in _items_from_scope(source_dir, identity):
+    for it in _resolve_items(db, src, config_data, identity):
         # Every item is checked for all three types, collections included. No source serves
         # collection logos or square art, so the batch pull still clamps collections to
         # backgrounds — but this is the browse view, and hiding the gap hid the drive's
@@ -289,7 +321,7 @@ def scope_items(sync_target_index: int, db: Session = Depends(get_db)) -> dict:
             "missing": missing,
         })
     items.sort(key=lambda x: (x["title"] or "").lower())
-    return {"items": items, "total": len(items), "scope_label": label}
+    return {"items": items, "total": len(items), "scope_label": label, "source": src}
 
 
 @router.get("/tmdb-download")
