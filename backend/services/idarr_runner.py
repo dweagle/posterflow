@@ -768,7 +768,10 @@ class IdarrRunner:
 
         # No SEASON_REGEX hint — only a TVDB tag marks the file as a series
         is_series = bool(tvdb_match)
-        is_collection = year is None and not is_series
+        # A missing year is the only collection hint left, so an IMDb tag has to veto it:
+        # TMDB collections carry no IMDb id, so {imdb-tt…} means a movie/series whose filename
+        # simply lost its (YYYY) — otherwise it lands on the collection tab and gets renamed as one.
+        is_collection = year is None and not is_series and not imdb_match
 
         if COLLECTION_REGEX.search(lower_stem) or is_collection:
             asset_type = "collection"

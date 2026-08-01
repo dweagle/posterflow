@@ -587,6 +587,20 @@ def test_idarr_runner_parse_repairs_malformed_year_paren():
     assert "2049" in p["title"]
 
 
+def test_idarr_runner_parse_year_less_imdb_tagged_file_is_a_movie():
+    """Without a year, the only remaining collection hint is 'no year at all' — but TMDB
+    collections have no IMDb id, so an {imdb-tt…} tag means a movie whose filename lost its year."""
+    p = IdarrRunner._parse_asset_no_season_hint(Path("/x/Leo 2 {tmdb-1235976} {imdb-tt31066554} - logo.png"))
+    assert p["type"] == "movie"
+    assert p["title"] == "Leo 2" and p["year"] is None
+    assert p["type_is_inferred"] is False
+    # An explicit "Collection" in the name still wins, and a year-less file with no IMDb tag
+    # stays a collection (Kometa's custom-collection assets look exactly like this).
+    assert IdarrRunner._parse_asset_no_season_hint(Path("/x/a24 - logo.png"))["type"] == "collection"
+    assert IdarrRunner._parse_asset_no_season_hint(
+        Path("/x/Alien Collection {tmdb-8091} - background.jpg"))["type"] == "collection"
+
+
 def test_idarr_runner_store_cache_rows_same_title_year_merges_to_one_row(test_db):
     """With title-based keys, two movies of the same title+year share one cache row.
     Both filenames are tracked under that single entry."""

@@ -270,10 +270,12 @@ def scope_items(sync_target_index: int, db: Session = Depends(get_db)) -> dict:
     index = af.build_scope_artwork_index(source_dir)
     items = []
     for it in _items_from_scope(source_dir):
-        # Collections only ever get backgrounds (TMDB has no collection logos/square art),
-        # so logo/squareart gaps aren't reported for them.
-        types = ["background"] if it.is_collection else ["logo", "background", "squareart"]
-        missing = [t for t in types if not af.scope_has_artwork(index, it, t)]
+        # Every item is checked for all three types, collections included. No source serves
+        # collection logos or square art, so the batch pull still clamps collections to
+        # backgrounds — but this is the browse view, and hiding the gap hid the drive's
+        # hand-made collection logos too, making the tab look like it had found nothing.
+        missing = [t for t in ("logo", "background", "squareart")
+                   if not af.scope_has_artwork(index, it, t)]
         items.append({
             "title": it.title,
             "year": it.year,

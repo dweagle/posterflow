@@ -169,9 +169,26 @@ def test_scope_items_reports_missing_types(client, test_db, tmp_path):
     by_title = {i["title"]: i for i in data["items"]}
     # Dune has a logo -> missing background + squareart
     assert sorted(by_title["Dune"]["missing"]) == ["background", "squareart"]
-    # the collection has its background -> nothing missing (collections never need logo/square)
-    assert by_title["Harry Potter Collection"]["missing"] == []
+    # Collections are checked for all three types too — the browse view reports the gaps even
+    # though no source auto-fills collection logos / square art.
+    assert sorted(by_title["Harry Potter Collection"]["missing"]) == ["logo", "squareart"]
     assert by_title["Harry Potter Collection"]["media_type"] == "collection"
+
+
+def test_scope_items_year_less_movie_with_imdb_id_is_not_a_collection(client, test_db, tmp_path):
+    """A missing (YYYY) is the only collection hint for asset-drive files, so an {imdb-tt…} tag
+    has to veto it — collections carry no IMDb id, and these were landing on the collection tab."""
+    _set_asset_scope(test_db, str(tmp_path))
+    logos = tmp_path / "logos"
+    logos.mkdir()
+    (logos / "Leo 2 {tmdb-1235976} {imdb-tt31066554} - logo.png").write_bytes(_jpg_bytes(size=(20, 20)))
+
+    resp = client.get("/api/artwork-finder/scope-items", params={"sync_target_index": 0})
+    assert resp.status_code == 200, resp.text
+    item = resp.json()["items"][0]
+    assert item["title"] == "Leo 2"
+    assert item["media_type"] == "movie"
+    assert item["imdb_id"] == "tt31066554"
 
 
 def test_gracenote_proxy_rejects_non_plex_host(client):
