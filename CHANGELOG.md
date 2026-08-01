@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-08-01
+### Added
+- Artwork Finder: the My Drive tab can now compare against poster source drives- the artwork drive, plus one per IDarr poster scope. Picking a poster scope lists everything in that library and measures artwork gaps against it, including items with no artwork pulled yet.
+
+### Changed
+- Artwork Finder: browsing a title now lists shows language tagged items but filters textless first. Batch Pull still auto-picks only textless backdrops at its configured minimum width.
+
+### Fixed
+- Job Logs: search no longer lags on very large logs
+- Artwork Finder: collections now report items correctly
+- Artwork Finder: series artwork carrying only a `{tmdb-…}` tag no longer gets confused with the movie sharing that id number
+
 ## [0.13.1] - 2026-07-31
 ### Added
 - Artwork Drives: added the BZ artwork drive.
