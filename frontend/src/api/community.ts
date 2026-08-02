@@ -166,3 +166,26 @@ export const getCommunityListOwners = (
 
 export const submitCommunityListItems = (payload: SubmitListItemsPayload): Promise<SubmitListItemsResponse> =>
   postData('/api/community/lists', payload)
+
+// ── Claim/overlap index ──────────────────────────────────────────────────────
+
+// Slim community-wide scan for the claim/overlap index: just the match keys and
+// status of every active-or-fulfilled request and list item.
+export interface ClaimIndexRow {
+  tmdb_id: number | null
+  tvdb_id: number | null
+  media_type: string | null
+  title: string | null
+  year: number | null
+  status: string
+}
+
+export const getClaimIndex = (): Promise<{ requests: ClaimIndexRow[]; list_items: ClaimIndexRow[] }> =>
+  getData('/api/community/claim-index')
+
+// Drop the backend's short-lived community read cache. Called after a mutation
+// that goes straight to a Supabase edge function (claim/complete/remove), which
+// the backend can't see — without this, a reload inside the cache TTL would
+// briefly show the pre-mutation state.
+export const clearCommunityCache = (): Promise<{ ok: boolean }> =>
+  postData('/api/community/cache/clear', {})

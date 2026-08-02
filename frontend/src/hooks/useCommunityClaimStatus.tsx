@@ -1,28 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { getCommunityRequests, getCommunityListItems, type CommunityRequest, type CommunityListItem } from '../api/community'
-
-// Page through everything (the API caps a page at 200) up to a sane ceiling, so
-// the claim/overlap index stays correct as the community grows.
-const PAGE = 200
-const MAX_PAGES = 25
-async function fetchAllRequests(): Promise<CommunityRequest[]> {
-  const out: CommunityRequest[] = []
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const d = await getCommunityRequests({ status: 'all', limit: PAGE, offset: i * PAGE }).catch(() => ({ requests: [] }))
-    out.push(...d.requests)
-    if (d.requests.length < PAGE) break
-  }
-  return out
-}
-async function fetchAllListItems(): Promise<CommunityListItem[]> {
-  const out: CommunityListItem[] = []
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const d = await getCommunityListItems({ status: 'all', limit: PAGE, offset: i * PAGE }).catch(() => ({ items: [], total: 0 }))
-    out.push(...d.items)
-    if (d.items.length < PAGE) break
-  }
-  return out
-}
+import { getClaimIndex, type ClaimIndexRow } from '../api/community'
 
 // Whether an item is currently being worked (claimed) or already done somewhere
 // in the community (a request or a published list item).
@@ -92,7 +69,10 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
 
   const load = useCallback(async () => {
     lastLoadRef.current = Date.now()
-    const [requests, items] = await Promise.all([fetchAllRequests(), fetchAllListItems()])
+    // One slim scan (match keys + status only) instead of paging both tables
+    // with full rows — the backend caps and caches it.
+    const { requests, list_items: items } = await getClaimIndex()
+      .catch(() => ({ requests: [] as ClaimIndexRow[], list_items: [] as ClaimIndexRow[] }))
     const map = new Map<string, ClaimStatus>()
     const reqKeys = new Set<string>()
     const listKeys = new Set<string>()

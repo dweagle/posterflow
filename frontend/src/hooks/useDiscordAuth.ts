@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { storeDiscordIdentity } from '../api/community'
+import { storeDiscordIdentity, clearCommunityCache } from '../api/community'
 
 const STORAGE_KEY = 'posterflow_discord_auth'
 const RESULT_KEY = 'discord_oauth_result'
@@ -194,6 +194,9 @@ export function useDiscordAuth() {
       if (!resp.ok) {
         throw new Error((data as { error?: string }).error ?? `Action "${action}" failed`)
       }
+      // The edge function mutated Supabase behind the backend's back — drop the
+      // backend's read cache so the next reload reflects it.
+      void clearCommunityCache().catch(() => {})
       return data as { status: string; claimed_by: string | null; fulfilled_by: string | null }
     },
     [auth],
@@ -218,6 +221,7 @@ export function useDiscordAuth() {
       if (!resp.ok) {
         throw new Error((data as { error?: string }).error ?? `Action "${action}" failed`)
       }
+      void clearCommunityCache().catch(() => {})
       return data as { status?: string; claimed_by?: string | null; claimed_by_discord_id?: string | null; removed?: boolean | number }
     },
     [auth],

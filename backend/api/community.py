@@ -1,5 +1,7 @@
 """Community poster requests API - connects to Supabase for cross-instance request sharing."""
+import asyncio
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -41,6 +43,35 @@ router = APIRouter(prefix="/api/community", tags=["community"])
 # Stores this instance's connected Discord identity {discord_user_id, discord_username}
 # so headless reconciliation knows whose published list items to clean up.
 SETTING_DISCORD_IDENTITY = "community_discord_identity"
+
+# ── Short-lived read cache ───────────────────────────────────────────────────
+# Tab-refocus reloads and multiple open views re-request the same community
+# reads; serving repeats from memory keeps Supabase (PostgREST) egress down.
+# Cleared on any community write from this instance; the frontend also pings
+# /cache/clear after edge-function mutations (claim/complete/remove), which
+# bypass this backend entirely.
+_TTL_PAGES = 30.0        # /requests and /lists pages
+_TTL_OWNERS = 60.0       # /lists/owners
+_TTL_CLAIM_INDEX = 120.0 # /claim-index (frontend already throttles to 5 min)
+
+_read_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def _cache_get(key: tuple, ttl: float) -> Optional[dict]:
+    hit = _read_cache.get(key)
+    if hit and time.monotonic() - hit[0] < ttl:
+        return hit[1]
+    return None
+
+
+def _cache_store(key: tuple, value: dict) -> None:
+    if len(_read_cache) > 256:  # bound stray param combinations
+        _read_cache.clear()
+    _read_cache[key] = (time.monotonic(), value)
+
+
+def _cache_clear() -> None:
+    _read_cache.clear()
 
 
 def _request_style(tags: Optional[list]) -> str:
@@ -228,6 +259,10 @@ async def get_community_requests(
     db: Session = Depends(get_db),
 ):
     """Fetch community poster requests from Supabase."""
+    cache_key = ("requests", status, media_type, claimed_by_discord_id, sort, limit, offset)
+    if (hit := _cache_get(cache_key, _TTL_PAGES)) is not None:
+        return hit
+
     show_all = status == "all"
     specific_status = status if status and status not in ("all",) else None
 
@@ -283,7 +318,9 @@ async def get_community_requests(
                         return False
                 requests_list = [r for r in requests_list if _keep(r)]
 
-            return {"requests": requests_list}
+            result = {"requests": requests_list}
+            _cache_store(cache_key, result)
+            return result
 
     except httpx.HTTPStatusError as e:
         log_error(LogTags.API, f"Supabase fetch failed: {e.response.text}", status_code=e.response.status_code)
@@ -291,6 +328,67 @@ async def get_community_requests(
     except httpx.RequestError as e:
         log_error(LogTags.API, f"Supabase connection error: {e}")
         raise HTTPException(status_code=502, detail="Could not connect to community service")
+
+
+@router.get("/claim-index")
+async def get_claim_index():
+    """Community-wide claim/overlap index: every active-or-fulfilled request and
+    list item, but only the match keys (ids/title/year) plus status. Replaces the
+    frontend paging both tables with select=* — the single biggest egress read.
+    Rejected rows are excluded; the index ignores them anyway."""
+    cache_key = ("claim-index",)
+    if (hit := _cache_get(cache_key, _TTL_CLAIM_INDEX)) is not None:
+        return hit
+
+    SELECT = "tmdb_id,tvdb_id,media_type,title,year,status"
+    PAGE = 1000
+    MAX_PAGES = 20
+
+    async def fetch_all(client: httpx.AsyncClient, table: str, statuses: str) -> list:
+        rows: list = []
+        for page in range(MAX_PAGES):
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                headers=SUPABASE_HEADERS,
+                params={
+                    "select": SELECT,
+                    "status": f"in.({statuses})",
+                    "order": "id.asc",  # unique tiebreaker so pages don't overlap
+                    "limit": PAGE,
+                    "offset": page * PAGE,
+                },
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            rows.extend(batch)
+            if len(batch) < PAGE:
+                break
+        return rows
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            requests_rows, item_rows = await asyncio.gather(
+                fetch_all(client, "poster_requests", "pending,in_progress,fulfilled"),
+                fetch_all(client, "poster_list_items", "open,in_progress,fulfilled"),
+            )
+        result = {"requests": requests_rows, "list_items": item_rows}
+        _cache_store(cache_key, result)
+        return result
+    except httpx.HTTPStatusError as e:
+        log_error(LogTags.API, f"Supabase claim index fetch failed: {e.response.text}", status_code=e.response.status_code)
+        raise HTTPException(status_code=502, detail="Failed to fetch community claim index")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Supabase connection error: {e}")
+        raise HTTPException(status_code=502, detail="Could not connect to community service")
+
+
+@router.post("/cache/clear")
+def clear_community_read_cache():
+    """Frontend pings this after a Supabase edge-function mutation (claim,
+    complete, remove, …) — those bypass this backend, so without the ping a
+    cached read could serve the pre-mutation state for up to its TTL."""
+    _cache_clear()
+    return {"ok": True}
 
 
 @router.post("/requests")
@@ -407,6 +505,7 @@ async def submit_community_request(payload: PosterRequestPayload):
             )
             resp.raise_for_status()
             result = resp.json()
+            _cache_clear()
 
             if result.get("is_new"):
                 log_info(LogTags.API, f"New community request: {payload.title}", tmdb_id=payload.tmdb_id)
@@ -554,13 +653,18 @@ async def get_community_lists(
     there's more to load.
     """
     # Free-text search (title OR a wanter's name) isn't expressible as a bounded
-    # PostgREST filter, so it runs server-side in a Postgres function.
+    # PostgREST filter, so it runs server-side in a Postgres function. Searches
+    # are user-typed and high-cardinality, so they skip the read cache.
     q = _safe_like(search) if search else ""
     if q:
         return await _search_community_list_items(
             q, status, media_type, added_by_discord_id,
             claimed_by_discord_id, sort, limit, offset,
         )
+
+    cache_key = ("lists", status, media_type, added_by_discord_id, claimed_by_discord_id, sort, limit, offset)
+    if (hit := _cache_get(cache_key, _TTL_PAGES)) is not None:
+        return hit
 
     # Each poster is one shared row now; embed its wanters so the UI can show
     # "wanted by N". added_by_discord_id is reinterpreted as "items I want".
@@ -602,7 +706,9 @@ async def get_community_lists(
             items = resp.json()
             for row in items:
                 row.pop("mine", None)  # internal join alias, not for the client
-            return {"items": items, "total": total}
+            result = {"items": items, "total": total}
+            _cache_store(cache_key, result)
+            return result
     except httpx.HTTPStatusError as e:
         log_error(LogTags.API, f"Supabase list fetch failed: {e.response.text}", status_code=e.response.status_code)
         raise HTTPException(status_code=502, detail="Failed to fetch community lists")
@@ -617,43 +723,32 @@ async def get_community_list_owners(
     media_type: Optional[str] = Query(None),
 ):
     """Distinct people who *want* items in the current list view (id, name, count)
-    — populates the wanter filter independent of which items are loaded."""
-    # PostgREST caps every response at 1000 rows regardless of limit
-    params: dict = {
-        "select": "discord_id,name,poster_list_items!inner(status,media_type)",
-        "poster_list_items.status": _list_status_filter(status),
-        "order": "id.asc",
-    }
-    if media_type:
-        params["poster_list_items.media_type"] = f"eq.{media_type}"
+    — populates the wanter filter independent of which items are loaded.
 
-    PAGE = 1000
+    Aggregated by the community_list_owners Postgres function — one small
+    response instead of paging every wanter row through PostgREST."""
+    cache_key = ("owners", status, media_type)
+    if (hit := _cache_get(cache_key, _TTL_OWNERS)) is not None:
+        return hit
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            owners: dict[str, dict] = {}
-            offset = 0
-            while True:
-                resp = await client.get(
-                    f"{SUPABASE_URL}/rest/v1/poster_list_wanters",
-                    headers=SUPABASE_HEADERS,
-                    params={**params, "limit": PAGE, "offset": offset},
-                )
-                resp.raise_for_status()
-                rows = resp.json()
-                for row in rows:
-                    did = row.get("discord_id")
-                    if not did:
-                        continue
-                    entry = owners.get(did)
-                    if entry is None:
-                        owners[did] = {"id": did, "name": row.get("name") or did, "count": 1}
-                    else:
-                        entry["count"] += 1
-                if len(rows) < PAGE:
-                    break
-                offset += PAGE
-            result = sorted(owners.values(), key=lambda o: (o["name"] or "").lower())
-            return {"owners": result}
+            resp = await client.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/community_list_owners",
+                headers=SUPABASE_HEADERS,
+                json={"p_statuses": _list_status_values(status), "p_media_type": media_type},
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            owners = [
+                {"id": r["discord_id"], "name": r.get("name") or r["discord_id"], "count": r.get("count") or 0}
+                for r in rows
+                if r.get("discord_id")
+            ]
+            owners.sort(key=lambda o: (o["name"] or "").lower())
+            result = {"owners": owners}
+            _cache_store(cache_key, result)
+            return result
     except httpx.HTTPStatusError as e:
         log_error(LogTags.API, f"Supabase list owners fetch failed: {e.response.text}", status_code=e.response.status_code)
         raise HTTPException(status_code=502, detail="Failed to fetch list owners")
@@ -692,6 +787,7 @@ async def submit_community_list_items(payload: SubmitListItemsPayload):
                 json={"token": payload.discord_token, "client": CLIENT_ID, "items": items},
             )
             resp.raise_for_status()
+            _cache_clear()
             return resp.json()
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
