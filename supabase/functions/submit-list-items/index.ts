@@ -36,6 +36,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
+const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN') ?? ''
+const GUILD_ID = Deno.env.get('DISCORD_GUILD_ID') ?? ''
+
+// Require the publisher to be in the Discord server. Same secret (and same
+// default-off behaviour) as submit-request.
+const REQUIRE_GUILD_MEMBER =
+  (Deno.env.get('DISCORD_REQUIRE_GUILD_MEMBER') ?? '').trim().toLowerCase() === 'true'
 
 const MAX_ITEMS_PER_SUBMIT = 200
 const MAX_OPEN_ITEMS = 1000
@@ -62,6 +69,20 @@ interface DiscordTokenPayload {
   discord_username: string
   is_maker: boolean
   exp: number
+}
+
+// Live membership check via the bot API — see the note in submit-request.
+async function isGuildMember(discordUserId: string): Promise<boolean> {
+  if (!DISCORD_BOT_TOKEN || !GUILD_ID) return false
+  try {
+    const resp = await fetch(
+      `https://discord.com/api/v10/guilds/${GUILD_ID}/members/${discordUserId}`,
+      { headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` } },
+    )
+    return resp.ok
+  } catch {
+    return false
+  }
 }
 
 async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
@@ -114,13 +135,58 @@ const str = (v: unknown, max: number): string | null => {
 const int = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null
 
+// ── Field validation (mirrors submit-request) ───────────────────────────────
+// This function is the only boundary a submission crosses, so every field is
+// constrained to what the app could have produced. Unlike submit-request this
+// is a bulk call, so a bad value drops that field rather than failing 200 good
+// items alongside it.
+
+// poster_path renders as an <img src> on every user's board — an unrestricted
+// URL is a tracking pixel aimed at the community. App values are TMDB/TVDB only.
+const POSTER_HOSTS = new Set([
+  'image.tmdb.org',
+  'artworks.thetvdb.com',
+  'www.themoviedb.org',
+  'media.themoviedb.org',
+])
+
+// Short forms — styleTag() strips the " Style" suffix before this is checked.
+const STYLE_TAGS = new Set(['CL2K', 'MM2K', 'Anime Movie', 'Anime TV'])
+
+const posterUrl = (v: unknown): string | null => {
+  if (typeof v !== 'string' || !v) return null
+  try {
+    const u = new URL(v)
+    return u.protocol === 'https:' && POSTER_HOSTS.has(u.hostname.toLowerCase()) ? v : null
+  } catch {
+    return null
+  }
+}
+
+// Ranges wide enough for anything real; some seasons are numbered by year.
+const inRange = (v: number | null, min: number, max: number): number | null =>
+  v != null && v >= min && v <= max ? v : null
+
+const imdbId = (v: unknown): string | null =>
+  typeof v === 'string' && /^tt\d{5,12}$/.test(v) ? v : null
+
+// Label for the submitted_via column (same as submit-request): the app's own
+// identifier if it sent one, otherwise the User-Agent. A record, not a check.
+function clientLabel(client: unknown, userAgent: string | null): string {
+  const raw = typeof client === 'string' && client.trim() ? client : userAgent
+  if (!raw) return 'unknown'
+  // deno-lint-ignore no-control-regex
+  return raw.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 100) || 'unknown'
+}
+
 // Community list items store the short style tag ('CL2K' / 'MM2K'). Requests keep
 // the 'CL2K Style' form (notify-discord maps that exact string to a Discord forum
 // tag), so a client may send either — strip a trailing " Style" so the list is
 // uniform regardless of which flow published the item.
 const styleTag = (v: unknown): string | null => {
   const s = str(v, 40)
-  return s ? s.replace(/\s+Style$/i, '') : s
+  const stripped = s ? s.replace(/\s+Style$/i, '') : s
+  return stripped && STYLE_TAGS.has(stripped) ? stripped : null
 }
 
 interface NormalizedItem {
@@ -143,14 +209,14 @@ function normalizeItem(raw: Record<string, unknown>): NormalizedItem | null {
   if (!VALID_MEDIA_TYPES.has(media_type) || !title) return null
   const source = typeof raw.source === 'string' && VALID_SOURCES.has(raw.source) ? raw.source : 'unmatched'
   return {
-    tmdb_id: int(raw.tmdb_id),
+    tmdb_id: inRange(int(raw.tmdb_id), 1, 20_000_000),
     media_type,
     title,
-    year: int(raw.year),
-    season_number: int(raw.season_number),
-    poster_path: str(raw.poster_path, 500),
-    imdb_id: str(raw.imdb_id, 20),
-    tvdb_id: int(raw.tvdb_id),
+    year: inRange(int(raw.year), 1870, 2200),
+    season_number: inRange(int(raw.season_number), 0, 2200),
+    poster_path: posterUrl(raw.poster_path),
+    imdb_id: imdbId(raw.imdb_id),
+    tvdb_id: inRange(int(raw.tvdb_id), 1, 20_000_000),
     style_tag: styleTag(raw.style_tag),
     source,
     notes: str(raw.notes, 1000),
@@ -195,12 +261,22 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Invalid JSON body' }, 400)
   }
 
+  // Where the publish came from, recorded on each new row it creates.
+  const submittedVia = clientLabel(body.client, req.headers.get('user-agent'))
+
   const token = typeof body.token === 'string' ? body.token : ''
   const user = await verifyToken(token)
   if (!user) {
     return json(
       { error: 'Discord authentication required — reconnect your Discord account and try again' },
       401,
+    )
+  }
+
+  if (REQUIRE_GUILD_MEMBER && !(await isGuildMember(user.discord_user_id))) {
+    return json(
+      { error: 'Publishing is limited to members of the PosterFlow Discord — join the server and try again.' },
+      403,
     )
   }
 
@@ -313,7 +389,7 @@ Deno.serve(async (req: Request) => {
   // insert fails and we re-read so we can still attach this user as a wanter.
   const toCreate = normalized.filter((it) => !rowByKey.has(dedupKey(it)))
   if (toCreate.length) {
-    const newRows = toCreate.map((it) => ({ ...it, status: 'open' }))
+    const newRows = toCreate.map((it) => ({ ...it, status: 'open', submitted_via: submittedVia }))
     const { data: created, error: createErr } = await supabase
       .from('poster_list_items')
       .insert(newRows)

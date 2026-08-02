@@ -12,7 +12,9 @@
  * which severs window.opener before postMessage can be used.
  *
  * The `state` parameter carries base64(JSON {nonce, origin}) so this function
- * knows where to redirect after completing OAuth.
+ * knows where to redirect after completing OAuth. `origin` is caller-supplied
+ * and not restricted — every issued token is logged with its destination
+ * instead, see isLocalOrigin() below.
  *
  * Required Supabase secrets:
  *   DISCORD_CLIENT_ID
@@ -80,6 +82,44 @@ function parseState(state: string): StatePayload | null {
   } catch {
     return null
   }
+}
+
+// ── Redirect-origin classification (logging only) ────────────────────────
+const LOCAL_SUFFIXES = ['.local', '.lan', '.localdomain', '.home', '.home.arpa', '.internal', '.localhost']
+
+function isPrivateIPv4(host: string): boolean {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return false
+  const parts = m.slice(1).map(Number)
+  if (parts.some((p) => p > 255)) return false
+  const [a, b] = parts
+  if (a === 10 || a === 127) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 169 && b === 254) return true // link-local
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT range — Tailscale et al.
+  return false
+}
+
+function isPrivateIPv6(host: string): boolean {
+  const h = host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
+  if (h === '::1') return true
+  return /^f[cd]/.test(h) || h.startsWith('fe80:') // ULA fc00::/7, link-local fe80::/10
+}
+
+function isLocalOrigin(origin: string): boolean {
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false
+  }
+  const host = url.hostname.toLowerCase()
+  if (host === 'localhost') return true
+  if (isPrivateIPv4(host)) return true
+  if (isPrivateIPv6(host)) return true
+  if (LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))) return true
+  return !host.includes('.') && !host.startsWith('[')
 }
 
 function callbackRedirect(origin: string, params: Record<string, string>): Response {
@@ -193,6 +233,13 @@ Deno.serve(async (req) => {
     exp: Math.floor(Date.now() / 1000) + 86400 * 30,
   }
   const token = await createToken(payload)
+
+  const dest = `${discordUsername} (${discordUserId}) -> ${origin}`
+  if (isLocalOrigin(origin)) {
+    console.log(`[discord-oauth] token issued: ${dest}`)
+  } else {
+    console.warn(`[discord-oauth] token issued to EXTERNAL origin: ${dest}`)
+  }
 
   // Redirect popup back to PosterFlow's /discord-callback route.
   // That page writes the token to localStorage, which the main window polls for.

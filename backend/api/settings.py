@@ -42,6 +42,7 @@ SENSITIVE_JSON_KEYS: Dict[str, List[str]] = {
     "sonarr_instances": ["api_key"],
     "maker_tools_monitor_config": ["tmdb_api_key"],
     "discord_notifications_features": ["webhook_url"],
+    "community_discord_identity": ["discord_token"],
 }
 
 NON_REVEALABLE_KEYS: set[str] = {

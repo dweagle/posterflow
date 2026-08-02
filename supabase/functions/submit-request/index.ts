@@ -35,8 +35,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
-// Only needed to freshen a request's forum thread after a season→show upgrade.
+// Freshens a request's forum thread after a season→show upgrade, and backs the
+// live membership re-check below.
 const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN') ?? ''
+const GUILD_ID = Deno.env.get('DISCORD_GUILD_ID') ?? ''
+
+// Require the requester to be in the Discord server. Off unless the secret is
+// set to "true", so enabling it is a deliberate flip.
+const REQUIRE_GUILD_MEMBER =
+  (Deno.env.get('DISCORD_REQUIRE_GUILD_MEMBER') ?? '').trim().toLowerCase() === 'true'
 
 // Per-Discord-account daily limit — the primary limit.
 const USER_DAILY_LIMIT = 5
@@ -60,6 +67,23 @@ interface DiscordTokenPayload {
   discord_username: string
   is_maker: boolean
   exp: number
+}
+
+// Live membership check via the bot API. Checked per submission rather than
+// recorded in the token, which lasts 30 days — otherwise someone who left or was
+// banned could keep submitting until it expired. Fails closed, matching the role
+// re-check in post-poster.
+async function isGuildMember(discordUserId: string): Promise<boolean> {
+  if (!DISCORD_BOT_TOKEN || !GUILD_ID) return false
+  try {
+    const resp = await fetch(
+      `https://discord.com/api/v10/guilds/${GUILD_ID}/members/${discordUserId}`,
+      { headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` } },
+    )
+    return resp.ok
+  } catch {
+    return false
+  }
 }
 
 async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
@@ -100,6 +124,72 @@ async function verifyToken(token: string): Promise<DiscordTokenPayload | null> {
   } catch {
     return null
   }
+}
+
+// ── Field validation ────────────────────────────────────────────────────────
+// This function is the only boundary a submission crosses — the app's own checks
+// are UI, and a script can skip them entirely. So every field the app can set is
+// constrained here to what the app could actually have produced.
+
+// poster_path is rendered as an <img src> on every user's requests board and as
+// the Discord embed thumbnail, so an unrestricted URL here is a tracking pixel
+// aimed at the whole community. The app only ever builds these from TMDB/TVDB.
+const POSTER_HOSTS = new Set([
+  'image.tmdb.org',
+  'artworks.thetvdb.com',
+  'www.themoviedb.org',
+  'media.themoviedb.org',
+])
+
+// The vocabulary in posterStyles.ts, plus the bare forms older rows still use.
+const STYLE_TAGS = new Set(['CL2K Style', 'MM2K Style', 'CL2K', 'MM2K', 'Anime Movie', 'Anime TV'])
+
+function isPosterUrl(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false
+  try {
+    const u = new URL(v)
+    return u.protocol === 'https:' && POSTER_HOSTS.has(u.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+const isIntInRange = (v: unknown, min: number, max: number): boolean =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
+
+// Label for the submitted_via column: the app's own identifier if it sent one,
+// otherwise the User-Agent. Control characters stripped so the value stays
+// readable in a query result.
+function clientLabel(client: unknown, userAgent: string | null): string {
+  const raw = typeof client === 'string' && client.trim() ? client : userAgent
+  if (!raw) return 'unknown'
+  // deno-lint-ignore no-control-regex
+  return raw.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 100) || 'unknown'
+}
+
+// Ranges are wide enough for anything real — the live board spans tmdb_id
+// 62–1.7M and years 1929–2026, and some seasons are numbered by year.
+// Bad ids are rejected rather than nulled: tmdb_id drives dedupe and the
+// show/season merge, so a junk value quietly splits a request from its twin.
+function validateFields(body: Record<string, unknown>): string | null {
+  // The app sends "" rather than null for an absent id or image — treat those as
+  // absent so they neither fail validation nor land in the row as empty strings.
+  for (const k of ['p_imdb_id', 'p_poster_path']) {
+    if (typeof body[k] === 'string' && !(body[k] as string).trim()) body[k] = null
+  }
+  if (body.p_poster_path != null && !isPosterUrl(body.p_poster_path)) return 'poster_path'
+  if (body.p_tmdb_id != null && !isIntInRange(body.p_tmdb_id, 1, 20_000_000)) return 'tmdb_id'
+  if (body.p_tvdb_id != null && !isIntInRange(body.p_tvdb_id, 1, 20_000_000)) return 'tvdb_id'
+  if (body.p_year != null && !isIntInRange(body.p_year, 1870, 2200)) return 'year'
+  if (body.p_season_number != null && !isIntInRange(body.p_season_number, 0, 2200)) return 'season_number'
+  if (
+    body.p_imdb_id != null &&
+    (typeof body.p_imdb_id !== 'string' || !/^tt\d{5,12}$/.test(body.p_imdb_id))
+  ) {
+    return 'imdb_id'
+  }
+  if (body.p_style_tags != null && !Array.isArray(body.p_style_tags)) return 'style_tags'
+  return null
 }
 
 // The community poster style (CL2K/MM2K) in a request's tags / list item's tag.
@@ -278,6 +368,14 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Invalid JSON body' }, 400)
   }
 
+  // Where the submission came from, recorded on the row. The app stamps itself
+  // ("posterflow/0.13.2"); a direct call to this function doesn't, so it falls
+  // back to the User-Agent. This is a record, not a check — anyone can send any
+  // value, so it separates "came through a PosterFlow instance" from "hit this
+  // endpoint directly" and nothing more.
+  const submittedVia = clientLabel(body.client, req.headers.get('user-agent'))
+  delete body.client
+
   // ── Verify the signed Discord token ────────────────────────────────────────
   const token = typeof body.token === 'string' ? body.token : ''
   delete body.token
@@ -289,6 +387,14 @@ Deno.serve(async (req: Request) => {
     )
   }
 
+  // Membership gate — checked before any quota is consumed.
+  if (REQUIRE_GUILD_MEMBER && !(await isGuildMember(user.discord_user_id))) {
+    return json(
+      { error: 'Requests are limited to members of the PosterFlow Discord — join the server and try again.' },
+      403,
+    )
+  }
+
   // Validate required fields before consuming any rate-limit quota
   const validTypes = ['movie', 'show', 'season', 'collection', 'person']
   if (!body.p_media_type || !validTypes.includes(body.p_media_type as string)) {
@@ -296,6 +402,10 @@ Deno.serve(async (req: Request) => {
   }
   if (!body.p_title || typeof body.p_title !== 'string' || !body.p_title.trim()) {
     return json({ error: 'Title is required' }, 400)
+  }
+  const badField = validateFields(body)
+  if (badField) {
+    return json({ error: `Invalid ${badField}` }, 400)
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -349,10 +459,18 @@ Deno.serve(async (req: Request) => {
   if (typeof body.p_title === 'string') body.p_title = body.p_title.trim().slice(0, 200)
   if (typeof body.p_notes === 'string') body.p_notes = body.p_notes.trim().slice(0, 1000)
 
+  // Unknown style tags are dropped rather than rejected — notify-discord already
+  // ignores any it can't map, so filtering changes nothing for real traffic.
+  if (Array.isArray(body.p_style_tags)) {
+    body.p_style_tags = body.p_style_tags.filter((t) => typeof t === 'string' && STYLE_TAGS.has(t))
+  }
+
   // Requester identity comes from the verified token, never the client.
   const requestedByDiscordId = user.discord_user_id
+  // Display name only — attribution comes from requested_by_discord_id below.
+  // Collapse whitespace so it can't be used to break the Discord embed layout.
   if (typeof body.p_requested_by === 'string' && body.p_requested_by.trim()) {
-    body.p_requested_by = body.p_requested_by.trim().slice(0, 100)
+    body.p_requested_by = body.p_requested_by.replace(/\s+/g, ' ').trim().slice(0, 100)
   } else {
     body.p_requested_by = user.discord_username
   }
@@ -400,6 +518,7 @@ Deno.serve(async (req: Request) => {
   if (data?.is_new && data?.request_id) {
     const updatePayload: Record<string, string> = {
       requested_by_discord_id: requestedByDiscordId,
+      submitted_via: submittedVia,
     }
     if (pingDiscordUsername) updatePayload.ping_discord_username = pingDiscordUsername
     const { error: updateErr } = await supabase

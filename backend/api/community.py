@@ -1,6 +1,7 @@
 """Community poster requests API - connects to Supabase for cross-instance request sharing."""
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -24,6 +25,16 @@ SUPABASE_HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
 }
+
+
+def _app_version() -> str:
+    """Read VERSION from the repo root. Not imported from main to avoid a cycle."""
+    try:
+        return (Path(__file__).resolve().parent.parent.parent / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+CLIENT_ID = f"posterflow/{_app_version()}"
 
 router = APIRouter(prefix="/api/community", tags=["community"])
 
@@ -379,6 +390,7 @@ async def submit_community_request(payload: PosterRequestPayload):
                 headers=SUPABASE_HEADERS,
                 json={
                     "token": payload.discord_token,
+                    "client": CLIENT_ID,
                     "p_tmdb_id": payload.tmdb_id,
                     "p_media_type": payload.media_type,
                     "p_title": payload.title.strip(),
@@ -677,7 +689,7 @@ async def submit_community_list_items(payload: SubmitListItemsPayload):
             resp = await client.post(
                 f"{SUPABASE_URL}/functions/v1/submit-list-items",
                 headers=SUPABASE_HEADERS,
-                json={"token": payload.discord_token, "items": items},
+                json={"token": payload.discord_token, "client": CLIENT_ID, "items": items},
             )
             resp.raise_for_status()
             return resp.json()
