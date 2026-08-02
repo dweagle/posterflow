@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-08-02
+### Changed
+- Community Requests: submissions now require membership in the Discord server, and submission content is verified server-side.
+- Community Requests: a short-lived read cache for requests and the claim index reduces repeat calls to the Supabase server.
+
 ## [0.13.2] - 2026-08-01
 ### Added
 - Artwork Finder: the My Drive tab can now compare against poster source drives- the artwork drive, plus one per IDarr poster scope. Picking a poster scope lists everything in that library and measures artwork gaps against it, including items with no artwork pulled yet.
