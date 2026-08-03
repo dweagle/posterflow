@@ -333,9 +333,11 @@ async def get_community_requests(
 @router.get("/claim-index")
 async def get_claim_index():
     """Community-wide claim/overlap index: every active-or-fulfilled request and
-    list item, but only the match keys (ids/title/year) plus status. Replaces the
-    frontend paging both tables with select=* — the single biggest egress read.
-    Rejected rows are excluded; the index ignores them anyway."""
+    list item, but only the match keys (ids/title/year) plus status and poster
+    style (style_tags/style_tag — lets the frontend show "Made" only for styles
+    the user actually collects). Replaces the frontend paging both tables with
+    select=* — the single biggest egress read. Rejected rows are excluded; the
+    index ignores them anyway."""
     cache_key = ("claim-index",)
     if (hit := _cache_get(cache_key, _TTL_CLAIM_INDEX)) is not None:
         return hit
@@ -344,14 +346,14 @@ async def get_claim_index():
     PAGE = 1000
     MAX_PAGES = 20
 
-    async def fetch_all(client: httpx.AsyncClient, table: str, statuses: str) -> list:
+    async def fetch_all(client: httpx.AsyncClient, table: str, statuses: str, select: str) -> list:
         rows: list = []
         for page in range(MAX_PAGES):
             resp = await client.get(
                 f"{SUPABASE_URL}/rest/v1/{table}",
                 headers=SUPABASE_HEADERS,
                 params={
-                    "select": SELECT,
+                    "select": select,
                     "status": f"in.({statuses})",
                     "order": "id.asc",  # unique tiebreaker so pages don't overlap
                     "limit": PAGE,
@@ -368,8 +370,8 @@ async def get_claim_index():
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             requests_rows, item_rows = await asyncio.gather(
-                fetch_all(client, "poster_requests", "pending,in_progress,fulfilled"),
-                fetch_all(client, "poster_list_items", "open,in_progress,fulfilled"),
+                fetch_all(client, "poster_requests", "pending,in_progress,fulfilled", SELECT + ",style_tags"),
+                fetch_all(client, "poster_list_items", "open,in_progress,fulfilled", SELECT + ",style_tag"),
             )
         result = {"requests": requests_rows, "list_items": item_rows}
         _cache_store(cache_key, result)
