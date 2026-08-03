@@ -1,24 +1,33 @@
 import { Check } from 'lucide-react'
-import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import { type ClaimStyle, type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
+
+const STYLE_ORDER: ClaimStyle[] = ['CL2K', 'MM2K', '']
 
 /**
- * Shows whether an item is already being worked on (orange) or done (green)
- * in the community, so the user doesn't request/list it again. Renders nothing
- * when there's no matching claim/fulfillment. `iconOnly` drops the text label
- * (used on compact rows), keeping just the colored checkmark + hover hint.
+ * Community status checks, one per poster style. Color carries the meaning:
+ * blue = made in CL2K, green = made in MM2K, gray = made in an unknown style
+ * (legacy rows), amber = a maker has it claimed in that style. The tooltip
+ * spells it out. Renders nothing when there's no matching claim/fulfillment.
  */
-export default function CommunityStatusBadge({ status, iconOnly = false }: { status: ClaimStatus | null; iconOnly?: boolean }) {
+export default function CommunityStatusBadge({ status }: { status: StyleClaimStatus | null }) {
   if (!status) return null
-  const fulfilled = status === 'fulfilled'
   return (
-    <span
-      className={`community-claim-badge${fulfilled ? ' community-claim-fulfilled' : ' community-claim-in-progress'}${iconOnly ? ' community-claim-icon-only' : ''}`}
-      title={fulfilled
-        ? 'Already made for the community — no need to request it again'
-        : 'Claimed — a maker is working on it; no need to request it again'}
-    >
-      <Check size={11} />
-      {!iconOnly && <span>{fulfilled ? 'Made' : 'In progress'}</span>}
-    </span>
+    <>
+      {STYLE_ORDER.filter((style) => status[style]).map((style) => {
+        const fulfilled = status[style] === 'fulfilled'
+        const inStyle = style ? ` in ${style}` : ' (style unknown)'
+        return (
+          <span
+            key={style || 'unknown'}
+            className={`community-claim-badge community-claim-${style ? style.toLowerCase() : 'unknown'}${fulfilled ? ' community-claim-fulfilled' : ' community-claim-in-progress'}`}
+            title={fulfilled
+              ? `Already made${inStyle} for the community; no need to request again\nIt may not have been uploaded by the maker yet or synced to your drive.`
+              : `Claimed${inStyle} — a maker is working on it; no need to request it again`}
+          >
+            <Check size={11} />
+          </span>
+        )
+      })}
+    </>
   )
 }

@@ -169,8 +169,8 @@ export const submitCommunityListItems = (payload: SubmitListItemsPayload): Promi
 
 // ── Claim/overlap index ──────────────────────────────────────────────────────
 
-// Slim community-wide scan for the claim/overlap index: just the match keys and
-// status of every active-or-fulfilled request and list item.
+// Slim community-wide scan for the claim/overlap index: just the match keys,
+// status, and poster style of every active-or-fulfilled request and list item.
 export interface ClaimIndexRow {
   tmdb_id: number | null
   tvdb_id: number | null
@@ -178,6 +178,8 @@ export interface ClaimIndexRow {
   title: string | null
   year: number | null
   status: string
+  style_tags?: string[] | null // requests
+  style_tag?: string | null // list items
 }
 
 export const getClaimIndex = (): Promise<{ requests: ClaimIndexRow[]; list_items: ClaimIndexRow[] }> =>

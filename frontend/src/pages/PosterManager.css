@@ -5298,38 +5298,45 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 
 
-/* Community claim/fulfillment indicator on unmatched + poster-style items.
-   Tells the user an item is already being worked on (orange) or done (green),
-   so they don't request/list it again. */
+/* Community claim/fulfillment checks on unmatched + poster-style items — one
+   per poster style. Color carries the meaning (tooltip spells it out):
+   blue = made in CL2K, green = made in MM2K, gray = made in unknown style,
+   amber = claimed/being worked on. 16px squares matching the M badge. */
 .community-claim-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.1rem 0.4rem;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   border-radius: 3px;
-  white-space: nowrap;
+  cursor: help;
 }
 .community-claim-in-progress {
   background: rgba(255, 183, 77, 0.14);
   color: #ffb74d;
 }
+/* Claimed stays amber for both styles; the border says which one (border-box,
+   so the 16px square doesn't grow). Unknown-style claims stay borderless. */
+.community-claim-in-progress.community-claim-cl2k {
+  border: 1px solid rgba(100, 181, 246, 0.55);
+}
+.community-claim-in-progress.community-claim-mm2k {
+  border: 1px solid rgba(76, 175, 80, 0.55);
+}
 .community-claim-fulfilled {
   background: rgba(76, 175, 80, 0.14);
   color: #81c784;
 }
-/* Icon-only variant (compact rows): just the checkmark + hover hint. */
-.community-claim-icon-only {
-  /* Match the M badge's fixed square so the indicator cluster is uniform. */
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  gap: 0;
-  justify-content: center;
-  cursor: help;
+/* Done in CL2K = blue, matching the drive/style badges (MM2K keeps the green). */
+.community-claim-fulfilled.community-claim-cl2k {
+  background: rgba(100, 181, 246, 0.16);
+  color: #64b5f6;
 }
-
+/* Style-unknown legacy fulfillments: neutral gray so green stays "MM2K done". */
+.community-claim-fulfilled.community-claim-unknown {
+  background: rgba(156, 163, 175, 0.14);
+  color: #b0b6bf;
+}
 /* "Missing in Arr" — red M badge (tracked in *arr but not downloaded). */
 .arr-missing-badge {
   display: inline-flex;

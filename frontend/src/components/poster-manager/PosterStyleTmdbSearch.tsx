@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
 import { type FallbackItem } from '../../api/posterManager'
-import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import { type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import { useToast } from '../Toast'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
@@ -14,7 +14,7 @@ type PosterStyleTmdbSearchProps = {
   item: FallbackItem
   tmdbApiKeyConfigured: boolean
   seasons?: (number | null)[]
-  claimStatus?: ClaimStatus | null
+  claimStatus?: StyleClaimStatus | null
 }
 
 function getTmdbLink(candidate: TmdbCandidate): string {

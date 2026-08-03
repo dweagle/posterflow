@@ -70,10 +70,10 @@ function UnmatchedTab({
   const navigate = useNavigate()
   const { getStatus: getClaimStatus } = useCommunityClaimStatus()
 
-  // Orange/green "already claimed/made" indicator for a preview row — icon-only
-  // (checkmark + hover) so the compact rows don't carry extra text.
+  // Per-style "already claimed/made" checks for a preview row (color = style,
+  // tooltip spells it out).
   const claimBadge = (item: PreviewItem, mediaType: string) => (
-    <CommunityStatusBadge iconOnly status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: mediaType, title: item.title, year: item.year })} />
+    <CommunityStatusBadge status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: mediaType, title: item.title, year: item.year })} />
   )
   // Red "M" indicator when the item is tracked in *arr but not downloaded.
   const arrBadge = (item: PreviewItem) => <ArrMissingBadge available={item.available} />

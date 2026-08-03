@@ -1,9 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { getClaimIndex, type ClaimIndexRow } from '../api/community'
+import { getStyleLabel } from '../components/community/posterStyles'
 
 // Whether an item is currently being worked (claimed) or already done somewhere
 // in the community (a request or a published list item).
 export type ClaimStatus = 'in_progress' | 'fulfilled'
+
+// The poster styles a claim/fulfillment can be tagged with; '' = a legacy row
+// without style tags.
+export type ClaimStyle = 'CL2K' | 'MM2K' | ''
+
+// Community status per poster style, e.g. { CL2K: 'fulfilled', MM2K: 'in_progress' }.
+// The badge shows every style so the user sees exactly what exists — no
+// guessing which styles they collect.
+export type StyleClaimStatus = Partial<Record<ClaimStyle, ClaimStatus>>
 
 type LookupItem = {
   tmdb_id?: number | null
@@ -30,13 +40,20 @@ function keysFor(item: LookupItem): string[] {
   return keys
 }
 
+// The poster style a claim/fulfillment row was made in. Requests carry
+// style_tags[], list items a single style_tag.
+const styleOf = (row: ClaimIndexRow): ClaimStyle =>
+  getStyleLabel(row.style_tags ?? (row.style_tag ? [row.style_tag] : null)) ?? ''
+
+const ALL_STYLES: ClaimStyle[] = ['CL2K', 'MM2K', '']
+
 // Whether an item also has an active counterpart elsewhere in the community:
 // onList = a matching open/in_progress list item; requested = a matching
 // pending/in_progress request. Powers the "also on a list" / "also requested" chips.
 export type CommunityOverlap = { onList: boolean; requested: boolean }
 
 interface CommunityClaimStatusValue {
-  getStatus: (item: LookupItem) => ClaimStatus | null
+  getStatus: (item: LookupItem) => StyleClaimStatus | null
   getOverlap: (item: LookupItem) => CommunityOverlap
   loaded: boolean
   refresh: () => void
@@ -58,6 +75,12 @@ const CommunityClaimStatusContext = createContext<CommunityClaimStatusValue>(def
  * Asset Manager Unmatched tab and its modals), instead of each component
  * fetching its own copy. fulfilled wins over in_progress. Best-effort: network
  * errors just yield no flags.
+ *
+ * getStatus reports per poster style: which styles (CL2K/MM2K) the item is
+ * made or claimed in, so the badge can spell them out and the user decides
+ * what's relevant — deliberately NOT filtered by the user's own drives.
+ * getOverlap stays style-blind — it powers "also requested / also on a list"
+ * dedupe chips on the community boards, where any active counterpart matters.
  */
 export function CommunityClaimStatusProvider({ children }: { children: ReactNode }) {
   const [index, setIndex] = useState<Map<string, ClaimStatus>>(new Map())
@@ -76,20 +99,24 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
     const map = new Map<string, ClaimStatus>()
     const reqKeys = new Set<string>()
     const listKeys = new Set<string>()
-    const add = (item: LookupItem, status: string) => {
-      const s: ClaimStatus | null = status === 'fulfilled' ? 'fulfilled' : status === 'in_progress' ? 'in_progress' : null
+    // Status keys carry the row's style ("CL2K|t:movie:123") so getStatus can
+    // skip styles the user doesn't collect; overlap keys stay style-less.
+    const add = (row: ClaimIndexRow) => {
+      const s: ClaimStatus | null = row.status === 'fulfilled' ? 'fulfilled' : row.status === 'in_progress' ? 'in_progress' : null
       if (!s) return
-      for (const k of keysFor(item)) {
+      const style = styleOf(row)
+      for (const k of keysFor(row)) {
+        const sk = `${style}|${k}`
         // fulfilled beats in_progress
-        if (s === 'fulfilled' || map.get(k) !== 'fulfilled') map.set(k, s)
+        if (s === 'fulfilled' || map.get(sk) !== 'fulfilled') map.set(sk, s)
       }
     }
     for (const r of requests) {
-      add(r, r.status)
+      add(r)
       if (r.status === 'pending' || r.status === 'in_progress') for (const k of keysFor(r)) reqKeys.add(k)
     }
     for (const it of items) {
-      add(it, it.status)
+      add(it)
       if (it.status === 'open' || it.status === 'in_progress') for (const k of keysFor(it)) listKeys.add(k)
     }
     setIndex(map)
@@ -108,14 +135,17 @@ export function CommunityClaimStatusProvider({ children }: { children: ReactNode
   }, [load])
 
   const value = useMemo<CommunityClaimStatusValue>(() => ({
-    getStatus: (item: LookupItem): ClaimStatus | null => {
-      let best: ClaimStatus | null = null
+    getStatus: (item: LookupItem): StyleClaimStatus | null => {
+      const out: StyleClaimStatus = {}
       for (const k of keysFor(item)) {
-        const s = index.get(k)
-        if (s === 'fulfilled') return 'fulfilled'
-        if (s === 'in_progress') best = 'in_progress'
+        for (const style of ALL_STYLES) {
+          const s = index.get(`${style}|${k}`)
+          if (!s) continue
+          // fulfilled beats in_progress, per style
+          if (s === 'fulfilled' || !out[style]) out[style] = s
+        }
       }
-      return best
+      return Object.keys(out).length ? out : null
     },
     getOverlap: (item: LookupItem): CommunityOverlap => {
       let onList = false

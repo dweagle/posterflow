@@ -5,7 +5,7 @@ import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
-import { type ClaimStatus } from '../../hooks/useCommunityClaimStatus'
+import { type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
 
 export interface SelectableListItem {
   key: string
@@ -15,7 +15,7 @@ export interface SelectableListItem {
   badgeType?: 'movie' | 'series' | 'season' | 'collection' | null
   posterUrl?: string | null
   // Same supplementary badges the Unmatched rows show.
-  claimStatus?: ClaimStatus | null
+  claimStatus?: StyleClaimStatus | null
   available?: boolean | null
 }
 
@@ -159,7 +159,7 @@ export default function CreateListModal({ items, submitting, onAdd, onClose, sty
                         {BADGE_LABEL[item.badgeType]}
                       </span>
                     )}
-                    <CommunityStatusBadge status={item.claimStatus ?? null} iconOnly />
+                    <CommunityStatusBadge status={item.claimStatus ?? null} />
                     <ArrMissingBadge available={item.available} />
                   </div>
                   <span className="create-list-check">{checked && <Check size={16} />}</span>
