@@ -23,13 +23,9 @@ function formatCardDate(dateStr: string): string {
     + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
-// Community poster style (CL2K/MM2K) from a request's style tags or a list item's style_tag.
-export function getStyleLabel(tags: string[] | null | undefined): 'CL2K' | 'MM2K' | null {
-  const t = tags ?? []
-  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
-  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
-  return null
-}
+// Lives in posterStyles.ts now (the claim-status hook needs it without pulling
+// in this component); re-exported so existing importers keep working.
+export { getStyleLabel } from './posterStyles'
 
 function tmdbLinkFor(mediaType: CardMediaType, tmdbId: number | null): string {
   if (!tmdbId) return ''

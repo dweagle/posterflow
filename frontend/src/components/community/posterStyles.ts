@@ -14,6 +14,16 @@ export const POSTER_STYLES: { value: string; label: string }[] = [
 // Optional extra style preferences (multi-select).
 export const EXTRA_TAGS = ['Anime Movie', 'Anime TV']
 
+// Community poster style (CL2K/MM2K) from a request's style_tags or a list
+// item's style_tag (tags carry either "CL2K Style" or bare "CL2K"). CL2K wins
+// if both appear — mirrors the backend's _request_style().
+export function getStyleLabel(tags: string[] | null | undefined): 'CL2K' | 'MM2K' | null {
+  const t = tags ?? []
+  if (t.includes('CL2K Style') || t.includes('CL2K')) return 'CL2K'
+  if (t.includes('MM2K Style') || t.includes('MM2K')) return 'MM2K'
+  return null
+}
+
 export function isValidDiscordUsername(value: string): boolean {
   const v = value.trim()
   return v.length >= 2 && v.length <= 32 && !/^@?(everyone|here)$/i.test(v)
