@@ -215,6 +215,7 @@ function ScheduleEditModal({
               <option value="border_replacer">Border Replacer</option>
               <option value="idarr">IDarr</option>
               <option value="maker_monitor">Maker Monitor</option>
+              <option value="backup">Backup</option>
             </select>
           </div>
 

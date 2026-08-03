@@ -24,6 +24,7 @@ VALID_JOB_TYPES = {
     "border_replacer",
     "idarr",
     "maker_monitor",
+    "backup",  # configuration backup zip to the configured backup location
 }
 
 

@@ -68,6 +68,7 @@ export {
   cleanupDatabase,
   downloadBackup,
   getDatabaseStats,
+  saveBackupToLocation,
   uploadBackup,
 } from './maintenance'
 
@@ -119,6 +120,9 @@ export {
   saveGdriveStoragePath,
   getArtworkGdriveStoragePath,
   saveArtworkGdriveStoragePath,
+  type BackupStorageSettings,
+  getBackupStorage,
+  saveBackupStorage,
   testDiscordNotification,
   testPlex,
   testRadarr,

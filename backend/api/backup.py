@@ -1,8 +1,9 @@
 """
 Backup and restore endpoints for PosterFlow configuration
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from pathlib import Path
 from typing import Any, Dict
@@ -12,8 +13,10 @@ import shutil
 import tempfile
 import traceback
 from datetime import datetime
+from database import get_db
 from core.config import settings as app_settings
 from core.logging import LogTags, log_info, log_success, log_error, log_warning, log_user_action
+from services.backup import build_backup_zip, run_backup_to_location
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
@@ -21,6 +24,7 @@ CONFIG_DIR = app_settings.config_dir
 DB_FILE = CONFIG_DIR / "posterflow.db"
 RCLONE_CONF = CONFIG_DIR / "rclone.conf"
 DRIVES_CACHE = CONFIG_DIR / "drives_cache.json"
+ARTWORK_DRIVES_CACHE = CONFIG_DIR / "artwork_drives_cache.json"
 
 
 @router.get("/")
@@ -29,49 +33,36 @@ def create_backup() -> FileResponse:
     Create a backup zip file containing database and configuration files
     """
     try:
-        backup_name = f"posterflow_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-        backup_path = CONFIG_DIR / backup_name
-        
-        # Create metadata
-        metadata = {
-            "version": "1.0",
-            "created_at": datetime.now().isoformat(),
-            "app": "PosterFlow"
-        }
-        
-        # Create zip file directly in config directory
-        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add database
-            if DB_FILE.exists():
-                zipf.write(DB_FILE, "posterflow.db")
-                log_info(LogTags.BACKUP, "Added database to backup")
-            
-            # Add rclone config
-            if RCLONE_CONF.exists():
-                zipf.write(RCLONE_CONF, "rclone.conf")
-                log_info(LogTags.BACKUP, "Added rclone config to backup")
-            
-            # Add drives cache (optional)
-            if DRIVES_CACHE.exists():
-                zipf.write(DRIVES_CACHE, "drives_cache.json")
-                log_info(LogTags.BACKUP, "Added drives cache to backup")
-            
-            # Add metadata
-            zipf.writestr("metadata.json", json.dumps(metadata, indent=2))
-        
-        log_success(LogTags.BACKUP, f"Created backup: {backup_name}")
-        
+        backup_path = build_backup_zip(CONFIG_DIR)
+
         # Return the file and clean up after sending
         return FileResponse(
             path=str(backup_path),
-            filename=backup_name,
+            filename=backup_path.name,
             media_type="application/zip",
             background=BackgroundTask(backup_path.unlink, missing_ok=True)
         )
-        
+
     except Exception as e:
         log_error(LogTags.BACKUP, f"Failed to create backup: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to create backup")
+
+
+@router.post("/save")
+def save_backup_to_location(db: Session = Depends(get_db)) -> Dict[str, str]:
+    """
+    Create a backup zip in the configured backup location (same as scheduled backups)
+    """
+    try:
+        backup_path = run_backup_to_location(db)
+        log_user_action("Manual backup saved to backup location", path=str(backup_path))
+        return {
+            "message": f"Backup saved to {backup_path}",
+            "path": str(backup_path),
+        }
+    except Exception as e:
+        log_error(LogTags.BACKUP, f"Failed to save backup: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to save backup")
 
 
 @router.post("/")
@@ -124,48 +115,38 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
             safety_backup_dir = CONFIG_DIR / "safety_backups"
             safety_backup_dir.mkdir(exist_ok=True)
             backup_suffix = f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            
-            # Restore database
-            db_backup = temp_path / "posterflow.db"
-            if db_backup.exists():
-                if DB_FILE.exists():
-                    safety_path = safety_backup_dir / f"posterflow.db{backup_suffix}"
-                    shutil.copy(DB_FILE, safety_path)
-                shutil.copy(db_backup, DB_FILE)
-                log_success(LogTags.BACKUP, "Database restored successfully")
-            
-            # Restore rclone config
-            rclone_backup = temp_path / "rclone.conf"
-            if rclone_backup.exists():
-                if RCLONE_CONF.exists():
-                    safety_path = safety_backup_dir / f"rclone.conf{backup_suffix}"
-                    shutil.copy(RCLONE_CONF, safety_path)
-                shutil.copy(rclone_backup, RCLONE_CONF)
-                log_success(LogTags.BACKUP, "Rclone config restored successfully")
-            
-            # Restore drives cache
-            cache_backup = temp_path / "drives_cache.json"
-            if cache_backup.exists():
-                if DRIVES_CACHE.exists():
-                    safety_path = safety_backup_dir / f"drives_cache.json{backup_suffix}"
-                    shutil.copy(DRIVES_CACHE, safety_path)
-                shutil.copy(cache_backup, DRIVES_CACHE)
-                log_success(LogTags.BACKUP, "Drives cache restored successfully")
+
+            # (zip member, live target, response key, log label)
+            restore_targets = [
+                ("posterflow.db", DB_FILE, "database", "Database"),
+                ("rclone.conf", RCLONE_CONF, "rclone_config", "Rclone config"),
+                ("drives_cache.json", DRIVES_CACHE, "drives_cache", "Drives cache"),
+                ("artwork_drives_cache.json", ARTWORK_DRIVES_CACHE, "artwork_drives_cache", "Artwork drives cache"),
+            ]
+
+            restored_files: Dict[str, bool] = {}
+            for member_name, target, response_key, label in restore_targets:
+                extracted = temp_path / member_name
+                restored_files[response_key] = extracted.exists()
+                if not extracted.exists():
+                    continue
+                if target.exists():
+                    safety_path = safety_backup_dir / f"{member_name}{backup_suffix}"
+                    shutil.copy(target, safety_path)
+                shutil.copy(extracted, target)
+                log_success(LogTags.BACKUP, f"{label} restored successfully")
 
             log_user_action(
                 "Backup restore completed",
-                database_restored=db_backup.exists(),
-                rclone_restored=rclone_backup.exists(),
-                cache_restored=cache_backup.exists(),
+                database_restored=restored_files["database"],
+                rclone_restored=restored_files["rclone_config"],
+                cache_restored=restored_files["drives_cache"],
+                artwork_cache_restored=restored_files["artwork_drives_cache"],
             )
-            
+
             return {
                 "message": "Backup restored successfully. Please restart the application for changes to take effect.",
-                "restored_files": {
-                    "database": db_backup.exists(),
-                    "rclone_config": rclone_backup.exists(),
-                    "drives_cache": cache_backup.exists()
-                }
+                "restored_files": restored_files
             }
             
     except zipfile.BadZipFile:

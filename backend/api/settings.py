@@ -1192,3 +1192,70 @@ def save_artwork_gdrive_storage_path(
 
     log_user_action("Updated GDrive artwork storage path", path=str(new_dir))
     return {"path": str(new_dir)}
+
+
+# ---------------------------------------------------------------------------
+# Backup storage (scheduled backups destination + retention)
+# ---------------------------------------------------------------------------
+
+class BackupStorageRequest(BaseModel):
+    path: str
+    retention: int
+
+
+@router.get("/backup-storage")
+def get_backup_storage(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return the scheduled-backup location ('' = default) and retention count."""
+    from services.backup import default_backup_dir, get_backup_retention
+
+    setting = get_setting(db, "backup_location")
+    current_path = setting.value.strip() if setting and setting.value else ""
+    return {
+        "path": current_path,
+        "retention": get_backup_retention(db),
+        "default_path": str(default_backup_dir()),
+    }
+
+
+@router.post("/backup-storage")
+def save_backup_storage(
+    payload: BackupStorageRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Persist the scheduled-backup location and retention count."""
+    from pathlib import Path as _Path
+    from services.backup import default_backup_dir
+
+    raw = payload.path.strip()
+
+    if raw:
+        # Validate: must be an absolute path, no traversal
+        try:
+            _Path(raw).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path")
+        if ".." in _Path(raw).parts:
+            raise HTTPException(status_code=400, detail="Path traversal not allowed")
+        if not _Path(raw).is_absolute():
+            raise HTTPException(status_code=400, detail="Path must be absolute")
+        new_dir = _Path(raw)
+    else:
+        # Empty = use default
+        new_dir = default_backup_dir()
+
+    if payload.retention < 0 or payload.retention > 365:
+        raise HTTPException(status_code=400, detail="Retention must be between 0 and 365")
+
+    upsert_setting(db, "backup_location", raw)
+    upsert_setting(db, "backup_retention", str(payload.retention))
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.API, f"Failed to save backup storage settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save setting")
+
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    log_user_action("Updated backup storage settings", path=str(new_dir), retention=payload.retention)
+    return {"path": raw, "retention": payload.retention, "default_path": str(default_backup_dir())}

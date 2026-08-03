@@ -1874,6 +1874,51 @@ details[open] .feature-events-summary::before {
   margin-top: 1rem;
 }
 
+.backup-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+.backup-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .backup-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.backup-item .form-group {
+  margin-bottom: 1rem;
+}
+
+.backup-item .form-group label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #aaa;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.backup-item .form-group input {
+  width: 100%;
+  max-width: 480px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background-color: #2a2a2a;
+  color: #E8ECEF;
+  font-size: 0.9rem;
+}
+
+.backup-item .form-group .field-hint {
+  margin-top: 0.35rem;
+}
+
 /* Database Maintenance Styles */
 .database-stats {
   background: #2a2a2a;

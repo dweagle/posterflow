@@ -38,6 +38,7 @@ from modules.unmatched import run_unmatched_detection_background_job
 from modules.border import run_border_replacer_background_job
 from modules.idarr import run_idarr_background_job
 from api.maker_tools import run_maker_monitor_scan_for_schedule
+from services.backup import run_backup_to_location
 from tzlocal import get_localzone
 
 # Create scheduler instance
@@ -344,6 +345,14 @@ def run_maker_monitor_for_schedule() -> None:
     )
 
 
+def run_backup_for_schedule() -> None:
+    """Wrapper for scheduled configuration backups."""
+    _run_scheduled_operation(
+        "Scheduled backup failed",
+        lambda db: run_backup_to_location(db),
+    )
+
+
 def sync_one_drive_for_schedule(drive_id: int) -> None:
     """
     Wrapper function for scheduled single-drive syncs.
@@ -455,6 +464,9 @@ def update_schedules() -> None:
                 job_args = [schedule.drive_group, schedule_sync_after, schedule_force_sync]
             elif schedule.job_type == 'maker_monitor':
                 job_func = run_maker_monitor_for_schedule
+                job_args = []
+            elif schedule.job_type == 'backup':
+                job_func = run_backup_for_schedule
                 job_args = []
             else:
                 log_warning(

@@ -407,6 +407,20 @@ export const saveGdriveStoragePath = async (path: string): Promise<{ path: strin
   return postData('/api/settings/gdrive-storage', { path })
 }
 
+export interface BackupStorageSettings {
+  path: string
+  retention: number
+  default_path: string
+}
+
+export const getBackupStorage = async (): Promise<BackupStorageSettings> => {
+  return getData('/api/settings/backup-storage')
+}
+
+export const saveBackupStorage = async (path: string, retention: number): Promise<BackupStorageSettings> => {
+  return postData('/api/settings/backup-storage', { path, retention })
+}
+
 export const getArtworkGdriveStoragePath = async (): Promise<{ path: string }> => {
   return getData('/api/settings/artwork-gdrive-storage')
 }

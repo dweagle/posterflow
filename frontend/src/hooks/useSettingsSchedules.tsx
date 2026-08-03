@@ -77,6 +77,8 @@ export const useSettingsSchedules = ({
         return 'Unmatched Assets'
       case 'border_replacer':
         return 'Border Replacer'
+      case 'backup':
+        return 'Backup'
       default:
         return 'Unknown Task'
     }

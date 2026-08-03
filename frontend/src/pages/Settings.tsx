@@ -1339,6 +1339,7 @@ function Settings() {
           restoreLoading={restoreLoading}
           onDownloadBackup={handleDownloadBackup}
           onRestoreBackup={handleRestoreBackup}
+          showToast={showToast}
         />
       )}
 

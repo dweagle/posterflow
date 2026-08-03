@@ -7,6 +7,10 @@ export const downloadBackup = async (): Promise<Blob> => {
   })
 }
 
+export const saveBackupToLocation = async (): Promise<{ message: string; path: string }> => {
+  return postData('/api/backup/save')
+}
+
 export const uploadBackup = async (file: File): Promise<{ message: string; restored_files: Record<string, boolean> }> => {
   const formData = new FormData()
   formData.append('file', file)

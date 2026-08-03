@@ -96,6 +96,29 @@ def test_create_schedule_accepts_maker_monitor_job_type(client, monkeypatch):
     assert payload["name"] == "Nightly Maker Monitor"
 
 
+def test_create_schedule_accepts_backup_job_type(client, monkeypatch):
+    """Schedule create should accept backup as a schedulable job type."""
+    import api.schedules as schedules_module
+
+    monkeypatch.setattr(schedules_module, "update_schedules", lambda: None)
+    monkeypatch.setattr(schedules_module, "get_schedule_next_run", lambda _id: None)
+
+    response = client.post(
+        "/api/schedules/",
+        json={
+            "job_type": "backup",
+            "name": "Nightly Backup",
+            "enabled": True,
+            "schedule_type": "daily",
+            "schedule_value": "03:30",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_type"] == "backup"
+    assert payload["name"] == "Nightly Backup"
+
+
 def test_create_schedule_accepts_idarr_scope_token(client, monkeypatch):
     """Schedule create should accept idarr scope token in drive_group."""
     import api.schedules as schedules_module

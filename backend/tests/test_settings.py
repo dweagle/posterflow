@@ -581,3 +581,57 @@ def test_plex_name_swap_is_not_treated_as_rename(client, test_db):
     assert _get_setting_json(test_db, "poster_renamer_libraries") == ["A:1", "B:2"]
 
 
+
+
+# ---------------------------------------------------------------------------
+# Backup storage settings
+# ---------------------------------------------------------------------------
+
+def test_backup_storage_defaults(client):
+    """Unset backup storage returns empty path, default retention, and the default dir."""
+    response = client.get("/api/settings/backup-storage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["path"] == ""
+    assert data["retention"] == 7
+    assert data["default_path"].endswith("backups")
+
+
+def test_backup_storage_save_and_roundtrip(client, test_db, tmp_path):
+    dest = tmp_path / "my-backups"
+    response = client.post("/api/settings/backup-storage", json={"path": str(dest), "retention": 3})
+    assert response.status_code == 200
+    assert response.json()["path"] == str(dest)
+    assert dest.is_dir(), "Backup location should be created on save"
+
+    data = client.get("/api/settings/backup-storage").json()
+    assert data["path"] == str(dest)
+    assert data["retention"] == 3
+
+    saved = test_db.query(Setting).filter(Setting.key == "backup_location").first()
+    assert saved is not None and saved.value == str(dest)
+
+
+def test_backup_storage_empty_path_uses_default(client):
+    response = client.post("/api/settings/backup-storage", json={"path": "", "retention": 5})
+    assert response.status_code == 200
+    data = client.get("/api/settings/backup-storage").json()
+    assert data["path"] == ""
+    assert data["retention"] == 5
+
+
+def test_backup_storage_rejects_relative_path(client):
+    response = client.post("/api/settings/backup-storage", json={"path": "relative/backups", "retention": 7})
+    assert response.status_code == 400
+    assert "absolute" in response.json()["detail"].lower()
+
+
+def test_backup_storage_rejects_traversal_path(client):
+    response = client.post("/api/settings/backup-storage", json={"path": "/config/../etc", "retention": 7})
+    assert response.status_code == 400
+
+
+def test_backup_storage_rejects_invalid_retention(client):
+    response = client.post("/api/settings/backup-storage", json={"path": "", "retention": -1})
+    assert response.status_code == 400
+    assert "retention" in response.json()["detail"].lower()
