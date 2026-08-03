@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, Loader2, ListPlus,
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
-import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
+import { tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
 import { publishToCommunityLists } from './publishToCommunityLists'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -461,16 +461,6 @@ function UnmatchedItemsModal({
             <Search size={13} />
             <span>Maker</span>
           </button>
-          <a
-            href={googleSearchUrl(cleanedTitle, item.year)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="maker-nav-btn"
-            title="Google search (opens in a new tab)"
-          >
-            <Search size={13} />
-            <span>Google</span>
-          </a>
           <a
             href={tpdbSearchUrl(cleanedTitle, item.type)}
             target="_blank"
