@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-08-04
+### Added
+- Backup: scheduled backups with configurable location and retention, run via a new "backup" job type in the Scheduling tab.
+- Unmatched Assets: a per-item ignore list — hide items from detection with the eye-off button on modal rows or a manual form under Detection Settings. The legacy "Ignore collections" list migrates over automatically.
+- Update banner: open tabs now detect a server update and prompt to refresh, so long-lived tabs stop running stale code. Dismissing snoozes it for 24 hours. (First appears on updates after 0.13.4.)
+
+### Changed
+- Unmatched Assets/Modal: removed the Google search button and slimmed row actions.
+- Plex API: the app now identifies itself to Plex with a stable client identity and updated headers.
+- Community: unmatched views show per-style made/claimed checks (blue = CL2K, green = MM2K, gray = legacy, amber = claimed); a tooltip notes a made poster may not be uploaded yet.
+
+### Fixed
+- IDarr: ID-keyed files are now honored and collection ignores are badged correctly.
+
 ## [0.13.3] - 2026-08-02
 ### Changed
 - Community Requests: submissions now require membership in the Discord server, and submission content is verified server-side.
