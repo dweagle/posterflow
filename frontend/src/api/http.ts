@@ -29,9 +29,26 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// On 401 responses, signal the app to show the lock screen
+// Fired when the server reports a newer version than this bundle was built as
+export const NEW_VERSION_EVENT = 'app:new-version'
+let lastVersionDispatch = 0
+
+// On 401 responses, signal the app to show the lock screen. On every response,
+// compare the server's X-App-Version against the baked-in bundle version and
+// signal the update banner on mismatch (throttled — one event per 30s is plenty).
 client.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const serverVersion = response.headers?.['x-app-version']
+    if (
+      typeof serverVersion === 'string' && serverVersion &&
+      serverVersion !== __APP_VERSION__ &&
+      Date.now() - lastVersionDispatch > 30_000
+    ) {
+      lastVersionDispatch = Date.now()
+      window.dispatchEvent(new CustomEvent(NEW_VERSION_EVENT, { detail: serverVersion }))
+    }
+    return response
+  },
   (error) => {
     if (error.response?.status === 401) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized'))

@@ -6,6 +6,8 @@ WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+# vite.config.ts bakes ../VERSION into the bundle for the update banner
+COPY VERSION /VERSION
 RUN npm run build
 
 # Stage 2: Final image with backend + frontend

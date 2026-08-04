@@ -478,6 +478,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-App-Version"],
 )
 
 # App password authentication middleware (no-op when no password is set)
@@ -502,6 +503,15 @@ async def allow_private_network_access(request: Request, call_next):
     response = await call_next(request)
     if request.headers.get("Access-Control-Request-Private-Network") == "true":
         response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
+
+@app.middleware("http")
+async def stamp_app_version(request: Request, call_next):
+    """Stamp every response with the running version so long-lived browser tabs
+    can notice they're on a stale bundle and show the refresh banner."""
+    response = await call_next(request)
+    response.headers["X-App-Version"] = APP_BASE_VERSION
     return response
 
 

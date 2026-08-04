@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { BookOpen, Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 import IdarrQuickAddNoticeHost from './IdarrQuickAddNotice'
+import UpdateBanner from './UpdateBanner'
 import './MainLayout.css'
 
 function MainLayout() {
@@ -66,6 +67,7 @@ function MainLayout() {
         <Outlet />
       </div>
       <IdarrQuickAddNoticeHost />
+      <UpdateBanner />
     </div>
   )
 }

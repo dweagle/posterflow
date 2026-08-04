@@ -1,8 +1,16 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+
+// Bake the release version into the bundle so a running tab knows what it IS —
+// the update banner compares this against the server's X-App-Version header.
+const appVersion = readFileSync(new URL('../VERSION', import.meta.url), 'utf-8').trim()
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   test: {
     setupFiles: ['./tests/setup.ts'],
     // Reset mock call history between tests so module-level vi.fn() mocks
