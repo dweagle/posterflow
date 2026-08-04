@@ -51,6 +51,19 @@ from urllib.request import urlopen
 # Set up logging
 setup_logging()
 
+# Pin a stable Plex client identity; plexapi defaults to the container MAC/hostname,
+# which change on rebuild and register a new device in Plex each time.
+import plexapi  # noqa: E402
+
+plexapi.X_PLEX_IDENTIFIER = "posterflow"
+plexapi.X_PLEX_PRODUCT = "Posterflow"
+plexapi.X_PLEX_DEVICE_NAME = "Posterflow"
+plexapi.BASE_HEADERS.update({
+    "X-Plex-Client-Identifier": "posterflow",
+    "X-Plex-Product": "Posterflow",
+    "X-Plex-Device-Name": "Posterflow",
+})
+
 def _load_app_base_version() -> str:
     version_file = Path(__file__).resolve().parent.parent / "VERSION"
     try:
