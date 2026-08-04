@@ -75,7 +75,6 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "poster_renamer_libraries",
     "unmatched_assets_libraries",
     "unmatched_ignore_root_folders",
-    "unmatched_ignore_collections",
     "unmatched_ignore_unmonitored",
     "asset_renamer_libraries",
     "asset_renamer_include",

@@ -41,10 +41,8 @@ export const usePosterManagerLibraries = ({
   const [libraryConfigs, setLibraryConfigs] = useState<PlexLibraryConfig[]>([])
   const [selectedLibraries, setSelectedLibraries] = useState<Set<string>>(new Set())
   const [unmatchedIgnoreRootFoldersText, setUnmatchedIgnoreRootFoldersText] = useState('')
-  const [unmatchedIgnoreCollectionsText, setUnmatchedIgnoreCollectionsText] = useState('')
   const [unmatchedIgnoreUnmonitored, setUnmatchedIgnoreUnmonitored] = useState(false)
   const [originalUnmatchedIgnoreRootFolders, setOriginalUnmatchedIgnoreRootFolders] = useState<string[]>([])
-  const [originalUnmatchedIgnoreCollections, setOriginalUnmatchedIgnoreCollections] = useState<string[]>([])
   const [originalUnmatchedIgnoreUnmonitored, setOriginalUnmatchedIgnoreUnmonitored] = useState(false)
   const [hasUnsavedUnmatchedSettings, setHasUnsavedUnmatchedSettings] = useState(false)
 
@@ -76,33 +74,19 @@ export const usePosterManagerLibraries = ({
       .filter(Boolean)
   }
 
-  const parseNewlineList = (raw: string): string[] => {
-    return raw
-      .split(/\n+/)
-      .map(item => item.trim())
-      .filter(Boolean)
-  }
-
   useEffect(() => {
     const currentRootFolders = parseListInput(unmatchedIgnoreRootFoldersText)
-    const currentCollections = parseNewlineList(unmatchedIgnoreCollectionsText)
 
     const hasRootChanges =
       JSON.stringify(currentRootFolders) !== JSON.stringify(originalUnmatchedIgnoreRootFolders)
-    const hasCollectionChanges =
-      JSON.stringify(currentCollections) !== JSON.stringify(originalUnmatchedIgnoreCollections)
     const hasUnmonitoredChange =
       unmatchedIgnoreUnmonitored !== originalUnmatchedIgnoreUnmonitored
 
-    setHasUnsavedUnmatchedSettings(
-      hasRootChanges || hasCollectionChanges || hasUnmonitoredChange
-    )
+    setHasUnsavedUnmatchedSettings(hasRootChanges || hasUnmonitoredChange)
   }, [
     unmatchedIgnoreRootFoldersText,
-    unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
     originalUnmatchedIgnoreRootFolders,
-    originalUnmatchedIgnoreCollections,
     originalUnmatchedIgnoreUnmonitored,
   ])
 
@@ -158,15 +142,12 @@ export const usePosterManagerLibraries = ({
       }
 
       const rootFolders = parseStringArraySetting(settings.unmatched_ignore_root_folders)
-      const collections = parseStringArraySetting(settings.unmatched_ignore_collections)
       const ignoreUnmonitored = parseBooleanSetting(settings.unmatched_ignore_unmonitored)
 
       setUnmatchedIgnoreRootFoldersText(rootFolders.join(', '))
-      setUnmatchedIgnoreCollectionsText(collections.join('\n'))
       setUnmatchedIgnoreUnmonitored(ignoreUnmonitored)
 
       setOriginalUnmatchedIgnoreRootFolders(rootFolders)
-      setOriginalUnmatchedIgnoreCollections(collections)
       setOriginalUnmatchedIgnoreUnmonitored(ignoreUnmonitored)
 
       originalLibrarySelectionRef.current = new Set(finalSelection)
@@ -201,10 +182,8 @@ export const usePosterManagerLibraries = ({
 
       if (activeTab === 'unmatched') {
         const parsedRootFolders = parseListInput(unmatchedIgnoreRootFoldersText)
-        const parsedCollections = parseNewlineList(unmatchedIgnoreCollectionsText)
 
         settingsToSave['unmatched_ignore_root_folders'] = JSON.stringify(parsedRootFolders)
-        settingsToSave['unmatched_ignore_collections'] = JSON.stringify(parsedCollections)
         settingsToSave['unmatched_ignore_unmonitored'] = unmatchedIgnoreUnmonitored ? 'true' : 'false'
       }
 
@@ -221,7 +200,6 @@ export const usePosterManagerLibraries = ({
 
       if (activeTab === 'unmatched') {
         setOriginalUnmatchedIgnoreRootFolders(parseListInput(unmatchedIgnoreRootFoldersText))
-        setOriginalUnmatchedIgnoreCollections(parseNewlineList(unmatchedIgnoreCollectionsText))
         setOriginalUnmatchedIgnoreUnmonitored(unmatchedIgnoreUnmonitored)
       }
 
@@ -248,7 +226,6 @@ export const usePosterManagerLibraries = ({
     }
 
     setUnmatchedIgnoreRootFoldersText(originalUnmatchedIgnoreRootFolders.join(', '))
-    setUnmatchedIgnoreCollectionsText(originalUnmatchedIgnoreCollections.join('\n'))
     setUnmatchedIgnoreUnmonitored(originalUnmatchedIgnoreUnmonitored)
     setHasUnsavedLibraryChanges(false)
   }
@@ -257,13 +234,11 @@ export const usePosterManagerLibraries = ({
     libraryConfigs,
     selectedLibraries,
     unmatchedIgnoreRootFoldersText,
-    unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
     hasUnsavedUnmatchedSettings,
     fetchLibraryConfigs,
     toggleLibrarySelection,
     setUnmatchedIgnoreRootFoldersText,
-    setUnmatchedIgnoreCollectionsText,
     setUnmatchedIgnoreUnmonitored,
     saveRenameSettings,
     resetLibrarySettingsToOriginal,

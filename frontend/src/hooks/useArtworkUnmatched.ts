@@ -36,5 +36,5 @@ export function useArtworkUnmatched(selectedType: ArtworkType) {
 
   const current: UnmatchedStats | null = stats ? stats[selectedType] : null
 
-  return { stats: current }
+  return { stats: current, refetch: fetchStats }
 }

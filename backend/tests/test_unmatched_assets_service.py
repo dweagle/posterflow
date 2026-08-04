@@ -298,11 +298,23 @@ def test_detect_unmatched_ignores_root_folders(test_db, monkeypatch):
     assert result["unmatched"]["movies"][0]["title"] == "Should Be Counted"
 
 
-def test_detect_unmatched_ignores_collections_by_title(test_db, monkeypatch):
+def test_detect_unmatched_ignores_migrated_collections_by_title(test_db, monkeypatch):
+    """The legacy ignore-collections setting is folded into the per-item ignore list at
+    startup; the migrated title-only entries filter collections exactly like before."""
     service = UnmatchedAssetsService(test_db)
 
     test_db.add(Setting(key="unmatched_ignore_collections", value='["ignore me"]'))
     test_db.commit()
+    service.migrate_ignore_collections_to_items()
+
+    # Legacy setting is gone; its titles live on as per-item collection entries.
+    assert test_db.query(Setting).filter(Setting.key == "unmatched_ignore_collections").first() is None
+    assert service.get_ignore_items() == [
+        {"media_type": "collection", "title": "ignore me", "year": None, "tmdb_id": None, "tvdb_id": None, "imdb_id": None},
+    ]
+    # Running again is a no-op.
+    service.migrate_ignore_collections_to_items()
+    assert len(service.get_ignore_items()) == 1
 
     asset = {
         "title": "Dummy",
@@ -399,7 +411,6 @@ def test_detect_unmatched_ignore_unmonitored_keeps_items_without_monitored_flag(
     filtered = service._apply_unmatched_filters(
         media_dict,
         ignore_root_folders=[],
-        ignore_collections=[],
         ignore_unmonitored=True,
     )
 
@@ -812,3 +823,117 @@ def test_unified_combined_stats_table_has_column_per_type(test_db, tmp_path):
     assert percent_row is not None
     # Only movie has a poster + logo + background, none have squareart.
     assert "100.00%" in percent_row and "0.00%" in percent_row
+
+
+# ── Per-item ignore list ──────────────────────────────────────────────────────
+
+def test_detect_unmatched_skips_ignore_list_items(test_db, monkeypatch):
+    """Items on the per-item ignore list are dropped before matching, like the other filters."""
+    service = UnmatchedAssetsService(test_db)
+
+    test_db.add(Setting(
+        key="unmatched_ignore_items",
+        value=json.dumps([{"media_type": "movie", "title": "Ignored Movie", "year": 2023, "tmdb_id": 202}]),
+    ))
+    test_db.commit()
+
+    monkeypatch.setattr(
+        "services.unmatched_assets.get_assets_files",
+        lambda _source_dirs, merge=False, exclude_artwork=False, artwork_out=None: (None, None),
+    )
+
+    media_dict = {
+        "movies": [
+            _movie("Kept Movie", "keptmovie", 2024, 101),
+            _movie("Ignored Movie", "ignoredmovie", 2023, 202),
+        ],
+        "series": [],
+        "collections": [],
+    }
+
+    result = service.detect_unmatched(media_dict, ["/tmp/organized"])
+
+    assert result["summary"]["movies"]["total"] == 1
+    assert [m["title"] for m in result["unmatched"]["movies"]] == ["Kept Movie"]
+
+
+def test_ignore_entry_matches_ids_beat_title():
+    """A comparable external id decides the match; title+year only when no id is shared."""
+    matches = UnmatchedAssetsService._ignore_entry_matches
+
+    assert matches({"title": "A", "tmdb_id": 1}, {"title": "B", "tmdb_id": 1})
+    # Same title but a conflicting id blocks the title fallback.
+    assert not matches({"title": "A", "year": 2020, "tmdb_id": 1}, {"title": "A", "year": 2020, "tmdb_id": 2})
+    # No comparable id → title (with "(year)" suffix stripped) + year fallback.
+    assert matches({"title": "A (2020)", "year": 2020}, {"title": "a", "year": 2020, "tvdb_id": 5})
+    assert not matches({"title": "A", "year": 2020}, {"title": "A", "year": 2021})
+    # Series tmdb id may live on tmdb_id_ref.
+    assert matches({"title": "A", "tmdb_id": 7}, {"title": "B", "tmdb_id_ref": 7})
+
+
+def test_add_and_remove_ignore_item(test_db):
+    service = UnmatchedAssetsService(test_db)
+
+    items = service.add_ignore_item({"media_type": "show", "title": "Some Show", "year": 2022, "tvdb_id": 9})
+    assert len(items) == 1
+    assert items[0]["media_type"] == "series"  # 'show' normalized
+
+    # Duplicate (same identity) is not added twice.
+    items = service.add_ignore_item({"media_type": "series", "title": "Some Show", "year": 2022, "tvdb_id": 9})
+    assert len(items) == 1
+
+    items = service.remove_ignore_item({"media_type": "series", "title": "Some Show", "year": 2022, "tvdb_id": 9})
+    assert items == []
+    assert service.get_ignore_items() == []
+
+
+def test_filter_ignored_results_strips_items_and_counts(test_db):
+    """Read-time filter removes ignored items from cached lists AND the summary counts."""
+    service = UnmatchedAssetsService(test_db)
+    service.add_ignore_item({"media_type": "movie", "title": "Old Movie", "year": 2001, "tmdb_id": 11})
+    service.add_ignore_item({"media_type": "series", "title": "Old Show", "year": 2002, "tvdb_id": 22})
+
+    result = {
+        "summary": {
+            "movies": {"total": 10, "unmatched": 2, "percent_complete": 80.0},
+            "series": {"total": 5, "unmatched": 1, "percent_complete": 80.0},
+            "seasons": {"total": 20, "unmatched": 3, "percent_complete": 85.0},
+            "collections": {"total": 2, "unmatched": 1, "percent_complete": 50.0},
+            "grand_total": {"total": 37, "unmatched": 7, "percent_complete": 81.08},
+            "by_library": {"Plex A": {"movies": {"total": 10, "unmatched": 2, "percent_complete": 80.0}}},
+        },
+        "unmatched": {
+            "movies": [
+                {"title": "Old Movie", "year": 2001, "tmdb_id": 11, "instance": "Plex A"},
+                {"title": "Kept Movie", "year": 2020, "tmdb_id": 12, "instance": "Plex A"},
+            ],
+            "series": [
+                {"title": "Old Show", "year": 2002, "tvdb_id": 22, "instance": "Plex A",
+                 "missing_main_poster": True, "missing_seasons": [1, 2]},
+            ],
+            "collections": [{"title": "Kept Collection", "instance": "Plex A"}],
+        },
+        "last_run": "2026-08-03T00:00:00+00:00",
+    }
+
+    filtered = service.filter_ignored_results(result)
+
+    assert [m["title"] for m in filtered["unmatched"]["movies"]] == ["Kept Movie"]
+    assert filtered["unmatched"]["series"] == []
+    assert len(filtered["unmatched"]["collections"]) == 1
+
+    s = filtered["summary"]
+    assert s["movies"] == {"total": 9, "unmatched": 1, "percent_complete": (8 / 9) * 100}
+    assert s["series"]["total"] == 4 and s["series"]["unmatched"] == 0
+    assert s["seasons"]["total"] == 18 and s["seasons"]["unmatched"] == 1
+    # Grand total drops 1 (movie) + 1 (series) + 2 (seasons) from both columns.
+    assert s["grand_total"]["total"] == 33 and s["grand_total"]["unmatched"] == 3
+    assert s["by_library"]["Plex A"]["movies"] == {"total": 9, "unmatched": 1, "percent_complete": (8 / 9) * 100}
+    # Collections untouched.
+    assert s["collections"] == {"total": 2, "unmatched": 1, "percent_complete": 50.0}
+
+
+def test_filter_ignored_results_noop_without_ignore_list(test_db):
+    service = UnmatchedAssetsService(test_db)
+    result = service._empty_result()
+    assert service.filter_ignored_results(result) is result

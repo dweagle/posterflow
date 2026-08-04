@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import UnmatchedItemsModal, { type UnmatchedModalType } from '../../src/components/poster-manager/UnmatchedItemsModal'
 import type { UnmatchedStats } from '../../src/api/client'
 
@@ -10,6 +11,11 @@ import type { UnmatchedStats } from '../../src/api/client'
 
 vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
+}))
+
+vi.mock('../../src/api/client', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  addUnmatchedIgnoreItem: vi.fn().mockResolvedValue({ items: [] }),
 }))
 
 vi.mock('../../src/hooks/useDiscordAuth', () => ({
@@ -99,5 +105,31 @@ describe('UnmatchedItemsModal heading', () => {
   it('keeps "Main" on a poster series view even when the open view has no season rows', () => {
     renderModal('series', posterStats(), 'Posters')
     expect(screen.getByText('Series Missing Main Posters', { selector: 'h2' })).toBeTruthy()
+  })
+})
+
+describe('UnmatchedItemsModal ignore button', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('adds the item to the ignore list and hides its row', async () => {
+    const { addUnmatchedIgnoreItem } = await import('../../src/api/client')
+    const user = userEvent.setup()
+    renderModal('movies', posterStats())
+
+    expect(screen.getByText('Inception')).toBeTruthy()
+    await user.click(screen.getByTitle(/Ignore this item/))
+
+    expect(addUnmatchedIgnoreItem).toHaveBeenCalledWith({
+      media_type: 'movie',
+      title: 'Inception',
+      year: 2010,
+      tmdb_id: null,
+      tvdb_id: null,
+      imdb_id: null,
+    })
+    await waitFor(() => expect(screen.queryByText('Inception')).toBeNull())
   })
 })

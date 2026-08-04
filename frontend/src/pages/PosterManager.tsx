@@ -268,13 +268,11 @@ function PosterManager() {
     libraryConfigs,
     selectedLibraries,
     unmatchedIgnoreRootFoldersText,
-    unmatchedIgnoreCollectionsText,
     unmatchedIgnoreUnmonitored,
     hasUnsavedUnmatchedSettings,
     fetchLibraryConfigs,
     toggleLibrarySelection,
     setUnmatchedIgnoreRootFoldersText,
-    setUnmatchedIgnoreCollectionsText,
     setUnmatchedIgnoreUnmonitored,
     saveRenameSettings,
     resetLibrarySettingsToOriginal,
@@ -363,6 +361,12 @@ function PosterManager() {
   const isPosterScope = unmatchedScope === 'posters'
   const artworkUnmatched = useArtworkUnmatched(isPosterScope ? 'logo' : unmatchedScope)
   const activeUnmatchedStats = isPosterScope ? unmatchedStats : artworkUnmatched.stats
+
+  // The per-item ignore list affects poster AND artwork stats — refresh both.
+  const handleIgnoreListChanged = () => {
+    void refreshStats()
+    artworkUnmatched.refetch()
+  }
 
   const { downloadCompleteReport } = usePosterManagerUnmatchedReports({
     unmatchedStats: activeUnmatchedStats,
@@ -592,13 +596,12 @@ function PosterManager() {
           onDownloadReport={downloadCompleteReport}
           onToggleLibrarySelection={toggleLibrarySelection}
           unmatchedIgnoreRootFoldersText={unmatchedIgnoreRootFoldersText}
-          unmatchedIgnoreCollectionsText={unmatchedIgnoreCollectionsText}
           unmatchedIgnoreUnmonitored={unmatchedIgnoreUnmonitored}
           hasUnsavedUnmatchedSettings={hasUnsavedUnmatchedSettings}
           onSetUnmatchedIgnoreRootFoldersText={setUnmatchedIgnoreRootFoldersText}
-          onSetUnmatchedIgnoreCollectionsText={setUnmatchedIgnoreCollectionsText}
           onSetUnmatchedIgnoreUnmonitored={setUnmatchedIgnoreUnmonitored}
           onOpenModal={setShowUnmatchedModal}
+          onIgnoreListChanged={handleIgnoreListChanged}
         />
       )}
 
@@ -611,6 +614,7 @@ function PosterManager() {
           onClose={() => setShowUnmatchedModal(null)}
           hideCommunity={!isPosterScope}
           typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
+          onIgnored={handleIgnoreListChanged}
         />
       )}
 

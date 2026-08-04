@@ -11,6 +11,17 @@ import type { PlexLibraryConfig, UnmatchedStats } from '../../src/api/client'
  * the poster + artwork views are later unified behind one component.
  */
 
+vi.mock('../../src/components/Toast', () => ({
+  useToast: () => ({ showToast: vi.fn() }),
+}))
+
+// The Detection Settings view mounts the Ignored Items list, which fetches on mount.
+vi.mock('../../src/api/client', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getUnmatchedIgnoreItems: vi.fn().mockResolvedValue({ items: [] }),
+  addUnmatchedIgnoreItem: vi.fn().mockResolvedValue({ items: [] }),
+}))
+
 const libraryConfigs: PlexLibraryConfig[] = [
   {
     instance_name: 'Main',
@@ -60,10 +71,8 @@ function makeProps(overrides: Record<string, unknown> = {}) {
     onDownloadReport: vi.fn(),
     onToggleLibrarySelection: vi.fn(),
     unmatchedIgnoreRootFoldersText: '',
-    unmatchedIgnoreCollectionsText: '',
     unmatchedIgnoreUnmonitored: false,
     onSetUnmatchedIgnoreRootFoldersText: vi.fn(),
-    onSetUnmatchedIgnoreCollectionsText: vi.fn(),
     onSetUnmatchedIgnoreUnmonitored: vi.fn(),
     onOpenModal: vi.fn(),
     ...overrides,
@@ -84,6 +93,7 @@ function renderTab(overrides: Record<string, unknown> = {}) {
 describe('UnmatchedTab (posters)', () => {
   afterEach(() => {
     cleanup()
+    vi.clearAllMocks()
   })
 
   it('renders the unified header with all four asset-type switches', () => {
@@ -231,6 +241,56 @@ describe('UnmatchedTab (posters)', () => {
     expect(screen.getByText('Detection Settings', { selector: 'h2' })).toBeTruthy()
     expect(screen.getByText('Library Selection', { selector: 'h2' })).toBeTruthy()
     expect(screen.queryByText('Movies', { selector: 'h3' })).toBeNull()
+  })
+
+  it('settings view lists the ignored items with a remove control', async () => {
+    const { getUnmatchedIgnoreItems } = await import('../../src/api/client')
+    vi.mocked(getUnmatchedIgnoreItems).mockResolvedValueOnce({
+      items: [{ media_type: 'movie', title: 'Hidden Movie', year: 2020, tmdb_id: 7 }],
+    })
+
+    renderTab({ settingsActive: true })
+
+    expect(screen.getByText('Ignored Items')).toBeTruthy()
+    expect(await screen.findByText('Hidden Movie')).toBeTruthy()
+    expect(screen.getByTitle('Remove from ignore list — show as unmatched again')).toBeTruthy()
+  })
+
+  it('manually adds a collection with no year field shown', async () => {
+    const { addUnmatchedIgnoreItem } = await import('../../src/api/client')
+    const user = userEvent.setup()
+    renderTab({ settingsActive: true })
+
+    await user.selectOptions(screen.getByLabelText('Item type'), 'collection')
+    expect(screen.queryByPlaceholderText('Year')).toBeNull()
+    await user.type(screen.getByPlaceholderText(/^Title/), 'James Bond')
+    await user.click(screen.getByTitle('Add to ignore list'))
+
+    expect(addUnmatchedIgnoreItem).toHaveBeenCalledWith({
+      media_type: 'collection',
+      title: 'James Bond',
+      year: null,
+    })
+  })
+
+  it('warns instead of adding a movie/series without a year', async () => {
+    const { addUnmatchedIgnoreItem } = await import('../../src/api/client')
+    const user = userEvent.setup()
+    renderTab({ settingsActive: true })
+
+    // Default type is movie: title alone must not add (it would ignore every
+    // same-titled movie, e.g. both Dune films).
+    await user.type(screen.getByPlaceholderText(/^Title/), 'Dune')
+    await user.click(screen.getByTitle('Add to ignore list'))
+    expect(addUnmatchedIgnoreItem).not.toHaveBeenCalled()
+
+    await user.type(screen.getByPlaceholderText('Year'), '2021')
+    await user.click(screen.getByTitle('Add to ignore list'))
+    expect(addUnmatchedIgnoreItem).toHaveBeenCalledWith({
+      media_type: 'movie',
+      title: 'Dune',
+      year: 2021,
+    })
   })
 
   it('toggling a library reports the selection', async () => {

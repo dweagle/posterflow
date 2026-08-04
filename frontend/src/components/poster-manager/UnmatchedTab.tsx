@@ -6,6 +6,7 @@ import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import LibrarySelectGrid from './LibrarySelectGrid'
 import UnmatchedHeader from './UnmatchedHeader'
+import UnmatchedIgnoreList from './UnmatchedIgnoreList'
 import { UnmatchedScope } from './UnmatchedTypeSelector'
 
 type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null }
@@ -32,12 +33,12 @@ type UnmatchedTabProps = {
   onDownloadReport: () => void
   onToggleLibrarySelection: (instanceName: string, libraryKey: string) => void
   unmatchedIgnoreRootFoldersText: string
-  unmatchedIgnoreCollectionsText: string
   unmatchedIgnoreUnmonitored: boolean
   onSetUnmatchedIgnoreRootFoldersText: (value: string) => void
-  onSetUnmatchedIgnoreCollectionsText: (value: string) => void
   onSetUnmatchedIgnoreUnmonitored: (value: boolean) => void
   onOpenModal: (type: 'movies' | 'series' | 'seasons' | 'collections' | 'all') => void
+  /** Called when the per-item ignore list changes so the page can refresh stats. */
+  onIgnoreListChanged?: () => void
 }
 
 function UnmatchedTab({
@@ -60,12 +61,11 @@ function UnmatchedTab({
   onDownloadReport,
   onToggleLibrarySelection,
   unmatchedIgnoreRootFoldersText,
-  unmatchedIgnoreCollectionsText,
   unmatchedIgnoreUnmonitored,
   onSetUnmatchedIgnoreRootFoldersText,
-  onSetUnmatchedIgnoreCollectionsText,
   onSetUnmatchedIgnoreUnmonitored,
   onOpenModal,
+  onIgnoreListChanged,
 }: UnmatchedTabProps) {
   const navigate = useNavigate()
   const { getStatus: getClaimStatus } = useCommunityClaimStatus()
@@ -331,37 +331,7 @@ function UnmatchedTab({
           <p className="section-description">Configure which items to include or exclude from unmatched detection. Shared across all asset types.</p>
 
           <div className="field-group">
-            <textarea
-              rows={2}
-              className="unmatched-settings-textarea"
-              value={unmatchedIgnoreRootFoldersText}
-              onChange={(e) => onSetUnmatchedIgnoreRootFoldersText(e.target.value)}
-              placeholder="Ignore root folders (example: movies, tv, /mnt/media/movies)"
-            />
-            <small>Comma-separated root folder names or full root paths.</small>
-
-            <textarea
-              rows={2}
-              className="unmatched-settings-textarea"
-              value={unmatchedIgnoreCollectionsText}
-              onChange={(e) => onSetUnmatchedIgnoreCollectionsText(e.target.value)}
-              placeholder="Ignore collections (one per line)"
-            />
-            <small>One collection title per line. Matching is case-insensitive.</small>
-
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={unmatchedIgnoreUnmonitored}
-                onChange={(e) => onSetUnmatchedIgnoreUnmonitored(e.target.checked)}
-              />
-              <span>
-                <strong>Ignore Unmonitored</strong>
-                <small>Exclude unmonitored movies, series, and seasons from unmatched detection.</small>
-              </span>
-            </label>
-
-            <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>TMDB API Key</label>
+            <label style={{ display: 'block', fontWeight: 500 }}>TMDB API Key</label>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
               Configured globally in{' '}
               <a
@@ -370,6 +340,35 @@ function UnmatchedTab({
                 onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
               >Settings → General → API Keys</a>.
             </p>
+
+            <UnmatchedIgnoreList onChanged={onIgnoreListChanged} />
+
+            <label style={{ marginTop: '1rem', display: 'block', fontWeight: 500 }}>Ignore Root Folders</label>
+            <small>
+              Excludes every movie and series stored under a matching Radarr/Sonarr root folder — use it to
+              skip whole locations, like a 4K or kids library. Enter folder names (movies, tv) or full paths
+              (/mnt/media/movies), comma-separated; matching is case-insensitive. Collections aren't affected.
+            </small>
+            <textarea
+              rows={2}
+              className="unmatched-settings-textarea"
+              value={unmatchedIgnoreRootFoldersText}
+              onChange={(e) => onSetUnmatchedIgnoreRootFoldersText(e.target.value)}
+              placeholder="Ignore root folders (example: movies, tv, /mnt/media/movies)"
+            />
+
+
+            <label className="checkbox-label checkbox-label--inline">
+              <input
+                type="checkbox"
+                checked={unmatchedIgnoreUnmonitored}
+                onChange={(e) => onSetUnmatchedIgnoreUnmonitored(e.target.checked)}
+              />
+              <span>
+                <strong>Ignore Unmonitored</strong>
+                <small>Exclude unmonitored movies, series, and seasons from detection.</small>
+              </span>
+            </label>
           </div>
         </div>
 

@@ -5085,6 +5085,227 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   color: #ffcc80;
 }
 
+/* ── Ignore (eye-off) button (unmatched item row) ─────────────────────── */
+.ignore-item-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid rgba(176, 190, 197, 0.35);
+  border-radius: 4px;
+  background: transparent;
+  color: #b0bec5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.ignore-item-btn:hover:not(:disabled) {
+  border-color: #ef9a9a;
+  background: rgba(239, 154, 154, 0.1);
+  color: #ef9a9a;
+}
+
+.ignore-item-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Ignored Items list (Unmatched → Detection Settings) ──────────────── */
+.unmatched-ignore-list {
+  margin-top: 1rem;
+}
+
+.unmatched-ignore-list > label {
+  color: #fff;
+}
+
+.unmatched-ignore-list > small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #888;
+}
+
+.unmatched-ignore-empty {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.unmatched-ignore-rows {
+  margin-top: 0.5rem;
+  /* Two-wide grid: items fill left-to-right then down, and reflow back up/left
+     on removal. minmax(0, …) lets long titles ellipsis instead of widening cells. */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+  /* 5 fixed-height rows + their gaps, then the list scrolls */
+  max-height: calc(5 * 2rem + 4 * 0.3rem);
+  overflow-y: auto;
+}
+
+.unmatched-ignore-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  background-color: #3D4556;
+  border: 1px solid #5c6882;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #e0e0e0;
+}
+
+.unmatched-ignore-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unmatched-ignore-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0.2rem 0.3rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #b0bec5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.unmatched-ignore-remove:hover:not(:disabled) {
+  background: rgba(239, 154, 154, 0.12);
+  color: #ef9a9a;
+}
+
+/* Manual entry row below the ignore list (type + title + optional year + Add).
+   The shared .field-group rules set inputs/selects to width:100%; pin each control
+   back to its flex size here or the row overflows the card. */
+.unmatched-ignore-add {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  min-width: 0;
+}
+
+.field-group .unmatched-ignore-add input[type="text"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.field-group .unmatched-ignore-add input[type="number"] {
+  width: 4.5rem;
+  flex: 0 0 auto;
+}
+
+.field-group .unmatched-ignore-add select {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+/* One height for every control on the row (selects render taller by default). */
+.field-group .unmatched-ignore-add select,
+.field-group .unmatched-ignore-add input[type="text"],
+.field-group .unmatched-ignore-add input[type="number"],
+.unmatched-ignore-add .unmatched-ignore-add-btn {
+  height: 1.9rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.unmatched-ignore-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid rgba(100, 181, 246, 0.4);
+  border-radius: 4px;
+  background: transparent;
+  color: #64b5f6;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.unmatched-ignore-add-btn:hover:not(:disabled) {
+  border-color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
+}
+
+.unmatched-ignore-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.unmatched-ignore-list > small:last-child {
+  display: block;
+  margin-top: 0.35rem;
+  color: #888;
+}
+
+/* Ignore Unmonitored as a plain compact row: no boxed card, text inline with the
+   checkbox, and only as wide as its content so the empty row isn't clickable. */
+.poster-manager .checkbox-label.checkbox-label--inline {
+  padding: 0;
+  background: none;
+  border: none;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.4rem;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline:hover {
+  background: none;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline input[type="checkbox"] {
+  /* DriveEditModal.css leaks an unprefixed `.checkbox-label input` margin-right
+     into the global bundle; zero it so the flex gap alone spaces the row. */
+  margin: 0;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline span {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline strong,
+.poster-manager .checkbox-label.checkbox-label--inline small {
+  white-space: nowrap;
+}
+
+.poster-manager .checkbox-label.checkbox-label--inline small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cross-asset-type warning under the Ignored Items heading */
+.unmatched-ignore-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: #ffb74d;
+}
+
+.unmatched-ignore-warning svg {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
 /* ── Community Request Modal ──────────────────────────────────────────── */
 .community-req-modal {
   max-width: 560px;

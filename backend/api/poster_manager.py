@@ -821,14 +821,54 @@ def scan_poster_directory(source_path: Optional[str] = None, db: Session = Depen
 @router.get("/unmatched-stats")
 def get_unmatched_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
-    Get cached unmatched media statistics.
+    Get cached unmatched media statistics (per-item ignore list applied).
     """
     try:
         unmatched_service = UnmatchedAssetsService(db)
-        return unmatched_service.get_cached_results()
+        return unmatched_service.filter_ignored_results(unmatched_service.get_cached_results())
     except Exception as e:
         log_error(LogTags.UNMATCHED, f"Error getting stats: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting unmatched stats")
+
+
+class UnmatchedIgnoreItem(BaseModel):
+    """One entry on the unmatched ignore list, identified by ids (preferred) or title+year."""
+    media_type: str = Field(pattern="^(movie|show|series|collection)$")
+    title: str
+    year: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+
+@router.get("/unmatched-ignore-items")
+def get_unmatched_ignore_items(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """List items the user hid from unmatched detection."""
+    return {"items": UnmatchedAssetsService(db).get_ignore_items()}
+
+
+@router.post("/unmatched-ignore-items")
+def add_unmatched_ignore_item(item: UnmatchedIgnoreItem, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Add an item to the unmatched ignore list; it disappears from unmatched stats immediately."""
+    try:
+        items = UnmatchedAssetsService(db).add_ignore_item(item.model_dump())
+        log_user_action(f"Added '{item.title}' to unmatched ignore list")
+        return {"items": items}
+    except Exception as e:
+        log_error(LogTags.UNMATCHED, f"Error adding ignore item: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error adding item to ignore list")
+
+
+@router.post("/unmatched-ignore-items/remove")
+def remove_unmatched_ignore_item(item: UnmatchedIgnoreItem, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Remove an item from the unmatched ignore list; it shows as unmatched again."""
+    try:
+        items = UnmatchedAssetsService(db).remove_ignore_item(item.model_dump())
+        log_user_action(f"Removed '{item.title}' from unmatched ignore list")
+        return {"items": items}
+    except Exception as e:
+        log_error(LogTags.UNMATCHED, f"Error removing ignore item: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error removing item from ignore list")
 
 
 @router.post("/detect-unmatched")

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import { type UnmatchedStats, type TmdbCandidate, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
+import { type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
@@ -49,6 +49,8 @@ type UnmatchedItemsModalProps = {
   hideCommunity?: boolean
   // Asset type being listed ('Posters', 'Logos', ...), used in the modal heading.
   typeNoun?: string
+  // Called after an item is added to the ignore list so the parent can refresh stats.
+  onIgnored?: () => void
 }
 
 function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
@@ -180,6 +182,37 @@ function toListInput(item: NormalizedItem): ListItemInput {
   }
 }
 
+// Map an unmatched row to an ignore-list entry (ids preferred, title+year fallback).
+function toIgnoreInput(item: NormalizedItem): UnmatchedIgnoreItem {
+  return {
+    media_type: item.type === 'show' ? 'series' : item.type,
+    title: item.year ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : item.title,
+    year: item.year,
+    tmdb_id: item.tmdb_id ?? null,
+    tvdb_id: item.tvdb_id ?? null,
+    imdb_id: item.imdb_id ?? null,
+  }
+}
+
+// Mirrors the backend matcher: any external id shared by both sides decides;
+// title+year only when no id is comparable.
+function ignoreMatches(entry: UnmatchedIgnoreItem, item: NormalizedItem): boolean {
+  if (entry.media_type !== (item.type === 'show' ? 'series' : item.type)) return false
+  let idsCompared = false
+  for (const key of ['tmdb_id', 'tvdb_id', 'imdb_id'] as const) {
+    const entryId = entry[key]
+    const itemId = item[key]
+    if (entryId && itemId) {
+      idsCompared = true
+      if (String(entryId) === String(itemId)) return true
+    }
+  }
+  if (idsCompared) return false
+  const norm = (t: string) => t.replace(/\s*\(\d{4}\)\s*$/, '').trim().toLowerCase()
+  if (norm(entry.title) !== norm(item.title)) return false
+  return !entry.year || !item.year || entry.year === item.year
+}
+
 function UnmatchedItemsModal({
   modalType,
   unmatchedStats,
@@ -188,6 +221,7 @@ function UnmatchedItemsModal({
   onClose,
   hideCommunity = false,
   typeNoun = 'Posters',
+  onIgnored,
 }: UnmatchedItemsModalProps) {
   const statsHaveSeasons = Boolean(unmatchedStats?.summary?.seasons && unmatchedStats.summary.seasons.total > 0)
   const modalTitle = getModalTitle(modalType, typeNoun, statsHaveSeasons)
@@ -206,6 +240,10 @@ function UnmatchedItemsModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [requestItem, setRequestItem] = useState<NormalizedItem | null>(null)
   const [createListOpen, setCreateListOpen] = useState(false)
+  // Items ignored during this modal session — hidden immediately; the parent's
+  // stats refresh (onIgnored) removes them from the source data for good.
+  const [locallyIgnored, setLocallyIgnored] = useState<UnmatchedIgnoreItem[]>([])
+  const [ignoringKeys, setIgnoringKeys] = useState<Set<string>>(new Set())
   // Required CL2K/MM2K style stamped on published items; shared by both publish
   // paths (the footer's "Add All" and the Create List picker) and remembered in
   // localStorage so the choice sticks across modal opens and reloads.
@@ -216,6 +254,23 @@ function UnmatchedItemsModal({
   }
 
   const itemKey = useCallback((item: NormalizedItem) => `${item.category ?? ''}::${item.origIdx}::${item.title}`, [])
+
+  const handleIgnore = useCallback(async (item: NormalizedItem) => {
+    const key = itemKey(item)
+    if (ignoringKeys.has(key)) return
+    setIgnoringKeys((prev) => new Set(prev).add(key))
+    const entry = toIgnoreInput(item)
+    try {
+      await addUnmatchedIgnoreItem(entry)
+      setLocallyIgnored((prev) => [...prev, entry])
+      showToast(`"${entry.title}" added to the ignore list`)
+      onIgnored?.()
+    } catch {
+      showToast('Failed to add item to ignore list', 'error')
+    } finally {
+      setIgnoringKeys((prev) => { const next = new Set(prev); next.delete(key); return next })
+    }
+  }, [ignoringKeys, itemKey, onIgnored, showToast])
 
   const handleTmdbSearch = useCallback(
     async (item: NormalizedItem) => {
@@ -328,6 +383,7 @@ function UnmatchedItemsModal({
   if (!modalType || !unmatchedStats?.unmatched) return null
 
   const allItems = buildAllItems(modalType, unmatchedStats)
+    .filter((item) => !locallyIgnored.some((entry) => ignoreMatches(entry, item)))
 
   if (allItems.length === 0) {
     return (
@@ -482,6 +538,15 @@ function UnmatchedItemsModal({
               <span>Request</span>
             </button>
           )}
+          <button
+            type="button"
+            className="ignore-item-btn"
+            title={'Ignore this item — it won\'t show as unmatched again.\nManage the ignore list in Detection Settings.'}
+            onClick={() => handleIgnore(item)}
+            disabled={ignoringKeys.has(key)}
+          >
+            {ignoringKeys.has(key) ? <Loader2 size={13} className="spin-icon" /> : <EyeOff size={13} />}
+          </button>
           </div>
           </div>
           {item.missingSeasonsNumbers && item.missingSeasonsNumbers.length > 0 && (

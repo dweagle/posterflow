@@ -307,6 +307,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             log_warning(LogTags.STARTUP, f"Could not clean up stale Plex library settings: {e}")
 
+        # Fold the legacy title-only ignore-collections setting into the per-item
+        # unmatched ignore list (one-time; no-op once the legacy setting is gone)
+        try:
+            from services.unmatched_assets import UnmatchedAssetsService
+            migrate_db = SessionLocal()
+            try:
+                UnmatchedAssetsService(migrate_db).migrate_ignore_collections_to_items()
+            finally:
+                migrate_db.close()
+        except Exception as e:
+            log_warning(LogTags.STARTUP, f"Could not migrate ignore-collections setting: {e}")
+
         # Clean up stale jobs from previous runs
         try:
             from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_ACTIVE, JOB_TYPE_IDARR, prune_job_history

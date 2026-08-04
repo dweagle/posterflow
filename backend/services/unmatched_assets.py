@@ -63,6 +63,124 @@ class UnmatchedAssetsService:
             return default
         return str(setting.value).strip().lower() in {"true", "1", "yes", "on"}
 
+    # ── Per-item ignore list ──────────────────────────────────────────────────
+    # Items the user explicitly hid from unmatched detection via the eye-off button
+    # on the unmatched modals. Entries: {media_type, title, year, tmdb_id, tvdb_id,
+    # imdb_id} with media_type one of movie/series/collection. Ignoring a series
+    # hides it entirely (main poster and seasons).
+
+    SETTING_IGNORE_ITEMS = "unmatched_ignore_items"
+
+    _IGNORE_BUCKETS = {"movie": "movies", "show": "series", "series": "series", "collection": "collections"}
+
+    def get_ignore_items(self) -> List[Dict[str, Any]]:
+        """Load the per-item ignore list (empty on missing/invalid setting)."""
+        setting = get_setting(self.db, self.SETTING_IGNORE_ITEMS)
+        if not setting or not setting.value:
+            return []
+        try:
+            parsed = json.loads(setting.value)
+        except Exception:
+            log_warning(LogTags.UNMATCHED, "Invalid unmatched_ignore_items setting — treating as empty")
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [e for e in parsed if isinstance(e, dict) and str(e.get("title") or "").strip()]
+
+    def _save_ignore_items(self, items: List[Dict[str, Any]]) -> None:
+        upsert_setting(self.db, self.SETTING_IGNORE_ITEMS, json.dumps(items))
+        self.db.commit()
+
+    @staticmethod
+    def _normalize_ignore_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        media_type = str(item.get("media_type") or "").strip().lower()
+        if media_type == "show":
+            media_type = "series"
+        return {
+            "media_type": media_type,
+            "title": str(item.get("title") or "").strip(),
+            "year": item.get("year"),
+            "tmdb_id": item.get("tmdb_id"),
+            "tvdb_id": item.get("tvdb_id"),
+            "imdb_id": item.get("imdb_id"),
+        }
+
+    def add_ignore_item(self, item: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Add an item to the ignore list (deduped by identity). Returns the full list."""
+        entry = self._normalize_ignore_item(item)
+        items = self.get_ignore_items()
+        if not any(e.get("media_type") == entry["media_type"] and self._ignore_entry_matches(e, entry) for e in items):
+            items.append(entry)
+            self._save_ignore_items(items)
+            log_info(LogTags.UNMATCHED, f"Added to unmatched ignore list: {entry['title']}", media_type=entry["media_type"], year=entry.get("year"))
+        return items
+
+    def remove_ignore_item(self, item: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Remove a matching item from the ignore list. Returns the full list."""
+        entry = self._normalize_ignore_item(item)
+        items = self.get_ignore_items()
+        kept = [e for e in items if not (e.get("media_type") == entry["media_type"] and self._ignore_entry_matches(e, entry))]
+        if len(kept) != len(items):
+            self._save_ignore_items(kept)
+            log_info(LogTags.UNMATCHED, f"Removed from unmatched ignore list: {entry['title']}", media_type=entry["media_type"], year=entry.get("year"))
+        return kept
+
+    def migrate_ignore_collections_to_items(self) -> None:
+        """One-time upgrade: fold the legacy title-only 'ignore collections' setting into the
+        per-item ignore list (title-only collection entries match the same case-insensitive
+        way), then drop the legacy setting. Idempotent — no-op once the setting is gone."""
+        setting = get_setting(self.db, "unmatched_ignore_collections")
+        if not setting:
+            return
+        titles = self._get_list_setting("unmatched_ignore_collections")
+        items = self.get_ignore_items()
+        added = 0
+        for title in titles:
+            entry = self._normalize_ignore_item({"media_type": "collection", "title": title})
+            if not any(e.get("media_type") == "collection" and self._ignore_entry_matches(e, entry) for e in items):
+                items.append(entry)
+                added += 1
+        upsert_setting(self.db, self.SETTING_IGNORE_ITEMS, json.dumps(items))
+        self.db.delete(setting)
+        self.db.commit()
+        log_info(
+            LogTags.UNMATCHED,
+            f"Migrated legacy ignore-collections setting into the per-item ignore list ({added} entr{'y' if added == 1 else 'ies'} added)",
+        )
+
+    @staticmethod
+    def _norm_ignore_title(title: Any) -> str:
+        return re.sub(r"\s*\(\d{4}\)\s*$", "", str(title or "").strip()).lower()
+
+    @classmethod
+    def _ignore_entry_matches(cls, entry: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        """True when an ignore entry identifies this media/unmatched item. Any external id
+        shared by both sides decides the match; title+year only when no id is comparable.
+        Callers scope entries per media-type bucket, so tmdb movie/TV namespaces never mix."""
+        ids_compared = False
+        for key in ("tmdb_id", "tvdb_id", "imdb_id"):
+            ev = entry.get(key)
+            iv = item.get(key) or (item.get("tmdb_id_ref") if key == "tmdb_id" else None)
+            if ev and iv:
+                ids_compared = True
+                if str(ev) == str(iv):
+                    return True
+        if ids_compared:
+            return False
+        if cls._norm_ignore_title(entry.get("title")) != cls._norm_ignore_title(item.get("title")):
+            return False
+        entry_year, item_year = entry.get("year"), item.get("year")
+        return not entry_year or not item_year or str(entry_year) == str(item_year)
+
+    @classmethod
+    def _ignore_entries_by_bucket(cls, entries: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        by_bucket: Dict[str, List[Dict[str, Any]]] = {"movies": [], "series": [], "collections": []}
+        for entry in entries:
+            bucket = cls._IGNORE_BUCKETS.get(str(entry.get("media_type") or "").strip().lower())
+            if bucket:
+                by_bucket[bucket].append(entry)
+        return by_bucket
+
     @staticmethod
     def _matches_ignored_root(root_folder: str | None, ignore_root_folders: List[str]) -> bool:
         """Return True if root folder matches ignored root folder names or paths."""
@@ -80,8 +198,8 @@ class UnmatchedAssetsService:
         self,
         media_dict: Dict[str, List[Dict[str, Any]]],
         ignore_root_folders: List[str],
-        ignore_collections: List[str],
         ignore_unmonitored: bool,
+        ignore_items: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Apply unmatched-assets-specific ignore filters to media payload."""
         filtered_media: Dict[str, List[Dict[str, Any]]] = {
@@ -90,21 +208,22 @@ class UnmatchedAssetsService:
             "collections": [],
         }
 
-        ignored_collection_names = {
-            value.strip().lower() for value in ignore_collections if value.strip()
-        }
+        ignore_entries = self._ignore_entries_by_bucket(ignore_items or [])
+
+        def is_ignored_item(item: Dict[str, Any], bucket: str) -> bool:
+            return any(self._ignore_entry_matches(e, item) for e in ignore_entries[bucket])
 
         filtered_unmonitored_movies = 0
         filtered_unmonitored_series = 0
         filtered_root_movies = 0
         filtered_root_series = 0
-        filtered_collections = 0
+        filtered_ignored_items = 0
         ignored_by_reason: Dict[str, List[str]] = {
             "unmonitored_movies": [],
             "unmonitored_series": [],
             "root_movies": [],
             "root_series": [],
-            "collections": [],
+            "ignored_items": [],
         }
 
         def build_item_label(item: Dict[str, Any], include_root: bool = False) -> str:
@@ -122,6 +241,10 @@ class UnmatchedAssetsService:
             return " | ".join(parts)
 
         for movie in media_dict.get("movies", []):
+            if is_ignored_item(movie, "movies"):
+                filtered_ignored_items += 1
+                ignored_by_reason["ignored_items"].append(build_item_label(movie))
+                continue
             if ignore_unmonitored and movie.get("monitored") is False:
                 filtered_unmonitored_movies += 1
                 ignored_by_reason["unmonitored_movies"].append(build_item_label(movie))
@@ -134,6 +257,10 @@ class UnmatchedAssetsService:
             filtered_media["movies"].append(movie)
 
         for series in media_dict.get("series", []):
+            if is_ignored_item(series, "series"):
+                filtered_ignored_items += 1
+                ignored_by_reason["ignored_items"].append(build_item_label(series))
+                continue
             if ignore_unmonitored and series.get("monitored") is False:
                 filtered_unmonitored_series += 1
                 ignored_by_reason["unmonitored_series"].append(build_item_label(series))
@@ -159,10 +286,9 @@ class UnmatchedAssetsService:
                 filtered_media["series"].append(series)
 
         for collection in media_dict.get("collections", []):
-            collection_title = str(collection.get("title", "")).strip().lower()
-            if collection_title and collection_title in ignored_collection_names:
-                filtered_collections += 1
-                ignored_by_reason["collections"].append(build_item_label(collection))
+            if is_ignored_item(collection, "collections"):
+                filtered_ignored_items += 1
+                ignored_by_reason["ignored_items"].append(build_item_label(collection))
                 continue
             filtered_media["collections"].append(collection)
 
@@ -175,20 +301,20 @@ class UnmatchedAssetsService:
                 skipped_series=filtered_root_series,
             )
 
-        if ignore_collections:
-            log_info(
-                LogTags.UNMATCHED,
-                "Applied ignore collections filter",
-                ignored_collections=ignore_collections,
-                skipped_collections=filtered_collections,
-            )
-
         if ignore_unmonitored:
             log_info(
                 LogTags.UNMATCHED,
                 "Applied ignore unmonitored filter",
                 skipped_movies=filtered_unmonitored_movies,
                 skipped_series=filtered_unmonitored_series,
+            )
+
+        if ignore_items:
+            log_info(
+                LogTags.UNMATCHED,
+                "Applied per-item ignore list",
+                ignore_list_size=len(ignore_items),
+                skipped_items=filtered_ignored_items,
             )
 
         # Verbose debug details so users can inspect exactly what was ignored.
@@ -204,7 +330,7 @@ class UnmatchedAssetsService:
                 ignored_unmonitored_series=len(ignored_by_reason["unmonitored_series"]),
                 ignored_root_movies=len(ignored_by_reason["root_movies"]),
                 ignored_root_series=len(ignored_by_reason["root_series"]),
-                ignored_collections=len(ignored_by_reason["collections"]),
+                ignored_items=len(ignored_by_reason["ignored_items"]),
             )
 
             for reason, items in ignored_by_reason.items():
@@ -642,20 +768,20 @@ class UnmatchedAssetsService:
             )
 
             ignore_root_folders = self._get_list_setting("unmatched_ignore_root_folders")
-            ignore_collections = self._get_list_setting("unmatched_ignore_collections")
             ignore_unmonitored = self._get_bool_setting("unmatched_ignore_unmonitored", default=False)
+            ignore_items = self.get_ignore_items()
             media_dict = self._apply_unmatched_filters(
                 media_dict,
                 ignore_root_folders=ignore_root_folders,
-                ignore_collections=ignore_collections,
                 ignore_unmonitored=ignore_unmonitored,
+                ignore_items=ignore_items,
             )
             log_info(
                 LogTags.UNMATCHED,
                 "Unmatched filters loaded",
                 ignore_root_folders=ignore_root_folders,
-                ignore_collections=ignore_collections,
                 ignore_unmonitored=ignore_unmonitored,
+                ignore_items=len(ignore_items),
                 filtered_media_counts={k: len(v) for k, v in media_dict.items()},
             )
 
@@ -1174,6 +1300,64 @@ class UnmatchedAssetsService:
         # Only log when cache is missing (first run or after clear)
         log_debug(LogTags.DATABASE, "No cached results found")
         return self._empty_result()
+
+    def filter_ignored_results(self, result: Dict[str, Any], ignore_items: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+        """Strip per-item ignore-list entries out of a cached result payload — the unmatched
+        lists AND the summary counts — so ignoring takes effect immediately instead of waiting
+        for the next detection run (which excludes them at the source). Un-ignoring likewise
+        makes the item reappear from the same cache. Mutates and returns ``result``.
+
+        Seasons totals shrink by the removed entry's missing seasons only (its full season
+        count isn't in the cache); the next detection run makes the numbers exact."""
+        entries = self.get_ignore_items() if ignore_items is None else ignore_items
+        if not entries or not isinstance(result, dict):
+            return result
+        by_bucket = self._ignore_entries_by_bucket(entries)
+        unmatched = result.get("unmatched") or {}
+        summary = result.get("summary") or {}
+        by_library = summary.get("by_library") or {}
+
+        def dec(section: Any, total_delta: int, unmatched_delta: int) -> None:
+            if not isinstance(section, dict) or (total_delta == 0 and unmatched_delta == 0):
+                return
+            section["total"] = max(0, int(section.get("total", 0)) - total_delta)
+            section["unmatched"] = max(0, int(section.get("unmatched", 0)) - unmatched_delta)
+            total = section["total"]
+            section["percent_complete"] = ((total - section["unmatched"]) / total * 100) if total else 100.0
+
+        for bucket in ("movies", "series", "collections"):
+            bucket_entries = by_bucket[bucket]
+            items = unmatched.get(bucket)
+            if not bucket_entries or not isinstance(items, list):
+                continue
+            kept: List[Dict[str, Any]] = []
+            for item in items:
+                if not any(self._ignore_entry_matches(e, item) for e in bucket_entries):
+                    kept.append(item)
+                    continue
+                instance_stats = by_library.get(item.get("instance") or "", {}).get(bucket)
+                if bucket == "series":
+                    main = 1 if item.get("missing_main_poster") else 0
+                    n_seasons = len(item.get("missing_seasons") or [])
+                    dec(summary.get("series"), 1, main)
+                    dec(summary.get("seasons"), n_seasons, n_seasons)
+                    dec(summary.get("grand_total"), 1 + n_seasons, main + n_seasons)
+                    dec(instance_stats, 1, main)
+                else:
+                    dec(summary.get(bucket), 1, 1)
+                    dec(summary.get("grand_total"), 1, 1)
+                    dec(instance_stats, 1, 1)
+            unmatched[bucket] = kept
+        return result
+
+    def filter_ignored_artwork_results(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the per-item ignore list to each artwork type in the cached artwork payload."""
+        entries = self.get_ignore_items()
+        if entries and isinstance(payload, dict):
+            for art_type in ARTWORK_TYPES:
+                if isinstance(payload.get(art_type), dict):
+                    self.filter_ignored_results(payload[art_type], entries)
+        return payload
 
     def _empty_result(self) -> Dict[str, Any]:
         """Return empty result structure."""

@@ -192,6 +192,29 @@ export const startUnmatchedDetection = async (): Promise<{ success: boolean; job
   return postData('/api/posterflow/detect-unmatched')
 }
 
+// One entry on the unmatched ignore list — items the user hid from unmatched
+// detection. Identified by ids when available, else title+year.
+export interface UnmatchedIgnoreItem {
+  media_type: 'movie' | 'series' | 'collection'
+  title: string
+  year?: number | null
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+}
+
+export const getUnmatchedIgnoreItems = async (): Promise<{ items: UnmatchedIgnoreItem[] }> => {
+  return getData('/api/posterflow/unmatched-ignore-items')
+}
+
+export const addUnmatchedIgnoreItem = async (item: UnmatchedIgnoreItem): Promise<{ items: UnmatchedIgnoreItem[] }> => {
+  return postData('/api/posterflow/unmatched-ignore-items', item)
+}
+
+export const removeUnmatchedIgnoreItem = async (item: UnmatchedIgnoreItem): Promise<{ items: UnmatchedIgnoreItem[] }> => {
+  return postData('/api/posterflow/unmatched-ignore-items/remove', item)
+}
+
 export interface TmdbCandidate {
   tmdb_id: number
   tvdb_id: number | null
