@@ -653,15 +653,39 @@ def _load_ignored_titles_raw(db: Session) -> list[dict[str, Any]]:
         return []
 
 
+_COLLECTION_WORD_REGEX = re.compile(r"\bcollections?\b", re.IGNORECASE)
+
+
+def _infer_ignored_entry_type(title: str, asset_type: Any) -> str:
+    """Concrete types pass through; unknown/pending entries whose title names a
+    collection are typed collection so the list badge and the runner's scan-time
+    typing agree."""
+    normalized = _normalize_idarr_asset_type(asset_type)
+    if normalized in ("movie", "tv_series", "collection"):
+        return normalized
+    if _COLLECTION_WORD_REGEX.search(str(title or "")):
+        return "collection"
+    return normalized or str(asset_type or "").strip().lower()
+
+
+def _with_inferred_ignored_type(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    inferred = _infer_ignored_entry_type(str(item.get("title") or ""), item.get("type"))
+    if inferred and inferred != item.get("type"):
+        return {**item, "type": inferred}
+    return item
+
+
 def _load_ignored_titles(db: Session, scope_token: str | None = None) -> list[dict[str, Any]]:
     payload = _load_ignored_titles_raw(db)
-    if scope_token is None:
-        return payload
-    return [
-        item
-        for item in payload
-        if isinstance(item, dict) and _asset_key_in_scope(item.get("asset_key"), scope_token)
-    ]
+    if scope_token is not None:
+        payload = [
+            item
+            for item in payload
+            if isinstance(item, dict) and _asset_key_in_scope(item.get("asset_key"), scope_token)
+        ]
+    return [_with_inferred_ignored_type(item) for item in payload]
 
 
 def _save_ignored_titles(db: Session, items: list[dict[str, Any]], scope_token: str | None = None) -> None:
@@ -697,7 +721,7 @@ def _parse_ignored_title_with_optional_year(value: str) -> tuple[str, int | None
 
 def _build_ignored_entry(*, title: str, year: int | None, asset_type: str, asset_key: str | None = None, scope_token: str | None = None) -> dict[str, Any]:
     normalized_title = str(title or "").strip()
-    normalized_type = _normalize_idarr_asset_type(asset_type)
+    normalized_type = _infer_ignored_entry_type(normalized_title, asset_type)
     normalized_year = year if isinstance(year, int) else None
     key = str(asset_key).strip() if isinstance(asset_key, str) and str(asset_key).strip() else _idarr_asset_key(normalized_type, normalized_title, normalized_year, scope_token)
     return {
@@ -768,8 +792,11 @@ def _resolve_ignored_entries_for_title(db: Session, raw_title: str, scope_token:
         return resolved_entries
 
     if isinstance(parsed_year, int):
+        # "James Bond Collection (1962)" must key as collection — the runner types
+        # collection-named files as collection, and movie/show keys don't reach it.
+        fallback_type = "collection" if _COLLECTION_WORD_REGEX.search(normalized_title) else "movie"
         return [
-            _build_ignored_entry(title=normalized_title, year=parsed_year, asset_type="movie", scope_token=scope_token),
+            _build_ignored_entry(title=normalized_title, year=parsed_year, asset_type=fallback_type, scope_token=scope_token),
         ]
 
     return [_build_ignored_entry(title=normalized_title, year=None, asset_type="collection", scope_token=scope_token)]

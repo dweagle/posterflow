@@ -411,6 +411,85 @@ def test_idarr_runner_expand_asset_key_aliases_pending_covers_all_concrete_types
     assert "pending::astarwarsstorycollection::::scope=t2_abc" in expanded
 
 
+def test_idarr_runner_expand_asset_key_aliases_handles_id_keyed_and_collection():
+    """ID-keyed ignore entries (copied from matched cache rows) and collection-typed
+    entries must expand across concrete types, or a runner type flip un-ignores them."""
+    id_key = "movie::tmdb=348"
+    expanded_id = IdarrRunner._expand_asset_key_aliases(id_key)
+    assert "movie::tmdb=348" in expanded_id
+    assert "tv_series::tmdb=348" in expanded_id
+    assert "collection::tmdb=348" in expanded_id
+
+    collection_key = "collection::jamesbondcollection::1962"
+    expanded_collection = IdarrRunner._expand_asset_key_aliases(collection_key)
+    assert "movie::jamesbondcollection::1962" in expanded_collection
+
+    movie_key = "movie::jamesbondcollection::1962"
+    expanded_movie = IdarrRunner._expand_asset_key_aliases(movie_key)
+    assert "collection::jamesbondcollection::1962" in expanded_movie
+
+
+def test_idarr_runner_is_ignored_matches_id_keyed_ignore_entry(test_db):
+    """A matched item's ignore entry is ID-keyed (movie::tmdb=…). The rename-time
+    check must catch it via the asset's ids, not only the title-keyed form."""
+    runner = IdarrRunner(test_db)
+    ignored_keys = runner._expand_asset_key_aliases("movie::tmdb=348")
+
+    asset = {"type": "movie", "title": "Alien", "year": 1979, "tmdb_id": 348}
+    assert runner.is_ignored(asset, ignored_keys) is True
+
+    other = {"type": "movie", "title": "Aliens", "year": 1986, "tmdb_id": 679}
+    assert runner.is_ignored(other, ignored_keys) is False
+
+
+def test_idarr_runner_is_ignored_bridges_collection_type_flip(test_db):
+    """An entry stored as movie (old year fallback) must still ignore the file once
+    the runner types it as a collection."""
+    runner = IdarrRunner(test_db)
+    stored_key = runner._asset_key(asset_type="movie", title="James Bond Collection", year=1962)
+    ignored_keys = runner._expand_asset_key_aliases(stored_key)
+
+    asset = {"type": "collection", "title": "James Bond Collection", "year": 1962}
+    assert runner.is_ignored(asset, ignored_keys) is True
+
+
+def test_import_ignored_titles_collection_word_with_year_types_collection(client):
+    response = client.post(
+        "/api/idarr/ignored-titles/import",
+        json={"titles": ["James Bond Collection (1962)"], "sync_target_index": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["added"] == 1
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    assert len(ignored) == 1
+    assert ignored[0]["type"] == "collection"
+    assert ignored[0]["asset_key"].startswith("collection::")
+    assert ignored[0]["year"] == 1962
+
+
+def test_ignored_titles_list_infers_collection_type_for_pending_entries(client):
+    """Entries ignored while unmatched are stored with type ``pending``; the list
+    must still badge collection-named titles as Collection."""
+    response = client.post(
+        "/api/idarr/ignored-titles/add",
+        json={
+            "title": "A Star Wars Story Collection",
+            "type": "pending",
+            "asset_key": "pending::astarwarsstorycollection::",
+            "sync_target_index": 0,
+        },
+    )
+    assert response.status_code == 200
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    assert len(ignored) == 1
+    assert ignored[0]["type"] == "collection"
+    # The key keeps its pending:: form so cache/pending row sync still matches.
+    assert ignored[0]["asset_key"] == "pending::astarwarsstorycollection::"
+
+
 def test_idarr_runner_asset_drive_keeps_type_inferred_for_unmatched_provisional_cache(test_db, tmp_path):
     """An ambiguous item that went to pending leaves an unmatched provisional cache row carrying
     the seed type ("movie"). On a later run that row must NOT settle the type — otherwise the

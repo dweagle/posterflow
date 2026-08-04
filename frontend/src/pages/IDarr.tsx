@@ -2076,10 +2076,13 @@ const {
                       <div className="ignored-list-meta">
                         {(() => {
                           const normalizedType = String(item.type || '').trim().toLowerCase()
-                          const isCollection = normalizedType === 'collection' || normalizedType === 'collections'
-                          const chip = isCollection
+                          const chip = normalizedType === 'collection' || normalizedType === 'collections'
                             ? { label: 'Collection', className: 'chip-collection' }
-                            : { label: 'Movie/Show', className: 'chip-show' }
+                            : normalizedType === 'movie'
+                              ? { label: 'Movie', className: 'chip-movie' }
+                              : normalizedType === 'tv_series' || normalizedType === 'series' || normalizedType === 'show'
+                                ? { label: 'Show', className: 'chip-show' }
+                                : { label: 'Movie/Show', className: 'chip-show' }
                           return <span className={`pending-type-chip ${chip.className}`}>{chip.label}</span>
                         })()}
                       </div>

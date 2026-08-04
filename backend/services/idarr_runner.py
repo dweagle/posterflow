@@ -288,23 +288,27 @@ class IdarrRunner:
         if not raw_key:
             return set()
 
-        parts = raw_key.split("::", 2)
-        if len(parts) != 3:
+        # Works on both key shapes (title-keyed ``type::title::year`` and ID-keyed
+        # ``type::tmdb=<id>``) by swapping only the type prefix.
+        type_part, sep, rest = raw_key.partition("::")
+        if not sep or not type_part or not rest:
             return {raw_key}
 
-        type_part, title_part, year_part = parts
         aliases = IdarrRunner._asset_type_aliases(type_part)
 
         movie_aliases = IdarrRunner._asset_type_aliases("movie")
         show_aliases = IdarrRunner._asset_type_aliases("tv_series")
         collection_aliases = IdarrRunner._asset_type_aliases("collection")
-        if aliases & (movie_aliases | show_aliases):
-            aliases = aliases | movie_aliases | show_aliases
+        # Runner typing can flip between concrete types across runs (movie↔show, and
+        # collection-named files demoted by stale cache hints), so any concrete type
+        # expands to all of them — the title/id part still has to match exactly.
+        if aliases & (movie_aliases | show_aliases | collection_aliases):
+            aliases = aliases | movie_aliases | show_aliases | collection_aliases
 
         if "pending" in aliases:
             aliases = aliases | movie_aliases | show_aliases | collection_aliases | {"pending"}
 
-        expanded = {f"{alias}::{title_part}::{year_part}" for alias in aliases if alias}
+        expanded = {f"{alias}::{rest}" for alias in aliases if alias}
         expanded.add(raw_key)
         return expanded
 
@@ -4634,12 +4638,22 @@ class IdarrRunner:
         return realigned
 
     def is_ignored(self, asset: dict[str, Any], ignored_asset_keys: set[str]) -> bool:
-        asset_key = self._asset_key(
-            asset_type=str(asset.get("type") or ""),
-            title=str(asset.get("title") or ""),
-            year=asset.get("year") if isinstance(asset.get("year"), int) else None,
-        )
-        return asset_key in ignored_asset_keys
+        asset_type = str(asset.get("type") or "")
+        title = str(asset.get("title") or "")
+        year = asset.get("year") if isinstance(asset.get("year"), int) else None
+        candidate_keys = {self._asset_key(asset_type=asset_type, title=title, year=year)}
+        # Ignore entries copied from matched cache rows are ID-keyed (type::tmdb=…),
+        # so the title-keyed form alone can never see them.
+        tmdb_id = asset.get("tmdb_id") if isinstance(asset.get("tmdb_id"), int) else None
+        tvdb_id = asset.get("tvdb_id") if isinstance(asset.get("tvdb_id"), int) else None
+        imdb_id = str(asset.get("imdb_id") or "").strip() or None
+        if tmdb_id is not None:
+            candidate_keys.add(self._asset_key(asset_type=asset_type, title=title, year=year, tmdb_id=tmdb_id))
+        if tvdb_id is not None:
+            candidate_keys.add(self._asset_key(asset_type=asset_type, title=title, year=year, tvdb_id=tvdb_id))
+        if imdb_id:
+            candidate_keys.add(self._asset_key(asset_type=asset_type, title=title, year=year, imdb_id=imdb_id))
+        return not candidate_keys.isdisjoint(ignored_asset_keys)
 
     @staticmethod
     def _archive_duplicate(file_path: Path, duplicates_dir: Path, dry_run: bool) -> tuple[bool, str | None]:
@@ -5660,6 +5674,20 @@ class IdarrRunner:
         realigned_ids = self._sync_asset_ids_from_cache(assets)
         if realigned_ids:
             log_info(LogTags.IDARR, f"Realigned {realigned_ids} file(s) to final cache IDs before rename")
+
+        # Second pass: enrichment may have attached the ids/type an ID-keyed ignore
+        # entry is stored under, so items missed at scan time are caught here.
+        if ignored_asset_keys:
+            before_late_ignored = len(assets)
+            assets = [
+                asset
+                for asset in assets
+                if not self.is_ignored(asset, ignored_asset_keys)
+            ]
+            late_ignored = before_late_ignored - len(assets)
+            if late_ignored > 0:
+                ignored_count += late_ignored
+                log_info(LogTags.IDARR, f"Ignored assets excluded after enrichment: {late_ignored}", ignored_count=late_ignored)
 
         renamed_count = 0
         skipped_count = 0
