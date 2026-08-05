@@ -1,6 +1,7 @@
 """Tests for util/posters/match.py"""
 from util.posters.index import build_search_index, create_new_empty_index
 from util.posters.match import (
+    ID_CONFLICT,
     NO_SHARED_ID,
     YEAR_MISMATCH,
     compare_strings,
@@ -379,15 +380,6 @@ class TestNoSharedId:
         assert matched is True
         assert reason == "by imdb_id"
 
-    def test_conflicting_ids_are_not_near_miss(self):
-        # Same title, genuinely different items — a shared id type that disagrees is a
-        # real rejection, not a tagging gap.
-        asset = self._series(tvdb_id=111)
-        media = self._series(tvdb_id=222)
-        matched, reason = is_match(asset, media)
-        assert matched is False
-        assert reason == ""
-
     def test_different_titles_are_not_near_miss(self):
         asset = self._series(title="Ripley Under Ground", normalized_title="ripleyunderground",
                              imdb_id="tt0219171")
@@ -578,3 +570,40 @@ class TestYearMismatch(TestNoSharedId):
 
         assert len(result["series"]) == 1
         assert "no year lined up" not in logged
+
+
+# ---------------------------------------------------------------------------
+# id conflict near miss (ID_CONFLICT)
+# ---------------------------------------------------------------------------
+
+class TestIdConflict(TestNoSharedId):
+    """Title AND year agree but a shared id type disagrees — one side is mistagged
+    (stale poster tag or a remapped *arr entry), so report it instead of silently
+    rejecting."""
+
+    def test_conflicting_id_with_agreeing_title_year_is_near_miss(self):
+        asset = self._series(tvdb_id=111)
+        media = self._series(tvdb_id=222)
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ID_CONFLICT
+
+    def test_conflicting_id_with_different_year_stays_silent(self):
+        # The remake case: same name, new year, new id — a genuine rejection.
+        asset = self._series(tvdb_id=111, year=1999)
+        media = self._series(tvdb_id=222)
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ""
+
+    def test_conflict_reported_with_both_ids(self):
+        asset = self._series(tvdb_id=111, files=["/p/RIPLEY (2024) {tvdb-111}.jpg"])
+        media = self._series(tvdb_id=222)
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert result["series"] == []
+        assert "DIFFERENT id" in logged
+        assert "{tvdb-111}" in logged                 # poster side
+        assert "{tvdb-222}" in logged                 # library side
+        assert "RIPLEY (2024) {tvdb-111}.jpg" in logged

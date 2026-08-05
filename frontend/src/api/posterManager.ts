@@ -245,6 +245,149 @@ export const searchUnmatchedTmdb = async (params: {
 }
 
 // ---------------------------------------------------------------------------
+// Unmatched match report ("why isn't this matching")
+// ---------------------------------------------------------------------------
+
+export interface MatchReportVerdict {
+  level: 'problem' | 'ok' | 'info'
+  code: string
+  message: string
+}
+
+export interface MatchReportCandidate {
+  title: string | null
+  year: number | null
+  type?: string | null
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  drive: string | null
+  files: string[]
+  season_numbers: number[]
+  // True when the set includes a non-season (main poster) file.
+  has_main?: boolean
+  // Artwork reports only: which artwork types this box carries.
+  artwork_types?: string[] | null
+  // Tag-looking text the id parser rejected ("{tvdb-475672 }" etc.).
+  malformed_tags?: string[]
+  // Ids found on the files of an id-less nested asset (tag on the wrong level).
+  file_ids?: { tmdb_id: number | null; tvdb_id: number | null; imdb_id: string | null } | null
+  found_by: 'id' | 'title'
+  matched: boolean
+  reason: string
+  newest_file: string | null
+}
+
+export interface MatchReportLibraryRecord {
+  instance: string | null
+  title: string | null
+  year: number | null
+  folder: string | null
+  folder_has_year: boolean
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  monitored: boolean | null
+  // Radarr: tba/announced/incinemas/released — Sonarr: upcoming/continuing/ended.
+  status: string | null
+  // Movies: has_file; series: has_episodes; collections: null.
+  available: boolean | null
+  alternate_titles: string[]
+  seasons_with_episodes: number[]
+}
+
+// A resolved reference carries ids + title/year; otherwise `skipped`, `error`, or
+// `missing` (Plex: reachable but the item isn't in any library) says why.
+export interface MatchReportReference {
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  title?: string
+  year?: number | null
+  // Plex only: which library/instance the item was found in.
+  library?: string | null
+  instance?: string | null
+  // TMDB/TVDB only: the source's alias list (capped; total says how many exist).
+  alternate_titles?: string[]
+  alternate_titles_total?: number
+  skipped?: string
+  error?: string
+  missing?: string
+}
+
+export interface MatchReport {
+  generated_at: string
+  app_version: string
+  item: {
+    media_type: 'movies' | 'series' | 'collections'
+    title: string
+    year: number | null
+    tmdb_id: number | null
+    tvdb_id: number | null
+    imdb_id: string | null
+    missing_seasons: number[]
+    missing_main?: boolean
+    artwork_type?: 'logo' | 'background' | 'squareart' | null
+  }
+  verdicts: MatchReportVerdict[]
+  library: {
+    found: boolean
+    records: MatchReportLibraryRecord[]
+    effective_ids: { tmdb_id: number | null; tvdb_id: number | null; imdb_id: string | null }
+    // Instance the effective ids came from (Sonarr/Radarr/Plex as named in Settings),
+    // or "unmatched cache" when no live record was found.
+    ids_source: string
+    manual_entry: boolean
+    on_ignore_list: boolean
+  }
+  reference: { tmdb: MatchReportReference; tvdb: MatchReportReference; plex: MatchReportReference }
+  drives: {
+    scanned: { name: string; style_type: string; last_synced: string | null; missing: boolean }[]
+    total_assets: number
+    error: string | null
+  }
+  candidates: { considered: number; shown: number; omitted: number; id_pool?: number; items: MatchReportCandidate[] }
+  // Only-when-nothing-matched extras (also rendered in the text report).
+  nonpriority_hits?: { title: string | null; year: number | null; drive: string | null; reason: string; files: string[] }[]
+  unscannable?: { file: string; drive_dir: string; reason: string }[]
+  close_titles?: { title: string | null; year: number | null; similarity: number; files: string[] }[]
+  collection_id_note?: { title: string | null; files: string[] } | null
+}
+
+export interface MatchReportResponse {
+  report: MatchReport
+  report_text: string
+  filename: string
+}
+
+export const fetchUnmatchedMatchReport = async (params: {
+  media_type: 'movies' | 'series' | 'collections'
+  title: string
+  year?: number | null
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  missing_seasons?: number[] | null
+  missing_main?: boolean
+  artwork_type?: 'logo' | 'background' | 'squareart' | null
+}): Promise<MatchReportResponse> => {
+  return postData('/api/posterflow/unmatched-match-report', params)
+}
+
+// Save a generated report as a .txt download (dropped straight into Discord/forums).
+export const downloadMatchReport = (response: MatchReportResponse): void => {
+  const blob = new Blob([response.report_text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = response.filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------------------
 // Manual Media Entries
 // ---------------------------------------------------------------------------
 

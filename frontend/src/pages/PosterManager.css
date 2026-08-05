@@ -5085,6 +5085,166 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   color: #ffcc80;
 }
 
+/* ── Match report (file-question) button (unmatched item row) ─────────── */
+.match-report-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid rgba(176, 190, 197, 0.35);
+  border-radius: 4px;
+  background: transparent;
+  color: #b0bec5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.match-report-btn:hover {
+  border-color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.1);
+  color: #4fc3f7;
+}
+
+/* ── Match report popup ───────────────────────────────────────────────── */
+.match-report-overlay {
+  z-index: 1100; /* sits above the unmatched items modal */
+}
+
+.match-report-modal {
+  max-width: 640px;
+}
+
+.match-report-loading,
+.match-report-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.25rem 0.25rem;
+  color: #b0bec5;
+}
+
+.match-report-error {
+  color: #ef9a9a;
+}
+
+.match-report-section {
+  margin-bottom: 1rem;
+}
+
+.match-report-section h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #90a4ae;
+}
+
+.match-report-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.match-report-verdict svg {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.match-report-verdict--problem { color: #ef9a9a; }
+.match-report-verdict--ok { color: #a5d6a7; }
+.match-report-verdict--info { color: #b0bec5; }
+
+.match-report-mono {
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: #b0bec5;
+  overflow-wrap: anywhere;
+}
+
+.match-report-file {
+  padding-left: 1.2rem;
+}
+
+.match-report-muted {
+  color: #78909c;
+  font-size: 0.8rem;
+}
+
+.match-report-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.match-report-table td {
+  padding: 0.15rem 0.6rem 0.15rem 0;
+  vertical-align: top;
+  font-size: 0.82rem;
+}
+
+.match-report-table td:first-child {
+  color: #90a4ae;
+  white-space: nowrap;
+}
+
+.match-report-candidate {
+  margin-bottom: 0.6rem;
+}
+
+.match-report-candidate-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.match-report-candidate-title {
+  font-size: 0.85rem;
+  color: #eceff1;
+}
+
+.match-report-drive-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(79, 195, 247, 0.12);
+  color: #4fc3f7;
+}
+
+.mr-ok { color: #a5d6a7; flex-shrink: 0; }
+.mr-problem { color: #ef9a9a; flex-shrink: 0; }
+
+/* Id tags color-coded by kind, so agreeing/disagreeing ids align visually across rows. */
+.mr-id { margin-right: 0.45rem; }
+.mr-id--tmdb { color: #4db6ac; }  /* teal */
+.mr-id--tvdb { color: #ce93d8; }  /* violet */
+.mr-id--imdb { color: #f0c96e; }  /* gold */
+
+.match-report-footnote {
+  font-size: 0.72rem;
+  color: #607d8b;
+  border-top: 1px solid rgba(96, 125, 139, 0.25);
+  padding-top: 0.5rem;
+}
+
+.match-report-footnote--top {
+  border-top: none;
+  border-bottom: 1px solid rgba(96, 125, 139, 0.25);
+  padding-top: 0;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Keep "Download report" on one line, matching the Close button's height. */
+.match-report-modal .modal-footer .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
 /* ── Ignore (eye-off) button (unmatched item row) ─────────────────────── */
 .ignore-item-btn {
   display: inline-flex;

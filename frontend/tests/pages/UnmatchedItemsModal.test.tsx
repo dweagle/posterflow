@@ -133,3 +133,20 @@ describe('UnmatchedItemsModal ignore button', () => {
     await waitFor(() => expect(screen.queryByText('Inception')).toBeNull())
   })
 })
+
+describe('UnmatchedItemsModal match report button', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('shows on poster rows', () => {
+    renderModal('movies', posterStats(), 'Posters')
+    expect(screen.getByTitle(/Why isn't this matching/)).toBeTruthy()
+  })
+
+  it('shows on artwork rows too — the report scans the artwork drives there', () => {
+    renderModal('series', artworkStats(), 'Logos')
+    expect(screen.getByTitle(/Why isn't this matching/)).toBeTruthy()
+  })
+})

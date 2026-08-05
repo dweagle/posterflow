@@ -614,6 +614,7 @@ function PosterManager() {
           onClose={() => setShowUnmatchedModal(null)}
           hideCommunity={!isPosterScope}
           typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
+          artworkType={isPosterScope ? null : unmatchedScope}
           onIgnored={handleIgnoreListChanged}
         />
       )}

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, FileQuestion, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
@@ -12,6 +12,7 @@ import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
 import CreateListModal, { type SelectableListItem } from './CreateListModal'
+import MatchReportModal, { type MatchReportItem } from './MatchReportModal'
 import PublishStyleToggle from './PublishStyleToggle'
 import { usePersistedPosterStyle } from '../community/posterStyles'
 import SortControls from './SortControls'
@@ -28,6 +29,8 @@ interface NormalizedItem {
   type: ItemType
   seasonCount: number
   missingSeasonsNumbers?: number[]
+  // Series rows listed for a missing MAIN poster (vs missing seasons).
+  missingMain?: boolean
   tmdbType?: TmdbSearchType
   category?: string
   // Authoritative refs carried from Plex/*arr (when available)
@@ -49,6 +52,8 @@ type UnmatchedItemsModalProps = {
   hideCommunity?: boolean
   // Asset type being listed ('Posters', 'Logos', ...), used in the modal heading.
   typeNoun?: string
+  // Artwork type of this view (null for posters) — scopes the per-item match report.
+  artworkType?: 'logo' | 'background' | 'squareart' | null
   // Called after an item is added to the ignore list so the parent can refresh stats.
   onIgnored?: () => void
 }
@@ -101,7 +106,7 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
   if (modalType === 'series') {
     return (unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
-      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, ...srcRefs(item) }))
+      .map((item, i) => ({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, missingMain: true, ...srcRefs(item) }))
   }
   if (modalType === 'seasons') {
     return (unmatchedStats.unmatched.series ?? [])
@@ -134,7 +139,7 @@ function buildAllItems(modalType: UnmatchedModalType, unmatchedStats: UnmatchedS
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_main_poster)
       .forEach((item, i) => {
-        result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, tmdbType: 'show', category: 'Series', ...srcRefs(item) })
+        result.push({ title: item.title, year: item.year ?? null, origIdx: i, type: 'show', seasonCount: 0, missingMain: true, tmdbType: 'show', category: 'Series', ...srcRefs(item) })
       })
     ;(unmatchedStats.unmatched.series ?? [])
       .filter((s) => s.missing_seasons.length > 0)
@@ -182,6 +187,21 @@ function toListInput(item: NormalizedItem): ListItemInput {
   }
 }
 
+// Map an unmatched row to the match-report request (backend media_type buckets).
+function toReportItem(item: NormalizedItem, artworkType: 'logo' | 'background' | 'squareart' | null): MatchReportItem {
+  return {
+    media_type: item.type === 'show' ? 'series' : item.type === 'collection' ? 'collections' : 'movies',
+    title: item.year ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : item.title,
+    year: item.year,
+    tmdb_id: item.tmdb_id ?? null,
+    tvdb_id: item.tvdb_id ?? null,
+    imdb_id: item.imdb_id ?? null,
+    missing_seasons: item.missingSeasonsNumbers ?? [],
+    missing_main: item.missingMain ?? false,
+    artwork_type: artworkType,
+  }
+}
+
 // Map an unmatched row to an ignore-list entry (ids preferred, title+year fallback).
 function toIgnoreInput(item: NormalizedItem): UnmatchedIgnoreItem {
   return {
@@ -221,6 +241,7 @@ function UnmatchedItemsModal({
   onClose,
   hideCommunity = false,
   typeNoun = 'Posters',
+  artworkType = null,
   onIgnored,
 }: UnmatchedItemsModalProps) {
   const statsHaveSeasons = Boolean(unmatchedStats?.summary?.seasons && unmatchedStats.summary.seasons.total > 0)
@@ -239,6 +260,7 @@ function UnmatchedItemsModal({
   const [noKeyItems, setNoKeyItems] = useState<Set<string>>(new Set())
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [requestItem, setRequestItem] = useState<NormalizedItem | null>(null)
+  const [reportItem, setReportItem] = useState<NormalizedItem | null>(null)
   const [createListOpen, setCreateListOpen] = useState(false)
   // Items ignored during this modal session — hidden immediately; the parent's
   // stats refresh (onIgnored) removes them from the source data for good.
@@ -540,6 +562,14 @@ function UnmatchedItemsModal({
           )}
           <button
             type="button"
+            className="match-report-btn"
+            title={'Why isn\'t this matching?\nGathers info from your library, drives, and TMDB/TVDB into a shareable report.'}
+            onClick={() => setReportItem(item)}
+          >
+            <FileQuestion size={13} />
+          </button>
+          <button
+            type="button"
             className="ignore-item-btn"
             title={'Ignore this item — it won\'t show as unmatched again.\nManage the ignore list in Detection Settings.'}
             onClick={() => handleIgnore(item)}
@@ -750,6 +780,10 @@ function UnmatchedItemsModal({
           />
         </div>
       </div>
+    )}
+
+    {reportItem && (
+      <MatchReportModal item={toReportItem(reportItem, artworkType)} onClose={() => setReportItem(null)} />
     )}
 
     {requestItem && (

@@ -871,6 +871,42 @@ def remove_unmatched_ignore_item(item: UnmatchedIgnoreItem, db: Session = Depend
         raise HTTPException(status_code=500, detail="Error removing item from ignore list")
 
 
+class MatchReportRequest(BaseModel):
+    """One unmatched row, as shown in the modal, to diagnose."""
+    media_type: str = Field(pattern="^(movies|series|collections)$")
+    title: str
+    year: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    missing_seasons: Optional[List[int]] = None
+    # True for series rows listed under "missing main poster".
+    missing_main: bool = False
+    # None = poster report; set for artwork unmatched rows.
+    artwork_type: Optional[str] = Field(default=None, pattern="^(logo|background|squareart)$")
+
+
+@router.post("/unmatched-match-report")
+def unmatched_match_report(payload: MatchReportRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Build the single-item "why isn't this matching" report: live library record, source-drive
+    candidate replay, TMDB/TVDB id cross-check, and a ranked verdict. Blocking (arr/TMDB/TVDB
+    calls + drive scan), so a sync handler — FastAPI runs it in the threadpool."""
+    from services.match_report import build_match_report, render_match_report_text, report_filename
+
+    try:
+        item = payload.model_dump()
+        report = build_match_report(db, item)
+        log_user_action(f"Generated match report for '{payload.title}'")
+        return {
+            "report": report,
+            "report_text": render_match_report_text(report),
+            "filename": report_filename(item),
+        }
+    except Exception as e:
+        log_error(LogTags.UNMATCHED, f"Error building match report: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error building match report")
+
+
 @router.post("/detect-unmatched")
 def start_unmatched_detection(
     db: Session = Depends(get_db)

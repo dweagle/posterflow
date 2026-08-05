@@ -15,6 +15,11 @@ NO_SHARED_ID = "no shared id"
 # *arr path has no "(year)" suffix, so folder_year is unavailable to corroborate.
 YEAR_MISMATCH = "year mismatch"
 
+# is_match rejection reason: title and year agree but a shared id type disagrees. One side
+# is mistagged (stale poster tag or a remapped *arr entry) — without this report the id
+# lock rejects the pair completely silently.
+ID_CONFLICT = "id conflict"
+
 # Cap the per-item near-miss detail in the summary; the rest stay at debug level.
 _NEAR_MISS_DETAIL_LIMIT = 15
 
@@ -265,11 +270,12 @@ def is_match(
         # pass silently rejects the same pairing and prunes what the rename just placed.
         if not has_any_valid_id(media):
             return title_matches()
-        # Rejected. Distinguish two very different causes, because only one is a defect:
-        #   - a shared id type that disagrees -> genuinely different items, stay silent.
-        #   - no id type on both sides -> nothing could be compared, and the id lock skips
-        #     the title fallback below, so an agreeing title means this is almost certainly
-        #     a tagging gap (e.g. imdb-only poster vs tvdb-only library item). Flag it.
+        # Rejected. Distinguish the causes, because the id lock skips the title fallback
+        # below and two of them deserve a report instead of silence:
+        #   - a shared id type disagrees but title AND year agree -> one side is mistagged.
+        #     (Title-only agreement stays silent — that's the remake-with-new-id case.)
+        #   - no id type on both sides -> nothing could be compared, so an agreeing title
+        #     is almost certainly a tagging gap (e.g. imdb-only poster vs tvdb-only item).
         shares_an_id_type = any(
             media_value and asset.get(key)
             for key, media_value in (
@@ -278,12 +284,15 @@ def is_match(
                 ("imdb_id", media.get("imdb_id")),
             )
         )
-        if not shares_an_id_type:
-            title_ok, title_reason = title_matches()
+        title_ok, title_reason = title_matches()
+        if shares_an_id_type:
             if title_ok:
-                return False, NO_SHARED_ID
-            if title_reason == YEAR_MISMATCH:
-                return False, YEAR_MISMATCH
+                return False, ID_CONFLICT
+            return False, ""
+        if title_ok:
+            return False, NO_SHARED_ID
+        if title_reason == YEAR_MISMATCH:
+            return False, YEAR_MISMATCH
         return False, ""
 
     return title_matches()
@@ -538,21 +547,20 @@ def match_assets_to_media(
     return matched
 
 
+# Near-miss priority: an id conflict names the exact wrong id, an id gap names the tag to
+# add, a year gap may just be a stale *arr year.
+_NEAR_MISS_RANK = {ID_CONFLICT: 0, NO_SHARED_ID: 1, YEAR_MISMATCH: 2}
+
+
 def _keep_near_miss(
     current: Optional[Tuple[Dict[str, Any], str]],
     asset: Dict[str, Any],
     reason: str,
 ) -> Optional[Tuple[Dict[str, Any], str]]:
-    """Keep the most actionable near-miss seen so far for one media item.
-
-    An id gap outranks a year gap: it names the exact tag to add, whereas a year gap
-    may just be a stale *arr year. Otherwise first candidate wins.
-    """
-    if reason not in (NO_SHARED_ID, YEAR_MISMATCH):
+    """Keep the most actionable near-miss seen so far for one media item (ties: first wins)."""
+    if reason not in _NEAR_MISS_RANK:
         return current
-    if current is None:
-        return (asset, reason)
-    if reason == NO_SHARED_ID and current[1] == YEAR_MISMATCH:
+    if current is None or _NEAR_MISS_RANK[reason] < _NEAR_MISS_RANK[current[1]]:
         return (asset, reason)
     return current
 
@@ -590,6 +598,11 @@ def _log_near_misses(
 
     groups = (
         (
+            ID_CONFLICT,
+            "carry a DIFFERENT id (title and year agree), so they were treated as "
+            "separate items. One side is mistagged — fix the poster tag or the *arr mapping:",
+        ),
+        (
             NO_SHARED_ID,
             "share no id with the library item, so they were skipped. "
             "Add the library id to the poster filename:",
@@ -616,7 +629,7 @@ def _log_near_misses(
                 os.path.basename((asset.get("files") or [""])[0])
                 or asset.get("title", "")
             )
-            if reason == NO_SHARED_ID:
+            if reason in (ID_CONFLICT, NO_SHARED_ID):
                 body = (
                     f"        poster  {_id_tags(asset)}  {source}\n"
                     f"        library {_id_tags(media)}"
