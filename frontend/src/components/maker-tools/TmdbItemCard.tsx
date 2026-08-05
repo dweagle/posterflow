@@ -1431,7 +1431,18 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         </div>
       )}
 
-      {/* Artwork save overwrite confirm modal */}
+      {/* Crop a poster into square art → saves to the square art export folder */}
+      {squareCropTarget && (
+        <SquareCropModal
+          imageUrl={squareCropTarget.url_full}
+          title={item.year ? `${item.title} (${item.year})` : item.title}
+          saving={!!artworkSaving[`squareart:${squareCropTarget.file_path}`]}
+          onCancel={() => setSquareCropTarget(null)}
+          onSave={(crop) => void handleSaveArtwork('squareart', squareCropTarget.file_path, { crop })}
+        />
+      )}
+
+      {/* Artwork save overwrite confirm modal — after the crop modal so it stacks on top of it */}
       {artworkOverwriteConfirm && (() => {
         const label = artworkOverwriteConfirm.subtype === 'squareart' ? 'square art' : artworkOverwriteConfirm.subtype
         return (
@@ -1470,17 +1481,6 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
         )
       })()}
-
-      {/* Crop a poster into square art → saves to the square art export folder */}
-      {squareCropTarget && (
-        <SquareCropModal
-          imageUrl={squareCropTarget.url_full}
-          title={item.year ? `${item.title} (${item.year})` : item.title}
-          saving={!!artworkSaving[`squareart:${squareCropTarget.file_path}`]}
-          onCancel={() => setSquareCropTarget(null)}
-          onSave={(crop) => void handleSaveArtwork('squareart', squareCropTarget.file_path, { crop })}
-        />
-      )}
 
       {/* PSD overwrite confirm modal */}
       {psdOverwriteConfirm && (
