@@ -1,7 +1,7 @@
 name: deploy-pages
 
-# Deploys the Photopea plugin to GitHub Pages, but only when the plugin
-# folder changes. Requires Pages source to be set to "GitHub Actions"
+# Deploys the Photopea plugin and the drive recommendation page to GitHub Pages,
+# only when one of them changes. Requires Pages source to be set to "GitHub Actions"
 # (Settings -> Pages -> Build and deployment -> Source).
 
 on:
@@ -9,6 +9,7 @@ on:
     branches: [develop]
     paths:
       - 'photopea-posterflow/**'
+      - 'docs/**'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
@@ -31,12 +32,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Check the drive page matches its sources
+        run: python3 docs/build_gdrives.py --check
+
       - name: Stage site
-        # Nest under photopea-posterflow/ so the existing plugin URL
-        # (…/posterflow/photopea-posterflow/photopea-posterflow.html) stays identical.
+        # plugin URL stays identical; the drive page lands at …/posterflow/gdrives/
         run: |
-          mkdir -p _site/photopea-posterflow
+          mkdir -p _site/photopea-posterflow _site/gdrives
           cp -r photopea-posterflow/. _site/photopea-posterflow/
+          cp docs/gdrives.html _site/gdrives/index.html
+          cp -r docs/images _site/gdrives/images
           touch _site/.nojekyll
 
       - name: Configure Pages

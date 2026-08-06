@@ -6,6 +6,8 @@ PosterFlow is heavily inspired by [DAPS by Drazzilb](https://github.com/Drazzilb
 
 See the Wiki for more information [Wiki](https://github.com/dweagle/posterflow/wiki)
 
+Community drive recommendations — poster drives, artwork drives and the priority baseline: [Google Drives](https://dweagle.github.io/posterflow/gdrives/) ([source](docs/))
+
 ## Dashboard
 ![dashboard](https://github.com/user-attachments/assets/91a834b3-0652-440d-bc11-6535eb9c627c)
 *The dashboard is the top landing spot when accessing the app. The sidebar exposes every top-level surface.*

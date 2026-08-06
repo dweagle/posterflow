@@ -26,6 +26,9 @@ __pycache__/
 # Tests
 backend/tests/
 
+# Docs (repo-only, never shipped in the image)
+docs/
+
 # Runtime data
 config/
 posters/

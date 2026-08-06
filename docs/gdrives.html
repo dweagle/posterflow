@@ -1,0 +1,725 @@
+<!doctype html>
+<!-- Edit this file freely, EXCEPT inside the "BEGIN … / END …" regions: those tables are
+     rewritten by docs/build_gdrives.py from gdrives_notes.json and the app's drive lists.
+     Run it after editing gdrives_notes.json or adding a drive:  python3 docs/build_gdrives.py -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Drives - PosterFlow / DAPS drive recommendations</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0;
+    --sub: #f6f8fa; --accent: #0969da; --code-bg: #eff1f3; --warn: #9a6700;
+    --tabh: 3.1rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d;
+      --sub: #151b23; --accent: #4493f8; --code-bg: #212830; --warn: #d29922;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; max-width: 1360px; padding: 2rem 1.25rem 5rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 1.9rem; margin: 0 0 .4rem; }
+  h2 { font-size: 1.4rem; margin: 2rem 0 1rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
+  h2:first-child { margin-top: 0; }
+  h3 { font-size: 1.15rem; margin: 2rem 0 .75rem; }
+  h4, h5 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+  p, ul, ol, blockquote { margin: 0 0 1rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: var(--code-bg); padding: .15em .4em; border-radius: 4px; font-size: .875em; }
+  pre { background: var(--sub); border: 1px solid var(--line); border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid var(--warn); padding: .1rem 0 .1rem 1rem; color: var(--muted); }
+  img { max-width: 100%; height: auto; border-radius: 6px; }
+  .lead { color: var(--muted); }
+  .hint { font-size: .85rem; color: var(--muted); }
+
+  /* tabs */
+  .tabs {
+    position: sticky; top: 0; z-index: 3; display: flex; gap: .15rem;
+    margin: 1.25rem 0 1.5rem; padding: .5rem 0; height: var(--tabh);
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    overflow-x: auto; white-space: nowrap;
+  }
+  .tab {
+    flex: none; border: 0; background: none; color: var(--muted);
+    font: inherit; font-size: .92rem; padding: .3rem .8rem; border-radius: 6px;
+    cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tab:hover { color: var(--fg); background: var(--sub); }
+  .tab[aria-selected="true"] { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+  .tab .n { font-size: .75rem; opacity: .7; margin-left: .3rem; }
+  .panel[hidden] { display: none; }
+
+  /* tables */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; margin: 0 0 1rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .7rem; vertical-align: top;
+           border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
+  th:last-child, td:last-child { border-right: 0; }
+  thead th { background: var(--sub); white-space: nowrap;
+             font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  caption { text-align: left; font-size: 1.15rem; font-weight: 600; padding: .6rem .7rem;
+            border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--sub); }
+  td ul { margin: 0; padding-left: 1.1rem; }
+
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable::after { content: " ↕"; opacity: .4; }
+  th.sortable[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
+  th.sortable[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+
+  .col-prio  { width: 5.5rem; }
+  .col-owner { width: 11rem; }
+  .col-did   { width: 15rem; }
+  .col-ack   { width: 3.5rem; text-align: center; }
+  .col-art   { width: 7rem; }
+
+  .prio { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+  /* ID wraps in column 1, the two buttons stack in column 2 */
+  .did { display: grid; grid-template-columns: 1fr auto; gap: .25rem .5rem; align-items: start; }
+  .did code { grid-column: 1; grid-row: 1 / span 2; font-size: .78rem; word-break: break-all;
+              background: none; padding: 0; color: var(--muted); }
+  .did .open { grid-column: 2; grid-row: 1; }
+  .did .copy { grid-column: 2; grid-row: 2; }
+  .copy, .did .open { flex: none; border: 1px solid var(--line); background: var(--bg);
+          color: var(--muted); border-radius: 4px; font-size: .7rem; padding: .1rem .35rem;
+          cursor: pointer; text-decoration: none; line-height: 1.4;
+          min-width: 3.1rem; text-align: center; }
+  .copy:hover, .did .open:hover { color: var(--fg); border-color: var(--muted); text-decoration: none; }
+  .ack { font-style: normal; }
+  .pill { display: inline-block; font-size: .68rem; font-weight: 600; letter-spacing: .03em;
+          border: 1px solid var(--line); border-radius: 999px; padding: .05rem .4rem;
+          margin: 0 .15rem .15rem 0; color: var(--muted); white-space: nowrap; }
+  .none { color: var(--muted); }
+
+  .filter { margin: 0 0 .6rem; }
+  .filter input { width: 100%; max-width: 22rem; padding: .4rem .6rem; font-size: .9rem;
+                  color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .filter .count { margin-left: .6rem; font-size: .8rem; color: var(--muted); }
+
+  .zoomable { cursor: zoom-in; transition: opacity .15s; }
+  .zoomable:hover { opacity: .85; }
+  .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .88);
+              display: flex; flex-direction: column; align-items: center; justify-content: center;
+              gap: .75rem; padding: 2rem; cursor: zoom-out; }
+  .lightbox[hidden] { display: none; }
+  .lightbox img { max-width: 100%; max-height: 86vh; width: auto; border-radius: 6px; }
+  .lightbox p { color: #fff; font-size: .85rem; margin: 0; text-align: center; }
+  .lightbox .close { position: absolute; top: 1rem; right: 1.25rem; background: none; border: 0;
+                     color: #fff; font-size: 1.75rem; line-height: 1; cursor: pointer; opacity: .8; }
+  .lightbox .close:hover { opacity: 1; }
+
+  .shots { display: flex; flex-wrap: wrap; gap: .75rem; margin: 0 0 1rem; align-items: flex-start; }
+  .shots img { width: 320px; }
+  .shots figure { margin: 0; flex: 0 0 auto; }
+  /* landscape shots take the rest of the row, and wrap below when it gets tight */
+  .shots.styles img { width: 215px; }
+  .shots.psd img { width: 460px; }
+  .shots figure.wide { flex: 1 1 420px; min-width: 0; }
+  .shots figure.wide img { width: 100%; }
+  .shots figcaption { font-size: .8rem; color: var(--muted); margin-top: .25rem; }
+
+  @media (max-width: 700px) {
+    body { padding: 1.25rem .75rem 4rem; }
+    .col-owner, .col-did { width: auto; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Google Drives</h1>
+
+<p class="lead">Community poster and artwork drive recommendations for
+<a href="https://github.com/Drazzilb08/daps">DAPS</a> and
+<a href="https://github.com/dweagle/posterflow">PosterFlow</a>.</p>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab" role="tab" data-tab="overview" data-anchor="community-baseline">Overview</button>
+  <button class="tab" role="tab" data-tab="guide" data-anchor="priority-guide">Priority Guide</button>
+  <button class="tab" role="tab" data-tab="mm2k" data-anchor="mm2k-style-drives">MM2K</button>
+  <button class="tab" role="tab" data-tab="cl2k" data-anchor="cl2k-style-drives">CL2K</button>
+  <button class="tab" role="tab" data-tab="artwork" data-anchor="artwork-drives">Artwork</button>
+  <button class="tab" role="tab" data-tab="makers" data-anchor="who-makes-what">Who Makes What</button>
+  <button class="tab" role="tab" data-tab="create" data-anchor="create-your-own">Create Your Own</button>
+</nav>
+
+<section class="panel" data-tab="overview" role="tabpanel" hidden>
+
+  <h3 id="the-two-styles">The Two Styles</h3>
+
+  <div class="shots styles">
+    <figure><img src="images/mm2k_sample.jpg" alt="Example MM2K-style poster">
+      <figcaption>MM2K - title set in text</figcaption></figure>
+    <figure><img src="images/cl2k_sample.jpg" alt="Example CL2K-style poster">
+      <figcaption>CL2K - the title's own clear logo</figcaption></figure>
+  </div>
+
+  <!-- BEGIN BASELINE_TABLE - generated, do not edit -->
+<div class="table-wrap"><table><caption id="community-baseline">Community baseline</caption><thead><tr><th class="col-prio">Priority</th><th class="col-owner">Priority info</th><th>Content</th></tr></thead><tbody><tr><td class="col-prio" data-sort="0"><span class="prio">--</span></td><td class="col-owner">LOWEST</td><td>Collection of others and their posters (Not necessarily conform to our style guidelines)</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">LOW</td><td>Homemade posters (Example: foreign/local media)</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">MEDIUM</td><td>Homemade posters (Can easily be exchanged within the same priority)</td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">HIGH</td><td>Drazzilb (MM2K holy grail) / High count general CL2K drives</td></tr><tr><td class="col-prio" data-sort="4"><span class="prio">+++</span></td><td class="col-owner">HIGHEST</td><td>Custom folder/drive (Personal)(*)</td></tr></tbody></table></div>
+<!-- END BASELINE_TABLE -->
+
+  <p>❗❗ Remember, it remains a personal preference when using the recommendations posted in the tables on the other tabs. This
+  only serves as a baseline and is by no means the golden rule.</p>
+
+  <h2 id="afterword">Afterword</h2>
+
+  <p>Maintained by <strong>dweagle79</strong>. This list continues the page originally written and
+  maintained by <strong>Chris DC</strong>
+  (<a href="https://github.com/christophedc0/Dump/blob/main/DAPS/gdrives.md">original</a>).</p>
+
+  <p><strong><em>Special thanks</em></strong> to <strong>Chris DC</strong>, who created and maintained
+  this page and handed it over, and to all the drive owners and users who provided the feedback that
+  made it useful.</p>
+
+  <p><strong><em>Big thanks</em></strong> to
+  <a href="https://theposterdb.com/user/musikmann2000">MusikMann2000</a> and everyone creating posters
+  to the guidelines and rules defined at <a href="https://github.com/Drazzilb08/daps">DAPS</a>.</p>
+
+  <p>As of 23/05/2025 there is also a
+  <a href="https://github.com/Drazzilb08/daps-gdrive-presets">centralized gdrive repo</a> containing
+  these drives, which DAPS and DAPS-UI make use of. PosterFlow loads its own copies from
+  <a href="https://github.com/dweagle/posterflow/tree/develop/backend/assets"><code>backend/assets/</code></a>.</p>
+
+</section>
+
+<section class="panel" data-tab="guide" role="tabpanel" hidden>
+
+  <h2 id="priority-guide">Priority Guide</h2>
+
+  <p>Two decisions sit behind a good setup: which poster style you want your library to look like, and
+  what order the drives sit in.</p>
+
+  <h3 id="how-ranking-works">How the ranking works</h3>
+
+  <p>Priority isn't a number you set per drive. It's a single ordered list you build yourself, and the
+  order decides who wins: for any given title, the strongest-placed drive that actually has a poster
+  for it supplies that poster. A drive further down only matters where everything above it came up
+  empty, and nothing is blended - one drive per asset.</p>
+
+  <p>In PosterFlow that list lives under <strong>Asset Manager &rarr; Drive Priority</strong>. Drag
+  drives into it and <strong>the top of the list is strongest</strong> - higher drives override lower
+  ones. MM2K, CL2K and your own custom drives all share the one list, which is what lets the two styles
+  work together.</p>
+
+  <blockquote><p>Subscribing to a drive is not the same as ranking it. A drive has to be in the
+  priority list to be used for matching at all - PosterFlow offers to add it for you when you
+  subscribe.</p></blockquote>
+
+  <p>DAPS works on the same idea, but its list is written in ascending order: lowest priority first.
+  That's the order the tiers on the DAPS tab are in, and it's why the strongest tier (<code>+++</code>) sits at
+  the bottom of that table. </p>
+  
+  <p>If you're setting this up in PosterFlow, read the tiers bottom-up - the
+  <code>+++</code> row belongs at the <em>top</em> of your Drive Priority list.</p>
+
+  <p>Artwork drives are ranked in their own separate list, and they resolve per asset rather than per
+  item: a title's logo, background and square art can each come from a different drive, whichever is
+  highest-placed for that particular slot.</p>
+
+  <p>MM2K and CL2K are listed separately here only because they're two different styles. You can run
+  both together, subscribing to drives from either list and ranking them in whatever order you like, or
+  commit to a single style and ignore the other list entirely. Both are perfectly normal setups.</p>
+
+  <h3 id="mm2k-or-cl2k">MM2K or CL2K?</h3>
+
+  <p>The difference is how the title is rendered. MM2K sets the title as text; CL2K uses the title's
+  own clear logo on the same template, which is why the two lists otherwise look so similar.</p>
+
+  <div class="table-wrap"><table>
+    <thead><tr><th></th><th>MM2K</th><th>CL2K</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Title</strong></td>
+          <td>Set in Arial over a black gradient</td>
+          <td>The title's own clear logo, 600 - 800 px wide and centered</td></tr>
+      <tr><td><strong>Coverage</strong></td>
+          <td>Broad. The longest-established list</td>
+          <td>Broad and still growing as more makers add posters</td></tr>
+      <tr><td><strong>Variants</strong></td>
+          <td>Several drives carry white-text or no-gradient versions</td>
+          <td>Original-language titles on Wenisinmood(#2), and more alternatives per title as the
+              list grows</td></tr>
+      <tr><td><strong>Looks best when</strong></td>
+          <td>You want one uniform treatment across everything</td>
+          <td>You want more variety, with each title carrying its own branding</td></tr>
+    </tbody>
+  </table></div>
+
+  <blockquote><p><strong>You don't have to pick one.</strong> Put your preferred style's drives above
+  the other style's, and the second one becomes a fallback: you get the look you want wherever it's
+  covered, and a matching-template poster instead of nothing everywhere else.</p></blockquote>
+
+  <p>Either style works as your primary now. Ranking the other one below it just means you still get a
+  matching-template poster on anything your first choice hasn't reached yet, and when neither has a
+  title, ask: missing posters can be requested, and makers pick them up. PosterFlow's
+  <strong>Requests</strong> board is built for exactly that.</p>
+
+  <p>Where mixing does hurt is <em>within</em> a set. A collection with logos on three films and Arial
+  text on the other two reads as unfinished in a way that either style used consistently does not. If
+  that bothers you, the custom folder covers it: drop matching posters for the odd ones out and they
+  win regardless of drive order.</p>
+
+  <h2 id="hybrid-drives"><em>Hybrid</em> drive(s)</h2>
+
+  <p>Whenever a drive contains &gt; 50% posters collected from others, its priority should be set to
+  lowest.</p>
+
+  <h4 id="example">Example</h4>
+
+  <p>Chris DC's drive is the canonical example. It contains a few homemade posters and personal
+  favorites, since posters sometimes have slight variations or have been remade by others - at which
+  point it falls into "collection of others".</p>
+
+  <p>In the list, because the posters are known to be correctly made, it sits above any other drive in
+  the lowest priority, but below any drive that is &gt; 50% custom made by the owner(s).</p>
+
+  <h5 id="how-is-this-reflected-in-reality">How is this reflected in reality?</h5>
+
+  <p>For its owner, that drive is their custom folder/drive and personal to them, so they set it to
+  the highest priority - they'd rather see their own posters than someone else's. For everyone else it
+  stays at the lowest priority.</p>
+
+  <h2 id="when-would-you-change-priority-for-yourself">When would you change priority for yourself?</h2>
+
+  <p>So why follow this baseline at all, and what happens if you change the order of these drives?</p>
+
+  <h4 id="example-2">Example</h4>
+
+  <p>You're using this baseline in your configuration, but some titles get a poster you don't like, and
+  you know a better one exists.</p>
+
+  <div class="shots">
+    <figure><img src="images/before_no_gradient.jpg" alt="Poster without a gradient">
+      <figcaption>Before</figcaption></figure>
+    <figure class="wide"><img src="images/before_no_gradient_in_plex.jpg" alt="No-gradient poster in Plex">
+      <figcaption>Before - in Plex</figcaption></figure>
+  </div>
+
+  <ul>
+    <li>Other posters can be found with PosterFlow and DAPS' search features, or by
+        browsing and downloading from the internet.</li>
+    <li>If they're on a drive in the list, change that drive's priority and re-run everything.</li>
+  </ul>
+
+  <p>But it's rarely that simple - a higher-priority drive may have posters you personally don't like
+  either.</p>
+
+  <p>That's where the custom folder comes in: move the posters you want to win into your custom folder,
+  re-run everything, et voila. Nothing else has to be re-ranked.</p>
+
+  <div class="shots">
+    <figure><img src="images/after_with_gradient.jpg" alt="Poster with a gradient">
+      <figcaption>After</figcaption></figure>
+    <figure class="wide"><img src="images/after_with_gradient_in_plex.jpg" alt="Gradient poster in Plex">
+      <figcaption>After - in Plex</figcaption></figure>
+  </div>
+
+</section>
+
+<section class="panel" data-tab="mm2k" role="tabpanel" hidden>
+
+    <h2 id="mm2k-style-drives">MM2K-style Drives</h2>
+
+  <p>MM2K style posters were orignally created by MusikMann2000.</p>
+
+  <p class="hint">On any table: click a column heading to sort, or type in the filter box to narrow
+  it. Drive IDs have a copy button.</p>
+  
+  <!-- BEGIN MM2K_TABLE - generated, do not edit -->
+<div class="filter"><input type="search" data-target="mm2k" placeholder="Filter MM2K drives…" aria-label="Filter MM2K drives"><span class="count"></span></div><div class="table-wrap"><table class="drive-table" id="mm2k"><thead><tr><th class="col-prio">Priority</th><th class="col-owner">Owner</th><th class="col-did">Drive ID</th><th>Content</th><th class="col-art">Artwork</th><th class="col-ack">ACK</th><th>Owner feedback</th></tr></thead><tbody><tr><td class="col-prio" data-sort="0"><span class="prio">--</span></td><td class="col-owner">Solen(#2)</td><td class="col-did"><div class="did"><code>1zWY-ORtJkOLcQChV--oHquxW3JCow1zm</code><a class="open" href="https://drive.google.com/drive/folders/1zWY-ORtJkOLcQChV--oHquxW3JCow1zm" title="Open in Google Drive">open</a><button class="copy" data-id="1zWY-ORtJkOLcQChV--oHquxW3JCow1zm" title="Copy drive ID">copy</button></div></td><td>Collection of others (broad, TV-heavy)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="0"><span class="prio">--</span></td><td class="col-owner">MajorGiant(#2)</td><td class="col-did"><div class="did"><code>15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru</code><a class="open" href="https://drive.google.com/drive/folders/15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru" title="Open in Google Drive">open</a><button class="copy" data-id="15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru" title="Copy drive ID">copy</button></div></td><td>Collection of others (broad; Hallmark, stand-up)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="0"><span class="prio">--</span></td><td class="col-owner">Chris DC</td><td class="col-did"><div class="did"><code>1oBzEOXXrTHGq6sUY_4RMtzMTt4VHyeJp</code><a class="open" href="https://drive.google.com/drive/folders/1oBzEOXXrTHGq6sUY_4RMtzMTt4VHyeJp" title="Open in Google Drive">open</a><button class="copy" data-id="1oBzEOXXrTHGq6sUY_4RMtzMTt4VHyeJp" title="Copy drive ID">copy</button></div></td><td>Homemade + collection of others</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>Posters <em>without</em> number overlay</li><li>Posters <em>with</em> small "THE"/"A" overlay</li><li>Personal favorites</li><li>Homemade (variants)</li><li>Collection of others</li></ul></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Jpalenz77</td><td class="col-did"><div class="did"><code>1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb</code><a class="open" href="https://drive.google.com/drive/folders/1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb" title="Open in Google Drive">open</a><button class="copy" data-id="1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb" title="Copy drive ID">copy</button></div></td><td>Homemade (Arthouse, docs, network collections)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Asked to be ranked lowest priority (of homemade posters)</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">WenIsInMood</td><td class="col-did"><div class="did"><code>1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG</code><a class="open" href="https://drive.google.com/drive/folders/1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG" title="Open in Google Drive">open</a><button class="copy" data-id="1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG" title="Copy drive ID">copy</button></div></td><td>Homemade (Chinese &amp; Korean drama, anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Darkkazul</td><td class="col-did"><div class="did"><code>1ejgRXwX6opexs8oAX8CnpSpKQt7Hrf00</code><a class="open" href="https://drive.google.com/drive/folders/1ejgRXwX6opexs8oAX8CnpSpKQt7Hrf00" title="Open in Google Drive">open</a><button class="copy" data-id="1ejgRXwX6opexs8oAX8CnpSpKQt7Hrf00" title="Copy drive ID">copy</button></div></td><td>Homemade (Anime, K-drama, docs, reality)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>About 33% are Anime, Korean, Chinese, and Japanese shows/movies</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Reitenth</td><td class="col-did"><div class="did"><code>1cqDinU27cnHf5sL5rSlfO7o_T6LSxG77</code><a class="open" href="https://drive.google.com/drive/folders/1cqDinU27cnHf5sL5rSlfO7o_T6LSxG77" title="Open in Google Drive">open</a><button class="copy" data-id="1cqDinU27cnHf5sL5rSlfO7o_T6LSxG77" title="Copy drive ID">copy</button></div></td><td>Homemade (95% Anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">TheOtherGuy(#2)</td><td class="col-did"><div class="did"><code>15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC</code><a class="open" href="https://drive.google.com/drive/folders/15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC" title="Open in Google Drive">open</a><button class="copy" data-id="15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC" title="Copy drive ID">copy</button></div></td><td>Homemade (OG titles: German)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>MM2K style with black gradient. ALL posters are in <strong>German</strong> (original release language); international versions are in TheOtherGuy(#1).</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">TheOtherGuy(#1)</td><td class="col-did"><div class="did"><code>1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB</code><a class="open" href="https://drive.google.com/drive/folders/1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB" title="Open in Google Drive">open</a><button class="copy" data-id="1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB" title="Copy drive ID">copy</button></div></td><td>Homemade (World cinema + list collections)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Movie, Series and Collection posters all in MM2K style with black gradient</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Dweagle79</td><td class="col-did"><div class="did"><code>1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj</code><a class="open" href="https://drive.google.com/drive/folders/1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj" title="Open in Google Drive">open</a><button class="copy" data-id="1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj" title="Copy drive ID">copy</button></div></td><td>Homemade (Mainstream + smart collections)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>Homemade variants</li><li>Requests</li></ul></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">MiniMyself</td><td class="col-did"><div class="did"><code>1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS</code><a class="open" href="https://drive.google.com/drive/folders/1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS" title="Open in Google Drive">open</a><button class="copy" data-id="1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS" title="Copy drive ID">copy</button></div></td><td>Homemade (Superhero, horror, sci-fi, anime)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>Homemade variants</li><li>Missing posters</li></ul></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Kalyanrajnish</td><td class="col-did"><div class="did"><code>1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL</code><a class="open" href="https://drive.google.com/drive/folders/1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL" title="Open in Google Drive">open</a><button class="copy" data-id="1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL" title="Copy drive ID">copy</button></div></td><td>Homemade (Indian: Hindi, Punjabi, South Indian)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">TokenMinal</td><td class="col-did"><div class="did"><code>1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS</code><a class="open" href="https://drive.google.com/drive/folders/1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS" title="Open in Google Drive">open</a><button class="copy" data-id="1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly Anime, some French media)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>Mostly Anime</li><li>Some French media</li><li>Mareau's posters</li></ul></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Tarantula212</td><td class="col-did"><div class="did"><code>1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia</code><a class="open" href="https://drive.google.com/drive/folders/1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia" title="Open in Google Drive">open</a><button class="copy" data-id="1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly Bollywood/Indian media)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li><a href="https://theposterdb.com/user/tarantula212">TPDB</a></li><li><a href="https://mediux.pro/user/tarantula212">Mediux</a></li></ul></td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Dsaq</td><td class="col-did"><div class="did"><code>1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz</code><a class="open" href="https://drive.google.com/drive/folders/1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz" title="Open in Google Drive">open</a><button class="copy" data-id="1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly Dutch media)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Dutch media also have Dutch filenaming</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Quafley</td><td class="col-did"><div class="did"><code>1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7</code><a class="open" href="https://drive.google.com/drive/folders/1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7" title="Open in Google Drive">open</a><button class="copy" data-id="1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly Anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td><td>Main focus is around anime (especially older lesser known ones). This includes movies.</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Stupifier</td><td class="col-did"><div class="did"><code>1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug</code><a class="open" href="https://drive.google.com/drive/folders/1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug" title="Open in Google Drive">open</a><button class="copy" data-id="1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly Anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>To be placed as low as possible</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Sahara</td><td class="col-did"><div class="did"><code>1KnwxzwBUQzQyKF1e24q_wlFqcER9xYHM</code><a class="open" href="https://drive.google.com/drive/folders/1KnwxzwBUQzQyKF1e24q_wlFqcER9xYHM" title="Open in Google Drive">open</a><button class="copy" data-id="1KnwxzwBUQzQyKF1e24q_wlFqcER9xYHM" title="Copy drive ID">copy</button></div></td><td>Homemade (Award &amp; best-of collections)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>+1 rank with Stupifier</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">MajorGiant(#1)</td><td class="col-did"><div class="did"><code>1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu</code><a class="open" href="https://drive.google.com/drive/folders/1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu" title="Open in Google Drive">open</a><button class="copy" data-id="1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu" title="Copy drive ID">copy</button></div></td><td>Homemade (Recent indie &amp; mainstream film)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Can contain white text versions of black text MM2K posters</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Lion City Gaming</td><td class="col-did"><div class="did"><code>1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr</code><a class="open" href="https://drive.google.com/drive/folders/1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr" title="Open in Google Drive">open</a><button class="copy" data-id="1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr" title="Copy drive ID">copy</button></div></td><td>Homemade (World cinema, Indian, docs)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Can contain white text versions of black text MM2K posters</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">IamSpartacus(#1)</td><td class="col-did"><div class="did"><code>19_kDCSHFdeZypxOxmODWmEt6jtBBtOYw</code><a class="open" href="https://drive.google.com/drive/folders/19_kDCSHFdeZypxOxmODWmEt6jtBBtOYw" title="Open in Google Drive">open</a><button class="copy" data-id="19_kDCSHFdeZypxOxmODWmEt6jtBBtOYw" title="Copy drive ID">copy</button></div></td><td>Homemade (Mainstream film &amp; TV, reality, docs)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>White text versions of black text MM2K posters</li><li>Posters <em>without</em> number overlay</li></ul></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">BZ</td><td class="col-did"><div class="did"><code>1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8</code><a class="open" href="https://drive.google.com/drive/folders/1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8" title="Open in Google Drive">open</a><button class="copy" data-id="1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8" title="Copy drive ID">copy</button></div></td><td>Homemade (Mostly TV: crime &amp; mystery)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Can contain white text versions of black text MM2K posters</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Solen(#1)</td><td class="col-did"><div class="did"><code>1YEuS1pulJAfhKm4L8U9z5-EMtGl-d2s7</code><a class="open" href="https://drive.google.com/drive/folders/1YEuS1pulJAfhKm4L8U9z5-EMtGl-d2s7" title="Open in Google Drive">open</a><button class="copy" data-id="1YEuS1pulJAfhKm4L8U9z5-EMtGl-d2s7" title="Copy drive ID">copy</button></div></td><td>Homemade (Age ratings, networks, Nordic TV)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li>Can contain no-gradient versions of MM2K posters</li><li>Different season posters per show</li><li><a href="https://theposterdb.com/user/Solen">TPDB</a></li><li><a href="https://mediux.pro/user/solen">Mediux</a></li></ul></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Zarox</td><td class="col-did"><div class="did"><code>1wOhY88zc0wdQU-QQmhm4FzHL9QiCQnpu</code><a class="open" href="https://drive.google.com/drive/folders/1wOhY88zc0wdQU-QQmhm4FzHL9QiCQnpu" title="Open in Google Drive">open</a><button class="copy" data-id="1wOhY88zc0wdQU-QQmhm4FzHL9QiCQnpu" title="Copy drive ID">copy</button></div></td><td>Homemade (K-drama, US/UK comedy-drama)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li><a href="https://theposterdb.com/user/zarox">TPDB</a></li><li>Can contain white text versions of black text MM2K posters</li></ul></td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">Drazzilb</td><td class="col-did"><div class="did"><code>1fKRkx4Yine5cqkH411FmShdd-wHRMBIF</code><a class="open" href="https://drive.google.com/drive/folders/1fKRkx4Yine5cqkH411FmShdd-wHRMBIF" title="Open in Google Drive">open</a><button class="copy" data-id="1fKRkx4Yine5cqkH411FmShdd-wHRMBIF" title="Copy drive ID">copy</button></div></td><td>Original MM2K</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="4"><span class="prio">+++</span></td><td class="col-owner">PERSONAL CUSTOM FOLDER/DRIVE</td><td class="col-did"><code>YOU</code></td><td>PERSONAL</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>(*) Use this to override/replace posters from one of the drives (or personal/other collections) when you don't want to change priorities for specific reasons.</td></tr></tbody></table></div>
+<!-- END MM2K_TABLE -->
+
+  <ul>
+    <li>Drives marked ✅ in the ACK column are verified by the owner: they provided the feedback on
+        their drive and its contents, and are aware of their ranking.</li>
+    <li>The Artwork column shows what that maker also publishes in an
+        <a href="#artwork-drives">artwork drive</a>.</li>
+  </ul>
+
+</section>
+
+<section class="panel" data-tab="cl2k" role="tabpanel" hidden>
+
+  <h2 id="cl2k-style-drives">CL2K-style Drives</h2>
+
+  <p>Iamspartacus and dweagle79 started creating posters with the original logo on them instead of the
+  title set in Arial. Some others joined the rebellion.</p>
+
+  <p>CL2K means "Clear Logo", and "2K" is because the main template is derived from the MM2K-style
+  one.</p>
+
+  <p class="hint">On any table: click a column heading to sort, or type in the filter box to narrow
+  it. Drive IDs have a copy button.</p>
+
+  <!-- BEGIN CL2K_TABLE - generated, do not edit -->
+<div class="filter"><input type="search" data-target="cl2k" placeholder="Filter CL2K drives…" aria-label="Filter CL2K drives"><span class="count"></span></div><div class="table-wrap"><table class="drive-table" id="cl2k"><thead><tr><th class="col-prio">Priority</th><th class="col-owner">Owner</th><th class="col-did">Drive ID</th><th>Content</th><th class="col-art">Artwork</th><th class="col-ack">ACK</th><th>Owner feedback</th></tr></thead><tbody><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Mario</td><td class="col-did"><div class="did"><code>1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q</code><a class="open" href="https://drive.google.com/drive/folders/1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q" title="Open in Google Drive">open</a><button class="copy" data-id="1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Horror, comedy, arthouse)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Logos may fall below the bottom limit.</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Wenisinmood(#2)</td><td class="col-did"><div class="did"><code>1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF</code><a class="open" href="https://drive.google.com/drive/folders/1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF" title="Open in Google Drive">open</a><button class="copy" data-id="1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Original language titles: East Asian)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Contains original language titles</td></tr><tr><td class="col-prio" data-sort="1"><span class="prio">-</span></td><td class="col-owner">Tarantula212</td><td class="col-did"><div class="did"><code>1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk</code><a class="open" href="https://drive.google.com/drive/folders/1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk" title="Open in Google Drive">open</a><button class="copy" data-id="1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mostly Indian media)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td><ul><li><a href="https://theposterdb.com/user/tarantula212">TPDB</a></li></ul></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Chodeus</td><td class="col-did"><div class="did"><code>18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s</code><a class="open" href="https://drive.google.com/drive/folders/18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s" title="Open in Google Drive">open</a><button class="copy" data-id="18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mainstream &amp; mid-budget film)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Solen</td><td class="col-did"><div class="did"><code>1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI</code><a class="open" href="https://drive.google.com/drive/folders/1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI" title="Open in Google Drive">open</a><button class="copy" data-id="1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Holiday TV movies, Swedish TV)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">BerserkeR</td><td class="col-did"><div class="did"><code>1jToV8ee8RhqnG9DhAPYKufEJpb8Ru_7r</code><a class="open" href="https://drive.google.com/drive/folders/1jToV8ee8RhqnG9DhAPYKufEJpb8Ru_7r" title="Open in Google Drive">open</a><button class="copy" data-id="1jToV8ee8RhqnG9DhAPYKufEJpb8Ru_7r" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mostly horror, world cinema)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Darkkazul</td><td class="col-did"><div class="did"><code>1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3</code><a class="open" href="https://drive.google.com/drive/folders/1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3" title="Open in Google Drive">open</a><button class="copy" data-id="1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Comedy, indie film, docs, anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Confused</td><td class="col-did"><div class="did"><code>1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ</code><a class="open" href="https://drive.google.com/drive/folders/1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ" title="Open in Google Drive">open</a><button class="copy" data-id="1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Korean &amp; Chinese drama, anime)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Wenisinmood(#1)</td><td class="col-did"><div class="did"><code>1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7</code><a class="open" href="https://drive.google.com/drive/folders/1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7" title="Open in Google Drive">open</a><button class="copy" data-id="1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Anime, East Asian, classics, comedy)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">BZ</td><td class="col-did"><div class="did"><code>1cEIuJRr8AZcthyVWfNn2skxog6R_MPrW</code><a class="open" href="https://drive.google.com/drive/folders/1cEIuJRr8AZcthyVWfNn2skxog6R_MPrW" title="Open in Google Drive">open</a><button class="copy" data-id="1cEIuJRr8AZcthyVWfNn2skxog6R_MPrW" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mostly TV: crime &amp; mystery)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">LionCityGaming</td><td class="col-did"><div class="did"><code>1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF</code><a class="open" href="https://drive.google.com/drive/folders/1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF" title="Open in Google Drive">open</a><button class="copy" data-id="1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (World cinema, Indian, classics)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">TokenMinal</td><td class="col-did"><div class="did"><code>1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5</code><a class="open" href="https://drive.google.com/drive/folders/1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5" title="Open in Google Drive">open</a><button class="copy" data-id="1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mostly Anime, some French media)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Anime</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">Jpalenz77</td><td class="col-did"><div class="did"><code>1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh</code><a class="open" href="https://drive.google.com/drive/folders/1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh" title="Open in Google Drive">open</a><button class="copy" data-id="1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Indie film, prestige TV, docs)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>Only new content as of 28-06-2025</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">füsen</td><td class="col-did"><div class="did"><code>1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh</code><a class="open" href="https://drive.google.com/drive/folders/1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh" title="Open in Google Drive">open</a><button class="copy" data-id="1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (World cinema, cult, classics)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>New drive, not on the original DAPS list yet</td></tr><tr><td class="col-prio" data-sort="2"><span class="prio">+</span></td><td class="col-owner">MajorGiant</td><td class="col-did"><div class="did"><code>1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N</code><a class="open" href="https://drive.google.com/drive/folders/1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N" title="Open in Google Drive">open</a><button class="copy" data-id="1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mostly mid-budget drama)</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>New drive, not on the original DAPS list yet</td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">MiniMyself</td><td class="col-did"><div class="did"><code>1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o</code><a class="open" href="https://drive.google.com/drive/folders/1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o" title="Open in Google Drive">open</a><button class="copy" data-id="1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Anime, horror, superhero, sci-fi)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">Bostafari</td><td class="col-did"><div class="did"><code>1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj</code><a class="open" href="https://drive.google.com/drive/folders/1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj" title="Open in Google Drive">open</a><button class="copy" data-id="1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Arthouse, HK action, anime, cult horror)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">Iamspartacus</td><td class="col-did"><div class="did"><code>179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc</code><a class="open" href="https://drive.google.com/drive/folders/179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc" title="Open in Google Drive">open</a><button class="copy" data-id="179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Mainstream film &amp; TV, stand-up)</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="3"><span class="prio">++</span></td><td class="col-owner">Dweagle79</td><td class="col-did"><div class="did"><code>1R4tDkZVyG7iEbQ4DNbUPiPGfslPkcWmU</code><a class="open" href="https://drive.google.com/drive/folders/1R4tDkZVyG7iEbQ4DNbUPiPGfslPkcWmU" title="Open in Google Drive">open</a><button class="copy" data-id="1R4tDkZVyG7iEbQ4DNbUPiPGfslPkcWmU" title="Copy drive ID">copy</button></div></td><td>CL2K Homemade (Broad mainstream film &amp; TV)</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td></td></tr><tr><td class="col-prio" data-sort="4"><span class="prio">+++</span></td><td class="col-owner">PERSONAL CUSTOM FOLDER/DRIVE</td><td class="col-did"><code>YOU</code></td><td>PERSONAL</td><td class="col-art" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td><td>(*) Use this to override/replace posters from one of the drives (or personal/other collections) when you don't want to change priorities for specific reasons.</td></tr></tbody></table></div>
+<!-- END CL2K_TABLE -->
+
+  <ul>
+    <li>Drives marked ✅ in the ACK column are verified by the owner: they provided the feedback on
+        their drive and its contents, and are aware of their ranking.</li>
+    <li>The Artwork column shows what that maker also publishes in an
+        <a href="#artwork-drives">artwork drive</a>.</li>
+  </ul>
+  
+</section>
+
+<section class="panel" data-tab="artwork" role="tabpanel" hidden>
+
+  <h2 id="artwork-drives">Artwork Drives</h2>
+
+  <p>Artwork drives hold the <strong>clear logos, backgrounds and square art</strong> used to build
+  CL2K posters and to dress up Plex/Kometa libraries. They are separate from poster drives: artwork
+  lives in its own <code>logos/</code>, <code>backgrounds/</code> and <code>squareart/</code>
+  subfolders, and it has no MM2K/CL2K style split.</p>
+
+  <p>Not every maker publishes all three. The table shows exactly what each drive contains, so you can
+  subscribe to a drive for logos only and skip a type you don't want.</p>
+
+  <div class="table-wrap"><table>
+    <thead><tr><th>Type</th><th>Folder</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td>Logos</td><td><code>logos/</code></td><td>Clear logos - CL2K poster titles, Plex clear-logo art</td></tr>
+      <tr><td>Backgrounds</td><td><code>backgrounds/</code></td><td>16:9 backdrops / fanart</td></tr>
+      <tr><td>Square art</td><td><code>squareart/</code></td><td>1:1 art, mostly for music and shorts</td></tr>
+    </tbody>
+  </table></div>
+
+  <!-- BEGIN ARTWORK_TABLE - generated, do not edit -->
+<div class="filter"><input type="search" data-target="artwork" placeholder="Filter artwork drives…" aria-label="Filter artwork drives"><span class="count"></span></div><div class="table-wrap"><table class="drive-table" id="artwork"><thead><tr><th class="col-owner">Owner</th><th class="col-did">Drive ID</th><th class="col-ack">Logos</th><th class="col-ack">Backgrounds</th><th class="col-ack">Square art</th><th>Poster drives</th><th class="col-ack">ACK</th></tr></thead><tbody><tr><td class="col-owner">Bostafari</td><td class="col-did"><div class="did"><code>1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s</code><a class="open" href="https://drive.google.com/drive/folders/1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s" title="Open in Google Drive">open</a><button class="copy" data-id="1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td>CL2K: Bostafari</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">BZ</td><td class="col-did"><div class="did"><code>18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp</code><a class="open" href="https://drive.google.com/drive/folders/18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp" title="Open in Google Drive">open</a><button class="copy" data-id="18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td>MM2K: BZ · CL2K: BZ</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">Dweagle79</td><td class="col-did"><div class="did"><code>1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL</code><a class="open" href="https://drive.google.com/drive/folders/1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL" title="Open in Google Drive">open</a><button class="copy" data-id="1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td>MM2K: Dweagle79 · CL2K: Dweagle79</td><td class="col-ack" data-sort="0"><span class="ack" title="Confirmed by the owner: they gave the feedback and know their ranking">✅</span></td></tr><tr><td class="col-owner">füsen</td><td class="col-did"><div class="did"><code>110Xtee9O414M1xPGxI6DCvkbDw9FNXqO</code><a class="open" href="https://drive.google.com/drive/folders/110Xtee9O414M1xPGxI6DCvkbDw9FNXqO" title="Open in Google Drive">open</a><button class="copy" data-id="110Xtee9O414M1xPGxI6DCvkbDw9FNXqO" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td>CL2K: füsen</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">Iamspartacus</td><td class="col-did"><div class="did"><code>1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE</code><a class="open" href="https://drive.google.com/drive/folders/1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE" title="Open in Google Drive">open</a><button class="copy" data-id="1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td>MM2K: IamSpartacus(#1) · CL2K: Iamspartacus</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">MiniMyself</td><td class="col-did"><div class="did"><code>13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX</code><a class="open" href="https://drive.google.com/drive/folders/13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX" title="Open in Google Drive">open</a><button class="copy" data-id="13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td>MM2K: MiniMyself · CL2K: MiniMyself</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">Tarantula212</td><td class="col-did"><div class="did"><code>1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV</code><a class="open" href="https://drive.google.com/drive/folders/1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV" title="Open in Google Drive">open</a><button class="copy" data-id="1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td class="col-ack" data-sort="0"><span class="none">-</span></td><td>MM2K: Tarantula212 · CL2K: Tarantula212</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr><tr><td class="col-owner">TokenMinal</td><td class="col-did"><div class="did"><code>18Yr85mO65WpEXMvtM57OXB_umusADWdF</code><a class="open" href="https://drive.google.com/drive/folders/18Yr85mO65WpEXMvtM57OXB_umusADWdF" title="Open in Google Drive">open</a><button class="copy" data-id="18Yr85mO65WpEXMvtM57OXB_umusADWdF" title="Copy drive ID">copy</button></div></td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td class="col-ack" data-sort="1">✅</td><td>MM2K: TokenMinal · CL2K: TokenMinal</td><td class="col-ack" data-sort="2"><span class="ack" title="Not confirmed by the owner yet">❔</span></td></tr></tbody></table></div>
+<!-- END ARTWORK_TABLE -->
+
+  <p>In PosterFlow, each artwork drive can be limited to the types you actually want under
+  <strong>Drives &rarr; Artwork</strong>; unselected types are excluded from the rclone transfer
+  entirely.</p>
+
+  <blockquote><p>⚠️ If placed logos keep "becoming" backgrounds, check Kometa's
+  <code>dimensional_asset_rename</code> setting - it renames assets by aspect ratio.</p></blockquote>
+
+</section>
+
+<section class="panel" data-tab="makers" role="tabpanel" hidden>
+
+  <h2 id="who-makes-what">Who Makes What</h2>
+
+  <p>Every maker on this page, and which lists they appear on.</p>
+
+  <!-- BEGIN OWNER_INDEX - generated, do not edit -->
+<div class="filter"><input type="search" data-target="makers" placeholder="Filter makers…" aria-label="Filter makers"><span class="count"></span></div><div class="table-wrap"><table class="drive-table" id="makers"><thead><tr><th class="col-owner">Owner</th><th>MM2K</th><th>CL2K</th><th class="col-art">Artwork</th></tr></thead><tbody><tr><td class="col-owner">BerserkeR</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">BerserkeR</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Bostafari</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">Bostafari</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td></tr><tr><td class="col-owner">BZ</td><td data-sort="1">BZ</td><td data-sort="1">BZ</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td></tr><tr><td class="col-owner">Chodeus</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">Chodeus</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Chris DC</td><td data-sort="1">Chris DC</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Confused</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">Confused</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Darkkazul</td><td data-sort="1">Darkkazul</td><td data-sort="1">Darkkazul</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Drazzilb</td><td data-sort="1">Drazzilb</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Dsaq</td><td data-sort="1">Dsaq</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Dweagle79</td><td data-sort="1">Dweagle79</td><td data-sort="1">Dweagle79</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td></tr><tr><td class="col-owner">Fusen</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">füsen</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td></tr><tr><td class="col-owner">Iamspartacus</td><td data-sort="1">IamSpartacus(#1)</td><td data-sort="1">Iamspartacus</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td></tr><tr><td class="col-owner">Jpalenz77</td><td data-sort="1">Jpalenz77</td><td data-sort="1">Jpalenz77</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Kalyanrajnish</td><td data-sort="1">Kalyanrajnish</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">LionCityGaming</td><td data-sort="1">Lion City Gaming</td><td data-sort="1">LionCityGaming</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">MajorGiant</td><td data-sort="2">MajorGiant(#1), MajorGiant(#2)</td><td data-sort="1">MajorGiant</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Mario</td><td data-sort="0"><span class="none">-</span></td><td data-sort="1">Mario</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">MiniMyself</td><td data-sort="1">MiniMyself</td><td data-sort="1">MiniMyself</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td></tr><tr><td class="col-owner">Quafley</td><td data-sort="1">Quafley</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Reitenth</td><td data-sort="1">Reitenth</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Sahara</td><td data-sort="1">Sahara</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Solen</td><td data-sort="2">Solen(#1), Solen(#2)</td><td data-sort="1">Solen</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Stupifier</td><td data-sort="1">Stupifier</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Tarantula212</td><td data-sort="1">Tarantula212</td><td data-sort="1">Tarantula212</td><td class="col-art" data-sort="1"><span class="pill">Logos</span></td></tr><tr><td class="col-owner">TheOtherGuy</td><td data-sort="2">TheOtherGuy(#1), TheOtherGuy(#2)</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">TokenMinal</td><td data-sort="1">TokenMinal</td><td data-sort="1">TokenMinal</td><td class="col-art" data-sort="3"><span class="pill">Logos</span><span class="pill">BG</span><span class="pill">Square</span></td></tr><tr><td class="col-owner">WenIsInMood</td><td data-sort="1">WenIsInMood</td><td data-sort="2">Wenisinmood(#1), Wenisinmood(#2)</td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr><tr><td class="col-owner">Zarox</td><td data-sort="1">Zarox</td><td data-sort="0"><span class="none">-</span></td><td class="col-art" data-sort="0"><span class="none">-</span></td></tr></tbody></table></div>
+<!-- END OWNER_INDEX -->
+
+</section>
+
+<section class="panel" data-tab="create" role="tabpanel" hidden>
+
+  <h2 id="create-your-own">Create Your Own</h2>
+
+  <p>Guidance for making your own posters to the community styles, and for getting your drive onto
+  the lists on this page.</p>
+
+  <h3 id="getting-listed">Making posters and getting listed</h3>
+
+  <p>Anyone can make posters for the community - every drive on this page started with someone
+  deciding to. Start from the matching template below, follow the style notes for
+  <a href="#making-mm2k">MM2K</a> or <a href="#making-cl2k">CL2K</a>, and collect what you make in a
+  Google Drive folder.</p>
+
+  <h4 id="asking-to-be-added">Asking to be added</h4>
+
+  <p>Once you have a drive worth sharing, ask to have it listed. It helps to have ready:</p>
+
+  <ul>
+    <li>The <strong>Drive folder ID</strong> - the part of the folder URL after
+        <code>/folders/</code></li>
+    <li>Whether it's <strong>MM2K or CL2K</strong> - a drive of each needs a separate entry</li>
+    <li>A one line description of <strong>what's in it</strong>, which becomes the Content column</li>
+    <li>Anything people should know before subscribing: original language titles, variants without a
+        gradient or number overlay, a language or region focus, and so on. That becomes your
+        <strong>Owner feedback</strong></li>
+    <li>Your <strong>TPDB or Mediux profile</strong>, if you want it linked</li>
+  </ul>
+
+  <p>The folder has to be shared so that anyone with the link can view it - that's how everyone
+  syncs what is in it.</p>
+
+  <p class="hint">Contact Dweagle79 in the PosterFlow Discord Channel to be added.</p>
+
+  <h4 id="how-youll-be-ranked">How you'll be ranked</h4>
+
+  <p>New drives are placed using the same
+  <a href="#community-baseline">community baseline</a> as everything else, so where you land depends
+  on what's in the drive rather than when you joined:</p>
+
+  <ul>
+    <li>More than half collected from other makers &rarr; lowest (<code>--</code>)</li>
+    <li>Mostly your own work &rarr; <code>-</code> or <code>+</code></li>
+    <li>A drive with broad, general coverage can sit higher still</li>
+  </ul>
+
+  <p><strong>You can ask for a particular spot.</strong> Several makers have, and those requests are
+  honored. If you'd rather be ranked low so your
+  posters only fill gaps, say so.</p>
+
+  <p>Your entry starts at ❔ in the ACK column, meaning nobody has confirmed it with you. Once you've
+  checked your row - the description, the feedback and the ranking - it becomes ✅. See
+  <a href="#priority-guide">how priority works</a> for what the tiers actually do.</p>
+
+  <h3 id="templates-and-tools">Templates &amp; tools</h3>
+
+  <ul>
+    <li><a href="https://github.com/dweagle/posterflow/raw/develop/backend/assets/default_template_mm2k.psd">MM2K template</a> - <code>.psd</code></li>
+    <li><a href="https://github.com/dweagle/posterflow/raw/develop/backend/assets/default_template.psd">CL2K template</a> - <code>.psd</code></li>
+    <li><a href="https://bendodson.com/projects/apple-tv-movies-artwork-finder">Logo/artwork finder by Ben Dodson</a></li>
+    <li><a href="https://www.themoviedb.org">TMDB</a></li>
+    <li><a href="https://thetvdb.com">TheTVDB</a></li>
+    <li><a href="https://theposterdb.com">ThePosterDB</a></li>
+  </ul>
+
+  <p class="hint">Both templates ship with PosterFlow, so they're also on disk at
+  <code>backend/assets/</code> in the repo.</p>
+
+  <h4 id="mm2k-template-layers">Template layers - Some commmonly used layers in the .psd file.  There are some differences between MM2K and CL2K.</h4>
+
+  <div class="table-wrap"><table>
+    <thead><tr><th>Group</th><th>What it's for</th></tr></thead>
+    <tbody>
+      <tr><td><code>BORDER LAYER</code></td><td>The white frame. Locked - leave it alone</td></tr>
+      <tr><td><code>COLLECTION TEXT</code></td><td>plasced at the bottom for Collection posters</td></tr>
+      <tr><td><code>TITLE ADDONS</code></td><td>The small leading "THE" / "A" some makers use</td></tr>
+      <tr><td><code>TITLE TEXT</code></td><td>Six preset title positions.  Can be mixed use for varying titles.</td></tr>
+      <tr><td><code>SEASONS</code></td><td>Season posters</td></tr>
+      <tr><td><code>SEQUEL</code></td><td>Sequel numbering, the "number overlay" referred to on the drive list</td></tr>
+      <tr><td><code>LOGO</code></td><td>The logo layer for CL2K</td></tr>
+      <tr><td><code>GRADIENT</code></td><td>The black fade the title sits on</td></tr>
+      <tr><td><code>POSTER</code></td><td>The artwork, placed as a smart object</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="making-mm2k">MM2K</h3>
+
+  <p>The original community style: the title set in Arial over a black gradient at the foot of the
+  artwork, inside a white border. The template below is the shared base - CL2K is the same file with
+  the title swapped for a clear logo.</p>
+
+  <h4 id="mm2k-high-level-information">MM2K high-level information</h4>
+
+  <ul>
+    <li>Enable the guidelines/rulers in the PSD</li>
+    <li>Canvas is <code>1000 x 1500</code></li>
+    <li>Place the artwork into <code>POSTER</code> as a smart object, filling the frame</li>
+    <li>Turn on one layer in <code>TITLE TEXT</code>. <code>MIDDLE BOTTOM</code> is the default;
+        the others move the title up or down to suit the art</li>
+    <li>Use the <code>(small)</code> variants for long titles that would otherwise crowd the border</li>
+    <li>Title should be <code>centered</code></li>
+    <li>Title is usually <code>white</code>, though some posters use black text - several drives carry
+        white-text versions of those</li>
+    <li>Leave <code>GRADIENT</code> and <code>BORDER LAYER</code> as they are</li>
+  </ul>
+
+  <p>If you publish variants - no gradient, no sequel number, white text over black - say so in your
+  drive's owner feedback on this page, so people know what they're subscribing to.</p>
+
+  <div class="shots psd">
+    <figure><img src="images/mm2k_logo.jpg" alt="MM2K template with the poster art hidden, showing the title text on the guides">
+      <figcaption>Title placement - art hidden, title text sitting on the guides</figcaption></figure>
+    <figure><img src="images/mm2k_poster.jpg" alt="MM2K template with the poster art placed">
+      <figcaption>Finished - art placed in the POSTER group</figcaption></figure>
+  </div>
+
+  <h3 id="making-cl2k">CL2K</h3>
+  <p>Based on MM2K posters.</p>
+
+  <p>When using Ben Dodson's artwork finder, primarily use the <code>SingleColorContentLogo</code>.
+  When using TMDB, it's in <code>media</code> &rarr; <code>logos</code>.</p>
+
+  <p>PosterFlow's <strong>Maker Tools &rarr; Artwork</strong> tab can pull logos, backgrounds and
+  square art for a title from TMDB and TheTVDB directly, and crop them to the right size.</p>
+
+  <h4 id="cl2k-psd-high-level-information">PSD guidelines</h4>
+
+  <ul>
+    <li>Enable the guidelines/rulers in the PSD</li>
+    <li>Logo <code>placement</code> should be on the <code>correct guideline</code></li>
+    <li><code>Width</code> of logo should be <code>600px</code>, but exceptionally can be <code>800px</code></li>
+    <li><code>Logo</code> should be <code>centered</code></li>
+    <li><code>Logo</code> should be <code>as white as possible</code></li>
+  </ul>
+
+  <img src="images/guide_lines.jpg" width="420" alt="CL2K template guide lines">
+
+  <div class="shots psd">
+    <figure><img src="images/cl2k_logo.jpg" alt="CL2K template with the poster art hidden, showing the clear logo on the guides">
+      <figcaption>Logo placement - art hidden, clear logo sitting on the guides</figcaption></figure>
+    <figure><img src="images/cl2k_poster.jpg" alt="CL2K template with the poster art placed">
+      <figcaption>Finished - art placed in the POSTER group</figcaption></figure>
+  </div>
+
+
+</section>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" hidden>
+  <button class="close" type="button" aria-label="Close preview">&times;</button>
+  <img alt="">
+  <p></p>
+</div>
+
+<script>
+const tabs = Array.from(document.querySelectorAll(".tab"));
+const panels = Array.from(document.querySelectorAll(".panel"));
+
+function showTab(name, scrollTo) {
+  const tab = tabs.find(function (t) { return t.dataset.tab === name; }) || tabs[0];
+  tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
+  panels.forEach(function (p) { p.hidden = p.dataset.tab !== tab.dataset.tab; });
+  if (scrollTo) {
+    const target = document.getElementById(scrollTo);
+    if (target) { target.scrollIntoView(); return; }
+  }
+  window.scrollTo(0, 0);
+}
+
+tabs.forEach(function (tab) {
+  tab.addEventListener("click", function () {
+    showTab(tab.dataset.tab);
+    history.replaceState(null, "", "#" + tab.dataset.anchor);
+  });
+});
+
+// A link to any heading activates whichever tab contains it.
+document.addEventListener("click", function (event) {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link) return;
+  const id = link.getAttribute("href").slice(1);
+  const target = document.getElementById(id);
+  const panel = target && target.closest(".panel");
+  if (!panel) return;
+  event.preventDefault();
+  showTab(panel.dataset.tab, id);
+  history.replaceState(null, "", "#" + id);
+});
+
+function openFromHash() {
+  const id = location.hash.slice(1);
+  const target = id && document.getElementById(id);
+  const panel = target && target.closest(".panel");
+  showTab(panel ? panel.dataset.tab : "overview", panel ? id : null);
+}
+window.addEventListener("hashchange", openFromHash);
+openFromHash();
+
+// data-sort overrides text ordering (priority tiers, ✅/- flags)
+function sortValue(row, index) {
+  const cell = row.cells[index];
+  if (!cell) return "";
+  const explicit = cell.dataset.sort;
+  return explicit !== undefined ? explicit.padStart(4, "0") : cell.textContent.trim().toLowerCase();
+}
+
+document.querySelectorAll("table.drive-table").forEach(function (table) {
+  const body = table.tBodies[0];
+  if (!body) return;
+  table.querySelectorAll("thead th").forEach(function (th, index) {
+    th.classList.add("sortable");
+    th.addEventListener("click", function () {
+      const ascending = th.getAttribute("aria-sort") !== "ascending";
+      table.querySelectorAll("thead th").forEach(function (other) {
+        if (other !== th) other.removeAttribute("aria-sort");
+      });
+      th.setAttribute("aria-sort", ascending ? "ascending" : "descending");
+      Array.from(body.rows)
+        .sort(function (a, b) {
+          const x = sortValue(a, index), y = sortValue(b, index);
+          return (x < y ? -1 : x > y ? 1 : 0) * (ascending ? 1 : -1);
+        })
+        .forEach(function (row) { body.appendChild(row); });
+    });
+  });
+});
+
+// Filter boxes are emitted right before the table they belong to.
+document.querySelectorAll(".filter input").forEach(function (input) {
+  const table = document.getElementById(input.dataset.target);
+  const count = input.parentElement.querySelector(".count");
+  const rows = table ? Array.from(table.tBodies[0].rows) : [];
+  const total = rows.length;
+  input.addEventListener("input", function () {
+    const term = input.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach(function (row) {
+      const hit = !term || row.textContent.toLowerCase().includes(term);
+      row.hidden = !hit;
+      if (hit) shown++;
+    });
+    count.textContent = term ? shown + " of " + total : total + " drives";
+  });
+  count.textContent = total + " drives";
+});
+
+// Show each tab's drive count next to its label.
+tabs.forEach(function (tab) {
+  const panel = panels.find(function (p) { return p.dataset.tab === tab.dataset.tab; });
+  const table = panel && panel.querySelector("table.drive-table");
+  if (!table) return;
+  const n = table.tBodies[0].rows.length;
+  const span = document.createElement("span");
+  span.className = "n";
+  span.textContent = n;
+  tab.appendChild(span);
+});
+
+// click any image to preview it full size
+const lightbox = document.getElementById("lightbox");
+const lightboxImg = lightbox.querySelector("img");
+const lightboxCap = lightbox.querySelector("p");
+
+function closeLightbox() {
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute("src");
+  document.body.style.overflow = "";
+}
+
+document.querySelectorAll(".panel img").forEach(function (img) {
+  img.classList.add("zoomable");
+  img.addEventListener("click", function () {
+    const figure = img.closest("figure");
+    const caption = figure && figure.querySelector("figcaption");
+    lightboxImg.src = img.currentSrc || img.src;
+    lightboxImg.alt = img.alt;
+    lightboxCap.textContent = caption ? caption.textContent : img.alt;
+    lightbox.hidden = false;
+    document.body.style.overflow = "hidden";
+  });
+});
+
+lightbox.addEventListener("click", closeLightbox);
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Escape" && !lightbox.hidden) closeLightbox();
+});
+
+// links off this page open in a new tab, so you don't lose your place
+document.querySelectorAll('a[href^="http"]').forEach(function (link) {
+  link.target = "_blank";
+  link.rel = "noopener";
+});
+
+// copy drive ID
+document.querySelectorAll(".copy").forEach(function (button) {
+  button.addEventListener("click", function () {
+    navigator.clipboard.writeText(button.dataset.id).then(function () {
+      const was = button.textContent;
+      button.textContent = "copied";
+      setTimeout(function () { button.textContent = was; }, 1200);
+    });
+  });
+});
+</script>
+</body>
+</html>

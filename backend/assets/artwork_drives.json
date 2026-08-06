@@ -4,48 +4,56 @@
       "name": "Bostafari",
       "display_name": "Bostafari",
       "drive_id": "1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s",
+      "artwork_types": ["logo", "background", "squareart"],
       "description": "Artwork drive containing logos, backgrounds, and squareart."
     },
     {
       "name": "BZ",
       "display_name": "BZ",
       "drive_id": "18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp",
+      "artwork_types": ["logo"],
       "description": "Artwork drive containing logos only."
     },
     {
       "name": "Dweagle79",
       "display_name": "Dweagle79",
       "drive_id": "1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL",
+      "artwork_types": ["logo", "background", "squareart"],
       "description": "Artwork drive containing logos, backgrounds, and squareart."
     },
     {
       "name": "Fusen",
       "display_name": "füsen",
       "drive_id": "110Xtee9O414M1xPGxI6DCvkbDw9FNXqO",
+      "artwork_types": ["logo"],
       "description": "Artwork drive containing logos only."
     },
     {
       "name": "Iamspartacus",
       "display_name": "Iamspartacus",
       "drive_id": "1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE",
+      "artwork_types": ["logo"],
       "description": "Artwork drive containing logos only."
     },
     {
       "name": "MiniMyself",
       "display_name": "MiniMyself",
       "drive_id": "13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX",
-      "description": "Artwork drive containing logos only."
+      "artwork_types": ["logo", "background", "squareart"],
+      "description": "Artwork drive containing logos, backgrounds, and squareart."
     },
     {
       "name": "Tarantula212",
       "display_name": "Tarantula212",
       "drive_id": "1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV",
+      "artwork_types": ["logo"],
       "description": "Artwork drive containing logos only."
     },
     {
       "name": "TokenMinal",
       "display_name": "TokenMinal",
       "drive_id": "18Yr85mO65WpEXMvtM57OXB_umusADWdF",
+      "artwork_types": ["logo", "background", "squareart"],
       "description": "Artwork drive containing logos, backgrounds, and squareart."
     }
   ]

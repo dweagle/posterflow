@@ -1,46 +1,109 @@
 {
   "drives": [
     {
-      "name": "Solen(#2)",
-      "display_name": "Solen(#2)",
-      "drive_id": "1zWY-ORtJkOLcQChV--oHquxW3JCow1zm",
+      "name": "BZ",
+      "display_name": "BZ",
+      "drive_id": "1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8",
       "style_type": "MM2K",
-      "description": "Collection of others"
-    },
-    {
-      "name": "MajorGiant(#2)",
-      "display_name": "MajorGiant(#2)",
-      "drive_id": "15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru",
-      "style_type": "MM2K",
-      "description": "Collection of others"
+      "description": "Mostly-TV library built on crime, mystery and detective drama: British cosy crime and procedurals, Nordic and European noir, and recent thriller limited series, alongside a few prestige films, holiday romance TV movies and lifestyle, travel and antiques factual shows. Heavily weighted to 2015 onward."
     },
     {
       "name": "Chris DC",
       "display_name": "Chris DC",
       "drive_id": "1oBzEOXXrTHGq6sUY_4RMtzMTt4VHyeJp",
       "style_type": "MM2K",
-      "description": "Homemade Collection of others"
-    },
-    {
-      "name": "Jpalenz77",
-      "display_name": "Jpalenz77",
-      "drive_id": "1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb",
-      "style_type": "MM2K",
-      "description": "Homemade (Mostly niche media)"
-    },
-    {
-      "name": "WenIsInMood",
-      "display_name": "WenIsInMood",
-      "drive_id": "1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG",
-      "style_type": "MM2K",
-      "description": "Homemade Animes, Chinese, Japanese, Korean shows"
+      "description": "Compact, franchise-focused movie set: mainstream Hollywood series and their sequels - James Bond, Batman, Spider-Man, Die Hard, Lethal Weapon, Police Academy, the Pink Panther, Beverly Hills Cop and Bourne - plus family animation and a little TV. Spans the 1960s to today, weighted to the 1980s through 2010s."
     },
     {
       "name": "Darkkazul",
       "display_name": "Darkkazul",
       "drive_id": "1ejgRXwX6opexs8oAX8CnpSpKQt7Hrf00",
       "style_type": "MM2K",
-      "description": "Homemade"
+      "description": "Eclectic mix with no single focus: a large anime catalog (isekai, slice-of-life and older classics), Korean and East Asian drama, documentary covering nature, food and the full Reel Rock climbing series, and reality and competition TV, plus scattered Western film. Mostly 2000s to today."
+    },
+    {
+      "name": "Drazzilb",
+      "display_name": "Drazzilb",
+      "drive_id": "1fKRkx4Yine5cqkH411FmShdd-wHRMBIF",
+      "style_type": "MM2K",
+      "description": "The reference MM2K library and by far the largest here: roughly 25,000 movies, 2,300 shows and 1,500 collections spanning 1902 to upcoming releases. Covers mainstream Hollywood, world cinema, TV, anime, documentary and stand-up - effectively the baseline every other drive fills gaps around."
+    },
+    {
+      "name": "Dsaq",
+      "display_name": "Dsaq",
+      "drive_id": "1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz",
+      "style_type": "MM2K",
+      "description": "Dutch and Flemish focused: Netherlands and Belgian film and TV - crime series, comedy and drama - with Dutch-language filenaming and collection art for Nederlandse and Vlaamse films and series, alongside mainstream international titles. Strongly weighted to the 2010s and 2020s."
+    },
+    {
+      "name": "Dweagle79",
+      "display_name": "Dweagle79",
+      "drive_id": "1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj",
+      "style_type": "MM2K",
+      "description": "Comprehensive mainstream movie and TV library with a strong 2020s skew, plus an unusually deep set of smart-collection art: streaming service Top 10s, chart and award sets, Dolby Vision and Atmos and reference-quality tiers, newly-released feeds, anime charts, and studio and franchise collections."
+    },
+    {
+      "name": "IamSpartacus(#1)",
+      "display_name": "IamSpartacus(#1)",
+      "drive_id": "19_kDCSHFdeZypxOxmODWmEt6jtBBtOYw",
+      "style_type": "MM2K",
+      "description": "Large mainstream US library, TV-heavy: prestige and network drama alongside an especially deep catalog of reality and competition TV, sports and true-crime documentary, and stand-up specials, plus Hollywood blockbusters, family animation and franchise collection art. Roughly 2,350 movies and 1,000 shows spanning 1935 to today, weighted heavily to the 2010s and 2020s."
+    },
+    {
+      "name": "Jpalenz77",
+      "display_name": "Jpalenz77",
+      "drive_id": "1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb",
+      "style_type": "MM2K",
+      "description": "Heavy on organizational collection art - decades, TV networks, genres and festival and award winners - over a film catalog that leans arthouse, festival and documentary, covering music, politics and true crime, with a notable Spanish-language strand. Mostly 2020s."
+    },
+    {
+      "name": "Kalyanrajnish",
+      "display_name": "Kalyanrajnish",
+      "drive_id": "1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL",
+      "style_type": "MM2K",
+      "description": "Indian library, mostly 2020s: Hindi and Bollywood alongside a large Punjabi catalog and South Indian titles in Telugu and Tamil, spanning films, web series and stand-up, with some international mainstream mixed in. Reaches back to the 1990s for classic Hindi cinema."
+    },
+    {
+      "name": "Lion City Gaming",
+      "display_name": "Lion City Gaming",
+      "drive_id": "1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr",
+      "style_type": "MM2K",
+      "description": "Movie-heavy international collection with almost no TV: world and Asian cinema across Japanese, Korean, Hong Kong and Chinese film, a deep Indian catalog spanning Hindi and South Indian titles, documentary, stand-up, and cult and extreme cinema, alongside Hollywood mainstream. Spans the 1920s to today."
+    },
+    {
+      "name": "MajorGiant(#1)",
+      "display_name": "MajorGiant(#1)",
+      "drive_id": "1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu",
+      "style_type": "MM2K",
+      "description": "Mostly recent film: indie and festival drama alongside mainstream studio releases, weighted heavily to 2018 onward, with some TV and Trakt chart collection art."
+    },
+    {
+      "name": "MajorGiant(#2)",
+      "display_name": "MajorGiant(#2)",
+      "drive_id": "15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru",
+      "style_type": "MM2K",
+      "description": "Very broad catalog with a large collection component built around actor and director sets: Hallmark-style holiday and romance TV movies, stand-up comedy specials, reality and competition TV, classic Hollywood and 1930s-1960s westerns, and modern indie film. Spans the 1920s to today."
+    },
+    {
+      "name": "MiniMyself",
+      "display_name": "MiniMyself",
+      "drive_id": "1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS",
+      "style_type": "MM2K",
+      "description": "Modern genre library: superhero and comic-book films, mainstream franchise horror, sci-fi and action, and a solid anime catalog, with franchise collection art for most of the big series. Weighted to the 2010s and 2020s."
+    },
+    {
+      "name": "Overbook874 (Tarantula212)",
+      "display_name": "Tarantula212",
+      "drive_id": "1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia",
+      "style_type": "MM2K",
+      "description": "Contemporary Indian library, almost entirely 2020s: Hindi and Bollywood films and franchises plus South Indian cinema and a large slate of OTT web series, with collection art for the major franchises and for the Indian streaming services."
+    },
+    {
+      "name": "Quafley",
+      "display_name": "Quafley",
+      "drive_id": "1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7",
+      "style_type": "MM2K",
+      "description": "Small drive: mostly recent anime series alongside Western sci-fi and drama TV and a handful of documentaries. Almost entirely 2010s and 2020s."
     },
     {
       "name": "Reitenth",
@@ -50,263 +113,200 @@
       "description": "Homemade (95% Anime)"
     },
     {
-      "name": "TheOtherGuy(#2)",
-      "display_name": "TheOtherGuy(#2)",
-      "drive_id": "15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC",
-      "style_type": "MM2K",
-      "description": "Homemade (OG titles: German)"
-    },
-    {
-      "name": "TheOtherGuy(#1)",
-      "display_name": "TheOtherGuy(#1)",
-      "drive_id": "1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "Dweagle79",
-      "display_name": "Dweagle79",
-      "drive_id": "1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "MiniMyself",
-      "display_name": "MiniMyself",
-      "drive_id": "1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "Kalyanrajnish",
-      "display_name": "Kalyanrajnish",
-      "drive_id": "1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL",
-      "style_type": "MM2K",
-      "description": "Homemade (Mostly Indian media)"
-    },
-    {
-      "name": "TokenMinal",
-      "display_name": "TokenMinal",
-      "drive_id": "1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "Overbook874 (Tarantula212)",
-      "display_name": "Tarantula212",
-      "drive_id": "1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia",
-      "style_type": "MM2K",
-      "description": "Homemade (Mostly Bollywood/Indian media)"
-    },
-    {
-      "name": "Dsaq",
-      "display_name": "Dsaq",
-      "drive_id": "1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz",
-      "style_type": "MM2K",
-      "description": "Homemade (Mostly Dutch media)"
-    },
-    {
-      "name": "Quafley",
-      "display_name": "Quafley",
-      "drive_id": "1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7",
-      "style_type": "MM2K",
-      "description": "Homemade (Mostly Anime)"
-    },
-    {
-      "name": "Stupifier",
-      "display_name": "Stupifier",
-      "drive_id": "1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
       "name": "Sahara",
       "display_name": "Sahara",
       "drive_id": "1KnwxzwBUQzQyKF1e24q_wlFqcER9xYHM",
       "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "MajorGiant(#1)",
-      "display_name": "MajorGiant(#1)",
-      "drive_id": "1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "Lion City Gaming",
-      "display_name": "Lion City Gaming",
-      "drive_id": "1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "IamSpartacus(#1)",
-      "display_name": "IamSpartacus(#1)",
-      "drive_id": "1HjwMWfI6XpQVYH36VBzYiJA4UWfoqcQ9",
-      "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "BZ",
-      "display_name": "BZ",
-      "drive_id": "1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8",
-      "style_type": "MM2K",
-      "description": "Homemade"
+      "description": "Built around award and best-of-decade collection art - BAFTA, Emmys, Golden Globes and Oscars by year, and a best-of set for every decade - over a mixed film and TV catalog with indie drama, martial arts, anime and a Romanian-language strand."
     },
     {
       "name": "Solen(#1)",
       "display_name": "Solen(#1)",
       "drive_id": "1YEuS1pulJAfhKm4L8U9z5-EMtGl-d2s7",
       "style_type": "MM2K",
-      "description": "Homemade"
+      "description": "Heavy on organizational collection art - age-rating tiers, TV networks and studios, streaming services and Formula 1 races - over a catalog leaning Swedish and Nordic TV, kids' and family programming, and anime. Mostly 2010s onward."
+    },
+    {
+      "name": "Solen(#2)",
+      "display_name": "Solen(#2)",
+      "drive_id": "1zWY-ORtJkOLcQChV--oHquxW3JCow1zm",
+      "style_type": "MM2K",
+      "description": "Large, broad general-purpose library, TV-heavy: US and UK series across drama, comedy, reality and true crime, plus films and actor collection art. Spans the 1930s to today with a strong 2010s and 2020s weighting."
+    },
+    {
+      "name": "Stupifier",
+      "display_name": "Stupifier",
+      "drive_id": "1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug",
+      "style_type": "MM2K",
+      "description": "Anime-led library with a deep catalog of series and films, classic and modern, alongside US network TV, talk and competition shows, stand-up specials, and reference and IMAX collection art. Mostly 2010s and 2020s."
+    },
+    {
+      "name": "TheOtherGuy(#1)",
+      "display_name": "TheOtherGuy(#1)",
+      "drive_id": "1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB",
+      "style_type": "MM2K",
+      "description": "Broad, curated movie library spanning the 1920s to today: Hollywood franchises alongside European and world cinema, with extensive list-based collection art including IMDb and Letterboxd Top 250, Cannes, Berlinale and Oscars winners, and thematic 'based on' sets."
+    },
+    {
+      "name": "TheOtherGuy(#2)",
+      "display_name": "TheOtherGuy(#2)",
+      "drive_id": "15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC",
+      "style_type": "MM2K",
+      "description": "German-language library with original German titles: post-war and New German Cinema classics, Karl May westerns, contemporary German film and TV, and Deutscher Filmpreis award collection art. Spans the 1940s to today."
+    },
+    {
+      "name": "TokenMinal",
+      "display_name": "TokenMinal",
+      "drive_id": "1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS",
+      "style_type": "MM2K",
+      "description": "Predominantly anime, classic and current, in both series and films, with AniList chart collection art, plus a distinct French and Quebecois live-action strand and a few Brazilian titles. Weighted to the 2020s."
+    },
+    {
+      "name": "WenIsInMood",
+      "display_name": "WenIsInMood",
+      "drive_id": "1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG",
+      "style_type": "MM2K",
+      "description": "Small East Asian drive: Chinese historical and palace drama, Korean drama, anime, and a few Taiwanese and Japanese series, reaching back to classic animation."
     },
     {
       "name": "Zarox",
       "display_name": "Zarox",
       "drive_id": "1wOhY88zc0wdQU-QQmhm4FzHL9QiCQnpu",
       "style_type": "MM2K",
-      "description": "Homemade"
-    },
-    {
-      "name": "Drazzilb",
-      "display_name": "Drazzilb",
-      "drive_id": "1fKRkx4Yine5cqkH411FmShdd-wHRMBIF",
-      "style_type": "MM2K",
-      "description": "MM2K"
-    },
-    {
-      "name": "fusen",
-      "display_name": "füsen",
-      "drive_id": "1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh",
-      "style_type": "CL2K",
-      "description": "New drive! Stay tuned!"
-    },
-    {
-      "name": "MajorGiant",
-      "display_name": "MajorGiant",
-      "drive_id": "1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N",
-      "style_type": "CL2K",
-      "description": "Broad catalog of mostly mid-budget live-action films from the 1960s through upcoming 2026 releases, weighted toward adult dramas: character studies, biographical and period dramas, legal/political and crime thrillers, war films, and romantic dramas, with comedies, occasional action, documentaries, and TV-movie/Hallmark-style romance mixed in."
-    },
-    {
-      "name": "Bostafari",
-      "display_name": "Bostafari",
-      "drive_id": "1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj",
-      "style_type": "CL2K",
-      "description": "Eclectic cinephile library: world arthouse & classic-cinema canon, Hong Kong/wuxia martial arts, anime & Ghibli, cult/grindhouse horror, plus British TV comedy and music/art/true-crime docs."
-    },
-    {
-      "name": "Chodeus",
-      "display_name": "Chodeus",
-      "drive_id": "18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s",
-      "style_type": "CL2K",
-      "description": "New CL2K poster drive. TBD!"
-    },
-    {
-      "name": "Mario",
-      "display_name": "Mario",
-      "drive_id": "1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q",
-      "style_type": "CL2K",
-      "description": "Eclectic, movie-heavy library with no single focus. Lots of horror (Stephen King & Asian horror), broad comedy (mainstream and auteur indie), arthouse/auteur cinema, sports dramas and true-crime, plus a little anime. Spans the 1980s to 2020s and includes freshness-based collection posters (newly/recently added)."
-    },
-    {
-      "name": "Wenisinmood(#2)",
-      "display_name": "Wenisinmood(#2)",
-      "drive_id": "1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF",
-      "style_type": "CL2K",
-      "description": "Original Language Titled Posters — East Asian-focused companion library: mostly anime (long-running detective, shonen, sports and a lot of isekai, plus films), Chinese historical/palace drama, Korean drama and Hong Kong action, with a small French/Belgian dark-comedy element."
-    },
-    {
-      "name": "Tarantula212",
-      "display_name": "Tarantula212",
-      "drive_id": "1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk",
-      "style_type": "CL2K",
-      "description": "Contemporary Indian library, almost entirely 2020s: Hindi/Bollywood plus South Indian (Malayalam, Tamil, Telugu, Kannada) films and a large slate of OTT web series, heavy on crime, thriller, true-crime and political/historical drama."
-    },
-    {
-      "name": "Solen",
-      "display_name": "Solen",
-      "drive_id": "1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI",
-      "style_type": "CL2K",
-      "description": "Small, seasonal-leaning drive: mostly Hallmark-style Christmas/holiday TV movies, plus some Swedish reality and home/lifestyle TV and a bit of kids' animation."
+      "description": "Modern TV-leaning mix: Korean drama, US and UK comedy-drama and limited series, with some Indian titles and older catalog film. Strongly weighted to the 2020s."
     },
     {
       "name": "BerserkeR",
       "display_name": "BerserkeR",
       "drive_id": "1jToV8ee8RhqnG9DhAPYKufEJpb8Ru_7r",
       "style_type": "CL2K",
-      "description": "Large, movie-heavy cinephile library dominated by horror in every subgenre: elevated/arthouse, extreme/grindhouse, and deliberately trashy creature-feature schlock, over a serious auteur backbone of world-cinema classics. Strong crime/thriller, war, and true-crime/cult documentary, plus a Brazilian-cinema strand. Includes director/actor and A/V-format (Dolby Vision/Atmos) collection posters. Mostly 2000s to 2020s."
+      "description": "Large, movie-heavy cinephile library dominated by horror in every subgenre - elevated and arthouse, extreme and grindhouse, and deliberately trashy creature features - over a serious auteur backbone of world-cinema classics. Strong crime, thriller and true-crime documentary, plus a Brazilian-cinema strand. Extensive collection art for actors, directors and A/V formats including Dolby Vision, Atmos and DTS-X. Mostly 2000s onward."
     },
     {
-      "name": "Darkkazul",
-      "display_name": "Darkkazul",
-      "drive_id": "1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3",
+      "name": "Bostafari",
+      "display_name": "Bostafari",
+      "drive_id": "1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj",
       "style_type": "CL2K",
-      "description": "Eclectic, movie-heavy library: American comedy (especially '80s to 2000s) and indie/arthouse film, a lot of documentaries (food & wine, music, and niche subjects), isekai-leaning anime, and mid-budget thrillers, with some classic and recent festival cinema."
-    },
-    {
-      "name": "Confused",
-      "display_name": "Confused",
-      "drive_id": "1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ",
-      "style_type": "CL2K",
-      "description": "Modern East Asian-focused library: mostly Korean drama (romance, fantasy & thriller) and Chinese xianxia/historical costume drama, plus a solid amount of anime. Almost entirely 2020s, with a few recent Western film/TV and kids' titles."
-    },
-    {
-      "name": "Wenisinmood(#1)",
-      "display_name": "Wenisinmood(#1)",
-      "drive_id": "1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7",
-      "style_type": "CL2K",
-      "description": "Eclectic mixed library with no single focus. Lots of anime (long-running detective, shonen, sports & isekai series plus films), East Asian film & TV (Korean drama, Chinese historical drama, Hong Kong action), classic Hollywood & Westerns, stand-up comedy specials, British comedy & panel TV, and documentaries (music, nature, true-crime & cult). Broad era range, weighted to the 1990s to 2010s."
+      "description": "Eclectic cinephile library and one of the largest here: a world arthouse and classic-cinema canon, a deep Hong Kong and wuxia martial-arts catalog, anime including Ghibli and Miyazaki, and cult, grindhouse and extreme horror, alongside British TV comedy and music, art and true-crime documentary. Spans the 1910s to upcoming releases."
     },
     {
       "name": "BZ",
       "display_name": "BZ",
       "drive_id": "1cEIuJRr8AZcthyVWfNn2skxog6R_MPrW",
       "style_type": "CL2K",
-      "description": "Mostly-TV library centered on crime, mystery & detective drama: heavy on British 'cosy crime' and procedurals plus Nordic/European noir, thriller limited series, and Christie-style whodunits. Skews very recent (2010s to 2020s), plus a few prestige films, holiday romance TV movies, and lifestyle, travel & nature factual shows."
+      "description": "Mostly-TV library centered on crime, mystery and detective drama: British cosy crime and procedurals, Nordic and European noir, thriller limited series and Christie-style whodunits. Skews very recent, most of it 2018 onward, plus a few prestige films, holiday romance TV movies and lifestyle, travel and antiques factual shows."
     },
     {
-      "name": "LionCityGaming",
-      "display_name": "LionCityGaming",
-      "drive_id": "1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF",
+      "name": "Chodeus",
+      "display_name": "Chodeus",
+      "drive_id": "18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s",
       "style_type": "CL2K",
-      "description": "International cinephile movie collection (almost no TV): a deep world-cinema and classic/silent canon, an especially large Indian catalog (Bollywood & South Indian), Asian extreme & genre cinema, elevated/arthouse horror, and documentaries. Spans the 1900s to today."
+      "description": "Mostly mainstream and mid-budget film - thrillers, action, war and comedy, including a run of direct-to-video sequels - plus prestige limited series, a few anime titles and documentary. Mostly 2010s and 2020s."
     },
     {
-      "name": "TokenMinal",
-      "display_name": "TokenMinal",
-      "drive_id": "1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5",
+      "name": "Confused",
+      "display_name": "Confused",
+      "drive_id": "1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ",
       "style_type": "CL2K",
-      "description": "Predominantly an anime library: deep Studio Ghibli and Makoto Shinkai catalogs, classic and modern series, and a large isekai catalog, plus collection posters for broadcast seasons (Winter/Spring/Summer/Fall) and demographics (shounen/shoujo/seinen/josei). Also a secondary set of French & Québécois live-action film and TV, plus a few documentaries."
+      "description": "Modern East Asian library: mostly Korean drama across romance, fantasy and thriller, and Chinese xianxia and historical costume drama, plus a solid amount of anime. Almost entirely 2020s, with a few recent Western film, TV and kids' titles."
     },
     {
-      "name": "Jpalenz77",
-      "display_name": "Jpalenz77",
-      "drive_id": "1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh",
+      "name": "Darkkazul",
+      "display_name": "Darkkazul",
+      "drive_id": "1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3",
       "style_type": "CL2K",
-      "description": "Small, eclectic collection: a handful of recent (2024 to 2025) indie films and prestige TV alongside music and true-crime documentaries, plus a couple of cinema classics."
-    },
-    {
-      "name": "MiniMyself",
-      "display_name": "MiniMyself",
-      "drive_id": "1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o",
-      "style_type": "CL2K",
-      "description": "Modern genre-focused movie & TV library with a 2000s-2010s skew: especially deep in anime, mainstream/franchise horror, superhero & comic-book adaptations, and sci-fi/action, with R-rated comedies mixed in."
-    },
-    {
-      "name": "Iamspartacus",
-      "display_name": "Iamspartacus",
-      "drive_id": "179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc",
-      "style_type": "CL2K",
-      "description": "Large modern mainstream movie & TV library with a streaming-era skew: complete Hollywood franchises and prestige & premium-cable drama, plus an especially deep catalog of stand-up comedy specials, true-crime & documentary, and reality/competition TV, with classics and arthouse mixed in."
+      "description": "Eclectic, movie-heavy library: American comedy, especially 1990s and 2000s, and indie and arthouse film, a lot of documentary covering food and wine, music, sport and niche subjects, isekai-leaning anime, and mid-budget thrillers, with classic, cult and recent festival cinema mixed in. Mostly 2000s onward."
     },
     {
       "name": "Dweagle79",
       "display_name": "Dweagle79",
       "drive_id": "1R4tDkZVyG7iEbQ4DNbUPiPGfslPkcWmU",
       "style_type": "CL2K",
-      "description": "Comprehensive mainstream movie & TV library: every major franchise (Marvel, DC, Star Wars/Trek, Alien), kids & family animation, blockbusters, comedies, prestige & reality TV, anime, docs and stand-up, spanning the 1920s to today. Extensive smart-collection art by decade, runtime, format (3D/4K/HDR/Atmos/Dolby Vision), studio & network, and genre."
+      "description": "Comprehensive mainstream movie and TV library and the largest CL2K drive: every major franchise, kids and family animation, blockbusters, comedy, prestige and reality TV, anime, documentary and stand-up, spanning the 1920s to today. Extensive smart-collection art by decade, runtime, format (3D, 4K, HDR, Atmos, Dolby Vision), studio, network and genre."
+    },
+    {
+      "name": "fusen",
+      "display_name": "füsen",
+      "drive_id": "1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh",
+      "style_type": "CL2K",
+      "description": "Eclectic cinephile picks with an older skew: world and arthouse cinema, Japanese film, classic Hollywood, cult action and horror, and documentary. Spans the 1920s to upcoming releases, weighted to the 1970s and 80s and the 2010s and 20s."
+    },
+    {
+      "name": "Iamspartacus",
+      "display_name": "Iamspartacus",
+      "drive_id": "179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc",
+      "style_type": "CL2K",
+      "description": "Large modern mainstream movie and TV library with a streaming-era skew: complete Hollywood franchises with collection art for most of them, prestige and premium-cable drama, and an especially deep catalog of stand-up comedy specials, true-crime and documentary, and reality and competition TV, with classics and arthouse mixed in."
+    },
+    {
+      "name": "Jpalenz77",
+      "display_name": "Jpalenz77",
+      "drive_id": "1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh",
+      "style_type": "CL2K",
+      "description": "Small, eclectic selection: a handful of recent indie films and prestige TV alongside music and true-crime documentary, plus a couple of cinema classics. Almost entirely new content from 2024 onward."
+    },
+    {
+      "name": "LionCityGaming",
+      "display_name": "LionCityGaming",
+      "drive_id": "1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF",
+      "style_type": "CL2K",
+      "description": "International cinephile movie collection with almost no TV: a deep world-cinema and classic canon taking in Ozu, Bergman, Kurosawa, Ray and Truffaut, an especially large Indian catalog across Hindi and South Indian film, Asian extreme and genre cinema, elevated and arthouse horror, and documentary. Spans the 1900s to today."
+    },
+    {
+      "name": "MajorGiant",
+      "display_name": "MajorGiant",
+      "drive_id": "1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N",
+      "style_type": "CL2K",
+      "description": "Broad catalog of mostly mid-budget live-action film from the 1960s through upcoming releases, weighted toward adult drama: character studies, biographical and period drama, legal, political and crime thrillers, war films and romantic drama, with comedy, occasional action, documentary and TV-movie and Hallmark-style romance mixed in. Almost entirely movies."
+    },
+    {
+      "name": "Mario",
+      "display_name": "Mario",
+      "drive_id": "1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q",
+      "style_type": "CL2K",
+      "description": "Eclectic, movie-heavy library with no single focus: a lot of horror, especially Stephen King adaptations and Asian horror, broad comedy from mainstream to auteur indie, arthouse and auteur cinema, sports drama and true crime, plus a little anime. Spans the 1980s to 2020s and includes freshness-based collection art for newly and recently added titles."
+    },
+    {
+      "name": "MiniMyself",
+      "display_name": "MiniMyself",
+      "drive_id": "1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o",
+      "style_type": "CL2K",
+      "description": "Modern genre-focused movie and TV library with a 2000s and 2010s skew: especially deep in anime, mainstream and franchise horror, superhero and comic-book adaptations, and sci-fi and action, with R-rated comedy mixed in. Heavy on collection art - star-rating tiers, streaming services and long-running TV franchises."
+    },
+    {
+      "name": "Solen",
+      "display_name": "Solen",
+      "drive_id": "1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI",
+      "style_type": "CL2K",
+      "description": "Small, seasonal-leaning drive: mostly Hallmark-style Christmas and holiday TV movies, plus Swedish reality, home and lifestyle TV, and a set of kids' animation led by the Curious George films."
+    },
+    {
+      "name": "Tarantula212",
+      "display_name": "Tarantula212",
+      "drive_id": "1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk",
+      "style_type": "CL2K",
+      "description": "Contemporary Indian library, almost entirely 2020s: Hindi and Bollywood plus South Indian film in Malayalam, Tamil, Telugu and Kannada, and a large slate of OTT web series, heavy on crime, thriller, true crime and political and historical drama."
+    },
+    {
+      "name": "TokenMinal",
+      "display_name": "TokenMinal",
+      "drive_id": "1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5",
+      "style_type": "CL2K",
+      "description": "Predominantly an anime library: classic and modern series and films with a large isekai catalog, and an unusually complete set of collection art for broadcast seasons - Winter, Spring, Summer and Fall going back to the 1990s - plus demographic groupings. Also a secondary set of French and Quebecois live-action film and TV, and a few documentaries."
+    },
+    {
+      "name": "Wenisinmood(#1)",
+      "display_name": "Wenisinmood(#1)",
+      "drive_id": "1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7",
+      "style_type": "CL2K",
+      "description": "Eclectic mixed library with no single focus: a lot of anime including long-running detective, shonen and sports series plus films, East Asian film and TV taking in Hong Kong action, Chinese historical drama and Korean drama, classic Hollywood and westerns, stand-up comedy specials, British comedy and panel TV, and documentary. Broad era range weighted to the 1990s through 2010s."
+    },
+    {
+      "name": "Wenisinmood(#2)",
+      "display_name": "Wenisinmood(#2)",
+      "drive_id": "1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF",
+      "style_type": "CL2K",
+      "description": "Original-language titled posters. East Asian-focused companion library: mostly anime - long-running detective series, shonen, sports and a lot of isekai, plus films - with Chinese historical and palace drama, Korean drama and Hong Kong action, and a small French and Belgian dark-comedy element."
     }
   ]
 }

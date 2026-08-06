@@ -1,0 +1,444 @@
+{
+  "_readme": [
+    "Hand-maintained metadata for the tables in docs/gdrives.html. Not read by the app.",
+    "Drive facts (name, drive_id, style, description, artwork_types) come from",
+    "backend/assets/drives.json and backend/assets/artwork_drives.json - do NOT copy them here.",
+    "This file only holds what those lists don't know: priority ranking, owner ACK,",
+    "owner feedback, and which person owns which drives.",
+    "",
+    "Poster drives are split into drives_mm2k / drives_cl2k. Keys are drive IDs. Fields:",
+    "  owner    - canonical person name, used to group a maker's drives together",
+    "  priority - one of: --  -  +  ++  +++   (ascending, DAPS order). Omit = unranked (?)",
+    "  rank     - position within the tier, following Chris DC's original list. Lower = weaker. 900 = added since",
+    "  ack      - yes (✅) | unknown or no (❔) | warn (❗) | none (blank)",
+    "  content  - optional short override for the CONTENT column (default: description from the drive JSON)",
+    "  feedback - free markdown, shown in the OWNER FEEDBACK column",
+    "",
+    "After editing, run: python3 docs/build_gdrives.py"
+  ],
+  "priority_tiers": [
+    {
+      "token": "--",
+      "label": "LOWEST",
+      "content": "Collection of others and their posters (Not necessarily conform to our style guidelines)"
+    },
+    {
+      "token": "-",
+      "label": "LOW",
+      "content": "Homemade posters (Example: foreign/local media)"
+    },
+    {
+      "token": "+",
+      "label": "MEDIUM",
+      "content": "Homemade posters (Can easily be exchanged within the same priority)"
+    },
+    {
+      "token": "++",
+      "label": "HIGH",
+      "content": "Drazzilb (MM2K holy grail) / High count general CL2K drives"
+    },
+    {
+      "token": "+++",
+      "label": "HIGHEST",
+      "content": "Custom folder/drive (Personal)(*)"
+    }
+  ],
+  "static_rows": {
+    "MM2K": [
+      {
+        "priority": "+++",
+        "owner": "PERSONAL CUSTOM FOLDER/DRIVE",
+        "drive_id": "YOU",
+        "content": "PERSONAL",
+        "ack": "yes",
+        "feedback": "(*) Use this to override/replace posters from one of the drives (or personal/other collections) when you don't want to change priorities for specific reasons."
+      }
+    ],
+    "CL2K": [
+      {
+        "priority": "+++",
+        "owner": "PERSONAL CUSTOM FOLDER/DRIVE",
+        "drive_id": "YOU",
+        "content": "PERSONAL",
+        "ack": "yes",
+        "feedback": "(*) Use this to override/replace posters from one of the drives (or personal/other collections) when you don't want to change priorities for specific reasons."
+      }
+    ]
+  },
+  "drives_mm2k": {
+    "1zWY-ORtJkOLcQChV--oHquxW3JCow1zm": {
+      "owner": "Solen",
+      "priority": "--",
+      "rank": 1,
+      "ack": "yes",
+      "content": "Collection of others (broad, TV-heavy)"
+    },
+    "15sNlcFZmeDox2OQJyGjVxRwtigtd82Ru": {
+      "owner": "MajorGiant",
+      "priority": "--",
+      "rank": 2,
+      "ack": "yes",
+      "content": "Collection of others (broad; Hallmark, stand-up)"
+    },
+    "1oBzEOXXrTHGq6sUY_4RMtzMTt4VHyeJp": {
+      "owner": "Chris DC",
+      "priority": "--",
+      "rank": 3,
+      "ack": "yes",
+      "content": "Homemade + collection of others",
+      "feedback": "<li>Posters *without* number overlay</li><li>Posters *with* small \"THE\"/\"A\" overlay</li><li>Personal favorites</li><li>Homemade (variants)</li><li>Collection of others</li>"
+    },
+    "1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb": {
+      "owner": "Jpalenz77",
+      "priority": "-",
+      "rank": 4,
+      "ack": "yes",
+      "content": "Homemade (Arthouse, docs, network collections)",
+      "feedback": "Asked to be ranked lowest priority (of homemade posters)"
+    },
+    "1Wz0S18sKOeyBURkJ1uT3RtkEmSsK1-PG": {
+      "owner": "WenIsInMood",
+      "priority": "-",
+      "rank": 5,
+      "ack": "yes",
+      "content": "Homemade (Chinese & Korean drama, anime)"
+    },
+    "1ejgRXwX6opexs8oAX8CnpSpKQt7Hrf00": {
+      "owner": "Darkkazul",
+      "priority": "-",
+      "rank": 6,
+      "ack": "yes",
+      "content": "Homemade (Anime, K-drama, docs, reality)",
+      "feedback": "About 33% are Anime, Korean, Chinese, and Japanese shows/movies"
+    },
+    "1cqDinU27cnHf5sL5rSlfO7o_T6LSxG77": {
+      "owner": "Reitenth",
+      "priority": "-",
+      "rank": 7,
+      "ack": "yes"
+    },
+    "15faKB1cDQAhjTQCvj8MvGUQb0nBORWGC": {
+      "owner": "TheOtherGuy",
+      "priority": "-",
+      "rank": 8,
+      "ack": "yes",
+      "content": "Homemade (OG titles: German)",
+      "feedback": "MM2K style with black gradient. ALL posters are in **German** (original release language); international versions are in TheOtherGuy(#1)."
+    },
+    "1TYVIGKpSwhipLyVQQn_OJHTobM6KaokB": {
+      "owner": "TheOtherGuy",
+      "priority": "-",
+      "rank": 9,
+      "ack": "yes",
+      "content": "Homemade (World cinema + list collections)",
+      "feedback": "Movie, Series and Collection posters all in MM2K style with black gradient"
+    },
+    "1XXZL-TpqWqfbKBWCifN2-MRdGDbSzHTj": {
+      "owner": "Dweagle79",
+      "priority": "-",
+      "rank": 10,
+      "ack": "yes",
+      "content": "Homemade (Mainstream + smart collections)",
+      "feedback": "<li>Homemade variants</li><li>Requests</li>"
+    },
+    "1Ec0PVQv_AU6S-2q6UE1Eoivfwo0DUnyS": {
+      "owner": "MiniMyself",
+      "priority": "-",
+      "rank": 11,
+      "ack": "yes",
+      "content": "Homemade (Superhero, horror, sci-fi, anime)",
+      "feedback": "<li>Homemade variants</li><li>Missing posters</li>"
+    },
+    "1Kb1kFZzzKKlq5N_ob8AFxJvStvm9PdiL": {
+      "owner": "Kalyanrajnish",
+      "priority": "-",
+      "rank": 12,
+      "ack": "yes",
+      "content": "Homemade (Indian: Hindi, Punjabi, South Indian)"
+    },
+    "1KJlsnMz-z2RAfNxKZp7sYP_U0SD1V6lS": {
+      "owner": "TokenMinal",
+      "priority": "-",
+      "rank": 13,
+      "ack": "yes",
+      "content": "Homemade (Mostly Anime, some French media)",
+      "feedback": "<li>Mostly Anime</li><li>Some French media</li><li>Mareau's posters</li>"
+    },
+    "1LIVG1RbTEd7tTJMbzZr7Zak05XznLFia": {
+      "owner": "Tarantula212",
+      "priority": "-",
+      "rank": 14,
+      "ack": "yes",
+      "content": "Homemade (Mostly Bollywood/Indian media)",
+      "feedback": "<li>[TPDB](https://theposterdb.com/user/tarantula212)</li><li>[Mediux](https://mediux.pro/user/tarantula212)</li>"
+    },
+    "1wrSru-46iIN1iqCl2Cjhj5ofdazPgbsz": {
+      "owner": "Dsaq",
+      "priority": "-",
+      "rank": 15,
+      "ack": "yes",
+      "content": "Homemade (Mostly Dutch media)",
+      "feedback": "Dutch media also have Dutch filenaming"
+    },
+    "1G77TLQvgs_R7HdMWkMcwHL6vd_96cMp7": {
+      "owner": "Quafley",
+      "priority": "+",
+      "rank": 16,
+      "ack": "unknown",
+      "content": "Homemade (Mostly Anime)",
+      "feedback": "Main focus is around anime (especially older lesser known ones). This includes movies."
+    },
+    "1bBbK_3JeXCy3ElqTwkFHaNoNxYgqtLug": {
+      "owner": "Stupifier",
+      "priority": "+",
+      "rank": 17,
+      "ack": "yes",
+      "content": "Homemade (Mostly Anime)",
+      "feedback": "To be placed as low as possible"
+    },
+    "1KnwxzwBUQzQyKF1e24q_wlFqcER9xYHM": {
+      "owner": "Sahara",
+      "priority": "+",
+      "rank": 18,
+      "ack": "yes",
+      "content": "Homemade (Award & best-of collections)",
+      "feedback": "+1 rank with Stupifier"
+    },
+    "1ZfvUgN0qz4lJYkC_iMRjhH-fZ0rDN_Yu": {
+      "owner": "MajorGiant",
+      "priority": "+",
+      "rank": 19,
+      "ack": "yes",
+      "content": "Homemade (Recent indie & mainstream film)",
+      "feedback": "Can contain white text versions of black text MM2K posters"
+    },
+    "1alseEnUBjH6CjXh77b5L4R-ZDGdtOMFr": {
+      "owner": "LionCityGaming",
+      "priority": "+",
+      "rank": 20,
+      "ack": "yes",
+      "content": "Homemade (World cinema, Indian, docs)",
+      "feedback": "Can contain white text versions of black text MM2K posters"
+    },
+    "19_kDCSHFdeZypxOxmODWmEt6jtBBtOYw": {
+      "owner": "Iamspartacus",
+      "priority": "+",
+      "rank": 21,
+      "ack": "yes",
+      "content": "Homemade (Mainstream film & TV, reality, docs)",
+      "feedback": "<li>White text versions of black text MM2K posters</li><li>Posters *without* number overlay</li>"
+    },
+    "1Xg9Huh7THDbmjeanW0KyRbEm6mGn_jm8": {
+      "owner": "BZ",
+      "priority": "+",
+      "rank": 22,
+      "ack": "yes",
+      "content": "Homemade (Mostly TV: crime & mystery)",
+      "feedback": "Can contain white text versions of black text MM2K posters"
+    },
+    "1YEuS1pulJAfhKm4L8U9z5-EMtGl-d2s7": {
+      "owner": "Solen",
+      "priority": "+",
+      "rank": 23,
+      "ack": "yes",
+      "content": "Homemade (Age ratings, networks, Nordic TV)",
+      "feedback": "<li>Can contain no-gradient versions of MM2K posters</li><li>Different season posters per show</li><li>[TPDB](https://theposterdb.com/user/Solen)</li><li>[Mediux](https://mediux.pro/user/solen)</li>"
+    },
+    "1wOhY88zc0wdQU-QQmhm4FzHL9QiCQnpu": {
+      "owner": "Zarox",
+      "priority": "+",
+      "rank": 24,
+      "ack": "yes",
+      "content": "Homemade (K-drama, US/UK comedy-drama)",
+      "feedback": "<li>[TPDB](https://theposterdb.com/user/zarox)</li><li>Can contain white text versions of black text MM2K posters</li>"
+    },
+    "1fKRkx4Yine5cqkH411FmShdd-wHRMBIF": {
+      "owner": "Drazzilb",
+      "priority": "++",
+      "rank": 25,
+      "ack": "yes",
+      "content": "Original MM2K"
+    }
+  },
+  "drives_cl2k": {
+    "1DuZrQfUBfmUbnYEg1C0ftrLe8v_FGAUh": {
+      "owner": "Fusen",
+      "priority": "+",
+      "rank": 900,
+      "ack": "yes",
+      "content": "CL2K Homemade (World cinema, cult, classics)",
+      "feedback": "New drive, not on the original DAPS list yet"
+    },
+    "18Rv6LBp9YZWpnT2qt5wXELFNXj9GSa2s": {
+      "owner": "Chodeus",
+      "priority": "+",
+      "rank": 1,
+      "ack": "no",
+      "content": "CL2K Homemade (Mainstream & mid-budget film)"
+    },
+    "1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q": {
+      "owner": "Mario",
+      "priority": "-",
+      "rank": 3,
+      "content": "CL2K Homemade (Horror, comedy, arthouse)",
+      "ack": "yes",
+      "feedback": "Logos may fall below the bottom limit."
+    },
+    "1sGiSVkabE6NtLuQfoKYEwbwosnRGMQAF": {
+      "owner": "WenIsInMood",
+      "priority": "-",
+      "rank": 4,
+      "content": "CL2K Homemade (Original language titles: East Asian)",
+      "ack": "yes",
+      "feedback": "Contains original language titles"
+    },
+    "1k5oohfM77PgcB5aOZ0ZV8t5GMF-FquTk": {
+      "owner": "Tarantula212",
+      "priority": "-",
+      "rank": 5,
+      "content": "CL2K Homemade (Mostly Indian media)",
+      "ack": "yes",
+      "feedback": "<li>[TPDB](https://theposterdb.com/user/tarantula212)</li>"
+    },
+    "1yHWFeml5eynoLuAXnNJ4PttCS_QK8u2N": {
+      "owner": "MajorGiant",
+      "priority": "+",
+      "rank": 900,
+      "content": "CL2K Homemade (Mostly mid-budget drama)",
+      "ack": "yes",
+      "feedback": "New drive, not on the original DAPS list yet"
+    },
+    "1NnKbYnIVnDGkxgKpbgSoWl8JFdbjawOI": {
+      "owner": "Solen",
+      "priority": "+",
+      "rank": 6,
+      "content": "CL2K Homemade (Holiday TV movies, Swedish TV)",
+      "ack": "yes"
+    },
+    "1jToV8ee8RhqnG9DhAPYKufEJpb8Ru_7r": {
+      "owner": "BerserkeR",
+      "priority": "+",
+      "rank": 7,
+      "content": "CL2K Homemade (Mostly horror, world cinema)",
+      "ack": "yes"
+    },
+    "1X1E8ktIoAXBwuTTImltizEH5_XwBPoz3": {
+      "owner": "Darkkazul",
+      "priority": "+",
+      "rank": 8,
+      "content": "CL2K Homemade (Comedy, indie film, docs, anime)",
+      "ack": "yes"
+    },
+    "1l-cuRGy1JDpkmDrBWz46yr_xlT1CWNvQ": {
+      "owner": "Confused",
+      "priority": "+",
+      "rank": 9,
+      "content": "CL2K Homemade (Korean & Chinese drama, anime)",
+      "ack": "yes"
+    },
+    "1Jr8oFEyLvSREHac9l1yRyaw2XCd8OXc7": {
+      "owner": "WenIsInMood",
+      "priority": "+",
+      "rank": 10,
+      "content": "CL2K Homemade (Anime, East Asian, classics, comedy)",
+      "ack": "yes"
+    },
+    "1cEIuJRr8AZcthyVWfNn2skxog6R_MPrW": {
+      "owner": "BZ",
+      "priority": "+",
+      "rank": 11,
+      "content": "CL2K Homemade (Mostly TV: crime & mystery)",
+      "ack": "yes"
+    },
+    "1gJ_CXigGfZDJV5C3ZTaTz_yycgkROTJF": {
+      "owner": "LionCityGaming",
+      "priority": "+",
+      "rank": 12,
+      "content": "CL2K Homemade (World cinema, Indian, classics)",
+      "ack": "yes"
+    },
+    "1FyjcjsP5Yb0w3u6QZHbjJ51j5zTT8lA5": {
+      "owner": "TokenMinal",
+      "priority": "+",
+      "rank": 13,
+      "content": "CL2K Homemade (Mostly Anime, some French media)",
+      "ack": "yes",
+      "feedback": "Anime"
+    },
+    "1kLvAjMx3jcJbRKjuMYTrUaA4hR4N8wfh": {
+      "owner": "Jpalenz77",
+      "priority": "+",
+      "rank": 14,
+      "content": "CL2K Homemade (Indie film, prestige TV, docs)",
+      "ack": "yes",
+      "feedback": "Only new content as of 28-06-2025"
+    },
+    "1MNpR2fVRJt6bW5NIBPR43f6GvINcrw_o": {
+      "owner": "MiniMyself",
+      "priority": "++",
+      "rank": 1,
+      "content": "CL2K Homemade (Anime, horror, superhero, sci-fi)",
+      "ack": "yes"
+    },
+    "1Z-U7hSK723MhynrlHXHW93TVCMKwh8Bj": {
+      "owner": "Bostafari",
+      "priority": "++",
+      "rank": 2,
+      "content": "CL2K Homemade (Arthouse, HK action, anime, cult horror)",
+      "ack": "yes"
+    },
+    "179QKyeP3avZvC_t4Fvk2Mm1nfRyuKvoc": {
+      "owner": "Iamspartacus",
+      "priority": "++",
+      "rank": 3,
+      "content": "CL2K Homemade (Mainstream film & TV, stand-up)",
+      "ack": "yes"
+    },
+    "1R4tDkZVyG7iEbQ4DNbUPiPGfslPkcWmU": {
+      "owner": "Dweagle79",
+      "priority": "++",
+      "rank": 4,
+      "content": "CL2K Homemade (Broad mainstream film & TV)",
+      "ack": "yes"
+    }
+  },
+  "_artwork_readme": [
+    "ACK starts at 'unknown' for artwork drives: the original DAPS page had no artwork section, so no",
+    "owner has confirmed their artwork drive's contents or ranking here yet. Flip to 'yes' as owners",
+    "confirm. artwork_types come from backend/assets/artwork_drives.json, not from this file."
+  ],
+  "artwork": {
+    "1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s": {
+      "owner": "Bostafari",
+      "ack": "unknown"
+    },
+    "18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp": {
+      "owner": "BZ",
+      "ack": "unknown"
+    },
+    "1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL": {
+      "owner": "Dweagle79",
+      "ack": "yes"
+    },
+    "110Xtee9O414M1xPGxI6DCvkbDw9FNXqO": {
+      "owner": "Fusen",
+      "ack": "unknown"
+    },
+    "1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE": {
+      "owner": "Iamspartacus",
+      "ack": "unknown"
+    },
+    "13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX": {
+      "owner": "MiniMyself",
+      "ack": "unknown"
+    },
+    "1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV": {
+      "owner": "Tarantula212",
+      "ack": "unknown"
+    },
+    "18Yr85mO65WpEXMvtM57OXB_umusADWdF": {
+      "owner": "TokenMinal",
+      "ack": "unknown"
+    }
+  }
+}
