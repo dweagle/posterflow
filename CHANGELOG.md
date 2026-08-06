@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-08-06
+### Added
+- Unmatched Assets: a per-item match report — a diagnosis button on unmatched items opens a popup explaining why the item didn't match, with a downloadable report file you can share for support.
+
+### Fixed
+- Artwork Finder: the square-crop overwrite confirmation now pops up over the modal correctly.
+- Setup Wizard: library keys are now compared consistently, so unchanged Plex library configs are no longer flagged as changed.
+
 ## [0.13.4] - 2026-08-04
 ### Added
 - Backup: scheduled backups with configurable location and retention, run via a new "backup" job type in the Scheduling tab.
