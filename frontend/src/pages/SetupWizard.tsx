@@ -18,12 +18,13 @@ interface ServerInstance {
 }
 
 // Order-independent fingerprint of an instance's library selection, used to skip re-saving a
-// config the wizard only loaded and never changed.
+// config the wizard only loaded and never changed. Keys are coerced to strings — the backend
+// returns Plex section keys as numbers, and numbers have no localeCompare.
 const librarySignature = (libraries: PlexLibrary[]): string =>
   JSON.stringify(
     [...libraries]
-      .sort((a, b) => a.key.localeCompare(b.key))
-      .map((lib) => [lib.key, lib.title, lib.type, lib.enabled])
+      .sort((a, b) => String(a.key).localeCompare(String(b.key)))
+      .map((lib) => [String(lib.key), lib.title, lib.type, lib.enabled])
   )
 
 interface FormData {
