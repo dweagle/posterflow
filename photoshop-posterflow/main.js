@@ -325,11 +325,13 @@ async function onTextlessExport(ev) {
 // above), let the user pick a square crop region (min 500x500, squarecrop.js), and save the cropped
 // JPG. A downscaled preview renders first so the dialog opens fast; the actual crop always
 // re-isolates and crops a FRESH full-resolution duplicate, never the preview.
-// The crop dialog is a SEPARATE modal window (uxpShowModal) — while it has focus, Photoshop can
-// stop reporting an "active document" at all, so app.activeDocument re-read at Save time resolves
-// to something with no real id ("document with an id of undefined does not exist"). Capture the
-// Document reference ONCE up front (targetDoc) and reuse it for every step, including inside the
-// dialog's onSave callback, instead of ever re-reading app.activeDocument after the dialog opens. ----
+// The crop dialog runs entirely SEQUENTIALLY with Photoshop work, never concurrently: render preview
+// → await the dialog (pure UI, no Photoshop calls of its own) → THEN do the real duplicate/crop/save
+// once the dialog has fully closed. Earlier attempts that touched app.activeDocument from inside the
+// still-open dialog's own Save handler hit "document with an id of undefined does not exist" —
+// apparently the modal can leave Photoshop's document context unusable to code outside its own flow
+// while it has focus, regardless of uxpShowModal options tried. Keeping the two phases strictly
+// sequential (dialog closed before any Photoshop call) sidesteps that rather than fighting it. ----
 let squareArtBusy = false;
 async function onSquareArt(ev) {
   if (!hasDoc()) { note('No document open.'); return; }
@@ -339,18 +341,15 @@ async function onSquareArt(ev) {
   const ctx = remoteCtx();
   squareArtBtn.textContent = '…';
   let previewUrl = null;
-  const done = () => { squareArtBusy = false; if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } };
   try {
     const sizeRes = await runExclusive(() => TL.readPosterSize(targetDoc, constants));
     if (!sizeRes.ok) {
-      squareArtBtn.textContent = 'Square Art'; done();
       note(sizeRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
       return;
     }
     const tmp = await R.tempFolder();
     const prevRes = await runExclusive(() => TL.exportPosterPreview(targetDoc, constants, tmp, 'squareart-preview.jpg', 1400));
     if (!prevRes.ok) {
-      squareArtBtn.textContent = 'Square Art'; done();
       note(prevRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
       return;
     }
@@ -358,41 +357,52 @@ async function onSquareArt(ev) {
     previewUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
     squareArtBtn.textContent = 'Square Art';
 
-    SC.openSquareCropDialog({
+    const cropNative = await SC.openSquareCropDialog({
       imageUrl: previewUrl,
       nativeW: sizeRes.width,
       nativeH: sizeRes.height,
       title: (ctx && ctx.name) || baseName(targetDoc),
-      onCancel: done,
-      onSave: async (cropNative) => {
-        const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
-        if (!folder) throw new Error('no folder chosen');
-        const filename = ((ctx && ctx.name) || baseName(targetDoc)) + M.activeSuffix(model) + ' - squareart.jpg';
-        const res = await runExclusive(() => TL.exportSquareArtJpg(targetDoc, constants, folder, filename, cropNative));
-        if (!res.ok) throw new Error(res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art export failed.');
-        if (ctx) {
-          const outBytes = await R.readBytes(res.entry);
-          try {
-            await R.putBytes('/api/maker-tools/squareart-exports/' + encodeURIComponent(res.filename), outBytes);
-            note('Saved "' + res.filename + '" → Posterflow square art folder.');
-          } catch (e) {
-            if (!/HTTP 400/.test(String(e && e.message))) throw e;
-            note('Server has no square art export folder — saving locally instead.');
-            const localFolder = await FS.getSquareartFolder({});
-            if (!localFolder) throw new Error('no folder chosen');
-            await FS.writeFileBytes(localFolder, res.filename, outBytes);
-            note('Saved "' + res.filename + '" → ' + localFolder.name);
-          }
-        } else {
-          note('Saved "' + res.filename + '" → ' + res.folderName);
-        }
-        done();
-      },
     });
+    URL.revokeObjectURL(previewUrl); previewUrl = null;
+    if (!cropNative) return;   // cancelled
+
+    // Brief settle delay: give Photoshop a moment to fully reclaim document focus from the just-closed
+    // dialog before touching the document again — the exact same document/executeAsModal calls that
+    // work fine everywhere else in this file failed intermittently right after dialog interaction.
+    await new Promise((r) => setTimeout(r, 150));
+
+    squareArtBtn.textContent = '…';
+    const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
+    if (!folder) { squareArtBtn.textContent = 'Square Art'; note('Square Art cancelled — no folder chosen.'); return; }
+    const filename = ((ctx && ctx.name) || baseName(targetDoc)) + M.activeSuffix(model) + ' - squareart.jpg';
+    const res = await runExclusive(() => TL.exportSquareArtJpg(targetDoc, constants, folder, filename, cropNative));
+    if (!res.ok) {
+      flash(squareArtBtn, '✗', 'Square Art');
+      note(res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art export failed.');
+      return;
+    }
+    if (ctx) {
+      const outBytes = await R.readBytes(res.entry);
+      try {
+        await R.putBytes('/api/maker-tools/squareart-exports/' + encodeURIComponent(res.filename), outBytes);
+        flash(squareArtBtn, '✓', 'Square Art'); note('Saved "' + res.filename + '" → Posterflow square art folder.');
+      } catch (e) {
+        if (!/HTTP 400/.test(String(e && e.message))) throw e;
+        note('Server has no square art export folder — saving locally instead.');
+        const localFolder = await FS.getSquareartFolder({});
+        if (!localFolder) { squareArtBtn.textContent = 'Square Art'; note('Square Art cancelled — no folder chosen.'); return; }
+        await FS.writeFileBytes(localFolder, res.filename, outBytes);
+        flash(squareArtBtn, '✓', 'Square Art'); note('Saved "' + res.filename + '" → ' + localFolder.name);
+      }
+    } else {
+      flash(squareArtBtn, '✓', 'Square Art'); note('Saved "' + res.filename + '" → ' + res.folderName);
+    }
   } catch (e) {
-    squareArtBtn.textContent = 'Square Art';
-    done();
+    flash(squareArtBtn, '✗', 'Square Art');
     showError(e);
+  } finally {
+    squareArtBusy = false;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
   }
 }
 
