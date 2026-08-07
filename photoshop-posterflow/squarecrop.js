@@ -188,8 +188,17 @@ function openSquareCropDialog({ imageUrl, nativeW, nativeH, title, onSave, onCan
     }
   });
 
-  if (typeof dlg.showModal === 'function') dlg.showModal();
-  else dlg.setAttribute('open', '');   // defensive fallback if <dialog> modal support is ever missing
+  // UXP sizes <dialog> elements through its own uxpShowModal(options) call — CSS width/height on
+  // the dialog itself is unreliable and can render as a tiny, content-shrunk box regardless of what
+  // the stylesheet says. Prefer uxpShowModal when present; fall back to the standard showModal()
+  // (older UXP) or a plain open attribute (defensive, if <dialog> support is ever missing outright).
+  if (typeof dlg.uxpShowModal === 'function') {
+    dlg.uxpShowModal({ title: 'Crop to square art', resize: 'both', size: { width: 860, height: 700 } });
+  } else if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  } else {
+    dlg.setAttribute('open', '');
+  }
 }
 
 function escapeHtml(s) {

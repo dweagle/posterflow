@@ -75,11 +75,13 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
    avoids anything that isn't rock-solid core CSS: no ::backdrop (unreliable across UXP versions —
    the dialog gets a plain opaque background instead so nothing behind it can show through), no
    huge box-shadow spread (used elsewhere as an outside-the-box dimming trick; dropped here — a
-   filled overlay div does the same job more predictably), no vw/vh units (fixed px only), explicit
-   fixed positioning + transform centering instead of relying on <dialog>'s default UA centering. */
-.crop-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 860px; height: 700px; padding: 0; margin: 0; border: 1px solid #3a3a42; border-radius: 8px;
-  background: #1f1f24; color: #e6e6e6; display: flex; flex-direction: column; overflow: hidden; }
+   filled overlay div does the same job more predictably), no vw/vh units (fixed px only).
+   The OUTER window size (860x700) comes from squarecrop.js's uxpShowModal({size:...}) call, NOT
+   from CSS on .crop-dialog — UXP ignores width/height set here for that purpose. This class just
+   fills whatever window uxpShowModal grants it. */
+.crop-dialog { width: 100%; height: 100%; box-sizing: border-box; padding: 0; margin: 0;
+  border: 1px solid #3a3a42; border-radius: 8px; background: #1f1f24; color: #e6e6e6;
+  display: flex; flex-direction: column; overflow: hidden; }
 .crop-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
   background: #2a2a31; border-bottom: 1px solid #3a3a42; font-weight: 700; flex-shrink: 0; }
 .crop-dialog__close { cursor: pointer; background: transparent; border: 0; color: #cfcfcf; font-size: 18px; line-height: 1; }
