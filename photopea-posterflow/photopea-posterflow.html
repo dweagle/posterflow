@@ -79,7 +79,7 @@
   </div>
   <div class="tools">
     <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo (keeps the logo's colors)">Place Logo</button>
-    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer into the 25px border (top-aligned, centered)">Fit Poster</button>
+    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer into the 25px border, down to the document's own bottom guide if it has one (top-aligned, centered)">Fit Poster</button>
   </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
@@ -120,6 +120,7 @@
   let jpgBusy = false;
   let placeBusy = false, pendingMode = '';  // Place Logo / Fit Poster state
   let placeBtn = null, placeLabel = '', placeWatch = null, pendingRes = null;  // in-flight button + watchdog + target geom
+  let awaitingGuideBytes = false, pendingGuideGeo = null;   // Fit Poster's PSD-bytes guide lookup (see onGeo)
   let pendingDocName = 'poster';                  // active doc's (possibly mangled) name — used for the JPG filename
   let detectedStyle = '';                          // CL2K/MM2K guessed from the active doc's layer structure
   let batchBusy = false, batchItems = [], batchIdx = 0, batchBase = '', batchStyle = '', batchOk = 0, batchConvention = false, batchMode = 'tags';  // batch-export state ('tags' = name-tag convention, 'seasons' = season range from one poster)
@@ -477,12 +478,61 @@
   // bottomY vertically): scale by the LARGER of the width/height ratios so the poster always
   // reaches bottomY, even if that means it overhangs the left/right border slightly (split evenly
   // by the horizontal centering below). bottomY is the RESOLVED bottom bound — the document's own
-  // lowest horizontal guide when present (read below, in READ_GEO), else ch - 25.
+  // lowest horizontal guide when present (found via findBottomGuideYFromPsdBytes below), else ch - 25.
   const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
     const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, bottomY - border);
     const scale = Math.max(targetW / srcW, targetH / srcH);
     const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
+  };
+
+  // Fit Poster's bottom bound: the document's own lowest horizontal guide (where these templates'
+  // gradient/fade overlay begins), read directly from raw PSD bytes — NOT Photopea's document.guides,
+  // which is undocumented in Photopea's own scripting reference (only width/height/layers/currentLayer/
+  // saveToOE()/open() etc. are documented) and was found to hang the panel indefinitely when accessed.
+  // saveToOE("psd") IS documented and already relied on elsewhere in this file (JPG/PNG export), so
+  // Fit Poster exports the doc and parses the "Grid and guides" image resource (id 1032) itself — same
+  // byte format the backend's _find_bottom_guide_y decodes: guide position = raw value / 32 (27.5
+  // fixed-point), direction byte 0 = vertical, 1 = horizontal. Returns null (→ ch - 25 fallback) on
+  // any parse failure or if the document has no such resource.
+  const findBottomGuideYFromPsdBytes = (buf, canvasH) => {
+    try {
+      const dv = new DataView(buf);
+      if (dv.getUint32(0) !== 0x38425053) return null;   // "8BPS"
+      let off = 26;   // sig(4)+version(2)+reserved(6)+channels(2)+height(4)+width(4)+depth(2)+colorMode(2)
+      off += 4 + dv.getUint32(off);           // skip the length-prefixed Color Mode Data section
+      const irLen = dv.getUint32(off); off += 4;
+      const irEnd = off + irLen;
+      const border = 25;
+      while (off + 4 <= irEnd) {
+        if (dv.getUint32(off) !== 0x3842494D) break;   // "8BIM"
+        off += 4;
+        const id = dv.getUint16(off); off += 2;
+        const nameLen = dv.getUint8(off);
+        off += 1 + nameLen;
+        if ((1 + nameLen) % 2 !== 0) off += 1;          // Pascal string name, padded to an even total
+        const dataLen = dv.getUint32(off); off += 4;
+        const dataStart = off;
+        if (id === 1032) {
+          let p = dataStart + 12;                       // skip version(4) + grid horizontal(4) + vertical(4)
+          const count = dv.getUint32(p); p += 4;
+          let best = null;
+          for (let i = 0; i < count && p + 5 <= dataStart + dataLen; i++) {
+            const loc = dv.getUint32(p); p += 4;
+            const dir = dv.getUint8(p); p += 1;
+            if (dir !== 1) continue;                    // 0 = vertical, 1 = horizontal
+            const y = loc / 32;
+            if (y <= border || y >= canvasH) continue;
+            if (best === null || y > best) best = y;
+          }
+          return best;
+        }
+        off = dataStart + dataLen + (dataLen % 2);       // resource data is ALSO padded to an even length
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   };
 
   // Coerce a Photopea bound/dimension to a PRIMITIVE px number. The trailing *1 matters:
@@ -500,16 +550,9 @@
     "try{" + NV + work + "}catch(e){app.echoToOE('SZERR:'+e);}" +
     "try{if(_ru!=null)app.preferences.rulerUnits=_ru;}catch(e){}";
 
-  // Read active-layer bounds + canvas size → echo SZGEO. (Fit Poster uses just this.)
-  //
-  // NOTE: unlike the Photoshop plugin and the website's PSD export, this does NOT read the
-  // document's guides to find the bottom gradient/fade boundary — accessing document.guides on a
-  // real template PSD was found to hang Photopea's own engine indefinitely (Fit Poster would spin
-  // and eventually time out, with an uncaught internal error in the console that our script's
-  // try/catch can't intercept, since Photopea's guide handling appears to fail asynchronously
-  // inside its own code, not synchronously inside the text we send it). Fit Poster here always
-  // fits to canvas_h - 25 (see onGeo below); only the Photoshop plugin and New Export honor a
-  // template's own guide.
+  // Read active-layer bounds + canvas size → echo SZGEO. Place Logo places immediately from this;
+  // Fit Poster additionally exports the doc as PSD bytes afterward to find the bottom guide (see
+  // onGeo / findBottomGuideYFromPsdBytes above) instead of touching Photopea's document.guides.
   const READ_GEO = px(
     "var d=app.activeDocument,L=d.activeLayer,b=L.bounds;" +
     "var ll=nv(b[0]),lt=nv(b[1]),lw=Math.round(nv(b[2])-ll),lh=Math.round(nv(b[3])-lt);" +
@@ -544,17 +587,31 @@
   const onGeo = (json) => {
     let geo; try { geo = JSON.parse(json); } catch { finishPlace(false); return; }
     if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
-    const res = pendingMode === 'logo'
-      ? computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)
-      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw, geo.ch - 25);
-    applyPlacement(geo, res);
+    if (pendingMode === 'logo') { applyPlacement(geo, computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)); return; }
+    // Fit Poster: export the doc as PSD bytes to find its own bottom guide (see
+    // findBottomGuideYFromPsdBytes above) — resolved in onGuideBytes below.
+    pendingGuideGeo = geo;
+    awaitingGuideBytes = true;
+    send(px("app.activeDocument.saveToOE('psd');"));
+  };
+
+  // Raw PSD bytes arrived (requested by onGeo, above) → find the bottom guide, falling back to
+  // ch - 25 when the document has none (or the parse failed), then place the poster.
+  const onGuideBytes = (buf) => {
+    awaitingGuideBytes = false;
+    const geo = pendingGuideGeo; pendingGuideGeo = null;
+    if (!geo) { finishPlace(false); return; }
+    const gy = findBottomGuideYFromPsdBytes(buf, geo.ch);
+    applyPlacement(geo, computePosterFitGeometry(geo.lw, geo.lh, geo.cw, gy != null ? gy : geo.ch - 25));
   };
 
   const startPlace = (mode, btn, lbl) => {
     if (placeBusy) return;
     placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = lbl;
     btn.textContent = '…';
-    placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 12000);
+    // 20s: Fit Poster's extra PSD-bytes round trip (see onGeo) can take longer than the plain
+    // bounds read Place Logo uses.
+    placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 20000);
     send(READ_GEO);
   };
   const startLogo = () => startPlace('logo', logoBtn, 'Place Logo');
@@ -1004,7 +1061,7 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { if (logoExpBusy) { onLogoBytes(d); } else { onBytes(d); } return; }   // ArrayBuffer = saveToOE result
+    if (typeof d !== 'string') { if (awaitingGuideBytes) { onGuideBytes(d); } else if (logoExpBusy) { onLogoBytes(d); } else { onBytes(d); } return; }   // ArrayBuffer = saveToOE result
     if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; }
     else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
     else if (d.startsWith('SZSIG:'))   { lastActiveSig = d.slice(6); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch

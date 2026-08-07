@@ -6,8 +6,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
-- Fit Poster / New Export (PSD "Fit Poster Inside Border"): the border-fit placement now cover-fits the poster (scaling by the larger of the width/height ratios) instead of scaling to width alone against a fixed border, so the poster reliably reaches its intended bottom edge instead of sometimes falling short. Applies to the Photoshop plugin, both Photopea panels, and the website's PSD export.
-- Fit Poster (Photoshop plugin) / New Export: the bottom bound now follows the template's own lowest horizontal guide (where these templates' gradient/fade overlay begins) instead of always the raw canvas border, so the poster doesn't overshoot past it. The two Photopea panels intentionally don't do this — accessing a PSD's guides from Photopea's scripting API was found to hang the panel — so Fit Poster there still targets the canvas border only.
+- Fit Poster / New Export / Use Existing PSD (PSD "Fit Poster Inside Border"): the border-fit placement now cover-fits the poster (scaling by the larger of the width/height ratios) instead of scaling to width alone against a fixed border, so the poster reliably reaches its intended bottom edge instead of sometimes falling short. Applies to the Photoshop plugin, both Photopea panels, and the website's PSD export/inject.
+- Fit Poster / New Export / Use Existing PSD: the bottom bound now follows the document's own lowest horizontal guide (where these templates' gradient/fade overlay begins) instead of always the raw canvas border, so the poster doesn't overshoot past it. The Photoshop plugin and website read this via their normal PSD access; the two Photopea panels — where Photopea's own `document.guides` scripting property is undocumented and was found to hang the panel — instead export the document as PSD bytes and parse its guide data directly, the same technique the website's export uses.
 
 ## [0.13.5] - 2026-08-06
 ### Added
