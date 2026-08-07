@@ -42,6 +42,9 @@ Thumbs.db
 CLAUDE.md
 GEMINI.md
 
+# Local testing automation (personal)
+test-loop.ps1
+
 # Environment
 .env
 .env.*
