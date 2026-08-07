@@ -201,11 +201,19 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
 
 // ---- geometry ----
 {
-  // Cover-fit: scaled by the LARGER of the width/height ratios, so the poster always reaches the
-  // bottom border (here binding on height) even at the cost of a slight left/right overhang.
-  const fit = G.computePosterFitGeometry(1000, 1500, 1000, 1500);
-  ok(fit.width === 967 && fit.height === 1450 && fit.left === 16 && fit.top === 25,
-    'Fit Poster: 1000x1500 src in 1000x1500 canvas → cover-fit 967x1450px, left 16, top 25');
+  // computePosterFitGeometry takes the RESOLVED bottom bound (bottomY) directly — findBottomGuideY
+  // (in tools.js, untestable here without a live Photoshop `doc`) is what resolves a document's own
+  // guide or falls back to ch - 25. Cover-fit: scaled by the LARGER of the width/height ratios, so
+  // the poster always reaches bottomY, even at the cost of a slight left/right overhang.
+  const noGuide = G.computePosterFitGeometry(1000, 1500, 1000, 1475);   // fallback: ch(1500) - 25
+  ok(noGuide.width === 967 && noGuide.height === 1450 && noGuide.left === 16 && noGuide.top === 25,
+    'Fit Poster (no guide): 1000x1500 src, bottomY 1475 → cover-fit 967x1450px, left 16, top 25');
+
+  // Pinned against the bundled CL2K template's real guide (1375px on a 1500-tall canvas — see
+  // backend test_find_bottom_guide_y_reads_the_templates_own_guide).
+  const guided = G.computePosterFitGeometry(1000, 1500, 1000, 1375);
+  ok(guided.width === 950 && guided.height === 1425 && guided.left === 25 && guided.top === 25,
+    'Fit Poster (CL2K guide): 1000x1500 src, bottomY 1375 → 950x1425px, left 25, top 25');
 
   const logo = G.computeLogoGeometry(600, 200, 1000, 1500, 0.30);
   ok(logo.width > 0 && logo.height > 0, 'Place Logo: positive dimensions');

@@ -13,6 +13,27 @@ const G = require('./geometry');
 // boost / dense shrink). Aspect ratio + pixel area (the dominant factors) are still exact.
 const LOGO_DENSITY = 0.30;
 
+// Lowest horizontal guide on the canvas = the poster area's true bottom bound (in these templates,
+// where the bottom gradient/fade overlay begins) — NOT the raw canvas height. Falls back to
+// ch - 25px when the document has no such guide. Best-effort: guides API failures (or an older
+// Photoshop without document.guides — added in PS 23.0) silently fall back rather than break Fit
+// Poster. Mirrors the reference .jsx script's findBottomGuideY exactly.
+const BORDER_PX = 25;
+function findBottomGuideY(doc, ch, constants) {
+  let best = null;
+  try {
+    const guides = doc.guides;
+    for (let i = 0; i < guides.length; i++) {
+      const g = guides[i];
+      if (g.direction !== constants.Direction.HORIZONTAL) continue;
+      const y = g.coordinate;
+      if (y <= BORDER_PX || y >= ch) continue;
+      if (best === null || y > best) best = y;
+    }
+  } catch (_) {}
+  return best !== null ? best : (ch - BORDER_PX);
+}
+
 // mode: 'logo' | 'fit'. Returns { ok } or { ok:false, reason:'no-layer' }.
 async function placeSelected(doc, mode, constants) {
   const layer = doc.activeLayers && doc.activeLayers[0];
@@ -24,7 +45,7 @@ async function placeSelected(doc, mode, constants) {
     if (!(lw > 0 && lh > 0)) throw new Error('selected layer has empty bounds');
     const res = mode === 'logo'
       ? G.computeLogoGeometry(lw, lh, cw, ch, LOGO_DENSITY)
-      : G.computePosterFitGeometry(lw, lh, cw, ch);
+      : G.computePosterFitGeometry(lw, lh, cw, findBottomGuideY(doc, ch, constants));
     const sc = (res.width / lw) * 100;
     await layer.scale(sc, sc, constants.AnchorPosition.MIDDLECENTER);
     const b1 = layer.bounds;                                    // re-measure after the resize

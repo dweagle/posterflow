@@ -6,7 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
-- Fit Poster / New Export (PSD "Fit Poster Inside Border"): the border-fit placement now cover-fits the poster into the bordered box (scaling by the larger of the width/height ratios) instead of scaling to width alone, so the poster always reaches the bottom border instead of sometimes falling short. Applies to the Photoshop plugin, both Photopea panels, and the website's PSD export.
+- Fit Poster / New Export (PSD "Fit Poster Inside Border"): the border-fit placement now cover-fits the poster (scaling by the larger of the width/height ratios) down to the template's own lowest horizontal guide — falling back to the canvas border when it has none — instead of scaling to width alone against a fixed border, so the poster reliably reaches its intended bottom edge instead of sometimes falling short or overshooting past the template's gradient/fade guide. Applies to the Photoshop plugin, both Photopea panels, and the website's PSD export.
 
 ## [0.13.5] - 2026-08-06
 ### Added

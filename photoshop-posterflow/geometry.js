@@ -35,11 +35,13 @@ const computeLogoGeometry = (srcW, srcH, cw, ch, density) => {
   return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
 };
 
-// Cover-fit into the bordered box (canvas − 25px each side, both axes): scale by the LARGER of the
-// width/height ratios so the poster always reaches the bottom border, even if that means it overhangs
-// the left/right border slightly (split evenly by the horizontal centering below).
-const computePosterFitGeometry = (srcW, srcH, cw, ch) => {
-  const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, ch - border * 2);
+// Cover-fit into the bordered box (canvas − 25px each side horizontally, top border down to
+// bottomY vertically): scale by the LARGER of the width/height ratios so the poster always reaches
+// bottomY, even if that means it overhangs the left/right border slightly (split evenly by the
+// horizontal centering below). bottomY is the RESOLVED bottom bound — normally the document's own
+// lowest horizontal guide (see findBottomGuideY in tools.js), not the raw canvas height.
+const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
+  const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, bottomY - border);
   const scale = Math.max(targetW / srcW, targetH / srcH);
   const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
   return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };

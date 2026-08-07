@@ -2143,15 +2143,45 @@ def compute_logo_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int, 
     return logo_w, logo_h, logo_left, logo_top
 
 
-def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int) -> tuple[int, int, int, int]:
-    """Cover-fit a poster into the bordered box (canvas − 25px each side, both axes), preserving
-    ratio, then center horizontally and top-align at y=25. Scaling by the LARGER of the width/height
-    ratios guarantees the poster always reaches the bottom border, even when that means it overhangs
-    the left/right border slightly (split evenly by the horizontal centering). Returns (w, h, left,
-    top) in canvas px. The plugin's Fit Poster button mirrors this in JS — keep them in sync."""
+def _find_bottom_guide_y(psd: "PSDImage", canvas_h: int) -> float:
+    """Lowest horizontal guide on the canvas = the poster area's true bottom bound (in these
+    templates, where the bottom gradient/fade overlay begins) — falls back to canvas_h − 25px when
+    the template has no guides (e.g. scratch mode). Mirrors the plugin's findBottomGuideY in JS.
+
+    The PSD "Grid and guides resource" (image resource 1032) stores each guide's position as a
+    27.5 fixed-point value (pixels × 32) alongside a direction byte (0 = vertical, 1 = horizontal) —
+    confirmed against the bundled templates' guides, which land exactly on the existing logo-geometry
+    reference constants (1100px / 1352.13px) once divided by 32."""
+    from psd_tools.constants import Resource
+
+    border_px = 25
+    best: float | None = None
+    try:
+        info = psd.image_resources.get_data(Resource.GRID_AND_GUIDES_INFO)
+        for location, direction in (info.data if info else []):
+            if direction != 1:   # 0 = vertical, 1 = horizontal
+                continue
+            y = location / 32.0
+            if y <= border_px or y >= canvas_h:
+                continue
+            if best is None or y > best:
+                best = y
+    except Exception:
+        pass
+    return best if best is not None else float(canvas_h - border_px)
+
+
+def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, bottom_y: float) -> tuple[int, int, int, int]:
+    """Cover-fit a poster into the bordered box (canvas − 25px each side horizontally, top border to
+    bottom_y vertically), preserving ratio, then center horizontally and top-align at y=25. Scaling
+    by the LARGER of the width/height ratios guarantees the poster always reaches bottom_y, even when
+    that means it overhangs the left/right border slightly (split evenly by the horizontal centering).
+    bottom_y is normally the template's lowest horizontal guide (see _find_bottom_guide_y) — NOT the
+    raw canvas height. Returns (w, h, left, top) in canvas px. The plugin's Fit Poster button mirrors
+    this in JS — keep them in sync."""
     border_px = 25
     target_w = max(1, canvas_w - (border_px * 2))
-    target_h = max(1, canvas_h - (border_px * 2))
+    target_h = max(1, bottom_y - border_px)
     scale = max(target_w / src_w, target_h / src_h)
     new_w = max(1, round(src_w * scale))
     new_h = max(1, round(src_h * scale))
@@ -2160,11 +2190,13 @@ def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h:
     return new_w, new_h, pos_left, pos_top
 
 
-def _place_poster(pil: Image.Image, canvas_w: int, canvas_h: int, fit_within_border: bool) -> tuple[Image.Image, int, int]:
+def _place_poster(pil: Image.Image, canvas_w: int, canvas_h: int, fit_within_border: bool, bottom_y: float | None = None) -> tuple[Image.Image, int, int]:
     """Resize a poster exactly as the PSD export places it. Returns (image, left, top)."""
     if fit_within_border:
-        # Cover-fit the bordered box, top-aligned and centered horizontally.
-        new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(pil.width, pil.height, canvas_w, canvas_h)
+        # Cover-fit the bordered box (up to bottom_y, the template's guide or canvas_h − 25px
+        # fallback), top-aligned and centered horizontally.
+        by = bottom_y if bottom_y is not None else (canvas_h - 25)
+        new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(pil.width, pil.height, canvas_w, by)
         return pil.resize((new_w, new_h), Image.LANCZOS), pos_left, pos_top
     # Default behavior: cover-fill to full canvas, then center-crop.
     scale = max(canvas_w / pil.width, canvas_h / pil.height)
@@ -2220,10 +2252,11 @@ def _build_psd(
       - Creates a blank PSD with poster layers at the bottom and LOGO on top.
 
     Each poster is cover-filled to the canvas dimensions by default. When
-    fit_within_border=True, posters are cover-fit into the bordered box
-    (canvas width/height minus 25px on each side), preserving ratio and top-aligning
-    at y=25 — the poster may overhang the left/right border slightly to guarantee
-    it still reaches the bottom border. The logo is bottom-anchored.
+    fit_within_border=True, posters are cover-fit into the bordered box (canvas width minus 25px
+    on each side, top border down to the template's lowest horizontal guide — or canvas height
+    minus 25px when the template has no guides), preserving ratio and top-aligning at y=25 — the
+    poster may overhang the left/right border slightly to guarantee it still reaches that bottom
+    bound. The logo is bottom-anchored.
     Backdrop images are scaled to fit the canvas height (no crop) and centred horizontally.
     """
     try:
@@ -2242,6 +2275,10 @@ def _build_psd(
     # Build the base display name used for all layer names
     base_name = f"{title} ({year})" if title and year else title or "Poster"
 
+    # Resolved once per export (same for every poster layer): the template's own lowest horizontal
+    # guide, or canvas_h − 25px when it has none (scratch mode, or a template without one).
+    bottom_y = _find_bottom_guide_y(psd, canvas_h) if fit_within_border else None
+
     # ── POSTER(S) ─────────────────────────────────────────────────────────────
     # Insert in reverse order so first-selected ends up on top of the group stack
     _names = poster_layer_names or []
@@ -2252,7 +2289,7 @@ def _build_psd(
         tag = _names[orig_idx].strip() if orig_idx < len(_names) else ""
         layer_name = tag if tag else (base_name if len(poster_bytes_list) == 1 else f"{base_name} {len(poster_bytes_list) - idx}")
         poster_pil, pos_left, pos_top = _place_poster(
-            Image.open(BytesIO(poster_bytes)).convert("RGB"), canvas_w, canvas_h, fit_within_border)
+            Image.open(BytesIO(poster_bytes)).convert("RGB"), canvas_w, canvas_h, fit_within_border, bottom_y)
 
         poster_layer = PixelLayer.frompil(poster_pil, psd, name=layer_name, top=pos_top, left=pos_left)
         # frompil bypasses psd-tools' macroman guard for the legacy name field, so a non-macroman

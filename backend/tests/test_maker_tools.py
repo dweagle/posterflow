@@ -24,6 +24,7 @@ from api.maker_tools import (
     _check_show_status,
     _content_disposition,
     _extract_name,
+    _find_bottom_guide_y,
     _merge_recent_missing_items,
     _translate_year_season,
     _fetch_tmdb_image_bytes,
@@ -1316,14 +1317,43 @@ def test_compute_logo_geometry_scales_with_canvas():
 
 
 def test_compute_poster_fit_geometry_bordered_and_top_aligned():
-    # Cover-fit: scaled by the LARGER of the width/height ratios, so the poster always reaches the
-    # bottom border (height matches the bordered box exactly) even if that means a slight left/right
-    # overhang past the border, split evenly by the horizontal centering.
+    # compute_poster_fit_geometry takes the RESOLVED bottom bound (bottom_y) directly — it never
+    # derives it from canvas height itself; that's _find_bottom_guide_y's job (below). Cover-fit:
+    # scaled by the LARGER of the width/height ratios, so the poster always reaches bottom_y, even
+    # if that means a slight left/right overhang past the border, split evenly by centering.
     assert compute_poster_fit_geometry(1000, 1500, 1000, 1500) == (967, 1450, 16, 25)
     assert compute_poster_fit_geometry(500, 750, 2000, 3000) == (1967, 2950, 16, 25)
     w, h, left, top = compute_poster_fit_geometry(800, 1200, 1000, 1500)
     assert h == 1450 and top == 25   # bordered height exactly covered, top-aligned
     assert left == (1000 - w) // 2   # any overhang split evenly by horizontal centering
+
+
+@_psd_tools_missing
+def test_find_bottom_guide_y_reads_the_templates_own_guide():
+    """Pinned against the two bundled templates' real guide resources — the actual bug the JSX
+    script exposed: the poster's true bottom bound is the template's own guide, not canvas_h − 25."""
+    from psd_tools.api.psd_image import PSDImage
+    import api.maker_tools as _mt
+
+    assets = Path(_mt.__file__).parent.parent / "assets"
+    cl2k = assets / "default_template.psd"
+    mm2k = assets / "default_template_mm2k.psd"
+    if not cl2k.exists() or not mm2k.exists():
+        pytest.skip("bundled default templates missing")
+
+    cl2k_psd = PSDImage.open(str(cl2k))
+    assert _find_bottom_guide_y(cl2k_psd, cl2k_psd.height) == 1375.0
+
+    mm2k_psd = PSDImage.open(str(mm2k))
+    assert _find_bottom_guide_y(mm2k_psd, mm2k_psd.height) == pytest.approx(1415.65625)
+
+
+@_psd_tools_missing
+def test_find_bottom_guide_y_falls_back_without_guides():
+    from psd_tools.api.psd_image import PSDImage
+
+    blank = PSDImage.new("RGB", (1000, 1500))
+    assert _find_bottom_guide_y(blank, 1500) == 1475.0   # canvas_h − border_px, no guides present
 
 
 def test_measure_logo_density_opaque_vs_transparent():

@@ -975,8 +975,9 @@ function MakerTools() {
                         <InfoTip>
                           Default export fills the full canvas. Enable this to scale posters into the canvas
                           minus a 25px border on each side, preserving aspect ratio and aligning the poster 25px
-                          from the top edge. The poster is scaled to cover the full bordered height, so it may
-                          overhang the left/right border slightly rather than leave a gap at the bottom.
+                          from the top edge. The poster is scaled to reach the template's own bottom guide (or the
+                          border, if it has none), so it may overhang the left/right border slightly rather than
+                          leave a gap above that line.
                         </InfoTip>
                       </div>
                       <label className="toggle-switch" style={{ flexShrink: 0 }}>

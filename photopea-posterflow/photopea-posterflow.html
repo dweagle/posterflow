@@ -79,7 +79,7 @@
   </div>
   <div class="tools">
     <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo (keeps the logo's colors)">Place Logo</button>
-    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer into the 25px border (top-aligned, centered, always reaches the bottom)">Fit Poster</button>
+    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer into the 25px border, down to the document's own bottom guide if it has one (top-aligned, centered)">Fit Poster</button>
   </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
@@ -473,11 +473,13 @@
     const w = rnd(srcW * scale), h = rnd(srcH * scale);
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
   };
-  // Cover-fit into the bordered box (canvas − 25px each side, both axes): scale by the LARGER of the
-  // width/height ratios so the poster always reaches the bottom border, even if that means it
-  // overhangs the left/right border slightly (split evenly by the horizontal centering below).
-  const computePosterFitGeometry = (srcW, srcH, cw, ch) => {
-    const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, ch - border * 2);
+  // Cover-fit into the bordered box (canvas − 25px each side horizontally, top border down to
+  // bottomY vertically): scale by the LARGER of the width/height ratios so the poster always
+  // reaches bottomY, even if that means it overhangs the left/right border slightly (split evenly
+  // by the horizontal centering below). bottomY is the RESOLVED bottom bound — the document's own
+  // lowest horizontal guide when present (read below, in READ_GEO), else ch - 25.
+  const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
+    const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, bottomY - border);
     const scale = Math.max(targetW / srcW, targetH / srcH);
     const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
@@ -498,11 +500,17 @@
     "try{" + NV + work + "}catch(e){app.echoToOE('SZERR:'+e);}" +
     "try{if(_ru!=null)app.preferences.rulerUnits=_ru;}catch(e){}";
 
-  // Read active-layer bounds + canvas size → echo SZGEO. (Fit Poster uses just this.)
+  // Read active-layer bounds + canvas size → echo SZGEO. (Fit Poster uses just this.) Also finds
+  // the lowest horizontal guide on the canvas (gy) — Fit Poster's true bottom bound, where these
+  // templates' bottom gradient/fade overlay begins; null when the document has none, and
+  // onGeo falls back to ch - 25 in that case. Mirrors the reference .jsx script's findBottomGuideY.
   const READ_GEO = px(
     "var d=app.activeDocument,L=d.activeLayer,b=L.bounds;" +
     "var ll=nv(b[0]),lt=nv(b[1]),lw=Math.round(nv(b[2])-ll),lh=Math.round(nv(b[3])-lt);" +
-    "app.echoToOE('SZGEO:'+JSON.stringify({cw:nv(d.width),ch:nv(d.height),lw:lw,lh:lh,ll:ll,lt:lt}));");
+    "var ch=nv(d.height),gy=null;" +
+    "for(var i=0;i<d.guides.length;i++){var g=d.guides[i];if(g.direction!==Direction.HORIZONTAL)continue;" +
+    "var y=nv(g.coordinate);if(y<=25||y>=ch)continue;if(gy===null||y>gy)gy=y;}" +
+    "app.echoToOE('SZGEO:'+JSON.stringify({cw:nv(d.width),ch:ch,lw:lw,lh:lh,ll:ll,lt:lt,gy:gy}));");
 
   // Placement is two scripts: (1) resize the layer and echo its NEW top-left as plain numbers
   // (SZRSZ:left,top); (2) the plugin computes the move in JS (no in-script UnitValue math) and
@@ -535,7 +543,7 @@
     if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
     const res = pendingMode === 'logo'
       ? computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)
-      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw, geo.ch);
+      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw, (geo.gy != null ? geo.gy : geo.ch - 25));
     applyPlacement(geo, res);
   };
 
