@@ -61,6 +61,8 @@
   .msg { padding: 8px; color: #9aa; }
   .trimbar { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
+  .trimbar2 { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
+  .trimbar2 .btn { padding: 4px 14px; white-space: nowrap; }
   .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
   .batchbar.hidden { display: none; }
   .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
@@ -101,9 +103,11 @@
   <div class="list"><div class="msg">Loading…</div></div>
   <div class="trimbar">
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
-    <button class="btn" data-act="textless-export" title="Download a JPG of the POSTER group's currently-visible variant only — every other layer (logo, gradient, border, text) hidden">Textless</button>
     <button class="btn" data-act="logo-export" title="Download the LOGO group as a trimmed transparent PNG">Logo</button>
-    <button class="btn" data-act="squareart" title="Crop a square out of the POSTER group's currently-visible variant (500-3000px) and download it as JPG">Square Art</button>
+  </div>
+  <div class="trimbar2">
+    <button class="btn" data-act="textless-export" title="Download a JPG of the POSTER group's currently-visible variant only — every other layer (logo, gradient, border, text) hidden">Textless</button>
+    <button class="btn" data-act="squareart" title="Crop a square (min 500x500) out of the POSTER group's currently-visible variant and download it as JPG">Square Art</button>
   </div>
 
 <script>
@@ -611,6 +615,25 @@
     img.src = url;
   });
 
+  // Re-encode a PNG Blob as JPEG (flattened onto white, since JPG has no alpha channel). Used after
+  // trimPngAlpha for Textless: the isolated art is exported as PNG first so the empty canvas gutter
+  // around it (e.g. a poster template's border margin) can be cropped away by its alpha bounds
+  // before flattening — exporting straight to JPG would bake that gutter in as a white margin.
+  const pngBlobToJpg = (blob, quality) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff'; cx.fillRect(0, 0, img.width, img.height);
+      cx.drawImage(img, 0, 0);
+      cv.toBlob((b) => b ? resolve(b) : reject(new Error('JPEG encode failed')), 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('PNG decode failed')); };
+    img.src = url;
+  });
+
   // PNG bytes from the logo export: restore visibility, trim, download.
   const onLogoBytes = async (buf) => {
     restoreLogoVis();
@@ -652,17 +675,25 @@
   const exportTextless = () => {
     if (textlessBusy || jpgBusy || placeBusy || logoExpBusy || batchBusy || trimBusy || squareArtBusy) return;
     textlessBusy = true; textlessBtn.textContent = '…';
+    // Exports PNG (not straight to JPG): the isolated art commonly sits inset from the canvas edge
+    // (e.g. a poster template's border gutter), which is empty/transparent once everything else is
+    // hidden — trimming to the alpha bounds before flattening to JPG is what drops that as a margin.
     send('try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' + POSTER_ISOLATE_JS +
       'app.echoToOE("SZPOSTERVIS:"+JSON.stringify(chg));' +
-      'if(!posterOk){app.echoToOE("SZNOPOSTER:");}else{d.saveToOE("jpg:0.90");}' +
+      'if(!posterOk){app.echoToOE("SZNOPOSTER:");}else{d.saveToOE("png");}' +
       '}catch(e){app.echoToOE("SZERR:"+e);}');
   };
-  // JPG bytes from the textless export: restore visibility, download.
-  const onTextlessBytes = (buf) => {
+  // PNG bytes from the textless export: restore visibility, trim to the alpha bounds, re-encode as
+  // JPG, download.
+  const onTextlessBytes = async (buf) => {
     restorePosterVis();
-    const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
-    download(buf, base + activeSuffix() + '.jpg');
-    flashTextless('✓');
+    try {
+      const trimmed = await trimPngAlpha(buf);
+      const jpg = await pngBlobToJpg(trimmed, 0.9);
+      const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+      download(jpg, base + activeSuffix() + '.jpg');
+      flashTextless('✓');
+    } catch (e) { flashTextless('✗'); note('Textless export failed: ' + (e && e.message ? e.message : e)); }
   };
 
   // Square Art: same isolate as Textless, but exports a PNG (avoids a second lossy JPEG re-encode)
@@ -691,11 +722,17 @@
     };
     window.addEventListener('message', onReady);
   };
-  const onSquareArtPreviewBytes = (buf) => {
+  const onSquareArtPreviewBytes = async (buf) => {
     restorePosterVis();
     squareArtBtn.textContent = 'Square Art';
-    const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
-    openSquareCropTab(buf, base + activeSuffix());
+    try {
+      // Trim to the alpha bounds here too — otherwise the crop tab would show (and let you crop
+      // into) the same empty canvas gutter the Textless fix above drops.
+      const trimmed = await trimPngAlpha(buf);
+      const trimmedBuf = await trimmed.arrayBuffer();
+      const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+      openSquareCropTab(trimmedBuf, base + activeSuffix());
+    } catch (e) { flashSquareArt('✗'); note('Square Art failed: ' + (e && e.message ? e.message : e)); }
     squareArtBusy = false;
   };
 

@@ -33,14 +33,16 @@
   .caption strong { color: #cfd6e4; }
   .presets { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; padding-top: 2px; }
   .presets__label { font-size: 10px; color: #99aaaa; font-weight: 700; }
-  .btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px; padding: 6px 12px; font-size: 12px; }
-  .btn:hover:not(:disabled) { background: #4a4a54; }
-  .btn:disabled { opacity: 0.45; cursor: default; }
-  .btn.primary { background: #2b5c9e; }
+  .btn { cursor: pointer; background: #3a3a42; border: 1px solid #52525c; color: #f0f0f0; border-radius: 4px;
+    padding: 7px 14px; font-size: 12px; font-weight: 600; }
+  .btn:hover:not(:disabled) { background: #4a4a54; border-color: #64646e; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.primary { background: #2b5c9e; border-color: #3f74bd; }
   .btn.primary:hover:not(:disabled) { background: #356ec0; }
-  .btn.active { background: #2e7d46; }
+  .btn.active { background: #2e7d46; border-color: #3fae62; }
   .footer { display: flex; gap: 8px; margin-top: 18px; }
   .presets button { text-align: center; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
@@ -63,7 +65,9 @@
   'use strict';
 
   const MIN_OUTPUT = 500;
-  const PRESETS = [500, 1000, 1500, 2000, 2500, 3000];
+  // Posters here are never wider than 1000px (the canvas width) — matches the Photoshop plugin's
+  // preset list. 950 covers a "Fit Poster inside border" export (1000 - 25px*2), 1000 a full-bleed one.
+  const PRESETS = [500, 950, 1000];
 
   const waitingEl = document.querySelector('[data-el="waiting"]');
   const layoutEl = document.querySelector('[data-el="layout"]');
