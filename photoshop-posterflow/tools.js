@@ -251,10 +251,13 @@ async function exportLogoPng(doc, constants, folder, filename) {
 // Shared primitive for both features: hide every top-level layer except the root-level POSTER
 // group (this is what drops LOGO/GRADIENT/SEASONS/SEQUEL/border chrome — anything outside POSTER —
 // without needing to name it), then within POSTER hide every child except the one that's already
-// visible (the currently-rendered variant). Must run on a DUPLICATE, inside executeAsModal, same as
-// exportLogoPng above. Returns { ok, reason } — reason is 'no-poster' | 'empty' on failure, or
-// 'fallback' when no POSTER group existed and a best-effort chrome-only hide was used instead.
-function isolatePosterArt(dup, constants) {
+// visible (the currently-rendered variant), then TRIM to that content's own bounds — templates
+// commonly inset the poster art from the canvas edge (e.g. a 25px gutter reserved for a border/frame
+// graphic elsewhere in the stack), and with everything else hidden that gutter is empty canvas,
+// which JPG export would otherwise flatten to a white margin. Must run on a DUPLICATE, inside
+// executeAsModal, same as exportLogoPng above. Returns { ok, reason } — reason is 'empty' on
+// failure, or 'fallback' when no POSTER group existed and a best-effort chrome-only hide was used.
+async function isolatePosterArt(dup, constants) {
   const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
   const top = dup.layers;
 
@@ -269,6 +272,7 @@ function isolatePosterArt(dup, constants) {
     for (let i = 0; i < kids.length; i++) { if (kids[i].visible) { activeIdx = i; break; } }
     if (activeIdx < 0) return { ok: false, reason: 'empty' };
     for (let i = 0; i < kids.length; i++) kids[i].visible = (i === activeIdx);
+    await dup.trim(constants.TrimType.TRANSPARENT);
     return { ok: true };
   }
 
@@ -284,6 +288,7 @@ function isolatePosterArt(dup, constants) {
       for (let i = 0; i < cont.length; i++) cont[i].visible = (i === path[k]);
       cont = cont[path[k]].layers;
     }
+    await dup.trim(constants.TrimType.TRANSPARENT);
     return { ok: true };
   }
 
@@ -294,6 +299,7 @@ function isolatePosterArt(dup, constants) {
       top[i].visible = false;
     }
   }
+  await dup.trim(constants.TrimType.TRANSPARENT);
   return { ok: true, reason: 'fallback' };
 }
 
@@ -304,7 +310,7 @@ async function exportTextlessJpg(doc, constants, folder, filename) {
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
     try {
-      const iso = isolatePosterArt(dup, constants);
+      const iso = await isolatePosterArt(dup, constants);
       if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
       const file = await folder.createFile(filename, { overwrite: true });
       await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
@@ -324,7 +330,7 @@ async function readPosterSize(doc, constants) {
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
     try {
-      const iso = isolatePosterArt(dup, constants);
+      const iso = await isolatePosterArt(dup, constants);
       if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
       result = { ok: true, width: Math.round(dup.width), height: Math.round(dup.height) };
     } finally {
@@ -342,7 +348,7 @@ async function exportPosterPreview(doc, constants, folder, filename, maxDim) {
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
     try {
-      const iso = isolatePosterArt(dup, constants);
+      const iso = await isolatePosterArt(dup, constants);
       if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
       const w = dup.width, h = dup.height;
       const longEdge = Math.max(w, h);
@@ -370,7 +376,7 @@ async function exportSquareArtJpg(doc, constants, folder, filename, cropRectNati
   await core.executeAsModal(async () => {
     const dup = await doc.duplicate();
     try {
-      const iso = isolatePosterArt(dup, constants);
+      const iso = await isolatePosterArt(dup, constants);
       if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
       await dup.crop(cropRectNative);
       const file = await folder.createFile(filename, { overwrite: true });

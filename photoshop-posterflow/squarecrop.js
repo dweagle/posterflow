@@ -19,7 +19,7 @@ function openSquareCropDialog({ imageUrl, nativeW, nativeH, title, onSave, onCan
     '<div class="crop-dialog__header"><span>Crop to square art' + (title ? ' — ' + escapeHtml(title) : '') + '</span>' +
     '<button type="button" class="crop-dialog__close">×</button></div>' +
     '<div class="crop-dialog__body">' +
-      '<div>' +
+      '<div class="crop-col">' +
         '<div class="crop-img-wrap"><img draggable="false" alt="" /></div>' +
         '<p class="crop-caption"></p>' +
       '</div>' +

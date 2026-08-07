@@ -62,28 +62,45 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .trimbar { flex-shrink: 0; display: flex; justify-content: center; padding: 3px; border-top: 1px solid #3a3a42; background: #23232a; }
 .trimbar sp-action-button { margin: 0 2px; }
 
+/* Textless / Square Art get their own row underneath — packing them into .trimbar wrapped
+   "Square Art" onto two lines. white-space:nowrap + no flex-shrink keeps each button's label on
+   one line regardless of panel width (the docked panel can scroll horizontally if truly narrow). */
+.trimbar2 { flex-shrink: 0; display: flex; justify-content: center; padding: 3px; border-top: 1px solid #3a3a42; background: #23232a; }
+.trimbar2 sp-action-button { margin: 0 2px; flex-shrink: 0; white-space: nowrap; }
+
 .hidden { display: none; }
 
-/* ---- Square Art crop dialog (squarecrop.js) — sized independently of the docked panel. ---- */
-.crop-dialog { width: 640px; max-width: 92vw; max-height: 88vh; padding: 0; border: 1px solid #3a3a42;
-  border-radius: 8px; background: #1f1f24; color: #e6e6e6; }
-.crop-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+/* ---- Square Art crop dialog (squarecrop.js) — sized independently of the docked panel. ----
+   UXP renders only a SUBSET of CSS (silent failures, no console warning), so this deliberately
+   avoids anything that isn't rock-solid core CSS: no ::backdrop (unreliable across UXP versions —
+   the dialog gets a plain opaque background instead so nothing behind it can show through), no
+   huge box-shadow spread (used elsewhere as an outside-the-box dimming trick; dropped here — a
+   filled overlay div does the same job more predictably), no vw/vh units (fixed px only), explicit
+   fixed positioning + transform centering instead of relying on <dialog>'s default UA centering. */
+.crop-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 860px; height: 700px; padding: 0; margin: 0; border: 1px solid #3a3a42; border-radius: 8px;
+  background: #1f1f24; color: #e6e6e6; display: flex; flex-direction: column; overflow: hidden; }
 .crop-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
-  background: #2a2a31; border-bottom: 1px solid #3a3a42; font-weight: 700; }
+  background: #2a2a31; border-bottom: 1px solid #3a3a42; font-weight: 700; flex-shrink: 0; }
 .crop-dialog__close { cursor: pointer; background: transparent; border: 0; color: #cfcfcf; font-size: 18px; line-height: 1; }
-.crop-dialog__body { display: flex; gap: 14px; align-items: flex-start; justify-content: center; padding: 14px; flex-wrap: wrap; }
-.crop-img-wrap { position: relative; line-height: 0; user-select: none; touch-action: none; max-width: 420px; }
-.crop-img-wrap img { max-width: 100%; max-height: 56vh; display: block; }
-.crop-box { position: absolute; border: 2px solid #64b5f6; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-  cursor: move; box-sizing: border-box; }
+.crop-dialog__body { display: flex; gap: 14px; align-items: flex-start; justify-content: center; padding: 14px;
+  flex: 1 1 auto; min-height: 0; }
+/* Shrink-wraps to the <img>'s own rendered size (no fixed width/height on the wrap itself) — the
+   crop box below is positioned in px relative to this element, so its bounds must exactly match
+   the image's bounds (origin at the image's top-left corner), not a larger centering container. */
+.crop-img-wrap { position: relative; display: inline-block; line-height: 0; user-select: none; touch-action: none; }
+.crop-img-wrap img { max-width: 560px; max-height: 540px; display: block; }
+.crop-box { position: absolute; border: 2px solid #64b5f6; cursor: move; box-sizing: border-box; }
 .crop-box__handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; background: #64b5f6;
   border: 2px solid #fff; border-radius: 3px; cursor: nwse-resize; }
 .crop-badge { position: absolute; background: rgba(220, 220, 220, 0.95); color: #1a1a1a; font-size: 12px;
   font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.35); pointer-events: none; white-space: nowrap; }
-.crop-caption { font-size: 11px; color: #99aaaa; margin: 8px 0 0; text-align: center; max-width: 420px; }
-.crop-presets { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; padding-top: 2px; }
+.crop-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.crop-caption { font-size: 11px; color: #99aaaa; margin: 0; text-align: center; max-width: 560px; }
+.crop-presets { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; width: 130px; padding-top: 2px; }
 .crop-presets__label { font-size: 10px; color: #99aaaa; font-weight: 700; }
-.crop-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid #3a3a42; background: #23232a; }
+.crop-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid #3a3a42;
+  background: #23232a; flex-shrink: 0; }
 .crop-dialog button.btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px;
   padding: 6px 12px; font-size: 12px; }
 .crop-dialog button.btn:hover:not(:disabled) { background: #4a4a54; }
