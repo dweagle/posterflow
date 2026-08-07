@@ -8,7 +8,7 @@ from models.job import Job
 from models.poster import Poster
 from models.plex_upload import PlexUploadRecord
 from core.config import settings
-from services.plex_upload import PlexUploadService
+from services.plex_upload import AssetOutcome, PlexUploadService, format_unmatched_reasons
 
 
 class _FakePlexItem:
@@ -250,8 +250,8 @@ def test_manual_single_background_job_passes_dry_run_to_preupload(test_db, monke
                     "matched": 1,
                     "uploaded": 0,
                     "would_upload": 1,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -981,8 +981,8 @@ def test_webhook_background_job_completes_with_warning_when_no_local_assets(test
                     "scanned": 0,
                     "matched": 0,
                     "uploaded": 0,
-                    "candidate_matches_raw": 0,
-                    "candidate_matches_unique": 0,
+                    "plex_targets": 0,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -1078,8 +1078,8 @@ def test_webhook_background_job_completes_without_retry_on_matched_zero_upload(t
                     "scanned": 1,
                     "matched": 1,
                     "uploaded": 0,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 1,
                     "errors": 0,
                 },
@@ -1446,8 +1446,8 @@ def test_webhook_background_job_short_circuits_when_target_is_fully_cached(test_
                     "scanned": 1,
                     "matched": 1,
                     "uploaded": 1,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -1543,8 +1543,8 @@ def test_webhook_background_job_series_season_runs_season_and_show_posters(test_
                     "scanned": 1,
                     "matched": 1,
                     "uploaded": 1,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -1639,8 +1639,8 @@ def test_webhook_background_job_series_season_cache_gate_requires_both_targets(t
                     "scanned": 1,
                     "matched": 1,
                     "uploaded": 1,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -2212,17 +2212,17 @@ def test_plex_upload_ambiguous_no_id_asset_is_skipped(test_db, monkeypatch):
 
     monkeypatch.setattr("services.plex_upload.log_info", _capture_info)
 
-    uploaded, matched, raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 0
-    assert matched is False
-    assert raw_candidates == 2
-    assert unique_candidates == 0
-    assert media_counts == service._empty_media_upload_counts()
+    assert outcome.uploaded == 0
+    assert outcome.matched is False
+    assert outcome.skip_reason == "type_unresolved"
+    assert outcome.plex_targets == 0
+    assert outcome.media_counts == service._empty_media_upload_counts()
     assert any("Skipping ambiguous no-ID asset" in message for message in info_messages)
 
 
@@ -2241,17 +2241,17 @@ def test_plex_upload_no_id_asset_prefers_collection_when_type_unknown(test_db):
         "collections": {"alien": [_FakePlexItem("collection", "Alien Collection", None, "Movies")]},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert unique_candidates == 1
-    assert media_counts["collections"] == 1
-    assert media_counts["movies"] == 0
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.plex_targets == 1
+    assert outcome.media_counts["collections"] == 1
+    assert outcome.media_counts["movies"] == 0
 
 
 def test_plex_upload_no_id_asset_prefers_collection_over_arr_movie_hint(test_db):
@@ -2273,18 +2273,18 @@ def test_plex_upload_no_id_asset_prefers_collection_over_arr_movie_hint(test_db)
         "shows": {},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
         arr_availability=arr_availability,
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert unique_candidates == 1
-    assert media_counts["collections"] == 1
-    assert media_counts["movies"] == 0
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.plex_targets == 1
+    assert outcome.media_counts["collections"] == 1
+    assert outcome.media_counts["movies"] == 0
 
 
 def test_plex_upload_discovery_excludes_tmp_assets_nested_anywhere(test_db, tmp_path):
@@ -2321,17 +2321,17 @@ def test_plex_upload_no_id_asset_falls_back_to_collection_when_untyped_only(test
         "collections": {"middleearth": [_FakePlexItem("collection", "Middle Earth", None, "Movies")]},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert unique_candidates == 1
-    assert media_counts["collections"] == 1
-    assert media_counts["movies"] == 0
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.plex_targets == 1
+    assert outcome.media_counts["collections"] == 1
+    assert outcome.media_counts["movies"] == 0
 
 
 def test_plex_upload_matches_show_by_tvdb_id_when_title_key_misses(test_db):
@@ -2352,16 +2352,16 @@ def test_plex_upload_matches_show_by_tvdb_id_when_title_key_misses(test_db):
         "collections": {},
     }
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert unique_candidates == 1
-    assert media_counts["shows"] == 1
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.plex_targets == 1
+    assert outcome.media_counts["shows"] == 1
 
 
 def test_movie_cache_uses_library_keys_not_legacy_library_name(test_db):
@@ -2411,16 +2411,16 @@ def test_movie_cache_uses_library_keys_not_legacy_library_name(test_db):
     ))
     test_db.commit()
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 2
-    assert matched is True
-    assert unique_candidates == 2
-    assert media_counts["movies"] == 2
+    assert outcome.uploaded == 2
+    assert outcome.matched is True
+    assert outcome.plex_targets == 2
+    assert outcome.media_counts["movies"] == 2
 
 
 def test_movie_default_edition_cache_is_scoped_per_library_key(test_db):
@@ -2470,17 +2470,17 @@ def test_movie_default_edition_cache_is_scoped_per_library_key(test_db):
     ))
     test_db.commit()
 
-    uploaded, matched, _raw_candidates, unique_candidates, media_counts, *_ = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
         media_type_filter="movie",
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert unique_candidates == 2
-    assert media_counts["movies"] == 1
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.plex_targets == 2
+    assert outcome.media_counts["movies"] == 1
 
 
 def test_is_single_target_fully_cached_movie_requires_all_library_keys(test_db):
@@ -2606,9 +2606,10 @@ def test_missing_show_match_logged_once_per_run(test_db, monkeypatch):
         }
         service._upload_asset(asset, index, dry_run=True, media_type_filter="series")
 
-    missing_lines = [m for m in messages if "No Plex show match" in m]
+    missing_lines = [m for m in messages if "can't be applied yet" in m]
     assert len(missing_lines) == 1
     assert "Chicago Fire" in missing_lines[0]
+    assert "no Plex show match" in missing_lines[0]  # no *arr index, so no availability claim
 
 
 def test_no_match_log_level_depends_on_run_type(test_db, monkeypatch):
@@ -3057,7 +3058,7 @@ def test_run_single_upload_series_season_only_processes_season_asset(test_db, mo
 
     def _fake_upload_asset(asset, index, dry_run, **kwargs):
         processed_paths.append(asset["path"])
-        return 1, True, 1, 1, service._empty_media_upload_counts()
+        return AssetOutcome(1, True, 1, service._empty_media_upload_counts())
 
     monkeypatch.setattr(service, "_upload_asset", _fake_upload_asset)
 
@@ -3109,7 +3110,7 @@ def test_run_single_upload_prefers_id_matched_asset_over_title_overlap(test_db, 
 
     def _fake_upload_asset(asset, index, dry_run, **kwargs):
         processed_paths.append(asset["path"])
-        return 1, True, 1, 1, service._empty_media_upload_counts()
+        return AssetOutcome(1, True, 1, service._empty_media_upload_counts())
 
     monkeypatch.setattr(service, "_upload_asset", _fake_upload_asset)
 
@@ -3700,15 +3701,15 @@ def test_upload_asset_season_missing_in_plex_returns_seasons_missing_flag(test_d
         "collections": {},
     }
 
-    uploaded, matched, _raw, _unique, _counts, seasons_missing = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=False,
     )
 
-    assert uploaded == 0
-    assert matched is True  # show was found in Plex
-    assert seasons_missing == 1  # season not yet scanned — should trigger retry
+    assert outcome.uploaded == 0
+    assert outcome.matched is True  # show was found in Plex
+    assert outcome.seasons_missing == 1  # season not yet scanned — should trigger retry
 
 
 def test_upload_asset_season_present_in_plex_returns_zero_seasons_missing(test_db):
@@ -3739,15 +3740,15 @@ def test_upload_asset_season_present_in_plex_returns_zero_seasons_missing(test_d
         "collections": {},
     }
 
-    uploaded, matched, _raw, _unique, _counts, seasons_missing = service._upload_asset(
+    outcome = service._upload_asset(
         asset,
         index,
         dry_run=True,
     )
 
-    assert uploaded == 1
-    assert matched is True
-    assert seasons_missing == 0
+    assert outcome.uploaded == 1
+    assert outcome.matched is True
+    assert outcome.seasons_missing == 0
 
 
 # ---------------------------------------------------------------------------
@@ -4148,8 +4149,8 @@ def test_webhook_background_job_retry_rebuilds_targeted_index(test_db, monkeypat
                     "scanned": 1,
                     "matched": 1,
                     "uploaded": 1,
-                    "candidate_matches_raw": 1,
-                    "candidate_matches_unique": 1,
+                    "plex_targets": 1,
+                    "multi_library_assets": 0,
                     "skipped": 0,
                     "errors": 0,
                 },
@@ -4572,7 +4573,7 @@ def test_upload_asset_supplements_arr_ids_when_path_has_no_tokens(test_db):
         "season_number": 1,
     }
 
-    uploaded, matched, raw, unique, _, seasons_missing = service._upload_asset(
+    outcome = service._upload_asset(
         asset=asset,
         index=index,
         dry_run=True,
@@ -4580,11 +4581,10 @@ def test_upload_asset_supplements_arr_ids_when_path_has_no_tokens(test_db):
         arr_availability=arr_availability,
     )
 
-    assert matched is True, "Show should be matched via ARR-supplemented TVDB ID key"
-    assert raw >= 1
-    assert unique >= 1
-    assert uploaded == 1  # dry_run counts the would-be upload
-    assert seasons_missing == 0
+    assert outcome.matched is True, "Show should be matched via ARR-supplemented TVDB ID key"
+    assert outcome.plex_targets >= 1
+    assert outcome.uploaded == 1  # dry_run counts the would-be upload
+    assert outcome.seasons_missing == 0
 
 
 def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
@@ -4625,7 +4625,7 @@ def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
     }
 
     # No ARR availability at all
-    uploaded, matched, raw, unique, _, _ = service._upload_asset(
+    outcome = service._upload_asset(
         asset=asset,
         index=index,
         dry_run=True,
@@ -4633,10 +4633,10 @@ def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
         arr_availability=None,
     )
 
-    assert matched is False
-    assert raw == 0
-    assert unique == 0
-    assert uploaded == 0
+    assert outcome.matched is False
+    assert outcome.plex_targets == 0
+    assert outcome.uploaded == 0
+    assert outcome.skip_reason == "no_plex_match"
 
 
 # ---------------------------------------------------------------------------
@@ -5094,7 +5094,7 @@ def _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete):
             return {
                 "success": True,
                 "stats": {"scanned": 1, "matched": 1, "uploaded": 1,
-                          "candidate_matches_raw": 1, "candidate_matches_unique": 1,
+                          "plex_targets": 1, "multi_library_assets": 0,
                           "skipped": 0, "errors": 0},
             }
 
@@ -5267,3 +5267,192 @@ def test_webhook_instance_token_ignored_when_no_instances_configured(client, mon
 
     stats = client.get("/api/posterflow/plex-upload/webhook-stats").json()
     assert stats["unknown_instance_tokens"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Unmatched reason breakdown — the scanned/matched gap has to explain itself
+# ---------------------------------------------------------------------------
+
+
+def test_diagnose_no_match_reports_year_mismatch_when_plex_has_other_year(test_db):
+    """Title is in Plex but under a different year — not the same as 'not in Plex'."""
+    service = PlexUploadService(test_db)
+    index = {
+        "movies": {"michael": [_FakePlexItem("movie", "Michael", 2026, "Movies")]},
+        "shows": {},
+        "collections": {},
+    }
+
+    assert service._diagnose_no_match(index, "michael", [], 2025) == "year_mismatch"
+    assert service._diagnose_no_match(index, "michael", [], 2026) == "no_plex_match"
+    assert service._diagnose_no_match(index, "nothinghere", [], 2025) == "no_plex_match"
+    assert service._diagnose_no_match(index, "michael", [], None) == "no_plex_match"
+
+
+def test_upload_asset_year_mismatch_is_counted_separately_from_missing(test_db):
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "michael",
+        "path": "/tmp/posters/Michael (2025)/poster.jpg",
+        "display_name": "Michael (2025)",
+        "asset_type": "main",
+        "folder_year": 2025,
+    }
+    index = {
+        "movies": {"michael": [_FakePlexItem("movie", "Michael", 2026, "Movies")]},
+        "shows": {},
+        "collections": {},
+    }
+
+    outcome = service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "year_mismatch"
+
+
+def test_process_assets_accumulates_reasons_and_plex_targets(test_db, monkeypatch):
+    """Run stats must carry the per-reason breakdown and the multi-library target count."""
+    service = PlexUploadService(test_db)
+    outcomes = [
+        AssetOutcome(2, True, 2, service._empty_media_upload_counts()),
+        AssetOutcome(1, True, 1, service._empty_media_upload_counts()),
+        AssetOutcome(0, False, 0, service._empty_media_upload_counts(), skip_reason="no_plex_match"),
+        AssetOutcome(0, False, 0, service._empty_media_upload_counts(), skip_reason="year_mismatch"),
+        AssetOutcome(0, False, 0, service._empty_media_upload_counts(), skip_reason="not_downloaded"),
+    ]
+    monkeypatch.setattr(service, "_upload_asset", lambda *a, **k: outcomes.pop(0))
+
+    assets = [{"path": f"/tmp/{i}.jpg", "asset_type": "main"} for i in range(5)]
+    stats = service._build_run_stats(assets, [])
+    service._process_assets_for_upload(
+        local_assets=assets,
+        index={"movies": {}, "shows": {}, "collections": {}},
+        stats=stats,
+        dry_run=False,
+        arr_availability={},
+        remove_overlay_label=False,
+    )
+
+    assert stats["scanned"] == 5
+    assert stats["matched"] == 2
+    assert stats["plex_targets"] == 3
+    assert stats["multi_library_assets"] == 1  # only the 2-target asset
+    assert stats["unmatched_reasons"] == {
+        "no_plex_match": 1,
+        "year_mismatch": 1,
+        "not_downloaded": 1,
+        "type_unresolved": 0,
+        "edition_pending": 0,
+    }
+    # Buckets partition the scan: nothing is double-counted, nothing vanishes.
+    assert stats["uploaded_files"] == 2
+    assert stats["already_current"] == 0
+    assert stats["awaiting_plex"] == 0
+    assert (
+        stats["uploaded_files"] + stats["already_current"] + stats["awaiting_plex"]
+        + sum(stats["unmatched_reasons"].values()) + stats["errors"] == stats["scanned"]
+    )
+
+
+def test_format_unmatched_reasons_lists_only_non_zero_reasons():
+    assert format_unmatched_reasons({"no_plex_match": 40, "year_mismatch": 0, "not_downloaded": 15}) == (
+        "40 no Plex match, 15 not downloaded"
+    )
+    assert format_unmatched_reasons({"no_plex_match": 0}) == ""
+    assert format_unmatched_reasons(None) == ""
+
+
+def test_format_match_detail_buckets_account_for_every_scanned_file():
+    from modules.upload import _format_match_detail
+
+    detail = _format_match_detail({
+        "scanned": 5715,
+        "uploaded_files": 4,
+        "already_current": 5648,
+        "awaiting_plex": 2,
+        "errors": 0,
+        "unmatched_reasons": {"no_plex_match": 48, "year_mismatch": 9, "not_downloaded": 4},
+    })
+
+    assert detail == (
+        "5,715 file(s): 4 uploaded, 5,648 already current, 2 awaiting Plex scan, "
+        "61 unmatched (48 no Plex match, 9 year differs, 4 not downloaded)"
+    )
+
+    clean = _format_match_detail({"scanned": 12, "uploaded_files": 0, "already_current": 12})
+    assert clean == "12 file(s): 0 uploaded, 12 already current"
+
+
+def test_format_match_detail_says_would_upload_on_a_dry_run():
+    from modules.upload import _format_match_detail
+
+    detail = _format_match_detail({"scanned": 3, "uploaded_files": 3, "already_current": 0}, dry_run=True)
+    assert detail == "3 file(s): 3 would upload"
+
+
+def test_format_match_detail_does_not_invent_unmatched_without_buckets():
+    """A stats dict with no buckets must fall back, not report every file as unmatched."""
+    from modules.upload import _format_match_detail
+
+    detail = _format_match_detail({"scanned": 10, "matched": 8})
+    assert detail == "10 file(s): 8 matched, 2 unmatched"
+
+
+def test_season_poster_of_undownloaded_show_reports_not_downloaded(test_db):
+    """A show with no Sonarr episodes is missing from Plex because of that — its season
+    posters must report the same cause as the show's own poster, not 'no Plex match'."""
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "gracepoint2014",
+        "path": "/tmp/posters/Gracepoint (2014) {tvdb-276396}/Season01.jpg",
+        "display_name": "Gracepoint (2014) {tvdb-276396}",
+        "asset_type": "season",
+        "season_number": 1,
+        "folder_year": 2014,
+    }
+    index = {"movies": {}, "shows": {}, "collections": {}}
+    arr_availability = {"shows": {"gracepoint2014": {"has_episodes": False, "seasons": {}}}}
+
+    outcome = service._upload_asset(asset, index, dry_run=True, arr_availability=arr_availability)
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "not_downloaded"
+
+
+def test_season_poster_of_downloaded_show_missing_from_plex_still_reports_no_match(test_db):
+    """*arr has the episodes, so a Plex miss really is a match problem — keep saying so."""
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "someshow2020",
+        "path": "/tmp/posters/Some Show (2020)/Season01.jpg",
+        "display_name": "Some Show (2020)",
+        "asset_type": "season",
+        "season_number": 1,
+        "folder_year": 2020,
+    }
+    index = {"movies": {}, "shows": {}, "collections": {}}
+    arr_availability = {"shows": {"someshow2020": {"has_episodes": True, "seasons": {1: True}}}}
+
+    outcome = service._upload_asset(asset, index, dry_run=True, arr_availability=arr_availability)
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "no_plex_match"
+
+
+def test_season_poster_without_arr_configured_falls_back_to_match_diagnosis(test_db):
+    """No *arr index means no availability opinion — don't invent one."""
+    service = PlexUploadService(test_db)
+    asset = {
+        "media_key": "someshow2020",
+        "path": "/tmp/posters/Some Show (2020)/Season01.jpg",
+        "display_name": "Some Show (2020)",
+        "asset_type": "season",
+        "season_number": 1,
+        "folder_year": 2020,
+    }
+    index = {"movies": {}, "shows": {}, "collections": {}}
+
+    outcome = service._upload_asset(asset, index, dry_run=True, arr_availability=None)
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "no_plex_match"

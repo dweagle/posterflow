@@ -7,7 +7,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,105 @@ from util.posters.scanner import artwork_type_of, artwork_flat_base
 
 
 PlexUploadProgressCallback = Callable[[int, int, Dict[str, int], str], None]
+
+# Why a file never reached a Plex item. Labels claim only what was determined —
+# the index covers selected libraries only, so "absent from Plex" is never said.
+UNMATCHED_REASONS = ("no_plex_match", "year_mismatch", "not_downloaded", "type_unresolved", "edition_pending")
+UNMATCHED_REASON_LABELS = {
+    "no_plex_match": "no Plex match",
+    "year_mismatch": "year differs",
+    "not_downloaded": "not downloaded",
+    "type_unresolved": "type unresolved",
+    "edition_pending": "edition pending",
+}
+# The same reasons spelled out, for the log where there is room to be unambiguous.
+UNMATCHED_REASON_DETAIL = {
+    "no_plex_match": "nothing in the selected Plex libraries matched this title or its IDs "
+                     "(absent from Plex, titled differently there, or in a library you did not select)",
+    "year_mismatch": "the title matched a Plex item but Plex's year is different",
+    "not_downloaded": "*arr knows the item but reports no downloaded file/episodes yet",
+    "type_unresolved": "no IDs in the path and movie/show/collection could not be told apart",
+    "edition_pending": "waiting for a specific movie edition to appear in Plex",
+}
+
+
+def empty_unmatched_reasons() -> Dict[str, int]:
+    return {reason: 0 for reason in UNMATCHED_REASONS}
+
+
+def format_unmatched_reasons(reasons: Optional[Dict[str, Any]]) -> str:
+    """'40 no Plex match, 15 not downloaded' — non-zero reasons only, empty string when clean."""
+    if not isinstance(reasons, dict):
+        return ""
+    parts = [
+        f"{int(reasons.get(reason, 0)):,} {UNMATCHED_REASON_LABELS[reason]}"
+        for reason in UNMATCHED_REASONS
+        if int(reasons.get(reason, 0) or 0) > 0
+    ]
+    return ", ".join(parts)
+
+
+def format_outcome_breakdown(
+    kind: str,
+    stats: Dict[str, Any],
+    *,
+    dry_run: bool,
+    scanned_detail: str = "",
+) -> List[str]:
+    """Per-file outcome block as lines, shared by posters and artwork. Lines rather
+    than log calls so each caller emits through its own logger."""
+    scanned = int(stats.get("scanned", 0))
+    uploaded_files = int(stats.get("uploaded_files", 0))
+    already_current = int(stats.get("already_current", 0))
+    awaiting = int(stats.get("awaiting_plex", 0))
+    errored = int(stats.get("errors", 0))
+    unmatched = max(0, scanned - uploaded_files - already_current - awaiting - errored)
+    reasons = stats.get("unmatched_reasons") if isinstance(stats.get("unmatched_reasons"), dict) else {}
+
+    lines = [
+        f"Outcome per {kind} file (final): {scanned:,} scanned{scanned_detail}",
+        f"- {uploaded_files:,} {'would upload' if dry_run else 'uploaded'} — pushed to Plex this run",
+        f"- {already_current:,} already current — matched a Plex item that already has this exact file",
+    ]
+    if awaiting:
+        lines.append(
+            f"- {awaiting:,} awaiting Plex scan — the show matched, but Plex has not scanned that season yet"
+        )
+    if unmatched:
+        lines.append(f"- {unmatched:,} unmatched — no Plex item to apply them to:")
+        lines.extend(
+            f"  - {int(count):,} {UNMATCHED_REASON_LABELS.get(reason, reason)}: "
+            f"{UNMATCHED_REASON_DETAIL.get(reason, '')}"
+            for reason, count in (reasons or {}).items()
+            if int(count or 0)
+        )
+    if errored:
+        lines.append(f"- {errored:,} errored — see the per-file errors above")
+    return lines
+
+
+def artwork_summary_lines(artwork_stats: Dict[str, Any], *, dry_run: bool) -> List[str]:
+    """Artwork's outcome block — the poster block plus the per-type split when anything uploaded."""
+    lines = format_outcome_breakdown("artwork", artwork_stats, dry_run=dry_run)
+    by_type = artwork_stats.get("by_type") if isinstance(artwork_stats.get("by_type"), dict) else {}
+    if int(artwork_stats.get("uploaded_files", 0)):
+        # Sub-bullet of the uploaded line, not whichever bucket lands last.
+        lines.insert(
+            2,
+            f"  - {int(by_type.get('logo', 0))} logos, {int(by_type.get('background', 0))} backgrounds, "
+            f"{int(by_type.get('squareart', 0))} squareart",
+        )
+    return lines
+
+
+class AssetOutcome(NamedTuple):
+    """Result of one asset's match+upload attempt."""
+    uploaded: int
+    matched: bool
+    plex_targets: int  # distinct Plex items matched (2+ = same title in several libraries)
+    media_counts: Dict[str, int]
+    seasons_missing: int = 0
+    skip_reason: Optional[str] = None
 
 
 class PlexUploadService:
@@ -133,7 +232,7 @@ class PlexUploadService:
         }
 
     @staticmethod
-    def _base_result_stats(scanned: int = 0) -> Dict[str, int]:
+    def _base_result_stats(scanned: int = 0) -> Dict[str, Any]:
         return {
             "scanned": scanned,
             "matched": 0,
@@ -142,6 +241,13 @@ class PlexUploadService:
             "skipped": 0,
             "errors": 0,
             "plex_seasons_missing": 0,
+            "plex_targets": 0,
+            "multi_library_assets": 0,
+            "unmatched_reasons": empty_unmatched_reasons(),
+            # Outcome buckets; every scanned file lands in exactly one, summing to scanned.
+            "uploaded_files": 0,
+            "already_current": 0,
+            "awaiting_plex": 0,
         }
 
     def _no_assets_result(self, message: str) -> Dict[str, Any]:
@@ -165,8 +271,6 @@ class PlexUploadService:
     ) -> Dict[str, Any]:
         return {
             **self._base_result_stats(scanned=len(local_assets)),
-            "candidate_matches_raw": 0,
-            "candidate_matches_unique": 0,
             "main_assets": sum(1 for asset in local_assets if asset.get("asset_type") == "main"),
             "season_assets": sum(1 for asset in local_assets if asset.get("asset_type") == "season"),
             "library_totals": library_totals,
@@ -179,6 +283,9 @@ class PlexUploadService:
                 "skipped": 0,
                 "errors": 0,
                 "by_type": {"logo": 0, "background": 0, "squareart": 0},
+                "unmatched_reasons": empty_unmatched_reasons(),
+                "uploaded_files": 0,
+                "already_current": 0,
             },
         }
 
@@ -213,7 +320,7 @@ class PlexUploadService:
         for asset_index, asset in enumerate(local_assets, start=1):
             progress_message = ""
             try:
-                uploaded_count, matched, raw_candidates, unique_candidates, media_counts, seasons_missing = self._upload_asset(
+                outcome = self._upload_asset(
                     asset,
                     index,
                     dry_run,
@@ -221,20 +328,30 @@ class PlexUploadService:
                     arr_availability=arr_availability,
                     remove_overlay_label=remove_overlay_label,
                 )
-                stats["candidate_matches_raw"] += raw_candidates
-                stats["candidate_matches_unique"] += unique_candidates
-                for key, value in media_counts.items():
+                uploaded_count = outcome.uploaded
+                stats["plex_targets"] += outcome.plex_targets
+                if outcome.plex_targets > 1:
+                    stats["multi_library_assets"] += 1
+                for key, value in outcome.media_counts.items():
                     stats["media_upload_counts"][key] += int(value)
-                if matched:
+                if outcome.matched:
                     stats["matched"] += 1
+                    if uploaded_count > 0:
+                        stats["uploaded_files"] += 1
+                    elif outcome.seasons_missing:
+                        stats["awaiting_plex"] += 1
+                    else:
+                        stats["already_current"] += 1
+                elif outcome.skip_reason in stats["unmatched_reasons"]:
+                    stats["unmatched_reasons"][outcome.skip_reason] += 1
                 if dry_run:
                     stats["would_upload"] += uploaded_count
                 else:
                     stats["uploaded"] += uploaded_count
                 if uploaded_count == 0:
                     stats["skipped"] += 1
-                if seasons_missing:
-                    stats["plex_seasons_missing"] = int(stats.get("plex_seasons_missing", 0)) + seasons_missing
+                if outcome.seasons_missing:
+                    stats["plex_seasons_missing"] = int(stats.get("plex_seasons_missing", 0)) + outcome.seasons_missing
 
                 file_name = Path(str(asset.get("path") or "")).name
                 upload_label = "would upload" if dry_run else "uploaded"
@@ -413,9 +530,10 @@ class PlexUploadService:
                 index=index,
                 stats=stats,
                 dry_run=dry_run,
+                arr_availability=arr_availability,
                 progress_callback=progress_callback,
             )
-            self._log_artwork_summary(stats, dry_run=dry_run)
+            # Full runs log artwork from the job layer; run_single_upload has no summary.
         stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
@@ -530,6 +648,7 @@ class PlexUploadService:
                 index=index,
                 stats=stats,
                 dry_run=dry_run,
+                arr_availability=arr_availability,
             )
             self._log_artwork_summary(stats, dry_run=dry_run)
         stats["year_discrepancies"] = list(self._year_discrepancies)
@@ -1765,7 +1884,7 @@ class PlexUploadService:
         media_type_filter: Optional[str] = None,
         arr_availability: Optional[Dict[str, Any]] = None,
         remove_overlay_label: bool = False,
-    ) -> Tuple[int, bool, int, int, Dict[str, int], int]:
+    ) -> AssetOutcome:
         media_key = asset["media_key"]
         file_path = asset["path"]
         asset_label = self._asset_label(asset)
@@ -1789,15 +1908,27 @@ class PlexUploadService:
         if asset["asset_type"] == "season":
             shows = self._dedupe_plex_items(shows_raw)
             if not shows:
+                # Undownloaded shows are absent from Plex because of that — blame *arr,
+                # not the match, so seasons agree with the show's own poster.
+                available, unavailable_reason = self._asset_has_arr_availability(
+                    asset, "series", arr_availability, asset_id_keys=asset_id_keys,
+                )
                 if media_key not in self._logged_missing_show_keys:
                     self._logged_missing_show_keys.add(media_key)
                     show_label = str(asset.get("display_name") or media_key)
+                    cause = "Sonarr reports no downloaded episodes" if not available else "no Plex show match"
                     log_debug(
                         LogTags.UPLOADER,
-                        f"No Plex show match for '{show_label}'; its season posters can't be applied yet",
+                        f"Season posters for '{show_label}' can't be applied yet: {cause}",
                         file=file_path,
                     )
-                return 0, False, 0, 0, media_counts, 0
+                return AssetOutcome(
+                    0, False, 0, media_counts,
+                    skip_reason=(
+                        "not_downloaded" if not available
+                        else self._diagnose_no_match(index, media_key, asset_id_keys, folder_year)
+                    ),
+                )
 
             uploaded = 0
             cached_skips = 0
@@ -1881,10 +2012,10 @@ class PlexUploadService:
                         f"No Season {int(season_number):02} found in {libraries_text} for {asset.get('display_name', media_key)}",
                         file=file_path,
                     )
-                    return uploaded, True, len(shows_raw), len(shows), media_counts, 1
+                    return AssetOutcome(uploaded, True, len(shows), media_counts, seasons_missing=1)
             if uploaded > 0:
                 self._note_year_discrepancy(asset, shows, asset_id_keys, file_path)
-            return uploaded, True, len(shows_raw), len(shows), media_counts, 0
+            return AssetOutcome(uploaded, True, len(shows), media_counts)
 
         inferred_filter, resolution_reason = self._resolve_target_media_type(
             asset,
@@ -1901,10 +2032,12 @@ class PlexUploadService:
                     f"Skipping ambiguous no-ID asset: {asset_label} ({resolution_reason})",
                     file=file_path,
                 )
-                ambiguous_raw_candidates = len(movies_raw) + len(shows_raw)
-                return 0, False, ambiguous_raw_candidates, 0, media_counts, 0
+                return AssetOutcome(0, False, 0, media_counts, skip_reason="type_unresolved")
             self._log_unmatched(f"No Plex match for asset: {asset_label}", file=file_path)
-            return 0, False, 0, 0, media_counts, 0
+            return AssetOutcome(
+                0, False, 0, media_counts,
+                skip_reason=self._diagnose_no_match(index, media_key, asset_id_keys, folder_year),
+            )
 
         available, unavailable_reason = self._asset_has_arr_availability(
             asset,
@@ -1918,17 +2051,15 @@ class PlexUploadService:
                 f"Skipping unavailable asset: {asset_label} ({unavailable_reason})",
                 file=file_path,
             )
-            return 0, False, 0, 0, media_counts, 0
+            return AssetOutcome(0, False, 0, media_counts, skip_reason="not_downloaded")
         candidate_groups = self._candidate_groups_for_filter(
             inferred_filter, movies_raw, shows_raw, collections_raw
         )
 
-        raw_candidate_count = 0
         matched_items: List[Any] = []
         for candidates in candidate_groups:
             deduped_candidates = self._dedupe_plex_items(candidates)
             if deduped_candidates:
-                raw_candidate_count = len(candidates)
                 matched_items = deduped_candidates
                 break
 
@@ -1938,7 +2069,10 @@ class PlexUploadService:
                 f"movies_raw={len(movies_raw)}, shows_raw={len(shows_raw)}, collections_raw={len(collections_raw)})",
                 file=file_path,
             )
-            return 0, False, raw_candidate_count, 0, media_counts, 0
+            return AssetOutcome(
+                0, False, 0, media_counts,
+                skip_reason=self._diagnose_no_match(index, media_key, asset_id_keys, folder_year),
+            )
 
         if inferred_filter == "movie" and self._expected_edition is not None:
             expected = self._normalize_edition(self._expected_edition)
@@ -1954,7 +2088,7 @@ class PlexUploadService:
                     f"{asset_label} (present: {sorted(set(present_editions))}); deferring upload to retry",
                     file=file_path,
                 )
-                return 0, False, raw_candidate_count, 0, media_counts, 0
+                return AssetOutcome(0, False, 0, media_counts, skip_reason="edition_pending")
 
         if inferred_filter == "movie" and uploaded_editions:
             live_editions = {self._movie_edition_title(m) for m in matched_items}
@@ -2101,14 +2235,57 @@ class PlexUploadService:
         if uploaded > 0:
             self._note_year_discrepancy(asset, matched_items, asset_id_keys, file_path)
 
-        return uploaded, True, raw_candidate_count, len(matched_items), media_counts, 0
+        return AssetOutcome(uploaded, True, len(matched_items), media_counts)
+
+    def _arr_not_downloaded_reason(
+        self,
+        asset: Dict[str, Any],
+        arr_availability: Optional[Dict[str, Any]],
+        asset_id_keys: List[str],
+    ) -> Optional[str]:
+        """*arr's wording when it reports nothing downloaded, else None. Asks both
+        namespaces since a missing item usually can't be resolved to movie-vs-show."""
+        # Collections carry neither year nor ids; without one, don't claim *arr's answer
+        # (an "Alien" collection would inherit the undownloaded movie's label).
+        if not arr_availability:
+            return None
+        if asset.get("folder_year") is None and not asset_id_keys:
+            return None
+        for media_filter in ("movie", "series"):
+            available, reason = self._asset_has_arr_availability(
+                asset, media_filter, arr_availability, asset_id_keys=asset_id_keys,
+            )
+            if not available:
+                return reason or "not downloaded"
+        return None
+
+    def _diagnose_no_match(
+        self,
+        index: Dict[str, Dict[str, List[Any]]],
+        media_key: str,
+        asset_id_keys: List[str],
+        folder_year: Optional[int],
+    ) -> str:
+        """Split "nothing in Plex" from "in Plex under a different year"."""
+        if folder_year is None:
+            return "no_plex_match"
+        for section in ("movies", "shows", "collections"):
+            index_map = index.get(section) or {}
+            pool: List[Any] = []
+            for id_key in asset_id_keys:
+                pool.extend(index_map.get(id_key, []))
+            pool.extend(index_map.get(media_key, []))
+            if pool and not any(getattr(item, "year", None) == folder_year for item in pool):
+                return "year_mismatch"
+        return "no_plex_match"
 
     def _upload_artwork_asset(
         self,
         asset: Dict[str, Any],
         index: Dict[str, Dict[str, List[Any]]],
         dry_run: bool,
-    ) -> Tuple[int, bool]:
+        arr_availability: Optional[Dict[str, Any]] = None,
+    ) -> AssetOutcome:
         """Upload one artwork file (logo/background/squareart) to its matched Plex item(s).
 
         Reuses the poster path's Plex matching + per-file dedupe; simpler because artwork has
@@ -2117,7 +2294,7 @@ class PlexUploadService:
         artwork_type = str(asset.get("artwork_type") or "")
         method_name = self.ARTWORK_UPLOAD_METHODS.get(artwork_type)
         if not method_name:
-            return 0, False
+            return AssetOutcome(0, False, 0, {})
 
         file_path = asset["path"]
         media_key = asset["media_key"]
@@ -2132,15 +2309,39 @@ class PlexUploadService:
         inferred_filter, resolution_reason = self._resolve_target_media_type(
             asset,
             media_type_filter=None,
-            arr_availability=None,
+            # Same index posters use; without it movie-vs-show ties are unresolvable.
+            arr_availability=arr_availability,
             movies_raw=movies_raw,
             shows_raw=shows_raw,
             collections_raw=collections_raw,
         )
+
+        def _no_match_outcome() -> AssetOutcome:
+            """Explain a miss. *arr is asked only here, never before matching — it
+            spans both namespaces and would otherwise veto a real Plex match."""
+            reason = self._arr_not_downloaded_reason(asset, arr_availability, asset_id_keys)
+            if reason:
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Skipping unavailable {artwork_type}: {asset_label} ({reason})",
+                    file=file_path,
+                )
+                return AssetOutcome(0, False, 0, {}, skip_reason="not_downloaded")
+            self._log_unmatched(f"No Plex match for {artwork_type}: {asset_label}", file=file_path)
+            return AssetOutcome(
+                0, False, 0, {},
+                skip_reason=self._diagnose_no_match(index, media_key, asset_id_keys, folder_year),
+            )
+
         if not inferred_filter:
             if not resolution_reason:
-                self._log_unmatched(f"No Plex match for {artwork_type}: {asset_label}", file=file_path)
-            return 0, False
+                return _no_match_outcome()
+            # Artwork used to return silently, leaving the bucket undiagnosable.
+            self._log_unmatched(
+                f"Skipping ambiguous no-ID {artwork_type}: {asset_label} ({resolution_reason})",
+                file=file_path,
+            )
+            return AssetOutcome(0, False, 0, {}, skip_reason="type_unresolved")
 
         matched_items: List[Any] = []
         for candidates in self._candidate_groups_for_filter(inferred_filter, movies_raw, shows_raw, collections_raw):
@@ -2149,8 +2350,7 @@ class PlexUploadService:
                 matched_items = deduped
                 break
         if not matched_items:
-            self._log_unmatched(f"No Plex match for {artwork_type}: {asset_label}", file=file_path)
-            return 0, False
+            return _no_match_outcome()
 
         record = self._get_uploaded_record(file_path)
         uploaded_to_libraries = set(record.get("uploaded_to_libraries", []))
@@ -2198,21 +2398,13 @@ class PlexUploadService:
             )
             log_info(LogTags.UPLOADER, f"Uploaded {artwork_type} for {item_label}", file=file_path, asset=asset_label)
 
-        return uploaded, True
+        return AssetOutcome(uploaded, True, len(matched_items), {})
 
     def _log_artwork_summary(self, stats: Dict[str, Any], *, dry_run: bool) -> None:
         """One line per run so artwork is visible without reading every per-file line.
         Logged by both the full and single-item paths."""
-        art = stats["artwork"]
-        by_type = art["by_type"]
-        log_info(
-            LogTags.UPLOADER,
-            f"Artwork upload: {art['would_upload'] if dry_run else art['uploaded']} "
-            f"{'would upload' if dry_run else 'uploaded'} "
-            f"({by_type['logo']} logos, {by_type['background']} backgrounds, {by_type['squareart']} squareart), "
-            f"{art['matched']} matched, {art['skipped']} skipped, {art['errors']} errors",
-            scanned=art["scanned"],
-        )
+        for line in artwork_summary_lines(stats["artwork"], dry_run=dry_run):
+            log_info(LogTags.UPLOADER, line)
 
     def _process_artwork_for_upload(
         self,
@@ -2221,15 +2413,20 @@ class PlexUploadService:
         index: Dict[str, Dict[str, List[Any]]],
         stats: Dict[str, Any],
         dry_run: bool,
+        arr_availability: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[PlexUploadProgressCallback] = None,
     ) -> None:
         art = stats["artwork"]
         total = len(artwork_assets)
         for i, asset in enumerate(artwork_assets, start=1):
             try:
-                uploaded_count, matched = self._upload_artwork_asset(asset, index, dry_run)
-                if matched:
+                outcome = self._upload_artwork_asset(asset, index, dry_run, arr_availability=arr_availability)
+                uploaded_count = outcome.uploaded
+                if outcome.matched:
                     art["matched"] += 1
+                    art["uploaded_files" if uploaded_count > 0 else "already_current"] += 1
+                elif outcome.skip_reason in art["unmatched_reasons"]:
+                    art["unmatched_reasons"][outcome.skip_reason] += 1
                 if dry_run:
                     art["would_upload"] += uploaded_count
                 else:
@@ -2251,7 +2448,8 @@ class PlexUploadService:
                     progress_callback(
                         i, total,
                         {"matched": art["matched"], "uploaded": art["uploaded"], "would_upload": art["would_upload"], "skipped": art["skipped"], "errors": art["errors"]},
-                        f"Artwork {i}/{total}: {file_name} | matched={art['matched']}, {label}={value}, skipped={art['skipped']}, errors={art['errors']}",
+                        f"Artwork {i}/{total}: {file_name} | {label}={value}, "
+                        f"already current={art['already_current']}, errors={art['errors']}",
                     )
                 except Exception as callback_error:
                     log_warning(LogTags.UPLOADER, f"Artwork upload progress callback failed: {callback_error}")

@@ -758,6 +758,23 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 )
                 child_ok, child_message = _get_child_result(db, plex_child.id)
 
+                # Same embed the standalone job posts
+                _pu_embed = {
+                    "description": child_message or "Plex upload completed",
+                    "fields": [],
+                    "color": 0x4CAF50,
+                }
+                try:
+                    from modules.upload import SETTING_PLEX_UPLOAD_STATS, build_plex_upload_embed
+                    _pu_raw = get_setting_value(db, SETTING_PLEX_UPLOAD_STATS)
+                    if _pu_raw:
+                        _pu_stats = json.loads(_pu_raw)
+                        _pu_embed = build_plex_upload_embed(
+                            _pu_stats, dry_run=bool(_pu_stats.get("dry_run", False))
+                        )
+                except Exception as e:
+                    log_debug(LogTags.WORKFLOW, f"Could not load plex_upload stats from settings: {e}")
+
                 results["jobs_run"].append({
                     "job": "plex_upload",
                     "success": child_ok,
@@ -765,9 +782,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     "embed_spec": {
                         "event_type": "success",
                         "title": "Plex Upload",
-                        "description": child_message or "Plex upload completed",
-                        "fields": [],
-                        "color": 0x4CAF50,
+                        **_pu_embed,
                     },
                 })
 

@@ -120,15 +120,15 @@ def test_upload_artwork_logo_and_dedupes(test_db, tmp_path, monkeypatch):
         "path": str(d / "logo.png"), "media_key": "inception", "display_name": "Inception",
         "asset_type": "main", "season_number": None, "folder_year": 2010, "artwork_type": "logo",
     }
-    uploaded, matched = svc._upload_artwork_asset(asset, idx, dry_run=False)
-    assert matched and uploaded == 1
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
+    assert outcome.matched and outcome.uploaded == 1
     assert item.logo_calls == [str(d / "logo.png")]
     assert item.art_calls == [] and item.square_calls == []
 
     # Second run (cache cleared → reads persisted record) must skip.
     svc.invalidate_record_cache()
-    uploaded2, _ = svc._upload_artwork_asset(asset, idx, dry_run=False)
-    assert uploaded2 == 0
+    outcome2 = svc._upload_artwork_asset(asset, idx, dry_run=False)
+    assert outcome2.uploaded == 0
     assert item.logo_calls == [str(d / "logo.png")]  # not re-uploaded
 
 
@@ -143,8 +143,8 @@ def test_upload_artwork_background_uses_uploadart(test_db, tmp_path, monkeypatch
         "path": str(d / "background.jpg"), "media_key": "inception", "display_name": "Inception",
         "asset_type": "main", "season_number": None, "folder_year": 2010, "artwork_type": "background",
     }
-    uploaded, matched = svc._upload_artwork_asset(asset, idx, dry_run=False)
-    assert uploaded == 1 and matched
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
+    assert outcome.uploaded == 1 and outcome.matched
     assert item.art_calls == [str(d / "background.jpg")]
     assert item.logo_calls == [] and item.square_calls == []
 
@@ -170,6 +170,7 @@ def test_run_single_upload_processes_artwork_when_enabled(test_db, tmp_path, mon
     assert result["success"]
     assert len(calls) == 1
     assert calls[0]["artwork_assets"] == [art]
+    assert "arr_availability" in calls[0]   # else undownloaded items read as match failures
 
 
 def test_run_single_upload_skips_artwork_when_disabled(test_db, tmp_path, monkeypatch):
@@ -226,8 +227,8 @@ def test_upload_artwork_dry_run_does_not_call_plex(test_db, tmp_path, monkeypatc
         "path": str(d / "square.jpg"), "media_key": "inception", "display_name": "Inception",
         "asset_type": "main", "season_number": None, "folder_year": 2010, "artwork_type": "squareart",
     }
-    uploaded, matched = svc._upload_artwork_asset(asset, idx, dry_run=True)
-    assert uploaded == 1 and matched
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True)
+    assert outcome.uploaded == 1 and outcome.matched
     assert item.square_calls == []  # dry run: no actual upload
 
 
@@ -321,63 +322,47 @@ def logged(monkeypatch):
 def _stats(**artwork):
     art = {
         "scanned": 0, "matched": 0, "uploaded": 0, "would_upload": 0, "skipped": 0, "errors": 0,
+        "uploaded_files": 0, "already_current": 0,
         "by_type": {"logo": 0, "background": 0, "squareart": 0},
     }
     art.update(artwork)
+    if "uploaded_files" not in artwork:
+        art["uploaded_files"] = art["would_upload"] or art["uploaded"]
     return {"artwork": art}
 
 
-def test_summary_names_each_artwork_type(test_db, logged):
-    stats = _stats(
-        scanned=6, matched=6, uploaded=6, skipped=0, errors=0,
-        by_type={"logo": 3, "background": 2, "squareart": 1},
+def test_log_artwork_summary_emits_the_shared_block(test_db, logged):
+    """The method is a thin wrapper over the shared formatter; this checks it delegates
+    and carries the per-type split. Bucket wording itself is covered where it is built."""
+    PlexUploadService(test_db)._log_artwork_summary(
+        _stats(scanned=6, uploaded=6, by_type={"logo": 3, "background": 2, "squareart": 1}),
+        dry_run=False,
     )
+    block = "\n".join(logged)
+    assert "Outcome per artwork file (final): 6 scanned" in block
+    assert "- 6 uploaded — pushed to Plex this run" in block
+    assert "3 logos, 2 backgrounds, 1 squareart" in block
 
-    PlexUploadService(test_db)._log_artwork_summary(stats, dry_run=False)
-
-    assert len(logged) == 1
-    line = logged[0]
-    assert "Artwork upload: 6 uploaded" in line
-    assert "3 logos" in line and "2 backgrounds" in line and "1 squareart" in line
-    assert "6 matched" in line
-
-
-def test_summary_reports_would_upload_on_a_dry_run(test_db, logged):
-    stats = _stats(scanned=2, matched=2, would_upload=2, by_type={"logo": 2, "background": 0, "squareart": 0})
-
-    PlexUploadService(test_db)._log_artwork_summary(stats, dry_run=True)
-
-    assert "Artwork upload: 2 would upload" in logged[0]
+    logged.clear()
+    PlexUploadService(test_db)._log_artwork_summary(
+        _stats(scanned=4, matched=0, uploaded=0), dry_run=True,
+    )
+    quiet = "\n".join(logged)
+    assert "- 0 would upload" in quiet          # dry-run verb reaches the wrapper
+    assert "- 4 unmatched" in quiet             # a silent run still reports
+    assert "logos" not in quiet                 # no per-type row when nothing uploaded
 
 
-def test_summary_still_logs_when_nothing_matched(test_db, logged):
-    """The point of the line: a run that placed no artwork must say so, not stay silent."""
-    stats = _stats(scanned=4, matched=0, uploaded=0, skipped=4)
-
-    PlexUploadService(test_db)._log_artwork_summary(stats, dry_run=False)
-
-    assert "Artwork upload: 0 uploaded" in logged[0]
-    assert "4 skipped" in logged[0]
-
-
-def test_summary_surfaces_errors(test_db, logged):
-    stats = _stats(scanned=3, matched=3, uploaded=2, errors=1, by_type={"logo": 2, "background": 0, "squareart": 0})
-
-    PlexUploadService(test_db)._log_artwork_summary(stats, dry_run=False)
-
-    assert "1 errors" in logged[0]
-
-
-def test_both_upload_paths_log_the_summary():
-    """run_full_upload and run_single_upload must both call it — the single path (webhook
-    and Single Poster) previously processed artwork without reporting any of it."""
+def test_single_upload_path_logs_the_summary_itself():
+    """Single runs have no job summary so must log artwork themselves; full runs
+    deliberately don't, so the job layer can print it beside the poster block."""
     import inspect
 
     full = inspect.getsource(PlexUploadService.run_full_upload)
     single = inspect.getsource(PlexUploadService.run_single_upload)
 
-    assert "_log_artwork_summary" in full
     assert "_log_artwork_summary" in single
+    assert "_log_artwork_summary" not in full
 
 
 # ---------------------------------------------------------------------------
@@ -417,13 +402,16 @@ def _run_upload_job(test_db, monkeypatch, stats):
 def _full_stats(**artwork):
     art = {
         "scanned": 0, "matched": 0, "uploaded": 0, "would_upload": 0, "skipped": 0, "errors": 0,
+        "uploaded_files": 0, "already_current": 0,
         "by_type": {"logo": 0, "background": 0, "squareart": 0},
     }
     art.update(artwork)
+    if "uploaded_files" not in artwork:
+        art["uploaded_files"] = art["uploaded"]
     return {
         "scanned": 10, "matched": 8, "uploaded": 8, "skipped": 2, "errors": 0,
+        "uploaded_files": 8, "already_current": 0, "awaiting_plex": 0,
         "movies": 5, "shows": 3, "seasons": 0, "collections": 0,
-        "candidates_raw": 10, "candidates_unique": 10,
         "assets_main": 8, "assets_season": 0,
         "artwork": art,
     }
@@ -434,15 +422,15 @@ def test_job_message_counts_artwork_alongside_posters(test_db, monkeypatch):
 
     job, _ = _run_upload_job(test_db, monkeypatch, stats)
 
-    assert "8 poster(s) uploaded" in job.message
-    assert "6 artwork" in job.message
+    assert "poster 10 file(s): 8 uploaded" in job.message
+    assert "artwork 6 file(s): 6 uploaded" in job.message
 
 
 def test_job_message_omits_artwork_when_it_was_not_enabled(test_db, monkeypatch):
     """Artwork off means nothing scanned — don't clutter the message with a zero."""
     job, _ = _run_upload_job(test_db, monkeypatch, _full_stats())
 
-    assert "8 poster(s) uploaded" in job.message
+    assert "poster 10 file(s): 8 uploaded" in job.message
     assert "artwork" not in job.message.lower()
 
 
@@ -451,9 +439,13 @@ def test_job_logs_artwork_totals_by_type(test_db, monkeypatch):
 
     _, logs = _run_upload_job(test_db, monkeypatch, stats)
 
-    totals = [l for l in logs if "Artwork totals (final)" in l]
+    outcome = [l for l in logs if "Outcome per artwork file (final)" in l]
+    assert len(outcome) == 1
+    assert "6 scanned" in outcome[0]
+
+    totals = [l for l in logs if "3 logos" in l]
     assert len(totals) == 1
-    assert "logos=3" in totals[0] and "backgrounds=2" in totals[0] and "squareart=1" in totals[0]
+    assert "2 backgrounds" in totals[0] and "1 squareart" in totals[0]
 
 
 def test_discord_summary_mentions_artwork(test_db, monkeypatch):
@@ -462,3 +454,225 @@ def test_discord_summary_mentions_artwork(test_db, monkeypatch):
     _, logs = _run_upload_job(test_db, monkeypatch, stats)
 
     assert any("6 artwork file(s)" in l for l in logs)
+
+
+def test_artwork_type_split_sits_under_the_uploaded_line():
+    """The per-type detail is a sub-bullet of 'uploaded' — appending it instead put it
+    under whichever bucket happened to be last (e.g. 'unmatched'), which read as a lie."""
+    from services.plex_upload import artwork_summary_lines
+
+    lines = artwork_summary_lines(
+        {"scanned": 10, "uploaded_files": 6, "already_current": 2, "errors": 0,
+         "by_type": {"logo": 3, "background": 2, "squareart": 1},
+         "unmatched_reasons": {"no_plex_match": 2}},
+        dry_run=False,
+    )
+
+    assert "uploaded" in lines[1]
+    assert lines[2] == "  - 3 logos, 2 backgrounds, 1 squareart"
+    assert "unmatched" in lines[-2] and "no Plex match" in lines[-1]
+
+
+def _art_asset(tmp_path, media_key="inception", year=2010):
+    d = _item_folder(tmp_path, logo=True)
+    return {
+        "path": str(d / "logo.png"), "media_key": media_key, "display_name": "Inception",
+        "asset_type": "main", "season_number": None, "folder_year": year, "artwork_type": "logo",
+    }
+
+
+def test_artwork_for_undownloaded_movie_reports_not_downloaded(test_db, tmp_path):
+    svc = _svc(test_db)
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    arr = {"movies": {"inception": {"has_file": False}}}
+
+    outcome = svc._upload_artwork_asset(
+        _art_asset(tmp_path), idx, dry_run=True, arr_availability=arr,
+    )
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "not_downloaded"
+
+
+def test_artwork_for_downloaded_movie_missing_from_plex_still_reports_no_match(test_db, tmp_path):
+    """*arr has the file, so a Plex miss really is a match problem — keep saying so."""
+    svc = _svc(test_db)
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    arr = {"movies": {"inception": {"has_file": True}}}
+
+    outcome = svc._upload_artwork_asset(
+        _art_asset(tmp_path), idx, dry_run=True, arr_availability=arr,
+    )
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "no_plex_match"
+
+
+def test_artwork_for_movie_absent_from_arr_reports_no_match(test_db, tmp_path):
+    """Artwork-only folders for titles *arr doesn't track get no availability opinion —
+    don't invent one (this is the 'artwork but no poster' case)."""
+    svc = _svc(test_db)
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+
+    outcome = svc._upload_artwork_asset(
+        _art_asset(tmp_path), idx, dry_run=True, arr_availability={"movies": {}},
+    )
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "no_plex_match"
+
+
+def test_artwork_for_collection_folder_makes_no_arr_claim(test_db, tmp_path):
+    """A collection carries neither year nor ids. One sharing a title with an undownloaded
+    movie must not inherit that movie's 'not downloaded' label — *arr never said it."""
+    svc = _svc(test_db)
+    d = tmp_path / "Inception"          # no year, no ids: collection-shaped
+    d.mkdir()
+    (d / "logo.png").write_bytes(b"l")
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "inception", "display_name": "Inception",
+        "asset_type": "main", "season_number": None, "folder_year": None, "artwork_type": "logo",
+    }
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    arr = {"movies": {"inception": {"has_file": False}}}
+
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True, arr_availability=arr)
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "no_plex_match"
+
+
+def test_artwork_with_ids_but_no_year_still_asks_arr(test_db, tmp_path):
+    """Year-less folders that carry {tmdb-}/{imdb-}/{tvdb-} ids are real titles, not
+    collections — 'The Savant (0)' and friends must get the *arr answer."""
+    svc = _svc(test_db)
+    d = tmp_path / "The Savant (0) {tvdb-432966}"
+    d.mkdir()
+    (d / "logo.png").write_bytes(b"l")
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "thesavant", "display_name": "The Savant",
+        "asset_type": "main", "season_number": None, "folder_year": None, "artwork_type": "logo",
+    }
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    arr = {"shows": {"thesavant": {"has_episodes": False, "seasons": {}}}}
+
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True, arr_availability=arr)
+
+    assert outcome.skip_reason == "not_downloaded"
+
+
+def test_ambiguous_artwork_is_logged_not_silently_dropped(test_db, tmp_path, monkeypatch):
+    """type-unresolved artwork returned with no log line at all, so the bucket was a
+    dead end — you could see the count but never the files."""
+    svc = _svc(test_db)
+    messages = []
+    monkeypatch.setattr("services.plex_upload.log_info", lambda _t, m, **_k: messages.append(m))
+    monkeypatch.setattr(svc, "_resolve_target_media_type", lambda *a, **k: (None, "ARR matched both movie and series"))
+
+    asset = _art_asset(tmp_path)
+    outcome = svc._upload_artwork_asset(asset, {"movies": {}, "shows": {}, "collections": {}}, dry_run=True)
+
+    assert outcome.skip_reason == "type_unresolved"
+    assert any("Skipping ambiguous no-ID logo" in m and "ARR matched both" in m for m in messages)
+
+
+def test_artwork_uses_arr_to_disambiguate_movie_vs_show_like_posters_do(test_db, tmp_path, monkeypatch):
+    """Movie-vs-show ties need *arr; artwork passed None and was dropped while the
+    poster beside it uploaded."""
+    svc = _svc(test_db)
+    movie = _FakeArtItem(item_type="movie", title="Galaxy Quest", year=1999)
+    show = _FakeArtItem(item_type="show", title="Galaxy Quest", year=1999, rating_key="999")
+    idx = {"movies": {"galaxyquest": [movie]}, "shows": {"galaxyquest": [show]}, "collections": {}}
+    monkeypatch.setattr(
+        svc, "_resolve_index_candidates",
+        lambda index_map, *a: [movie] if index_map is idx["movies"] else ([show] if index_map is idx["shows"] else []),
+    )
+
+    d = tmp_path / "Galaxy Quest (1999) {tmdb-926}"
+    d.mkdir()
+    (d / "logo.png").write_bytes(b"l")
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "galaxyquest", "display_name": "Galaxy Quest",
+        "asset_type": "main", "season_number": None, "folder_year": 1999, "artwork_type": "logo",
+    }
+
+    # No *arr index: genuinely ambiguous, nothing to upload to.
+    assert svc._upload_artwork_asset(asset, idx, dry_run=True).skip_reason == "type_unresolved"
+
+    # With *arr saying "movie", it resolves exactly as the sibling poster does.
+    arr = {"movies": {"galaxyquest": {"has_file": True}}, "shows": {}}
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True, arr_availability=arr)
+    assert outcome.matched is True
+    assert outcome.uploaded == 1
+
+
+def test_unavailable_artwork_line_matches_the_poster_wording(test_db, tmp_path, monkeypatch):
+    """Same event and same *arr answer as the poster path, so say it the same way."""
+    svc = _svc(test_db)
+    messages = []
+    monkeypatch.setattr("services.plex_upload.log_info", lambda _t, m, **_k: messages.append(m))
+
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    arr = {"movies": {"muppet": {"has_file": False}}}
+    d = tmp_path / "A Muppet Family Christmas (1987) {tmdb-13247}"
+    d.mkdir()
+    (d / "background.jpg").write_bytes(b"b")
+    asset = {
+        "path": str(d / "background.jpg"), "media_key": "muppet",
+        "display_name": "A Muppet Family Christmas (1987) {tmdb-13247}",
+        "asset_type": "main", "season_number": None, "folder_year": 1987,
+        "artwork_type": "background",
+    }
+
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True, arr_availability=arr)
+
+    assert outcome.skip_reason == "not_downloaded"
+    line = next(m for m in messages if "Skipping unavailable" in m)
+    assert line.startswith("Skipping unavailable background: ")
+    assert "(no Radarr file available)" in line          # *arr's own wording, as posters use
+    assert "No Plex match" not in line                   # the old hybrid phrasing is gone
+
+
+def test_unavailable_artwork_uses_sonarr_wording_for_shows(test_db, tmp_path, monkeypatch):
+    svc = _svc(test_db)
+    messages = []
+    monkeypatch.setattr("services.plex_upload.log_info", lambda _t, m, **_k: messages.append(m))
+
+    d = tmp_path / "Gracepoint (2014) {tvdb-276396}"
+    d.mkdir()
+    (d / "logo.png").write_bytes(b"l")
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "gracepoint", "display_name": "Gracepoint (2014)",
+        "asset_type": "main", "season_number": None, "folder_year": 2014, "artwork_type": "logo",
+    }
+    arr = {"shows": {"gracepoint": {"has_episodes": False, "seasons": {}}}}
+
+    svc._upload_artwork_asset(asset, {"movies": {}, "shows": {}, "collections": {}},
+                              dry_run=True, arr_availability=arr)
+
+    assert any("Skipping unavailable logo: " in m and "no Sonarr episodes available" in m
+               for m in messages)
+
+
+def test_arr_answer_never_overrides_a_real_plex_match(test_db, tmp_path, monkeypatch):
+    """Regression: the question spans both *arr namespaces, so asking before matching
+    let a stale Radarr record veto artwork whose Plex item exists."""
+    svc = _svc(test_db)
+    item = _FakeArtItem(item_type="movie", title="Snorks Bubbles of Fun", year=1987)
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    _prep_matching(svc, idx, item, monkeypatch)
+
+    d = tmp_path / "Snorks Bubbles of Fun (1987) {tmdb-731506}"
+    d.mkdir()
+    (d / "logo.png").write_bytes(b"l")
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "snorks", "display_name": "Snorks Bubbles of Fun",
+        "asset_type": "main", "season_number": None, "folder_year": 1987, "artwork_type": "logo",
+    }
+    arr = {"movies": {"snorks": {"has_file": False}}}
+
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True, arr_availability=arr)
+
+    assert outcome.matched is True, "Plex has the item — *arr must not veto the upload"
+    assert outcome.uploaded == 1
+    assert outcome.skip_reason is None

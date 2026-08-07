@@ -214,7 +214,7 @@ def send_discord_notification(
 
         embed_fields: List[Dict[str, Any]] = []
         if include_details and fields:
-            for field in fields[:10]:
+            for field in fields[:25]:   # Discord's real limit; 10 dropped fields silently
                 if not isinstance(field, dict):
                     continue
                 name = _truncate(str(field.get("name", "Details")), 256)

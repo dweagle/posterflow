@@ -44,7 +44,13 @@ from models.poster import Poster
 from services.border_replacer import BorderReplacerService
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 from services.poster_renamer import PosterRenameService
-from services.plex_upload import PlexUploadService
+from services.plex_upload import (
+    PlexUploadService,
+    empty_unmatched_reasons,
+    artwork_summary_lines,
+    format_outcome_breakdown,
+    format_unmatched_reasons,
+)
 from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
 
@@ -1611,6 +1617,158 @@ def _search_webhook_dedupe_entries(
     }
 
 
+def _format_match_detail(stats: Dict[str, Any], *, dry_run: bool = False) -> str:
+    """What happened to every scanned file, in buckets that sum to the scan. Shared by
+    the full, webhook and single-item sites."""
+    scanned = int(stats.get("scanned", 0))
+    if not any(key in stats for key in ("uploaded_files", "already_current", "awaiting_plex")):
+        matched = int(stats.get("matched", 0))
+        return f"{scanned:,} file(s): {matched:,} matched, {max(0, scanned - matched):,} unmatched"
+
+    uploaded_files = int(stats.get("uploaded_files", 0))
+    already_current = int(stats.get("already_current", 0))
+    awaiting = int(stats.get("awaiting_plex", 0))
+    errors = int(stats.get("errors", 0))
+    unmatched = max(0, scanned - uploaded_files - already_current - awaiting - errors)
+
+    parts = [f"{uploaded_files:,} {'would upload' if dry_run else 'uploaded'}"]
+    if already_current:
+        parts.append(f"{already_current:,} already current")
+    if awaiting:
+        parts.append(f"{awaiting:,} awaiting Plex scan")
+    if unmatched:
+        reasons_text = format_unmatched_reasons(stats.get("unmatched_reasons"))
+        parts.append(f"{unmatched:,} unmatched ({reasons_text})" if reasons_text else f"{unmatched:,} unmatched")
+    if errors:
+        parts.append(f"{errors:,} errored")
+
+    return f"{scanned:,} file(s): " + ", ".join(parts)
+
+
+def _discord_outcome_fields(
+    kind: str,
+    stats: Dict[str, Any],
+    *,
+    dry_run: bool,
+    type_counts: list,
+) -> list:
+    """Discord fields for one half of a run, shared so both halves read alike. kind is
+    the field-name noun, already plural or mass ("Posters"/"Artwork"). Unmatched files
+    are left out — expected, unchanging, and broken down in the log instead."""
+    uploaded_files = int(stats.get("uploaded_files", 0))
+    already_current = int(stats.get("already_current", 0))
+    awaiting = int(stats.get("awaiting_plex", 0))
+    # Only files with a Plex target; the raw scan counts unmatched ones too.
+    applicable = uploaded_files + already_current + awaiting
+    verb = "would upload" if dry_run else "uploaded"
+
+    # Discord packs 3 inline fields per row; pad so each block starts a new row.
+    def _pad(rows: list) -> None:
+        while len(rows) % 3:
+            rows.append({"name": "\u200b", "value": "\u200b", "inline": True})
+
+    fields = [
+        {"name": f"{kind} {verb}", "value": f"{uploaded_files:,} of {applicable:,}", "inline": True},
+        {"name": f"{kind} already current", "value": f"{already_current:,}", "inline": True},
+    ]
+    _pad(fields)
+    if uploaded_files:
+        # Zero types are dropped; a row of "Seasons: 0, Collections: 0" says nothing.
+        fields += [
+            {"name": label, "value": f"{int(count):,}", "inline": True}
+            for label, count in type_counts if int(count)
+        ]
+        _pad(fields)
+    if awaiting:
+        fields.append({
+            "name": f"{kind} awaiting Plex scan",
+            "value": f"{awaiting:,} — the show matched, Plex has not scanned the season yet",
+            "inline": False,
+        })
+    return fields
+
+
+SETTING_PLEX_UPLOAD_STATS = "plex_upload_stats"
+
+
+def build_plex_upload_embed(stats: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
+    """description/fields/color for the Plex upload embed, shared by the standalone job
+    and the workflow step so both report the same run the same way."""
+    artwork = stats.get("artwork") if isinstance(stats.get("artwork"), dict) else {}
+    artwork_scanned = int(artwork.get("scanned", 0))
+    by_type = artwork.get("by_type") if isinstance(artwork.get("by_type"), dict) else {}
+    counts = stats.get("media_upload_counts") if isinstance(stats.get("media_upload_counts"), dict) else {}
+    uploaded_label = "would_upload" if dry_run else "uploaded"
+    uploaded_count = int(stats.get(uploaded_label, 0))
+    artwork_uploaded = int(artwork.get(uploaded_label, 0))
+    mode_label = "Dry Run" if dry_run else "Live"
+
+    fields = _discord_outcome_fields(
+        "Posters", stats, dry_run=dry_run,
+        type_counts=[
+            ("Movies", int(counts.get("movies", 0))),
+            ("Shows", int(counts.get("shows", 0))),
+            ("Seasons", int(counts.get("seasons", 0))),
+            ("Collections", int(counts.get("collections", 0))),
+        ],
+    )
+    if artwork_scanned:
+        fields += _discord_outcome_fields(
+            "Artwork", artwork, dry_run=dry_run,
+            type_counts=[
+                ("Logos", int(by_type.get("logo", 0))),
+                ("Backgrounds", int(by_type.get("background", 0))),
+                ("Squareart", int(by_type.get("squareart", 0))),
+            ],
+        )
+    fields.append({"name": "Mode", "value": mode_label, "inline": True})
+
+    year_discrepancy_text = _format_year_discrepancy_text(stats.get("year_discrepancies", []) or [])
+    if year_discrepancy_text:
+        fields.append({"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False})
+
+    return {
+        "description": _plex_upload_description(
+            uploaded_count=uploaded_count,
+            artwork_uploaded=artwork_uploaded,
+            posters_current=int(stats.get("already_current", 0)),
+            artwork_current=int(artwork.get("already_current", 0)),
+            artwork_scanned=artwork_scanned,
+            mode_label=mode_label,
+            dry_run=dry_run,
+        ),
+        "fields": fields,
+        "color": 0xFFB74D if year_discrepancy_text else 0x4CAF50,
+    }
+
+
+def _plex_upload_description(
+    *,
+    uploaded_count: int,
+    artwork_uploaded: int,
+    posters_current: int,
+    artwork_current: int,
+    artwork_scanned: int,
+    mode_label: str,
+    dry_run: bool,
+) -> str:
+    """One line saying what the run did. Uploading nothing is normal once a library is
+    settled, and "0 poster(s) uploaded" reads as failure — say what held instead."""
+    mode = mode_label.lower()
+    if uploaded_count or artwork_uploaded:
+        bits = [f"{uploaded_count:,} poster(s)"] if uploaded_count else []
+        if artwork_uploaded:
+            bits.append(f"{artwork_uploaded:,} artwork file(s)")
+        return " and ".join(bits) + f" {'would upload' if dry_run else 'uploaded'} ({mode})"
+
+    current = [f"{posters_current:,} poster(s)"] if posters_current else []
+    if artwork_scanned and artwork_current:
+        current.append(f"{artwork_current:,} artwork file(s)")
+    if current:
+        return "Nothing to upload — " + " and ".join(current) + f" already current ({mode})"
+    return f"Nothing uploaded ({mode})"
+
+
 def run_plex_upload_background_job(
     job_id: int,
     dry_run: bool = False,
@@ -1706,13 +1864,12 @@ def run_plex_upload_background_job(
         artwork_stats = stats.get("artwork", {}) if isinstance(stats.get("artwork"), dict) else {}
         artwork_scanned = int(artwork_stats.get("scanned", 0))
         artwork_uploaded = int(artwork_stats.get("would_upload" if dry_run else "uploaded", 0))
-        artwork_by_type = artwork_stats.get("by_type", {}) if isinstance(artwork_stats.get("by_type"), dict) else {}
         uploaded_label = "would_upload" if dry_run else "uploaded"
         uploaded_count = int(stats.get(uploaded_label, 0))
         matched_count = int(stats.get("matched", 0))
         scanned_count = int(stats.get("scanned", 0))
-        raw_candidates = int(stats.get("candidate_matches_raw", 0))
-        unique_candidates = int(stats.get("candidate_matches_unique", 0))
+        unmatched_reasons = stats.get("unmatched_reasons", {}) if isinstance(stats.get("unmatched_reasons"), dict) else {}
+        match_detail = _format_match_detail(stats, dry_run=dry_run)
         main_assets = int(stats.get("main_assets", 0))
         season_assets = int(stats.get("season_assets", 0))
         library_totals = stats.get("library_totals", [])
@@ -1730,11 +1887,12 @@ def run_plex_upload_background_job(
             message=format_complete_message(
                 "Plex upload",
                 (
-                    f"({'dry run' if dry_run else 'live'}): "
-                    f"{uploaded_count:,} poster(s) uploaded"
-                    + (f", {artwork_uploaded:,} artwork" if artwork_scanned else "")
-                    + f", {matched_count:,}/{scanned_count:,} matched, "
-                    f"candidates {unique_candidates:,}/{raw_candidates:,} unique/raw"
+                    f"({'dry run' if dry_run else 'live'}): poster {match_detail}"
+                    + (
+                        f" | artwork {_format_match_detail(artwork_stats, dry_run=dry_run)}"
+                        if artwork_scanned
+                        else ""
+                    )
                 ),
             ),
             completed_at=datetime.now(timezone.utc),
@@ -1749,8 +1907,10 @@ def run_plex_upload_background_job(
             scanned=scanned_count,
             matched=matched_count,
             uploaded=uploaded_count,
-            candidates_raw=raw_candidates,
-            candidates_unique=unique_candidates,
+            plex_targets=int(stats.get("plex_targets", 0)),
+            multi_library_assets=int(stats.get("multi_library_assets", 0)),
+            unmatched=max(0, scanned_count - matched_count),
+            **{f"unmatched_{reason}": int(count) for reason, count in unmatched_reasons.items() if int(count or 0)},
             assets_main=main_assets,
             assets_season=season_assets,
             movies=movies_uploaded,
@@ -1773,17 +1933,27 @@ def run_plex_upload_background_job(
             ),
         )
 
-        if artwork_scanned:
+        for line in format_outcome_breakdown(
+            "poster",
+            stats,
+            dry_run=dry_run,
+            scanned_detail=f" ({main_assets:,} title poster(s), {season_assets:,} season poster(s))",
+        ):
+            log_info(LogTags.UPLOADER, line)
+
+        plex_targets = int(stats.get("plex_targets", 0))
+        multi_library = int(stats.get("multi_library_assets", 0))
+        if plex_targets:
             log_info(
                 LogTags.UPLOADER,
-                (
-                    f"Artwork totals (final): {summary_label} | "
-                    f"logos={int(artwork_by_type.get('logo', 0))}, "
-                    f"backgrounds={int(artwork_by_type.get('background', 0))}, "
-                    f"squareart={int(artwork_by_type.get('squareart', 0))}, "
-                    f"total={artwork_uploaded}"
-                ),
+                f"Matched files resolved to {plex_targets:,} Plex item(s)"
+                + (f"; {multi_library:,} file(s) match the same title in 2+ libraries" if multi_library else ""),
             )
+
+        # Same block, same wording — logged here so artwork sits next to the poster one.
+        if artwork_scanned:
+            for line in artwork_summary_lines(artwork_stats, dry_run=dry_run):
+                log_info(LogTags.UPLOADER, line)
 
         if isinstance(library_totals, list) and library_totals:
             log_info(LogTags.UPLOADER, "Library summary (final)")
@@ -1805,44 +1975,27 @@ def run_plex_upload_background_job(
                     f"- {instance_name} / {library_name} ({section_type}) | items={items}, collections={collections}",
                 )
 
-        mode_label = "Dry Run" if dry_run else "Live"
-        year_discrepancy_text = _format_year_discrepancy_text(stats.get("year_discrepancies", []) or [])
+        embed = build_plex_upload_embed(stats, dry_run=dry_run)
+        # The workflow suppresses this notification and rebuilds the embed from these.
+        try:
+            upsert_setting(db, SETTING_PLEX_UPLOAD_STATS, json.dumps({
+                **{k: v for k, v in stats.items() if k not in {"library_totals"}},
+                "dry_run": dry_run,
+            }, default=str))
+            db.commit()  # upsert_setting only stages
+        except Exception as e:
+            db.rollback()
+            log_warning(LogTags.UPLOADER, f"Could not persist Plex upload stats for workflow reporting: {e}")
+
         if not skip_discord:
-            discord_fields = [
-                {"name": "Movies", "value": str(movies_uploaded), "inline": True},
-                {"name": "Shows", "value": str(shows_uploaded), "inline": True},
-                {"name": "Seasons", "value": str(seasons_uploaded), "inline": True},
-                {"name": "Collections", "value": str(collections_uploaded), "inline": True},
-                {"name": "Matched", "value": f"{matched_count:,}/{scanned_count:,}", "inline": True},
-                {"name": "Mode", "value": mode_label, "inline": True},
-            ]
-            if artwork_scanned:
-                discord_fields.append({
-                    "name": "Artwork",
-                    "value": (
-                        f"{artwork_uploaded:,}/{artwork_scanned:,} uploaded — "
-                        f"logos {int(artwork_by_type.get('logo', 0))}, "
-                        f"backgrounds {int(artwork_by_type.get('background', 0))}, "
-                        f"squareart {int(artwork_by_type.get('squareart', 0))}"
-                    ),
-                    "inline": False,
-                })
-            if year_discrepancy_text:
-                discord_fields.append(
-                    {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
-                )
             send_discord_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
                 title="Plex Upload Completed",
-                description=(
-                    f"{uploaded_count:,} poster(s)"
-                    + (f" and {artwork_uploaded:,} artwork file(s)" if artwork_scanned else "")
-                    + f" uploaded ({mode_label.lower()})"
-                ),
-                fields=discord_fields,
-                color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
+                description=embed["description"],
+                fields=embed["fields"],
+                color=embed["color"],
             )
 
         log_section_end(LogTags.UPLOADER, "Plex Upload Complete")
@@ -1941,6 +2094,8 @@ def _accumulate_artwork_stats(aggregated: Dict[str, Any], target_stats: Dict[str
         return
     aggregated["scanned"] += int(art.get("scanned", 0))
     aggregated["uploaded"] += int(art.get("uploaded", 0))
+    for bucket in ("uploaded_files", "already_current"):
+        aggregated[bucket] = int(aggregated.get(bucket, 0)) + int(art.get(bucket, 0))
     by_type = art.get("by_type") if isinstance(art.get("by_type"), dict) else {}
     for atype, count in by_type.items():
         aggregated["by_type"][atype] = int(aggregated["by_type"].get(atype, 0)) + int(count or 0)
@@ -2500,14 +2655,20 @@ def run_plex_webhook_background_job(
                 "scanned": 0,
                 "matched": 0,
                 "uploaded": 0,
-                "candidate_matches_raw": 0,
-                "candidate_matches_unique": 0,
+                "plex_targets": 0,
+                "multi_library_assets": 0,
+                "uploaded_files": 0,
+                "already_current": 0,
+                "awaiting_plex": 0,
                 "skipped": 0,
                 "errors": 0,
                 "plex_seasons_missing": 0,
             }
-            # Artwork is nested (not a flat int), so it accumulates separately from the loop above.
-            aggregated_artwork: Dict[str, Any] = {"scanned": 0, "uploaded": 0, "by_type": {}}
+            # Nested, so they accumulate outside the flat-int loop above.
+            aggregated_artwork: Dict[str, Any] = {
+                "scanned": 0, "uploaded": 0, "uploaded_files": 0, "already_current": 0, "by_type": {},
+            }
+            aggregated_unmatched: Dict[str, int] = empty_unmatched_reasons()
             year_discrepancies = []
 
             for target in webhook_targets:
@@ -2604,6 +2765,10 @@ def run_plex_webhook_background_job(
                     )
                 for key in aggregated_stats:
                     aggregated_stats[key] += int(target_stats.get(key, 0))
+                target_unmatched = target_stats.get("unmatched_reasons", {})
+                if isinstance(target_unmatched, dict):
+                    for reason in aggregated_unmatched:
+                        aggregated_unmatched[reason] += int(target_unmatched.get(reason, 0) or 0)
                 _accumulate_artwork_stats(aggregated_artwork, target_stats)
 
             if result and result.get("retry_scheduled"):
@@ -2611,7 +2776,11 @@ def run_plex_webhook_background_job(
 
             result = {
                 "success": True,
-                "stats": {**aggregated_stats, "artwork": aggregated_artwork},
+                "stats": {
+                    **aggregated_stats,
+                    "unmatched_reasons": aggregated_unmatched,
+                    "artwork": aggregated_artwork,
+                },
             }
 
             if not result.get("success", False):
@@ -2672,9 +2841,12 @@ def run_plex_webhook_background_job(
                 break
 
             if attempt < attempts:
+                no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook upload had no Plex match yet for '{title}{year_label}', retrying in {delay_seconds}s",
+                    f"Webhook upload had no Plex match yet for '{title}{year_label}'"
+                    + (f" ({no_match_reasons})" if no_match_reasons else "")
+                    + f", retrying in {delay_seconds}s",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -2689,8 +2861,7 @@ def run_plex_webhook_background_job(
         uploaded_count = int(stats.get("uploaded", 0))
         matched_count = int(stats.get("matched", 0))
         scanned_count = int(stats.get("scanned", 0))
-        raw_candidates = int(stats.get("candidate_matches_raw", 0))
-        unique_candidates = int(stats.get("candidate_matches_unique", 0))
+        match_detail = _format_match_detail(stats)
         # Artwork counted separately from posters, same as the full upload reports it.
         wh_artwork = stats.get("artwork") if isinstance(stats.get("artwork"), dict) else {}
         wh_artwork_scanned = int(wh_artwork.get("scanned", 0))
@@ -2710,9 +2881,11 @@ def run_plex_webhook_background_job(
                     matching_skipped=True,
                 )
             else:
+                no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_warning(
                     LogTags.UPLOADER,
-                    "Webhook failed after retries: Plex reachable but no matches were found",
+                    "Webhook failed after retries: Plex reachable but no matches were found"
+                    + (f" ({no_match_reasons})" if no_match_reasons else ""),
                     attempts=attempts,
                     media_type=media_type,
                     title=title,
@@ -2734,12 +2907,12 @@ def run_plex_webhook_background_job(
             message=(
                 format_complete_message(
                     "Webhook Plex upload",
-                    f"{title} ({uploaded_count:,} uploaded, {matched_count:,}/{scanned_count:,} matched, candidates {unique_candidates:,}/{raw_candidates:,} unique/raw)",
+                    f"{title} — {match_detail}",
                 )
                 if uploaded_count > 0
                 else format_complete_message(
                     "Webhook matched Plex item but performed no upload",
-                    f"{title} ({uploaded_count:,} uploaded, {matched_count:,}/{scanned_count:,} matched, candidates {unique_candidates:,}/{raw_candidates:,} unique/raw)",
+                    f"{title} — {match_detail}",
                 )
             ),
             completed_at=datetime.now(timezone.utc),
@@ -2766,8 +2939,8 @@ def run_plex_webhook_background_job(
             scanned=scanned_count,
             matched=matched_count,
             uploaded=uploaded_count,
-            candidates_raw=raw_candidates,
-            candidates_unique=unique_candidates,
+            plex_targets=int(stats.get("plex_targets", 0)),
+            multi_library_assets=int(stats.get("multi_library_assets", 0)),
             artwork_scanned=wh_artwork_scanned,
             artwork_uploaded=wh_artwork_uploaded,
             skipped=int(stats.get("skipped", 0)),
@@ -2796,16 +2969,17 @@ def run_plex_webhook_background_job(
                 {"name": "Uploaded", "value": str(uploaded_count), "inline": True},
             ]
             if wh_artwork_scanned:
-                discord_fields.append({
-                    "name": "Artwork",
-                    "value": (
-                        f"{wh_artwork_uploaded:,}/{wh_artwork_scanned:,} uploaded — "
-                        f"logos {int(wh_artwork_by_type.get('logo', 0))}, "
-                        f"backgrounds {int(wh_artwork_by_type.get('background', 0))}, "
-                        f"squareart {int(wh_artwork_by_type.get('squareart', 0))}"
-                    ),
-                    "inline": False,
-                })
+                # Same builder the full run uses, so a webhook embed reads like a full one.
+                discord_fields += _discord_outcome_fields(
+                    "Artwork",
+                    wh_artwork,
+                    dry_run=False,
+                    type_counts=[
+                        ("Logos", int(wh_artwork_by_type.get("logo", 0))),
+                        ("Backgrounds", int(wh_artwork_by_type.get("background", 0))),
+                        ("Squareart", int(wh_artwork_by_type.get("squareart", 0))),
+                    ],
+                )
             if year_discrepancy_text:
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
@@ -2993,8 +3167,7 @@ def run_plex_single_manual_background_job(
         uploaded_count = int(stats.get(uploaded_label, 0))
         matched_count = int(stats.get("matched", 0))
         scanned_count = int(stats.get("scanned", 0))
-        raw_candidates = int(stats.get("candidate_matches_raw", 0))
-        unique_candidates = int(stats.get("candidate_matches_unique", 0))
+        match_detail = _format_match_detail(stats, dry_run=dry_run)
         preupload_rename = preupload_summary.get("rename", {}) if isinstance(preupload_summary.get("rename", {}), dict) else {}
         preupload_border = preupload_summary.get("border", {}) if isinstance(preupload_summary.get("border", {}), dict) else {}
 
@@ -3014,7 +3187,7 @@ def run_plex_single_manual_background_job(
             progress=100,
             message=format_complete_message(
                 "Manual single Plex upload",
-                f"{title} ({uploaded_count:,} {'would upload' if dry_run else 'uploaded'}, {matched_count:,}/{scanned_count:,} matched, candidates {unique_candidates:,}/{raw_candidates:,} unique/raw{preupload_details})",
+                f"{title} — {match_detail}{preupload_details}",
             ),
             completed_at=datetime.now(timezone.utc),
         )
@@ -3030,8 +3203,9 @@ def run_plex_single_manual_background_job(
             scanned=scanned_count,
             matched=matched_count,
             uploaded=uploaded_count,
-            candidates_raw=raw_candidates,
-            candidates_unique=unique_candidates,
+            plex_targets=int(stats.get("plex_targets", 0)),
+            multi_library_assets=int(stats.get("multi_library_assets", 0)),
+            **{f"unmatched_{reason}": int(count) for reason, count in (stats.get("unmatched_reasons") or {}).items() if int(count or 0)},
             skipped=int(stats.get("skipped", 0)),
             errors=int(stats.get("errors", 0)),
             preupload_rename_matched=int(preupload_rename.get("matched", 0)),
