@@ -201,8 +201,11 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
 
 // ---- geometry ----
 {
-  const fit = G.computePosterFitGeometry(1000, 1500, 1000);
-  ok(fit.width === 950 && fit.left === 25 && fit.top === 25, 'Fit Poster: 1000-wide src in 1000 canvas → 950px, left 25, top 25');
+  // Cover-fit: scaled by the LARGER of the width/height ratios, so the poster always reaches the
+  // bottom border (here binding on height) even at the cost of a slight left/right overhang.
+  const fit = G.computePosterFitGeometry(1000, 1500, 1000, 1500);
+  ok(fit.width === 967 && fit.height === 1450 && fit.left === 16 && fit.top === 25,
+    'Fit Poster: 1000x1500 src in 1000x1500 canvas → cover-fit 967x1450px, left 16, top 25');
 
   const logo = G.computeLogoGeometry(600, 200, 1000, 1500, 0.30);
   ok(logo.width > 0 && logo.height > 0, 'Place Logo: positive dimensions');

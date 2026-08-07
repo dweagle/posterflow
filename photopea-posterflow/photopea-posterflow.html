@@ -79,7 +79,7 @@
   </div>
   <div class="tools">
     <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo (keeps the logo's colors)">Place Logo</button>
-    <button class="btn" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</button>
+    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer into the 25px border (top-aligned, centered, always reaches the bottom)">Fit Poster</button>
   </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
@@ -473,8 +473,12 @@
     const w = rnd(srcW * scale), h = rnd(srcH * scale);
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
   };
-  const computePosterFitGeometry = (srcW, srcH, cw) => {
-    const border = 25, targetW = Math.max(1, cw - border * 2), scale = targetW / srcW;
+  // Cover-fit into the bordered box (canvas − 25px each side, both axes): scale by the LARGER of the
+  // width/height ratios so the poster always reaches the bottom border, even if that means it
+  // overhangs the left/right border slightly (split evenly by the horizontal centering below).
+  const computePosterFitGeometry = (srcW, srcH, cw, ch) => {
+    const border = 25, targetW = Math.max(1, cw - border * 2), targetH = Math.max(1, ch - border * 2);
+    const scale = Math.max(targetW / srcW, targetH / srcH);
     const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
   };
@@ -531,7 +535,7 @@
     if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
     const res = pendingMode === 'logo'
       ? computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)
-      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw);
+      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw, geo.ch);
     applyPlacement(geo, res);
   };
 

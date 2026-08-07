@@ -24,7 +24,7 @@ async function placeSelected(doc, mode, constants) {
     if (!(lw > 0 && lh > 0)) throw new Error('selected layer has empty bounds');
     const res = mode === 'logo'
       ? G.computeLogoGeometry(lw, lh, cw, ch, LOGO_DENSITY)
-      : G.computePosterFitGeometry(lw, lh, cw);
+      : G.computePosterFitGeometry(lw, lh, cw, ch);
     const sc = (res.width / lw) * 100;
     await layer.scale(sc, sc, constants.AnchorPosition.MIDDLECENTER);
     const b1 = layer.bounds;                                    // re-measure after the resize

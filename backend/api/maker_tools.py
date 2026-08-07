@@ -2144,12 +2144,15 @@ def compute_logo_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int, 
 
 
 def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h: int) -> tuple[int, int, int, int]:
-    """Scale a poster to the bordered width (canvas − 25px each side), preserving ratio,
-    then center horizontally and top-align at y=25. Returns (w, h, left, top) in canvas px.
-    The plugin's Fit Poster button mirrors this in JS — keep them in sync."""
+    """Cover-fit a poster into the bordered box (canvas − 25px each side, both axes), preserving
+    ratio, then center horizontally and top-align at y=25. Scaling by the LARGER of the width/height
+    ratios guarantees the poster always reaches the bottom border, even when that means it overhangs
+    the left/right border slightly (split evenly by the horizontal centering). Returns (w, h, left,
+    top) in canvas px. The plugin's Fit Poster button mirrors this in JS — keep them in sync."""
     border_px = 25
     target_w = max(1, canvas_w - (border_px * 2))
-    scale = target_w / src_w
+    target_h = max(1, canvas_h - (border_px * 2))
+    scale = max(target_w / src_w, target_h / src_h)
     new_w = max(1, round(src_w * scale))
     new_h = max(1, round(src_h * scale))
     pos_left = (canvas_w - new_w) // 2
@@ -2160,7 +2163,7 @@ def compute_poster_fit_geometry(src_w: int, src_h: int, canvas_w: int, canvas_h:
 def _place_poster(pil: Image.Image, canvas_w: int, canvas_h: int, fit_within_border: bool) -> tuple[Image.Image, int, int]:
     """Resize a poster exactly as the PSD export places it. Returns (image, left, top)."""
     if fit_within_border:
-        # Scale to the bordered width, top-aligned and centered.
+        # Cover-fit the bordered box, top-aligned and centered horizontally.
         new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(pil.width, pil.height, canvas_w, canvas_h)
         return pil.resize((new_w, new_h), Image.LANCZOS), pos_left, pos_top
     # Default behavior: cover-fill to full canvas, then center-crop.
@@ -2217,9 +2220,10 @@ def _build_psd(
       - Creates a blank PSD with poster layers at the bottom and LOGO on top.
 
     Each poster is cover-filled to the canvas dimensions by default. When
-    fit_within_border=True, posters are resized to the bordered width
-    (canvas width minus 25px on each side), preserving ratio and top-aligning
-    at y=25. The logo is bottom-anchored.
+    fit_within_border=True, posters are cover-fit into the bordered box
+    (canvas width/height minus 25px on each side), preserving ratio and top-aligning
+    at y=25 — the poster may overhang the left/right border slightly to guarantee
+    it still reaches the bottom border. The logo is bottom-anchored.
     Backdrop images are scaled to fit the canvas height (no crop) and centred horizontally.
     """
     try:

@@ -1316,10 +1316,14 @@ def test_compute_logo_geometry_scales_with_canvas():
 
 
 def test_compute_poster_fit_geometry_bordered_and_top_aligned():
-    assert compute_poster_fit_geometry(1000, 1500, 1000, 1500) == (950, 1425, 25, 25)
-    assert compute_poster_fit_geometry(500, 750, 2000, 3000) == (1950, 2925, 25, 25)
+    # Cover-fit: scaled by the LARGER of the width/height ratios, so the poster always reaches the
+    # bottom border (height matches the bordered box exactly) even if that means a slight left/right
+    # overhang past the border, split evenly by the horizontal centering.
+    assert compute_poster_fit_geometry(1000, 1500, 1000, 1500) == (967, 1450, 16, 25)
+    assert compute_poster_fit_geometry(500, 750, 2000, 3000) == (1967, 2950, 16, 25)
     w, h, left, top = compute_poster_fit_geometry(800, 1200, 1000, 1500)
-    assert w == 950 and left == 25 and top == 25   # canvas − 25px each side, top-aligned
+    assert h == 1450 and top == 25   # bordered height exactly covered, top-aligned
+    assert left == (1000 - w) // 2   # any overhang split evenly by horizontal centering
 
 
 def test_measure_logo_density_opaque_vs_transparent():
