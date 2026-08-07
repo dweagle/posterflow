@@ -22,11 +22,6 @@ from core.logging import LogTags, log_info, log_error, log_user_action
 # level by a one-off Supabase migration (applied out-of-band).
 SUPABASE_URL = "https://qwudwkxfqowjtisdlplv.supabase.co"
 SUPABASE_KEY = "sb_publishable_N83-fB74swOKM5XGbMhO7A_qk7LXgel"
-SUPABASE_HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-}
 
 
 def _app_version() -> str:
@@ -37,6 +32,14 @@ def _app_version() -> str:
         return "unknown"
 
 CLIENT_ID = f"posterflow/{_app_version()}"
+
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    # Logged by Supabase edge logs (x_client_info) — identifies this instance's version
+    "x-client-info": CLIENT_ID,
+}
 
 router = APIRouter(prefix="/api/community", tags=["community"])
 

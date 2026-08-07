@@ -17,6 +17,7 @@ user's own list items are ever touched.
 import base64
 import json
 import time
+from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import httpx
@@ -28,10 +29,21 @@ from core.logging import LogTags, log_info, log_user_action, log_error
 # Same public Supabase project as api/community.py (read-only publishable key).
 SUPABASE_URL = "https://qwudwkxfqowjtisdlplv.supabase.co"
 SUPABASE_KEY = "sb_publishable_N83-fB74swOKM5XGbMhO7A_qk7LXgel"
+
+
+def _app_version() -> str:
+    """Read VERSION from the repo root (duplicated from api/community.py, same as the constants above)."""
+    try:
+        return (Path(__file__).resolve().parent.parent.parent / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
+    # Logged by Supabase edge logs (x_client_info) — identifies this instance's version
+    "x-client-info": f"posterflow/{_app_version()}",
 }
 
 SETTING_DISCORD_IDENTITY = "community_discord_identity"
