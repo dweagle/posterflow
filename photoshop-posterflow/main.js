@@ -601,7 +601,7 @@ linkToggleBtn.addEventListener('click', () => {
 // throttled to one note per streak so a down server doesn't spam.
 let pollErrNoted = false;
 setInterval(async () => {
-  if (busy || batchBusy) return;
+  if (busy || batchBusy || squareArtBusy) return;
   if (!R.isConfigured(R.getConfig())) return;
   let items;
   try { items = await R.pollQueue(); }
@@ -631,16 +631,21 @@ setInterval(async () => {
 // they fire (debounced, skipped while our own ops or a batch run are mid-flight; a refresh right
 // after our own toggles is harmless and re-syncs rv). A light 2s poll catches active-doc SWITCHES,
 // which don't fire those events.
+// Also skipped while squareArtBusy: the Square Art crop dialog runs with lockDocumentFocus:true
+// (needed so its own Save can touch the document at all — see squarecrop.js), and while that lock
+// is held, ANY other code touching app.documents/app.activeDocument from outside the dialog's own
+// flow throws ("Cannot read properties of undefined (reading 'batchPlay')") instead of just
+// returning a stale value.
 let rescanT = null;
 const scheduleRescan = () => {
   if (rescanT) clearTimeout(rescanT);
-  rescanT = setTimeout(() => { rescanT = null; if (!busy && !batchBusy) refresh(); }, 500);
+  rescanT = setTimeout(() => { rescanT = null; if (!busy && !batchBusy && !squareArtBusy) refresh(); }, 500);
 };
 try {
   require('photoshop').action.addNotificationListener(['show', 'hide', 'open', 'close'], scheduleRescan);
 } catch (e) { console.log('Posterflow: event listener unavailable, relying on poll only.', e); }
 setInterval(() => {
-  if (busy || batchBusy) return;
+  if (busy || batchBusy || squareArtBusy) return;
   const id = hasDoc() ? app.activeDocument.id : 0;
   if (id !== lastDocId) refresh();
 }, 2000);
