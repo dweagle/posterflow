@@ -508,8 +508,10 @@
     "var d=app.activeDocument,L=d.activeLayer,b=L.bounds;" +
     "var ll=nv(b[0]),lt=nv(b[1]),lw=Math.round(nv(b[2])-ll),lh=Math.round(nv(b[3])-lt);" +
     "var ch=nv(d.height),gy=null;" +
-    "for(var i=0;i<d.guides.length;i++){var g=d.guides[i];if(g.direction!==Direction.HORIZONTAL)continue;" +
-    "var y=nv(g.coordinate);if(y<=25||y>=ch)continue;if(gy===null||y>gy)gy=y;}" +
+    // Guarded on its own: Photopea's guides support is less reliable than real Photoshop's, so a
+    // failure here must never break Fit Poster — it just falls back to gy=null (ch - 25 in onGeo).
+    "try{for(var i=0;i<d.guides.length;i++){var g=d.guides[i];if(g.direction!==Direction.HORIZONTAL)continue;" +
+    "var y=nv(g.coordinate);if(y<=25||y>=ch)continue;if(gy===null||y>gy)gy=y;}}catch(ge){}" +
     "app.echoToOE('SZGEO:'+JSON.stringify({cw:nv(d.width),ch:ch,lw:lw,lh:lh,ll:ll,lt:lt,gy:gy}));");
 
   // Placement is two scripts: (1) resize the layer and echo its NEW top-left as plain numbers
