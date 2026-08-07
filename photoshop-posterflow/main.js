@@ -253,7 +253,7 @@ async function onLogoExport(ev) {
   try {
     const folder = ctx ? await R.tempFolder() : await FS.getLogoFolder({ forcePick: wantsRepick(ev) });
     if (!folder) { logoExpBtn.textContent = 'Logo'; note('Logo export cancelled — no folder chosen.'); return; }
-    const filename = ((ctx && ctx.name) || baseName()) + '.png';
+    const filename = ((ctx && ctx.name) || baseName()) + ' - logo.png';
     const res = await runExclusive(() => TL.exportLogoPng(app.activeDocument, constants, folder, filename));
     if (res.ok && ctx) {
       const bytes = await R.readBytes(res.entry);
