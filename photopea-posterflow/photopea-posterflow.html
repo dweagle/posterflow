@@ -15,6 +15,10 @@
    - shows the template style (CL2K / MM2K), detected from the layer structure
    - Place Logo / Fit Poster: resize + position the SELECTED layer with the poster formula
    - JPG: download a flattened JPG (named after the doc + the visible season)
+   - Textless: download a JPG of the POSTER group's currently-visible variant only, with every
+     other layer (logo, gradient, border, text) hidden — raw material for square-art crops
+   - Square Art: crop a 500-3000px square out of that same isolated poster art and download it
+     as JPG (a new browser tab hosts the crop UI — see square-crop.html)
 
   Install: host this file at a stable HTTPS URL, then in Photopea do
   Window ▸ Plugins ▸ Add Plugin and upload the manifest.json that points at it.
@@ -97,7 +101,9 @@
   <div class="list"><div class="msg">Loading…</div></div>
   <div class="trimbar">
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
+    <button class="btn" data-act="textless-export" title="Download a JPG of the POSTER group's currently-visible variant only — every other layer (logo, gradient, border, text) hidden">Textless</button>
     <button class="btn" data-act="logo-export" title="Download the LOGO group as a trimmed transparent PNG">Logo</button>
+    <button class="btn" data-act="squareart" title="Crop a square out of the POSTER group's currently-visible variant (500-3000px) and download it as JPG">Square Art</button>
   </div>
 
 <script>
@@ -113,8 +119,12 @@
   const fitBtn  = document.querySelector('[data-act="fit"]');
   const trimBtn = document.querySelector('[data-act="trim"]');
   const logoExpBtn = document.querySelector('[data-act="logo-export"]');
+  const textlessBtn = document.querySelector('[data-act="textless-export"]');
+  const squareArtBtn = document.querySelector('[data-act="squareart"]');
   let trimBusy = false;
   let logoExpBusy = false, logoRestore = null;   // Logo export: busy flag + visibility changes to undo
+  let textlessBusy = false, squareArtBusy = false;   // Textless / Square Art: busy flags
+  let posterRestore = null;   // visibility changes to undo after isolating the POSTER group (shared by both)
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
   let jpgBusy = false;
@@ -404,7 +414,7 @@
   };
   const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
   const exportJpg = () => {
-    if (jpgBusy || placeBusy || logoExpBusy) return;
+    if (jpgBusy || placeBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
     send('try{app.echoToOE("SZNAME:"+app.activeDocument.name);app.activeDocument.saveToOE("jpg:0.90")}catch(e){app.echoToOE("SZERR:"+e)}');
   };
@@ -549,7 +559,7 @@
   // saved PSD. Canvas size and all layers are preserved; no visible change. Save afterwards.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
-    if (trimBusy || placeBusy || batchBusy || logoExpBusy) return;
+    if (trimBusy || placeBusy || batchBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
     send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('SZTRIM:ok');"));
   };
@@ -562,7 +572,7 @@
   const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
   const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
   const exportLogo = () => {
-    if (logoExpBusy || jpgBusy || placeBusy || batchBusy || trimBusy) return;
+    if (logoExpBusy || jpgBusy || placeBusy || batchBusy || trimBusy || textlessBusy || squareArtBusy) return;
     logoExpBusy = true; logoExpBtn.textContent = '…';
     send('try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' +
       'function fl(ls,pa){for(var i=0;i<ls.length;i++){var L=ls[i],h=pa.concat(i);if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return h;var f=fl(L.layers,h);if(f)return f;}}return null;}' +
@@ -610,6 +620,83 @@
       download(blob, base + '.png');
       flashLogoExp('✓');
     } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
+  };
+
+  // ---- Textless export & Square Art crop: isolate the POSTER group's active variant ------------
+  // Shared in-script fragment (assumes `d` = app.activeDocument is already defined): hides every
+  // layer that isn't the POSTER group's currently-visible child — this is what drops LOGO/GRADIENT/
+  // SEASONS/SEQUEL/border chrome without needing to name it — and records every change into `chg`
+  // so it can be restored afterward, same restore pattern as the Logo export's SZLOGOVIS above.
+  // `posterOk` is false only when a POSTER group exists but has no visible child. A MISSING POSTER
+  // group (older templates) falls back to hiding known chrome groups by name — best-effort, never
+  // fails outright.
+  const POSTER_ISOLATE_JS =
+    'var chg=[];var posterOk=(function(){' +
+    'function isGrp(L){return L.typename=="LayerSet";}' +
+    'var top=d.layers,posterIdx=-1;' +
+    'for(var i=0;i<top.length;i++){if(isGrp(top[i])&&/^\\s*poster\\s*$/i.test(top[i].name)){posterIdx=i;break;}}' +
+    'if(posterIdx>=0){' +
+    'for(var i=0;i<top.length;i++){var want=(i==posterIdx);if(top[i].visible!=want){chg.push({p:[i],v:top[i].visible});top[i].visible=want;}}' +
+    'var kids=top[posterIdx].layers,activeIdx=-1;' +
+    'for(var i=0;i<kids.length;i++){if(kids[i].visible){activeIdx=i;break;}}' +
+    'if(activeIdx<0)return false;' +
+    'for(var i=0;i<kids.length;i++){var want2=(i==activeIdx);if(kids[i].visible!=want2){chg.push({p:[posterIdx,i],v:kids[i].visible});kids[i].visible=want2;}}' +
+    'return true;' +
+    '}' +
+    'for(var i=0;i<top.length;i++){if(isGrp(top[i])&&/^\\s*(logos?|gradients?|seasons?|sequels?|borders?)\\s*$/i.test(top[i].name)&&top[i].visible){chg.push({p:[i],v:true});top[i].visible=false;}}' +
+    'return true;' +
+    '})();';
+  const restorePosterVis = () => { if (posterRestore && posterRestore.length) setVis(posterRestore); posterRestore = null; };
+
+  const flashTextless = (m) => { textlessBusy = false; textlessBtn.textContent = m; setTimeout(() => { textlessBtn.textContent = 'Textless'; }, 1400); };
+  const exportTextless = () => {
+    if (textlessBusy || jpgBusy || placeBusy || logoExpBusy || batchBusy || trimBusy || squareArtBusy) return;
+    textlessBusy = true; textlessBtn.textContent = '…';
+    send('try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' + POSTER_ISOLATE_JS +
+      'app.echoToOE("SZPOSTERVIS:"+JSON.stringify(chg));' +
+      'if(!posterOk){app.echoToOE("SZNOPOSTER:");}else{d.saveToOE("jpg:0.90");}' +
+      '}catch(e){app.echoToOE("SZERR:"+e);}');
+  };
+  // JPG bytes from the textless export: restore visibility, download.
+  const onTextlessBytes = (buf) => {
+    restorePosterVis();
+    const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    download(buf, base + activeSuffix() + '.jpg');
+    flashTextless('✓');
+  };
+
+  // Square Art: same isolate as Textless, but exports a PNG (avoids a second lossy JPEG re-encode)
+  // and hands it to a NEW browser tab (square-crop.html) for the actual crop UI — the docked panel
+  // is too narrow (~184-260px) for a usable drag-crop interface, so this can't run inline like the
+  // other buttons. No backend here (standalone plugin), so the crop tab downloads the result.
+  const flashSquareArt = (m) => { squareArtBtn.textContent = m; setTimeout(() => { squareArtBtn.textContent = 'Square Art'; }, 1400); };
+  const startSquareArt = () => {
+    if (squareArtBusy || jpgBusy || placeBusy || logoExpBusy || batchBusy || trimBusy || textlessBusy) return;
+    squareArtBusy = true; squareArtBtn.textContent = '…';
+    send('try{var d=app.activeDocument;app.echoToOE("SZNAME:"+d.name);' + POSTER_ISOLATE_JS +
+      'app.echoToOE("SZPOSTERVIS:"+JSON.stringify(chg));' +
+      'if(!posterOk){app.echoToOE("SZNOPOSTER:");}else{d.saveToOE("png");}' +
+      '}catch(e){app.echoToOE("SZERR:"+e);}');
+  };
+  // Opens square-crop.html in a new tab and hands it the isolated poster's PNG bytes once it
+  // signals it's ready. That page implements the actual crop UI (drag/resize/presets) and, since
+  // this variant has no backend, downloads the cropped JPG itself.
+  const openSquareCropTab = (buf, filenameBase) => {
+    const win = window.open('square-crop.html', '_blank');
+    if (!win) { note('Square Art: pop-up blocked — allow pop-ups for this site and try again.'); return; }
+    const onReady = (e) => {
+      if (e.source !== win || e.data !== 'SQUAREART_READY') return;
+      window.removeEventListener('message', onReady);
+      win.postMessage({ type: 'SQUAREART_INIT', buf, filename: filenameBase + ' - squareart.jpg' }, '*', [buf]);
+    };
+    window.addEventListener('message', onReady);
+  };
+  const onSquareArtPreviewBytes = (buf) => {
+    restorePosterVis();
+    squareArtBtn.textContent = 'Square Art';
+    const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    openSquareCropTab(buf, base + activeSuffix());
+    squareArtBusy = false;
   };
 
   // ---- Batch export --------------------------------------------------------
@@ -989,7 +1076,13 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { if (logoExpBusy) { onLogoBytes(d); } else { onBytes(d); } return; }   // ArrayBuffer = saveToOE result
+    if (typeof d !== 'string') {
+      if (textlessBusy) { onTextlessBytes(d); }
+      else if (squareArtBusy) { onSquareArtPreviewBytes(d); }
+      else if (logoExpBusy) { onLogoBytes(d); }
+      else { onBytes(d); }
+      return;
+    }   // ArrayBuffer = saveToOE result
     if (d.startsWith('SZNAME:'))       { pendingDocName = d.slice(7) || 'poster'; }
     else if (d.startsWith('SZDET:'))   { detectedStyle = d.slice(6); updateDocUI(); }
     else if (d.startsWith('SZSIG:'))   { lastActiveSig = d.slice(6); }   // baseline the watcher from the read we just did → the next poll's identical sig doesn't trigger a redundant re-fetch
@@ -1019,7 +1112,21 @@
     else if (d.startsWith('SZTRIM:'))  { flashTrim('✓'); }
     else if (d.startsWith('SZLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(10)); } catch (_) { logoRestore = null; } }
     else if (d.startsWith('SZNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
-    else if (d.startsWith('SZERR:'))   { if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(6)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(6)); } else if (batchBusy) { batchAbort(d.slice(6)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); } else { note('Error: ' + d.slice(6)); flashJpg('JPG'); } }
+    else if (d.startsWith('SZPOSTERVIS:')) { try { posterRestore = JSON.parse(d.slice(12)); } catch (_) { posterRestore = null; } }
+    else if (d.startsWith('SZNOPOSTER:')) {
+      restorePosterVis();
+      if (textlessBusy) { flashTextless('✗'); note('The POSTER group has no visible variant.'); }
+      else if (squareArtBusy) { squareArtBusy = false; flashSquareArt('✗'); note('The POSTER group has no visible variant.'); }
+    }
+    else if (d.startsWith('SZERR:'))   {
+      if (textlessBusy) { restorePosterVis(); flashTextless('✗'); note('Textless export failed: ' + d.slice(6)); }
+      else if (squareArtBusy) { restorePosterVis(); squareArtBusy = false; flashSquareArt('✗'); note('Square Art failed: ' + d.slice(6)); }
+      else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(6)); }
+      else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(6)); }
+      else if (batchBusy) { batchAbort(d.slice(6)); }
+      else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(6)); }
+      else { note('Error: ' + d.slice(6)); flashJpg('JPG'); }
+    }
     else if (d.startsWith('SZ:'))      { try { model = JSON.parse(d.slice(3)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     // SZVIS: ack handled optimistically in commit().
   });
@@ -1030,10 +1137,12 @@
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
   logoExpBtn.addEventListener('click', exportLogo);
+  textlessBtn.addEventListener('click', exportTextless);
+  squareArtBtn.addEventListener('click', startSquareArt);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
   const boltClick = (mode) => {
-    if (batchBusy || logoExpBusy) return;
+    if (batchBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
     startBatch(mode);
   };
@@ -1063,7 +1172,7 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("SZACT:"+sig)}catch(e){}';
-  setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) send(POLL); }, 1200);
+  setInterval(() => { if (!jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !textlessBusy && !squareArtBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the active document (press ⟳ to reload)
 })();

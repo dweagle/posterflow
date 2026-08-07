@@ -1649,6 +1649,88 @@ def test_save_image_export_mm2k_writes_to_mm2k_folder(client, test_db):
 
 
 # ---------------------------------------------------------------------------
+# API: PUT /api/maker-tools/textless-exports/{filename} and /squareart-exports/{filename}
+# ---------------------------------------------------------------------------
+
+
+def test_save_textless_export_writes_to_configured_folder(client, test_db):
+    with tempfile.TemporaryDirectory() as textless_dir:
+        test_db.add(Setting(key="textless_export_folder", value=textless_dir))
+        test_db.commit()
+
+        response = client.put(
+            "/api/maker-tools/textless-exports/Show (2026).jpg",
+            content=b"TEXTLESSBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+        assert response.status_code == 200
+        saved = Path(textless_dir) / "Show (2026).jpg"
+        assert saved.is_file()
+        assert saved.read_bytes() == b"TEXTLESSBYTES"
+
+
+def test_save_textless_export_no_folder_configured_returns_400(client):
+    response = client.put(
+        "/api/maker-tools/textless-exports/Show (2026).jpg",
+        content=b"TEXTLESSBYTES",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 400
+
+
+def test_save_textless_export_invalid_filename_rejected(client, test_db):
+    with tempfile.TemporaryDirectory() as textless_dir:
+        test_db.add(Setting(key="textless_export_folder", value=textless_dir))
+        test_db.commit()
+        response = client.put(
+            "/api/maker-tools/textless-exports/evil.exe",
+            content=b"TEXTLESSBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert response.status_code == 400
+
+
+def test_save_squareart_export_writes_to_configured_folder(client, test_db):
+    """Square art export shares squareart_export_folder with the gallery crop tool."""
+    with tempfile.TemporaryDirectory() as squareart_dir:
+        test_db.add(Setting(key="squareart_export_folder", value=squareart_dir))
+        test_db.commit()
+
+        response = client.put(
+            "/api/maker-tools/squareart-exports/Show (2026) - squareart.jpg",
+            content=b"SQUAREARTBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+        assert response.status_code == 200
+        saved = Path(squareart_dir) / "Show (2026) - squareart.jpg"
+        assert saved.is_file()
+        assert saved.read_bytes() == b"SQUAREARTBYTES"
+
+
+def test_save_squareart_export_no_folder_configured_returns_400(client):
+    response = client.put(
+        "/api/maker-tools/squareart-exports/Show (2026) - squareart.jpg",
+        content=b"SQUAREARTBYTES",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 400
+
+
+def test_save_squareart_export_invalid_filename_rejected(client, test_db):
+    with tempfile.TemporaryDirectory() as squareart_dir:
+        test_db.add(Setting(key="squareart_export_folder", value=squareart_dir))
+        test_db.commit()
+        response = client.put(
+            "/api/maker-tools/squareart-exports/../evil.jpg",
+            content=b"SQUAREARTBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert response.status_code in (400, 404, 422)
+
+
+# ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/psd-exports/{filename} — security & serving
 # ---------------------------------------------------------------------------
 

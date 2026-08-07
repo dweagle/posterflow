@@ -63,3 +63,34 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .trimbar sp-action-button { margin: 0 2px; }
 
 .hidden { display: none; }
+
+/* ---- Square Art crop dialog (squarecrop.js) — sized independently of the docked panel. ---- */
+.crop-dialog { width: 640px; max-width: 92vw; max-height: 88vh; padding: 0; border: 1px solid #3a3a42;
+  border-radius: 8px; background: #1f1f24; color: #e6e6e6; }
+.crop-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.crop-dialog__header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+  background: #2a2a31; border-bottom: 1px solid #3a3a42; font-weight: 700; }
+.crop-dialog__close { cursor: pointer; background: transparent; border: 0; color: #cfcfcf; font-size: 18px; line-height: 1; }
+.crop-dialog__body { display: flex; gap: 14px; align-items: flex-start; justify-content: center; padding: 14px; flex-wrap: wrap; }
+.crop-img-wrap { position: relative; line-height: 0; user-select: none; touch-action: none; max-width: 420px; }
+.crop-img-wrap img { max-width: 100%; max-height: 56vh; display: block; }
+.crop-box { position: absolute; border: 2px solid #64b5f6; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  cursor: move; box-sizing: border-box; }
+.crop-box__handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; background: #64b5f6;
+  border: 2px solid #fff; border-radius: 3px; cursor: nwse-resize; }
+.crop-badge { position: absolute; background: rgba(220, 220, 220, 0.95); color: #1a1a1a; font-size: 12px;
+  font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.35); pointer-events: none; white-space: nowrap; }
+.crop-caption { font-size: 11px; color: #99aaaa; margin: 8px 0 0; text-align: center; max-width: 420px; }
+.crop-presets { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; padding-top: 2px; }
+.crop-presets__label { font-size: 10px; color: #99aaaa; font-weight: 700; }
+.crop-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid #3a3a42; background: #23232a; }
+.crop-dialog button.btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px;
+  padding: 6px 12px; font-size: 12px; }
+.crop-dialog button.btn:hover:not(:disabled) { background: #4a4a54; }
+.crop-dialog button.btn:disabled { opacity: 0.45; cursor: default; }
+.crop-dialog button.btn.primary { background: #2b5c9e; }
+.crop-dialog button.btn.primary:hover:not(:disabled) { background: #356ec0; }
+.crop-dialog button.btn.active { background: #2e7d46; }
+.crop-presets button.btn { text-align: center; }
+
+.hidden { display: none; }

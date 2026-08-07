@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Posterflow — Square Art crop</title>
+<!--
+  Square Art crop tool for the standalone Photopea plugin. Opened as a NEW TAB by the "Square Art"
+  button in photopea-posterflow.html (window.open), because the docked Photopea panel is too narrow
+  (~184-260px) for a usable drag-crop UI. The opener hands over the isolated poster's PNG bytes via
+  postMessage once this page signals it's ready; there's no backend in this variant, so the cropped
+  result downloads straight to the browser (same as every other export in this plugin).
+  Interaction model (drag-to-move, drag-corner-to-resize, size presets, native-px scaling) mirrors
+  frontend/src/components/maker-tools/SquareCropModal.tsx.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #1f1f24; color: #e6e6e6;
+    font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 24px 16px; box-sizing: border-box; }
+  h1 { font-size: 15px; font-weight: 700; margin: 0 0 16px; color: #cfcfcf; }
+  .msg { color: #99aaaa; margin-top: 40px; text-align: center; max-width: 480px; }
+  .layout { display: flex; gap: 20px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .img-col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .img-wrap { position: relative; line-height: 0; user-select: none; touch-action: none; }
+  .img-wrap img { max-width: min(78vw, 640px); max-height: 74vh; display: block; }
+  .crop-box { position: absolute; border: 2px solid #64b5f6; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+    cursor: move; box-sizing: border-box; }
+  .crop-box__handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; background: #64b5f6;
+    border: 2px solid #fff; border-radius: 3px; cursor: nwse-resize; }
+  .crop-badge { position: absolute; background: rgba(220, 220, 220, 0.95); color: #1a1a1a; font-size: 12px;
+    font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.35); pointer-events: none; white-space: nowrap; }
+  .caption { font-size: 11px; color: #99aaaa; margin: 0; text-align: center; max-width: 480px; }
+  .caption strong { color: #cfd6e4; }
+  .presets { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; padding-top: 2px; }
+  .presets__label { font-size: 10px; color: #99aaaa; font-weight: 700; }
+  .btn { cursor: pointer; background: #3a3a42; border: 0; color: #e6e6e6; border-radius: 4px; padding: 6px 12px; font-size: 12px; }
+  .btn:hover:not(:disabled) { background: #4a4a54; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.primary { background: #2b5c9e; }
+  .btn.primary:hover:not(:disabled) { background: #356ec0; }
+  .btn.active { background: #2e7d46; }
+  .footer { display: flex; gap: 8px; margin-top: 18px; }
+  .presets button { text-align: center; }
+</style>
+</head>
+<body>
+  <h1>Crop to square art</h1>
+  <div class="msg" data-el="waiting">Waiting for the poster from Photopea…</div>
+  <div class="layout hidden" data-el="layout">
+    <div class="img-col">
+      <div class="img-wrap"><img draggable="false" alt="" /></div>
+      <p class="caption" data-el="caption"></p>
+    </div>
+    <div class="presets"><span class="presets__label">PRESETS</span></div>
+  </div>
+  <div class="footer hidden" data-el="footer">
+    <button type="button" class="btn" data-act="cancel">Cancel</button>
+    <button type="button" class="btn primary" data-act="save" disabled>Save as Square Art</button>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  const MIN_OUTPUT = 500;
+  const PRESETS = [500, 1000, 1500, 2000, 2500, 3000];
+
+  const waitingEl = document.querySelector('[data-el="waiting"]');
+  const layoutEl = document.querySelector('[data-el="layout"]');
+  const footerEl = document.querySelector('[data-el="footer"]');
+  const img = document.querySelector('.img-wrap img');
+  const wrap = document.querySelector('.img-wrap');
+  const caption = document.querySelector('[data-el="caption"]');
+  const presetsEl = document.querySelector('.presets');
+  const cancelBtn = document.querySelector('[data-act="cancel"]');
+  const saveBtn = document.querySelector('[data-act="save"]');
+
+  let filename = 'square-art.jpg';
+  let box = null;    // { x, y, size } in DISPLAY px within wrap
+  let drag = null;   // { mode, startX, startY, orig }
+  let maxNativeSquare = 0;
+  let tooSmall = false;
+
+  const scale = () => img.naturalWidth / (img.clientWidth || 1);
+
+  function clampBox(b) {
+    const w = img.clientWidth, h = img.clientHeight;
+    const size = Math.max(1, Math.min(b.size, w, h));
+    return { size, x: Math.max(0, Math.min(b.x, w - size)), y: Math.max(0, Math.min(b.y, h - size)) };
+  }
+
+  function updatePresetActive(nativeSize) {
+    presetsEl.querySelectorAll('button.btn').forEach((b) => {
+      b.classList.toggle('active', Number(b.dataset.size) === nativeSize);
+    });
+  }
+
+  function renderBox() {
+    wrap.querySelectorAll('.crop-box, .crop-badge').forEach((el) => el.remove());
+    if (!box || tooSmall) { saveBtn.disabled = true; return; }
+    const boxEl = document.createElement('div');
+    boxEl.className = 'crop-box';
+    boxEl.style.left = box.x + 'px'; boxEl.style.top = box.y + 'px';
+    boxEl.style.width = box.size + 'px'; boxEl.style.height = box.size + 'px';
+    const handleEl = document.createElement('div');
+    handleEl.className = 'crop-box__handle';
+    boxEl.appendChild(handleEl);
+    wrap.appendChild(boxEl);
+
+    const nativeSize = Math.round(box.size * scale());
+    const badgeEl = document.createElement('div');
+    badgeEl.className = 'crop-badge';
+    badgeEl.style.left = (box.x + 4) + 'px'; badgeEl.style.top = (box.y + 4) + 'px';
+    badgeEl.textContent = nativeSize + ' × ' + nativeSize;
+    wrap.appendChild(badgeEl);
+
+    boxEl.addEventListener('pointerdown', (e) => startDrag('move', e));
+    handleEl.addEventListener('pointerdown', (e) => startDrag('resize', e));
+
+    updatePresetActive(nativeSize);
+    saveBtn.disabled = false;
+  }
+
+  function startDrag(mode, e) {
+    e.preventDefault(); e.stopPropagation();
+    drag = { mode, startX: e.clientX, startY: e.clientY, orig: Object.assign({}, box) };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', endDrag);
+  }
+  function onMove(e) {
+    if (!drag) return;
+    const w = img.clientWidth, h = img.clientHeight;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (drag.mode === 'move') {
+      box = clampBox({ x: drag.orig.x + dx, y: drag.orig.y + dy, size: drag.orig.size });
+    } else {
+      const sc = scale();
+      const minSize = MIN_OUTPUT / sc;
+      const maxSize = Math.min(w - drag.orig.x, h - drag.orig.y);
+      const size = Math.min(maxSize, Math.max(Math.min(minSize, maxSize), drag.orig.size + Math.max(dx, dy)));
+      box = { x: drag.orig.x, y: drag.orig.y, size };
+    }
+    renderBox();
+  }
+  function endDrag() {
+    drag = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', endDrag);
+  }
+
+  function applyPreset(nativeSize) {
+    const sc = scale();
+    const w = img.clientWidth, h = img.clientHeight;
+    const size = Math.min(nativeSize / sc, w, h);
+    const cx = box ? box.x + box.size / 2 : w / 2;
+    const cy = box ? box.y + box.size / 2 : h / 2;
+    box = clampBox({ x: cx - size / 2, y: cy - size / 2, size });
+    renderBox();
+  }
+
+  function buildPresets() {
+    PRESETS.forEach((sz) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn'; b.dataset.size = String(sz);
+      b.textContent = sz + ' × ' + sz;
+      const disabled = tooSmall || sz > maxNativeSquare;
+      b.disabled = disabled;
+      b.title = disabled ? ('Poster too small for ' + sz + '×' + sz) : ('Set the crop to ' + sz + '×' + sz);
+      b.addEventListener('click', () => applyPreset(sz));
+      presetsEl.appendChild(b);
+    });
+  }
+
+  function measure() {
+    if (!img.clientWidth) return;
+    if (tooSmall) {
+      caption.innerHTML = 'This poster is only <strong>' + img.naturalWidth + '×' + img.naturalHeight +
+        '</strong>px — too small to crop a ' + MIN_OUTPUT + '×' + MIN_OUTPUT + ' square.';
+      saveBtn.disabled = true;
+      return;
+    }
+    caption.innerHTML = 'Source poster: <strong>' + img.naturalWidth + '×' + img.naturalHeight +
+      'px</strong> · drag to move, drag the corner to resize (min ' + MIN_OUTPUT + '×' + MIN_OUTPUT + ').';
+    box = box ? clampBox(box) : (() => {
+      const size = Math.min(img.clientWidth, img.clientHeight);
+      return { x: (img.clientWidth - size) / 2, y: (img.clientHeight - size) / 2, size };
+    })();
+    renderBox();
+  }
+
+  function onImageReady() {
+    maxNativeSquare = Math.min(img.naturalWidth, img.naturalHeight);
+    tooSmall = maxNativeSquare < MIN_OUTPUT;
+    waitingEl.classList.add('hidden');
+    layoutEl.classList.remove('hidden');
+    footerEl.classList.remove('hidden');
+    buildPresets();
+    measure();
+    try { new ResizeObserver(() => measure()).observe(img); } catch (_) {}
+  }
+
+  function doCrop() {
+    const sc = scale();
+    const size = Math.max(1, Math.round(box.size * sc));
+    const left = Math.max(0, Math.min(Math.round(box.x * sc), img.naturalWidth - size));
+    const top = Math.max(0, Math.min(Math.round(box.y * sc), img.naturalHeight - size));
+    const cv = document.createElement('canvas');
+    cv.width = size; cv.height = size;
+    cv.getContext('2d').drawImage(img, left, top, size, size, 0, 0, size, size);
+    return new Promise((resolve, reject) => {
+      cv.toBlob((b) => b ? resolve(b) : reject(new Error('JPEG encode failed')), 'image/jpeg', 0.9);
+    });
+  }
+
+  const download = (blob, name) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  };
+
+  saveBtn.addEventListener('click', async () => {
+    if (!box || tooSmall) return;
+    saveBtn.disabled = true; cancelBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const blob = await doCrop();
+      download(blob, filename);
+      saveBtn.textContent = 'Saved ✓';
+      setTimeout(() => window.close(), 900);
+    } catch (e) {
+      saveBtn.textContent = 'Save as Square Art'; saveBtn.disabled = false; cancelBtn.disabled = false;
+      caption.textContent = 'Save failed: ' + (e && e.message ? e.message : e);
+    }
+  });
+  cancelBtn.addEventListener('click', () => window.close());
+
+  // ---- handshake with the opener panel --------------------------------------
+  if (!window.opener) {
+    waitingEl.textContent = 'This page must be opened from the Posterflow panel\'s Square Art button.';
+  } else {
+    window.addEventListener('message', (e) => {
+      if (e.source !== window.opener) return;
+      const d = e.data;
+      if (!d || d.type !== 'SQUAREART_INIT') return;
+      filename = d.filename || filename;
+      const blob = new Blob([d.buf], { type: 'image/png' });
+      img.src = URL.createObjectURL(blob);
+      img.addEventListener('load', onImageReady, { once: true });
+    });
+    window.opener.postMessage('SQUAREART_READY', '*');
+  }
+})();
+</script>
+</body>
+</html>

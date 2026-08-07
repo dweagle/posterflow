@@ -7,6 +7,8 @@
 
 const { core, action } = require('photoshop');
 const G = require('./geometry');
+const M = require('./model');
+const { JPG_QUALITY } = require('./save');
 
 // Neutral density: the export's logo formula has a transparency term that needs the layer's pixels
 // (fragile to read for one layer), so — like the Photopea panel — we skip it and use 0.30 (no sparse
@@ -245,4 +247,144 @@ async function exportLogoPng(doc, constants, folder, filename) {
   return result;
 }
 
-module.exports = { placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible, hideManualCollectionLogos, LOGO_DENSITY };
+// ---- Textless export / Square Art crop: isolate the POSTER group's active variant ----
+// Shared primitive for both features: hide every top-level layer except the root-level POSTER
+// group (this is what drops LOGO/GRADIENT/SEASONS/SEQUEL/border chrome — anything outside POSTER —
+// without needing to name it), then within POSTER hide every child except the one that's already
+// visible (the currently-rendered variant). Must run on a DUPLICATE, inside executeAsModal, same as
+// exportLogoPng above. Returns { ok, reason } — reason is 'no-poster' | 'empty' on failure, or
+// 'fallback' when no POSTER group existed and a best-effort chrome-only hide was used instead.
+function isolatePosterArt(dup, constants) {
+  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
+  const top = dup.layers;
+
+  let posterIdx = -1;
+  for (let i = 0; i < top.length; i++) {
+    if (isGroup(top[i]) && /^\s*poster\s*$/i.test(top[i].name)) { posterIdx = i; break; }
+  }
+  if (posterIdx >= 0) {
+    for (let i = 0; i < top.length; i++) top[i].visible = (i === posterIdx);
+    const kids = top[posterIdx].layers;
+    let activeIdx = -1;
+    for (let i = 0; i < kids.length; i++) { if (kids[i].visible) { activeIdx = i; break; } }
+    if (activeIdx < 0) return { ok: false, reason: 'empty' };
+    for (let i = 0; i < kids.length; i++) kids[i].visible = (i === activeIdx);
+    return { ok: true };
+  }
+
+  // No POSTER group (legacy template): fall back to the same name-tag scan the batch export uses
+  // (s0/s1…/main/show/c/cls) for a single currently-visible tagged layer, and isolate just that.
+  const baseNorm = ('' + (dup.name || '')).replace(/\.(psd|psb)$/i, '').toLowerCase().trim().replace(/\s+/g, ' ');
+  const scan = M.scanBatch(dup, constants, baseNorm);
+  const visible = scan.variants.filter((v) => v.v);
+  if (visible.length === 1) {
+    const path = visible[0].p;
+    let cont = top;
+    for (let k = 0; k < path.length; k++) {
+      for (let i = 0; i < cont.length; i++) cont[i].visible = (i === path[k]);
+      cont = cont[path[k]].layers;
+    }
+    return { ok: true };
+  }
+
+  // Last resort: hide known chrome groups by name, leave everything else exactly as currently
+  // visible — best-effort so the export never hard-fails on an unfamiliar template.
+  for (let i = 0; i < top.length; i++) {
+    if (isGroup(top[i]) && /^\s*(logos?|gradients?|seasons?|sequels?|borders?)\s*$/i.test(top[i].name)) {
+      top[i].visible = false;
+    }
+  }
+  return { ok: true, reason: 'fallback' };
+}
+
+// Export a JPG of the isolated poster art (no logo/gradient/border/text chrome) into `folder`.
+// Works on a DUPLICATE so the open doc is untouched, mirroring exportLogoPng's shape.
+async function exportTextlessJpg(doc, constants, folder, filename) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    const dup = await doc.duplicate();
+    try {
+      const iso = isolatePosterArt(dup, constants);
+      if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
+      const file = await folder.createFile(filename, { overwrite: true });
+      await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+      result = { ok: true, filename, folderName: folder.name, entry: file, fallback: iso.reason === 'fallback' };
+    } finally {
+      await dup.closeWithoutSaving();
+    }
+  }, { commandName: 'Export textless poster JPG' });
+  return result;
+}
+
+// Read the isolated poster art's pixel size (native px), for the crop dialog to scale its display
+// against. Does NOT save anything — just isolates on a throwaway duplicate and reads doc.width/height
+// (the isolated content is always the full canvas — POSTER variants are canvas-sized layers).
+async function readPosterSize(doc, constants) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    const dup = await doc.duplicate();
+    try {
+      const iso = isolatePosterArt(dup, constants);
+      if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
+      result = { ok: true, width: Math.round(dup.width), height: Math.round(dup.height) };
+    } finally {
+      await dup.closeWithoutSaving();
+    }
+  }, { commandName: 'Read poster size' });
+  return result;
+}
+
+// Export a PREVIEW JPG of the isolated poster art at a capped display resolution (long edge <=
+// maxDim) so the crop dialog has something fast to load — never used for the final crop, which
+// re-isolates and crops the FULL-resolution duplicate (see exportSquareArtJpg).
+async function exportPosterPreview(doc, constants, folder, filename, maxDim) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    const dup = await doc.duplicate();
+    try {
+      const iso = isolatePosterArt(dup, constants);
+      if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
+      const w = dup.width, h = dup.height;
+      const longEdge = Math.max(w, h);
+      if (longEdge > maxDim) {
+        // Document.resizeImage takes absolute pixel width/height (unlike ArtLayer.scale's percentages
+        // used elsewhere in this file) — compute the target size directly.
+        const scale = maxDim / longEdge;
+        await dup.resizeImage(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)));
+      }
+      const file = await folder.createFile(filename, { overwrite: true });
+      await dup.saveAs.jpg(file, { quality: 8 }, true);
+      result = { ok: true, entry: file, width: Math.round(dup.width), height: Math.round(dup.height) };
+    } finally {
+      await dup.closeWithoutSaving();
+    }
+  }, { commandName: 'Render poster preview' });
+  return result;
+}
+
+// Export the FINAL square-art JPG: re-isolate the poster art on a FRESH full-resolution duplicate,
+// crop to `cropRectNative` ({left,top,right,bottom} in the isolated doc's own native px — same space
+// readPosterSize/exportPosterPreview report against), and save. Never crops the lossy preview.
+async function exportSquareArtJpg(doc, constants, folder, filename, cropRectNative) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    const dup = await doc.duplicate();
+    try {
+      const iso = isolatePosterArt(dup, constants);
+      if (!iso.ok) { result = { ok: false, reason: iso.reason }; return; }
+      await dup.crop(cropRectNative);
+      const file = await folder.createFile(filename, { overwrite: true });
+      await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+      result = { ok: true, filename, folderName: folder.name, entry: file, fallback: iso.reason === 'fallback' };
+    } finally {
+      await dup.closeWithoutSaving();
+    }
+  }, { commandName: 'Export square art JPG' });
+  return result;
+}
+
+module.exports = {
+  placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible,
+  hideManualCollectionLogos, LOGO_DENSITY, isolatePosterArt, exportTextlessJpg, readPosterSize,
+  exportPosterPreview, exportSquareArtJpg,
+};

@@ -1880,6 +1880,7 @@ SETTING_PSD_OPEN_PHOTOPEA = "psd_open_photopea"
 SETTING_PSD_POSTER_FIT_BORDER = "psd_poster_fit_border"
 SETTING_PSD_IMAGE_EXPORT_FOLDER = "psd_image_export_folder"       # CL2K image export folder
 SETTING_LOGO_EXPORT_FOLDER = "logo_export_folder"                 # panel Logo button PNGs (CL2K-only feature, one folder)
+SETTING_TEXTLESS_EXPORT_FOLDER = "textless_export_folder"         # panel Textless button JPGs (both styles, one folder)
 # Gallery save buttons (artwork-drive names) — logo is a separate folder from the panel's above.
 SETTING_ARTWORK_LOGO_EXPORT_FOLDER = "artwork_logo_export_folder"
 SETTING_BACKGROUND_EXPORT_FOLDER = "background_export_folder"
@@ -2719,6 +2720,70 @@ async def save_logo_export(filename: str, request: Request, db: Session = Depend
     except Exception as exc:
         log_error(LogTags.API, f"Logo export save failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save logo: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True})
+
+
+@router.put("/textless-exports/{filename}")
+async def save_textless_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a textless poster JPG (the panel's Textless button — the PSD's POSTER group's
+    currently-visible child, with every other layer hidden) to the configured textless export folder.
+
+    One folder for all styles — a textless render applies to both CL2K and MM2K posters.
+    400s when unconfigured so the panel falls back to a browser download.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_TEXTLESS_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No textless export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported textless poster", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Textless export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save textless poster: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True})
+
+
+@router.put("/squareart-exports/{filename}")
+async def save_squareart_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a square-art JPG cropped in the panel (the Square Art tool — a square region of the
+    PSD's POSTER group's currently-visible child) to the configured square art export folder.
+
+    Shares its folder setting with the web app's gallery crop tool (SquareCropModal), so panel
+    crops land in the same place as TMDB/TVDB gallery crops. The bytes arrive already cropped
+    client-side — unlike /artwork-exports, this endpoint never fetches or crops server-side.
+    400s when unconfigured so the panel falls back to a browser download.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_SQUAREART_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No square art export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported square art", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Square art export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save square art: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True})
 

@@ -146,6 +146,7 @@ function MakerTools() {
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdImageExportFolder, setPsdImageExportFolder] = useState('')
   const [logoExportFolder, setLogoExportFolder] = useState('')          // panel Logo button (Photopea/Photoshop)
+  const [textlessExportFolder, setTextlessExportFolder] = useState('')  // panel Textless button (Photopea/Photoshop)
   const [artworkLogoExportFolder, setArtworkLogoExportFolder] = useState('')   // gallery logo save button
   const [backgroundExportFolder, setBackgroundExportFolder] = useState('')
   const [squareartExportFolder, setSquareartExportFolder] = useState('')
@@ -241,6 +242,7 @@ function MakerTools() {
       setTvdbEnabled(cfg.tvdbEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
       setLogoExportFolder((settings.logo_export_folder || '').trim())
+      setTextlessExportFolder((settings.textless_export_folder || '').trim())
       setArtworkLogoExportFolder((settings.artwork_logo_export_folder || '').trim())
       setBackgroundExportFolder((settings.background_export_folder || '').trim())
       setSquareartExportFolder((settings.squareart_export_folder || '').trim())
@@ -302,6 +304,7 @@ function MakerTools() {
         psd_photopea_same_tab: String(psdSameTab),
         psd_poster_fit_border: String(psdPosterFitBorder),
         logo_export_folder: logoExportFolder.trim(),
+        textless_export_folder: textlessExportFolder.trim(),
         artwork_logo_export_folder: artworkLogoExportFolder.trim(),
         background_export_folder: backgroundExportFolder.trim(),
         squareart_export_folder: squareartExportFolder.trim(),
@@ -1121,6 +1124,33 @@ function MakerTools() {
                     </label>
                   </div>
                 </div>
+
+                <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
+                  Panel Export Folders
+                  <InfoTip>
+                    Folders used by the Photopea/Photoshop panel's own export buttons — separate from the
+                    gallery folders above. One folder for both styles. The panel's <strong>Square Art</strong>
+                    {' '}crop tool reuses the <strong>Square Art Export Folder</strong> setting above (same
+                    destination as the gallery's crop-to-square tool) — there's no separate setting for it.
+                  </InfoTip>
+                </div>
+                <label>
+                  Textless Export Folder
+                  <InfoTip>
+                    Optional. Where the panel&apos;s <strong>Textless</strong> button saves a JPG of the
+                    currently-visible poster art — the PSD&apos;s <strong>POSTER</strong> group&apos;s
+                    active variant, with every other layer (logo, gradient, border, text) hidden. Set an
+                    absolute container-side path (e.g. <code>/config/textless</code>). When blank, Photopea
+                    falls back to a browser download, and the Photoshop panel falls back to its own local
+                    textless folder (it asks once and remembers).
+                  </InfoTip>
+                  <input
+                    type="text"
+                    value={textlessExportFolder}
+                    onChange={(e) => setTextlessExportFolder(e.target.value)}
+                    placeholder="(blank = download)"
+                  />
+                </label>
 
                 <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
                   Style Folders

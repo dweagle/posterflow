@@ -140,6 +140,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "psd_poster_fit_border",
     "psd_default_editor",
     "logo_export_folder",
+    "textless_export_folder",
     "artwork_logo_export_folder",
     "background_export_folder",
     "squareart_export_folder",

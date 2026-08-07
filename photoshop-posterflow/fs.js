@@ -30,27 +30,40 @@ async function getImageFolder(style, { forcePick = false } = {}) {
 
 function clearImageFolder(style) { try { localStorage.removeItem(tokenKey(style)); } catch (_) {} }
 
-// Logo export folder — one folder, not per style (logos only exist on CL2K templates).
-const LOGO_KEY = 'posterflow.logoFolder';
-async function getLogoFolder({ forcePick = false } = {}) {
+// Shared ask-once-remember logic for the single-folder (not per-style) export buttons below —
+// Logo, Textless, Square Art — each keyed by its own localStorage entry.
+async function _getOrPickFolder(lsKey, forcePick) {
   if (!forcePick) {
     let tok = null;
-    try { tok = localStorage.getItem(LOGO_KEY); } catch (_) {}
+    try { tok = localStorage.getItem(lsKey); } catch (_) {}
     if (tok) {
       try { return await fs.getEntryForPersistentToken(tok); }
-      catch (_) { try { localStorage.removeItem(LOGO_KEY); } catch (_e) {} }
+      catch (_) { try { localStorage.removeItem(lsKey); } catch (_e) {} }
     }
   }
   const folder = await fs.getFolder();
   if (!folder) return null;
-  try { localStorage.setItem(LOGO_KEY, await fs.createPersistentToken(folder)); } catch (_) {}
+  try { localStorage.setItem(lsKey, await fs.createPersistentToken(folder)); } catch (_) {}
   return folder;
 }
 
-// Forget every remembered folder (both image styles + logo) — the next export prompts again.
+// Logo export folder — one folder, not per style (logos only exist on CL2K templates).
+const LOGO_KEY = 'posterflow.logoFolder';
+function getLogoFolder({ forcePick = false } = {}) { return _getOrPickFolder(LOGO_KEY, forcePick); }
+
+// Textless export folder — one folder, applies to both CL2K and MM2K (every template has a POSTER group).
+const TEXTLESS_KEY = 'posterflow.textlessFolder';
+function getTextlessFolder({ forcePick = false } = {}) { return _getOrPickFolder(TEXTLESS_KEY, forcePick); }
+
+// Square Art export folder — one folder, applies to both styles.
+const SQUAREART_KEY = 'posterflow.squareartFolder';
+function getSquareartFolder({ forcePick = false } = {}) { return _getOrPickFolder(SQUAREART_KEY, forcePick); }
+
+// Forget every remembered folder (image styles + logo + textless + square art) — the next export
+// of each prompts again.
 function clearAllFolders() {
   ['CL2K', 'MM2K', 'default'].forEach((s) => clearImageFolder(s));
-  try { localStorage.removeItem(LOGO_KEY); } catch (_) {}
+  [LOGO_KEY, TEXTLESS_KEY, SQUAREART_KEY].forEach((k) => { try { localStorage.removeItem(k); } catch (_) {} });
 }
 
 // Write raw bytes into a folder (used when a server upload falls back to a local save).
@@ -59,4 +72,7 @@ async function writeFileBytes(folder, name, bytes) {
   await f.write(bytes, { format: formats.binary });
 }
 
-module.exports = { getImageFolder, clearImageFolder, getLogoFolder, clearAllFolders, writeFileBytes };
+module.exports = {
+  getImageFolder, clearImageFolder, getLogoFolder, getTextlessFolder, getSquareartFolder,
+  clearAllFolders, writeFileBytes,
+};

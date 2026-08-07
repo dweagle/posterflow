@@ -101,7 +101,9 @@
   <div class="list"><div class="msg">Loading…</div></div>
   <div class="trimbar">
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
+    <button class="btn" data-act="textless-export" title="Export a JPG of the POSTER group's currently-visible variant only — every other layer (logo, gradient, border, text) hidden (to the textless folder, or download)">Textless</button>
     <button class="btn" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG (to the logo folder, or download)">Logo</button>
+    <button class="btn" data-act="squareart" title="Crop a square out of the POSTER group's currently-visible variant (500-3000px) and export it as JPG (to the square art folder, or download)">Square Art</button>
   </div>
 
 <script>
@@ -120,6 +122,10 @@
   let trimBusy = false;
   const logoExpBtn = document.querySelector('[data-act="logo-export"]');
   let logoExpBusy = false, logoRestore = null;   // Logo export: busy flag + visibility changes to undo
+  const textlessExpBtn = document.querySelector('[data-act="textless-export"]');
+  const squareArtBtn = document.querySelector('[data-act="squareart"]');
+  let textlessBusy = false, squareArtBusy = false;   // Textless / Square Art: busy flags
+  let posterRestore = null;   // visibility changes to undo after isolating the POSTER group (shared by both)
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
   let saving = false, jpgBusy = false;
@@ -425,7 +431,7 @@
   const DETECT = 'function hasGrp(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hasGrp(L.layers,re))return true;}}return false;}' +
     'var st=hasGrp(d.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hasGrp(d.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");';
   const saveDoc = () => {
-    if (saving || placeBusy || logoExpBusy) return;
+    if (saving || placeBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     saving = true; saveBtn.textContent = '…';
     send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
       'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));d.saveToOE("psd");}' +
@@ -456,7 +462,7 @@
   };
   const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
   const exportJpg = () => {
-    if (jpgBusy || placeBusy || logoExpBusy) return;
+    if (jpgBusy || placeBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
     // Capture the ACTIVE doc's context so the JPG is named/routed for whatever doc is in front:
     // source ctx (if it sticks) → the first doc's cfg → live name+detected style → else a bare
@@ -668,7 +674,7 @@
   // pixels don't show anyway). Save afterwards to reclaim the space.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
-    if (trimBusy || placeBusy || batchBusy || logoExpBusy) return;
+    if (trimBusy || placeBusy || batchBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
     send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('PFLTRIM:ok');"));
   };
@@ -681,7 +687,7 @@
   const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
   const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
   const exportLogo = () => {
-    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy) return;
+    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || textlessBusy || squareArtBusy) return;
     logoExpBusy = true; logoExpBtn.textContent = '…';
     // Same per-doc context resolution as the JPG path (names the PNG after the poster), then:
     // find the LOGO group, hide non-chain siblings at every level of its path (recording prior
@@ -747,6 +753,102 @@
       }
       flashLogoExp('✓');
     } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
+  };
+
+  // ---- Textless export & Square Art crop: isolate the POSTER group's active variant ------------
+  // Shared in-script fragment (assumes `d` = app.activeDocument is already defined): hides every
+  // layer that isn't the POSTER group's currently-visible child — this is what drops LOGO/GRADIENT/
+  // SEASONS/SEQUEL/border chrome without needing to name it — and records every change into `chg`
+  // so it can be restored afterward, same restore pattern as the Logo export's PFLLOGOVIS above.
+  // `posterOk` is false only when a POSTER group exists but has no visible child. A MISSING POSTER
+  // group (older templates) falls back to hiding known chrome groups by name — best-effort, never
+  // fails outright.
+  const POSTER_ISOLATE_JS =
+    'var chg=[];var posterOk=(function(){' +
+    'function isGrp(L){return L.typename=="LayerSet";}' +
+    'var top=d.layers,posterIdx=-1;' +
+    'for(var i=0;i<top.length;i++){if(isGrp(top[i])&&/^\\s*poster\\s*$/i.test(top[i].name)){posterIdx=i;break;}}' +
+    'if(posterIdx>=0){' +
+    'for(var i=0;i<top.length;i++){var want=(i==posterIdx);if(top[i].visible!=want){chg.push({p:[i],v:top[i].visible});top[i].visible=want;}}' +
+    'var kids=top[posterIdx].layers,activeIdx=-1;' +
+    'for(var i=0;i<kids.length;i++){if(kids[i].visible){activeIdx=i;break;}}' +
+    'if(activeIdx<0)return false;' +
+    'for(var i=0;i<kids.length;i++){var want2=(i==activeIdx);if(kids[i].visible!=want2){chg.push({p:[posterIdx,i],v:kids[i].visible});kids[i].visible=want2;}}' +
+    'return true;' +
+    '}' +
+    'for(var i=0;i<top.length;i++){if(isGrp(top[i])&&/^\\s*(logos?|gradients?|seasons?|sequels?|borders?)\\s*$/i.test(top[i].name)&&top[i].visible){chg.push({p:[i],v:true});top[i].visible=false;}}' +
+    'return true;' +
+    '})();';
+  const restorePosterVis = () => { if (posterRestore && posterRestore.length) setVis(posterRestore); posterRestore = null; };
+
+  // Same per-doc context resolution as JPG/Logo (names the export after the poster + routes the PUT).
+  const CTX_RESOLVE_JS = 'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
+    'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);}' +
+    'else if(' + JSON.stringify(cfg.name) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');}' +
+    'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));}' +
+    'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}';
+
+  const flashTextless = (m) => { textlessBusy = false; textlessExpBtn.textContent = m; setTimeout(() => { textlessExpBtn.textContent = 'Textless'; }, 1400); };
+  const exportTextless = () => {
+    if (textlessBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy || squareArtBusy) return;
+    textlessBusy = true; textlessExpBtn.textContent = '…';
+    send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT + CTX_RESOLVE_JS + POSTER_ISOLATE_JS +
+      'app.echoToOE("PFLPOSTERVIS:"+JSON.stringify(chg));' +
+      'if(!posterOk){app.echoToOE("PFLNOPOSTER:");}else{d.saveToOE("jpg:0.90");}' +
+      '}catch(e){app.echoToOE("PFLERR:"+e);}');
+  };
+  // JPG bytes from the textless export: restore visibility, then PUT to the textless folder (or download).
+  const onTextlessBytes = async (buf) => {
+    const ex = pendingExport || {}; pendingExport = null;
+    restorePosterVis();
+    const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    const filename = base + activeSuffix() + '.jpg';
+    try {
+      const r = await fetch(location.origin + '/api/maker-tools/textless-exports/' + encodeURIComponent(filename), {
+        method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: new Blob([buf]),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    } catch (e) {
+      console.warn('Textless PUT failed, downloading instead:', e);
+      download(buf, filename);
+    }
+    flashTextless('✓');
+  };
+
+  // Square Art: same isolate as Textless, but exports a PNG (avoids a second lossy JPEG re-encode)
+  // and hands it to a NEW browser tab (square-crop.html) for the actual crop UI — the docked panel
+  // is too narrow (~184-260px) for a usable drag-crop interface, so this can't run inline like the
+  // other buttons. The crop tab PUTs the cropped result to the square art folder itself (or downloads
+  // on failure), same fallback shape as every other export here.
+  const flashSquareArt = (m) => { squareArtBtn.textContent = m; setTimeout(() => { squareArtBtn.textContent = 'Square Art'; }, 1400); };
+  const startSquareArt = () => {
+    if (squareArtBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy || textlessBusy) return;
+    squareArtBusy = true; squareArtBtn.textContent = '…';
+    send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT + CTX_RESOLVE_JS + POSTER_ISOLATE_JS +
+      'app.echoToOE("PFLPOSTERVIS:"+JSON.stringify(chg));' +
+      'if(!posterOk){app.echoToOE("PFLNOPOSTER:");}else{d.saveToOE("png");}' +
+      '}catch(e){app.echoToOE("PFLERR:"+e);}');
+  };
+  // Opens square-crop.html in a new tab and hands it the isolated poster's PNG bytes once it signals
+  // it's ready. That page implements the crop UI (drag/resize/presets) and PUTs the cropped JPG to
+  // the square art folder itself, falling back to a browser download if the PUT fails.
+  const openSquareCropTab = (buf, filenameBase) => {
+    const win = window.open('square-crop.html', '_blank');
+    if (!win) { note('Square Art: pop-up blocked — allow pop-ups for this site and try again.'); return; }
+    const onReady = (e) => {
+      if (e.source !== win || e.data !== 'SQUAREART_READY') return;
+      window.removeEventListener('message', onReady);
+      win.postMessage({ type: 'SQUAREART_INIT', buf, filename: filenameBase + ' - squareart.jpg', apiOrigin: location.origin, authHeaders: authHeaders() }, '*', [buf]);
+    };
+    window.addEventListener('message', onReady);
+  };
+  const onSquareArtPreviewBytes = (buf) => {
+    const ex = pendingExport || {}; pendingExport = null;
+    restorePosterVis();
+    squareArtBtn.textContent = 'Square Art';
+    const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    openSquareCropTab(buf, base + activeSuffix());
+    squareArtBusy = false;
   };
 
   // ---- Batch export --------------------------------------------------------
@@ -1150,7 +1252,13 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { if (logoExpBusy) { onLogoBytes(d); } else { onSaved(d); } return; }   // ArrayBuffer = saveToOE result
+    if (typeof d !== 'string') {
+      if (textlessBusy) { onTextlessBytes(d); }
+      else if (squareArtBusy) { onSquareArtPreviewBytes(d); }
+      else if (logoExpBusy) { onLogoBytes(d); }
+      else { onSaved(d); }
+      return;
+    }   // ArrayBuffer = saveToOE result
     if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
     else if (d.startsWith('PFLEXP:'))   { try { pendingExport = JSON.parse(d.slice(7)); } catch (_) { pendingExport = null; } }
     else if (d.startsWith('PFLDOC:'))   { let o = null; try { o = JSON.parse(d.slice(7)); } catch (_) {} pendingExport = o ? { save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(o.name + '.psd') + '?style=' + encodeURIComponent(o.style), name: o.name, style: o.style } : null; }
@@ -1177,7 +1285,7 @@
       send(collectionMoveScript(dy));
     }
     else if (d.startsWith('PFLCLEAN:')) { /* collection logo restored — ack only */ }
-    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) { lastActiveSig = sig; fetchLayers(); } }
+    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !textlessBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
@@ -1185,8 +1293,22 @@
     else if (d.startsWith('PFLTRIM:'))  { flashTrim('✓'); }
     else if (d.startsWith('PFLLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(11)); } catch (_) { logoRestore = null; } }
     else if (d.startsWith('PFLNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
+    else if (d.startsWith('PFLPOSTERVIS:')) { try { posterRestore = JSON.parse(d.slice(13)); } catch (_) { posterRestore = null; } }
+    else if (d.startsWith('PFLNOPOSTER:')) {
+      restorePosterVis();
+      if (textlessBusy) { flashTextless('✗'); note('The POSTER group has no visible variant.'); }
+      else if (squareArtBusy) { squareArtBusy = false; flashSquareArt('✗'); note('The POSTER group has no visible variant.'); }
+    }
     else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); note('"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.'); }
-    else if (d.startsWith('PFLERR:'))   { if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
+    else if (d.startsWith('PFLERR:'))   {
+      if (textlessBusy) { restorePosterVis(); flashTextless('✗'); note('Textless export failed: ' + d.slice(7)); }
+      else if (squareArtBusy) { restorePosterVis(); squareArtBusy = false; flashSquareArt('✗'); note('Square Art failed: ' + d.slice(7)); }
+      else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); }
+      else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); }
+      else if (batchBusy) { batchAbort(d.slice(7)); }
+      else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); }
+      else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); }
+    }
     // PFLVIS: ack handled optimistically in commit().
   });
 
@@ -1197,10 +1319,12 @@
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
   logoExpBtn.addEventListener('click', exportLogo);
+  textlessExpBtn.addEventListener('click', exportTextless);
+  squareArtBtn.addEventListener('click', startSquareArt);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
   const boltClick = (mode) => {
-    if (batchBusy || logoExpBusy) return;
+    if (batchBusy || logoExpBusy || textlessBusy || squareArtBusy) return;
     if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
     startBatch(mode);
   };
@@ -1257,7 +1381,7 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
-  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) send(POLL); }, 1200);
+  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !textlessBusy && !squareArtBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
 })();

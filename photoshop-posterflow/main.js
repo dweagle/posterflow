@@ -12,6 +12,7 @@ const B = require('./batch');
 const TL = require('./tools');
 const FS = require('./fs');
 const R = require('./remote');
+const SC = require('./squarecrop');
 
 // ---- DOM refs ----
 const styleEl   = document.querySelector('[data-el="style"]');
@@ -24,6 +25,8 @@ const logoBtn   = document.querySelector('[data-act="logo"]');
 const fitBtn    = document.querySelector('[data-act="fit"]');
 const trimBtn   = document.querySelector('[data-act="trim"]');
 const logoExpBtn = document.querySelector('[data-act="logo-export"]');
+const textlessExpBtn = document.querySelector('[data-act="textless-export"]');
+const squareArtBtn = document.querySelector('[data-act="squareart"]');
 const batchBtn    = document.querySelector('[data-act="batch"]');          // amber ⚡ — name-tag batch
 const seasonsBtn  = document.querySelector('[data-act="batch-seasons"]');  // blue ⚡ — seasons from one poster
 const batchBar    = document.querySelector('.batchbar');
@@ -278,6 +281,112 @@ async function onLogoExport(ev) {
   } catch (e) { flash(logoExpBtn, '✗', 'Logo'); showError(e); }
 }
 
+// ---- Export a textless JPG: the PSD's POSTER group's currently-visible variant, with every other
+// layer (logo, gradient, border, season/sequel text — anything outside POSTER) hidden. Alt-click
+// re-picks the folder. Remote docs render to a temp file and upload to the server's textless
+// folder instead. ----
+async function onTextlessExport(ev) {
+  if (!hasDoc()) { note('No document open.'); return; }
+  const ctx = remoteCtx();
+  textlessExpBtn.textContent = '…';
+  try {
+    const folder = ctx ? await R.tempFolder() : await FS.getTextlessFolder({ forcePick: wantsRepick(ev) });
+    if (!folder) { textlessExpBtn.textContent = 'Textless'; note('Textless export cancelled — no folder chosen.'); return; }
+    const filename = ((ctx && ctx.name) || baseName()) + M.activeSuffix(model) + '.jpg';
+    const res = await runExclusive(() => TL.exportTextlessJpg(app.activeDocument, constants, folder, filename));
+    if (res.ok && ctx) {
+      const bytes = await R.readBytes(res.entry);
+      try {
+        await R.putBytes('/api/maker-tools/textless-exports/' + encodeURIComponent(res.filename), bytes);
+        flash(textlessExpBtn, '✓', 'Textless'); note('Saved "' + res.filename + '" → Posterflow textless folder.');
+      } catch (e) {
+        if (!/HTTP 400/.test(String(e && e.message))) throw e;
+        note('Server has no textless export folder — saving locally instead.');
+        const localFolder = await FS.getTextlessFolder({});
+        if (!localFolder) { textlessExpBtn.textContent = 'Textless'; note('Textless export cancelled — no folder chosen.'); return; }
+        await FS.writeFileBytes(localFolder, res.filename, bytes);
+        flash(textlessExpBtn, '✓', 'Textless'); note('Saved "' + res.filename + '" → ' + localFolder.name);
+      }
+    } else if (res.ok) {
+      flash(textlessExpBtn, '✓', 'Textless');
+      note('Saved "' + res.filename + '" → ' + res.folderName +
+        (res.fallback ? ' (no POSTER group found — hid Logo/Gradient/Season/Sequel groups by name instead)' : ''));
+    } else {
+      flash(textlessExpBtn, '✗', 'Textless');
+      note(res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Textless export failed.');
+    }
+  } catch (e) { flash(textlessExpBtn, '✗', 'Textless'); showError(e); }
+}
+
+// ---- Square Art crop: isolate the POSTER group's active variant (same primitive as Textless
+// above), let the user pick a square crop region (500-3000px, squarecrop.js), and save the cropped
+// JPG. A downscaled preview renders first so the dialog opens fast; the actual crop always
+// re-isolates and crops a FRESH full-resolution duplicate, never the preview. ----
+let squareArtBusy = false;
+async function onSquareArt(ev) {
+  if (!hasDoc()) { note('No document open.'); return; }
+  if (squareArtBusy) return;
+  squareArtBusy = true;
+  const ctx = remoteCtx();
+  squareArtBtn.textContent = '…';
+  let previewUrl = null;
+  const done = () => { squareArtBusy = false; if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } };
+  try {
+    const sizeRes = await runExclusive(() => TL.readPosterSize(app.activeDocument, constants));
+    if (!sizeRes.ok) {
+      squareArtBtn.textContent = 'Square Art'; done();
+      note(sizeRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
+      return;
+    }
+    const tmp = await R.tempFolder();
+    const prevRes = await runExclusive(() => TL.exportPosterPreview(app.activeDocument, constants, tmp, 'squareart-preview.jpg', 1400));
+    if (!prevRes.ok) {
+      squareArtBtn.textContent = 'Square Art'; done();
+      note(prevRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
+      return;
+    }
+    const bytes = await R.readBytes(prevRes.entry);
+    previewUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+    squareArtBtn.textContent = 'Square Art';
+
+    SC.openSquareCropDialog({
+      imageUrl: previewUrl,
+      nativeW: sizeRes.width,
+      nativeH: sizeRes.height,
+      title: (ctx && ctx.name) || baseName(),
+      onCancel: done,
+      onSave: async (cropNative) => {
+        const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
+        if (!folder) throw new Error('no folder chosen');
+        const filename = ((ctx && ctx.name) || baseName()) + M.activeSuffix(model) + ' - squareart.jpg';
+        const res = await runExclusive(() => TL.exportSquareArtJpg(app.activeDocument, constants, folder, filename, cropNative));
+        if (!res.ok) throw new Error(res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art export failed.');
+        if (ctx) {
+          const outBytes = await R.readBytes(res.entry);
+          try {
+            await R.putBytes('/api/maker-tools/squareart-exports/' + encodeURIComponent(res.filename), outBytes);
+            note('Saved "' + res.filename + '" → Posterflow square art folder.');
+          } catch (e) {
+            if (!/HTTP 400/.test(String(e && e.message))) throw e;
+            note('Server has no square art export folder — saving locally instead.');
+            const localFolder = await FS.getSquareartFolder({});
+            if (!localFolder) throw new Error('no folder chosen');
+            await FS.writeFileBytes(localFolder, res.filename, outBytes);
+            note('Saved "' + res.filename + '" → ' + localFolder.name);
+          }
+        } else {
+          note('Saved "' + res.filename + '" → ' + res.folderName);
+        }
+        done();
+      },
+    });
+  } catch (e) {
+    squareArtBtn.textContent = 'Square Art';
+    done();
+    showError(e);
+  }
+}
+
 // ---- Trim off-canvas pixels ----
 async function onTrim() {
   if (!hasDoc()) { note('No document open.'); return; }
@@ -405,9 +514,11 @@ logoBtn.addEventListener('click', () => onPlace('logo', logoBtn, 'Place Logo'));
 fitBtn.addEventListener('click', () => onPlace('fit', fitBtn, 'Fit Poster'));
 trimBtn.addEventListener('click', onTrim);
 logoExpBtn.addEventListener('click', onLogoExport);
+textlessExpBtn.addEventListener('click', onTextlessExport);
+squareArtBtn.addEventListener('click', onSquareArt);
 document.querySelector('[data-act="folders"]').addEventListener('click', () => {
   FS.clearAllFolders();
-  note('Remembered folders cleared — the next JPG / Logo export will ask again.');
+  note('Remembered folders cleared — the next JPG / Logo / Textless / Square Art export will ask again.');
 });
 document.querySelector('[data-act="refresh"]').addEventListener('click', refresh);
 batchBtn.addEventListener('click', () => boltClick('tags'));
