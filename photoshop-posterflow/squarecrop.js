@@ -4,7 +4,10 @@
 'use strict';
 
 const MIN_OUTPUT = 500;   // square art must be at least 500x500 native px
-const PRESETS = [500, 1000, 1500, 2000, 2500, 3000];
+// Posters here are never wider than 1000px (the canvas width), so larger presets would always be
+// disabled dead weight — 950 covers a "Fit Poster inside border" export (950 = 1000 - 25px*2), 1000
+// covers a full-bleed export (greyed out if the isolated art doesn't reach it, same as any preset).
+const PRESETS = [500, 950, 1000];
 
 // Opens the dialog over `imageUrl` (a PREVIEW image, possibly downscaled from the true poster size).
 // `nativeW`/`nativeH` are the poster's TRUE full-resolution dimensions — the crop rect passed to

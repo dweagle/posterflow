@@ -76,7 +76,10 @@ const note = (t) => {
 const showError = (e) => note('Error: ' + (e && e.message ? e.message : e));
 const flash = (btn, mark, restore) => { btn.textContent = mark; setTimeout(() => { btn.textContent = restore; }, 1400); };
 const hasDoc = () => app.documents && app.documents.length > 0;
-const baseName = () => (app.activeDocument.name || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+// `doc` lets callers pass a CAPTURED document reference instead of re-reading app.activeDocument —
+// needed by Square Art, whose crop dialog is a separate modal window that can steal "active
+// document" status from Photoshop while it has focus (see onSquareArt).
+const baseName = (doc) => ((doc || app.activeDocument).name || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
 
 function updateBadge(style) {
   styleEl.textContent = style || '—';
@@ -319,27 +322,33 @@ async function onTextlessExport(ev) {
 }
 
 // ---- Square Art crop: isolate the POSTER group's active variant (same primitive as Textless
-// above), let the user pick a square crop region (500-3000px, squarecrop.js), and save the cropped
+// above), let the user pick a square crop region (min 500x500, squarecrop.js), and save the cropped
 // JPG. A downscaled preview renders first so the dialog opens fast; the actual crop always
-// re-isolates and crops a FRESH full-resolution duplicate, never the preview. ----
+// re-isolates and crops a FRESH full-resolution duplicate, never the preview.
+// The crop dialog is a SEPARATE modal window (uxpShowModal) — while it has focus, Photoshop can
+// stop reporting an "active document" at all, so app.activeDocument re-read at Save time resolves
+// to something with no real id ("document with an id of undefined does not exist"). Capture the
+// Document reference ONCE up front (targetDoc) and reuse it for every step, including inside the
+// dialog's onSave callback, instead of ever re-reading app.activeDocument after the dialog opens. ----
 let squareArtBusy = false;
 async function onSquareArt(ev) {
   if (!hasDoc()) { note('No document open.'); return; }
   if (squareArtBusy) return;
   squareArtBusy = true;
+  const targetDoc = app.activeDocument;
   const ctx = remoteCtx();
   squareArtBtn.textContent = '…';
   let previewUrl = null;
   const done = () => { squareArtBusy = false; if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; } };
   try {
-    const sizeRes = await runExclusive(() => TL.readPosterSize(app.activeDocument, constants));
+    const sizeRes = await runExclusive(() => TL.readPosterSize(targetDoc, constants));
     if (!sizeRes.ok) {
       squareArtBtn.textContent = 'Square Art'; done();
       note(sizeRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
       return;
     }
     const tmp = await R.tempFolder();
-    const prevRes = await runExclusive(() => TL.exportPosterPreview(app.activeDocument, constants, tmp, 'squareart-preview.jpg', 1400));
+    const prevRes = await runExclusive(() => TL.exportPosterPreview(targetDoc, constants, tmp, 'squareart-preview.jpg', 1400));
     if (!prevRes.ok) {
       squareArtBtn.textContent = 'Square Art'; done();
       note(prevRes.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
@@ -353,13 +362,13 @@ async function onSquareArt(ev) {
       imageUrl: previewUrl,
       nativeW: sizeRes.width,
       nativeH: sizeRes.height,
-      title: (ctx && ctx.name) || baseName(),
+      title: (ctx && ctx.name) || baseName(targetDoc),
       onCancel: done,
       onSave: async (cropNative) => {
         const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
         if (!folder) throw new Error('no folder chosen');
-        const filename = ((ctx && ctx.name) || baseName()) + M.activeSuffix(model) + ' - squareart.jpg';
-        const res = await runExclusive(() => TL.exportSquareArtJpg(app.activeDocument, constants, folder, filename, cropNative));
+        const filename = ((ctx && ctx.name) || baseName(targetDoc)) + M.activeSuffix(model) + ' - squareart.jpg';
+        const res = await runExclusive(() => TL.exportSquareArtJpg(targetDoc, constants, folder, filename, cropNative));
         if (!res.ok) throw new Error(res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art export failed.');
         if (ctx) {
           const outBytes = await R.readBytes(res.entry);
