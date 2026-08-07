@@ -735,7 +735,7 @@
     try {
       const blob = await trimPngAlpha(buf);
       const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
-      const filename = base + '.png';
+      const filename = base + ' - logo.png';
       try {
         const r = await fetch(location.origin + '/api/maker-tools/logo-exports/' + encodeURIComponent(filename), {
           method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: blob,

@@ -607,7 +607,7 @@
     try {
       const blob = await trimPngAlpha(buf);
       const base = pendingDocName.replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
-      download(blob, base + '.png');
+      download(blob, base + ' - logo.png');
       flashLogoExp('✓');
     } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
