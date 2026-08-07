@@ -195,8 +195,11 @@ function openSquareCropDialog({ imageUrl, nativeW, nativeH, title, onSave, onCan
   // the dialog itself is unreliable and can render as a tiny, content-shrunk box regardless of what
   // the stylesheet says. Prefer uxpShowModal when present; fall back to the standard showModal()
   // (older UXP) or a plain open attribute (defensive, if <dialog> support is ever missing outright).
+  // lockDocumentFocus:true is required too — without it, showing the dialog does NOT put Photoshop
+  // into a real modal state, so app.activeDocument (and duplicate()/executeAsModal against it) can
+  // fail from inside the dialog's callbacks with "document with an id of undefined does not exist".
   if (typeof dlg.uxpShowModal === 'function') {
-    dlg.uxpShowModal({ title: 'Crop to square art', resize: 'both', size: { width: 860, height: 700 } });
+    dlg.uxpShowModal({ title: 'Crop to square art', resize: 'both', size: { width: 860, height: 700 }, lockDocumentFocus: true });
   } else if (typeof dlg.showModal === 'function') {
     dlg.showModal();
   } else {
