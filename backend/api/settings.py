@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import requests
 from database import get_db
 from models.setting import Setting, get_setting, upsert_setting
-from core.config import settings as app_settings
+from core.config import Settings, settings as app_settings
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -1123,9 +1123,9 @@ def save_gdrive_storage_path(
         save_value = raw
         new_dir = _Path(raw)
     else:
-        # Empty = revert to default
+        # Empty = revert to the configured default (env-aware, not container-only)
         save_value = ""
-        new_dir = _Path("/config/posters/gdrive")
+        new_dir = Settings().gdrive_dir
 
     upsert_setting(db, "gdrive_storage_path", save_value)
     try:
@@ -1175,7 +1175,7 @@ def save_artwork_gdrive_storage_path(
         new_dir = _Path(raw)
     else:
         save_value = ""
-        new_dir = _Path("/config/artwork/gdrive")
+        new_dir = Settings().artwork_gdrive_dir
 
     upsert_setting(db, "artwork_gdrive_storage_path", save_value)
     try:
