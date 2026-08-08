@@ -92,7 +92,7 @@ const buildResult = (item: FlatArtworkItem, tmdbId: number, posterUrl: string | 
   year: item.year ? String(item.year) : '',
   overview,
   poster_url: posterUrl || '',
-  homepage: tmdbHomepage(item.mediaType, tmdbId),
+  homepage: tmdbId ? tmdbHomepage(item.mediaType, tmdbId) : '',
   imdb_id: imdbId ?? null,
   tvdb_id: tvdbId ?? null,
 })
@@ -143,7 +143,13 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   const resolved = useMemo(
     () => picked ?? (item.tmdb_id
       ? buildResult(item, item.tmdb_id, item.poster_url, item.imdb_id, item.tvdb_id)
-      : null),
+      // Custom collections (decades, holidays, …) have no TMDB entry, so resolve-first would
+      // dead-end them — show the finder card anyway so the local-folder picker still works.
+      // A TVDB id alone is also enough: the card can browse TheTVDB's artwork with it.
+      // Items with neither stay resolve-first.
+      : item.mediaType === 'collection' || item.tvdb_id
+        ? buildResult(item, 0, item.poster_url, item.imdb_id, item.tvdb_id)
+        : null),
     [picked, item],
   )
   const [candidates, setCandidates] = useState<TmdbCandidate[] | null>(null)
@@ -163,6 +169,30 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
     }
   }
 
+  // Shared by the resolve-first card and the id-less-collection slot inside the finder card.
+  const resolveControls = candidates === null ? (
+    // alignSelf keeps it content-sized — the flex column would otherwise stretch it
+    // across the whole card (and .btn-toolbar's 185px min-width needs zeroing).
+    <button type="button" className="btn-toolbar" style={{ alignSelf: 'flex-start', minWidth: 0, fontSize: '0.8rem', padding: '0.35rem 0.9rem' }} onClick={() => void handleResolve()} disabled={loading}>
+      {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
+      {loading ? 'Searching…' : 'Find on TMDB'}
+    </button>
+  ) : candidates.length === 0 ? (
+    <p className="muted">No TMDB matches found.</p>
+  ) : (
+    <div className="unmatched-maker-candidates">
+      {candidates.map((c) => (
+        <button key={`${c.media_type}-${c.tmdb_id}`} type="button" className="unmatched-maker-candidate" onClick={() => setPicked(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))}>
+          {c.poster_url ? <img src={c.poster_url} alt="" loading="lazy" /> : <span className="unmatched-maker-candidate-placeholder"><Search size={14} /></span>}
+          <span className="unmatched-maker-candidate-meta">
+            <span className="unmatched-maker-candidate-title">{c.title}</span>
+            {c.year && <span className="tmdb-result-year">{c.year}</span>}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+
   if (resolved) {
     return (
       <ArtworkFinderCard
@@ -170,6 +200,16 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
         syncTargetIndex={syncTargetIndex}
         scopeLabel={scopeLabel}
         missing={TYPE_ORDER.filter((t) => item.missing.includes(t))}
+        infoExtra={!resolved.tmdb_id ? (
+          <div className="unmatched-maker-inline-resolve">
+            <p className="muted">
+              {item.mediaType === 'collection'
+                ? 'Custom collection? Add artwork with From folder. If it does exist on TMDB, resolve it to browse online artwork:'
+                : 'No TMDB id — only TheTVDB artwork is browsable. Resolve it to add TMDB artwork and Plex square art:'}
+            </p>
+            {resolveControls}
+          </div>
+        ) : undefined}
       />
     )
   }
@@ -199,28 +239,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
             )}
           </div>
           <p className="muted unmatched-maker-resolve-note">No TMDB id on this item — find it to browse artwork and add it to your scope.</p>
-          {candidates === null ? (
-            // alignSelf keeps it content-sized — the flex column would otherwise stretch it
-            // across the whole card (and .btn-toolbar's 185px min-width needs zeroing).
-            <button type="button" className="btn-toolbar" style={{ alignSelf: 'flex-start', minWidth: 0, fontSize: '0.8rem', padding: '0.35rem 0.9rem' }} onClick={() => void handleResolve()} disabled={loading}>
-              {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />}
-              {loading ? 'Searching…' : 'Find on TMDB'}
-            </button>
-          ) : candidates.length === 0 ? (
-            <p className="muted">No TMDB matches found.</p>
-          ) : (
-            <div className="unmatched-maker-candidates">
-              {candidates.map((c) => (
-                <button key={`${c.media_type}-${c.tmdb_id}`} type="button" className="unmatched-maker-candidate" onClick={() => setPicked(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))}>
-                  {c.poster_url ? <img src={c.poster_url} alt="" loading="lazy" /> : <span className="unmatched-maker-candidate-placeholder"><Search size={14} /></span>}
-                  <span className="unmatched-maker-candidate-meta">
-                    <span className="unmatched-maker-candidate-title">{c.title}</span>
-                    {c.year && <span className="tmdb-result-year">{c.year}</span>}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          {resolveControls}
         </div>
       </div>
     </div>

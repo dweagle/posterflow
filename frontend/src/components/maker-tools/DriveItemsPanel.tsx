@@ -76,6 +76,8 @@ type Props = {
   itemScopeIndex: number | null
   sourceLabel: string
   sourceHint: string
+  /** Bumped by the toolbar's Refresh button — any change re-runs the scan. */
+  refreshKey?: number
 }
 
 // Map a scope item onto the shared unmatched-card shape (poster_url unknown — the scope holds
@@ -99,7 +101,7 @@ function toMergedItem(it: ArtworkScopeItem, index: number): MergedArtworkItem {
 const PAGE_SIZE = 50   // cards rendered at a time; more stream in as the list scrolls
 
 export default function DriveItemsPanel({
-  syncTargetIndex, scopeLabel, source, itemScopeIndex, sourceLabel, sourceHint,
+  syncTargetIndex, scopeLabel, source, itemScopeIndex, sourceLabel, sourceHint, refreshKey,
 }: Props) {
   const { showToast } = useToast()
   const [items, setItems] = useState<ArtworkScopeItem[] | null>(null)
@@ -123,7 +125,7 @@ export default function DriveItemsPanel({
       .catch((e) => { if (!cancelled) showToast(getApiErrorMessage(e, 'Failed to scan for items'), 'error') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [syncTargetIndex, source, itemScopeIndex, showToast])
+  }, [syncTargetIndex, source, itemScopeIndex, refreshKey, showToast])
 
   const merged = useMemo(() => (items ?? []).map(toMergedItem), [items])
   const gapCount = useMemo(() => merged.filter((it) => it.missing.length > 0).length, [merged])

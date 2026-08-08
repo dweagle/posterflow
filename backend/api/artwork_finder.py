@@ -2,6 +2,8 @@
 add a chosen one into an IDarr artwork scope. New, self-contained router; delete the file to
 remove the endpoints.
 """
+import base64
+import io
 import json
 import os
 from pathlib import Path
@@ -10,17 +12,19 @@ from urllib.parse import quote, urlparse
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from api.idarr import SETTING_MAKER_IDARR_CONFIG
+from core.config import settings as app_settings
 from core.job_queue import job_queue
 from core.logging import log_user_action
 from database import get_db
 from models.job import JOB_STATUSES_ACTIVE, JOB_TYPE_ARTWORK_PULL, Job, create_job
-from models.setting import get_setting
+from models.setting import get_setting, upsert_setting
 from services import artwork_finder as af
+from services import text_logo
 from services import tvdb
 
 router = APIRouter(prefix="/api/artwork-finder", tags=["artwork-finder"])
@@ -36,6 +40,7 @@ class Candidate(BaseModel):
     language: Optional[str] = None          # ISO 639-1, or None when the image is textless
     off_white_pct: Optional[float] = None   # logos only, when evaluated
     is_white: Optional[bool] = None
+    origin: Optional[str] = None            # collection logos: the member movie this came from
 
 
 # Listable types include "poster" (a crop-to-square source), which is NOT a savable subtype.
@@ -175,6 +180,7 @@ def get_candidates(
     types: str = "logo,background,squareart,poster",
     evaluate_white: bool = True,
     source: str = "tmdb",
+    language: str = "en+textless",   # TMDB image language: all | en+textless | an ISO code
     db: Session = Depends(get_db),
 ) -> CandidatesResponse:
     """Browse logo / background / square-art / poster candidates for one title, from one source.
@@ -209,7 +215,8 @@ def get_candidates(
     try:
         result = af.list_candidates(item, wanted, tmdb_api_key=key, plex=plex, session=session,
                                     evaluate_white=evaluate_white, source=src, tvdb_creds=tvdb_creds,
-                                    textless_backgrounds=False)
+                                    textless_backgrounds=False,
+                                    image_language=af.tmdb_image_language(language))
     except tvdb.TvdbError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
     return CandidatesResponse(**result)
@@ -379,6 +386,273 @@ def gracenote_image_proxy(url: str = Query(...)):
         raise HTTPException(status_code=502, detail=f"Image fetch failed (HTTP {resp.status_code}).")
     return StreamingResponse(resp.iter_content(chunk_size=8192),
                              media_type=resp.headers.get("content-type", "image/jpeg"))
+
+
+# ------------------------------------------------------------------ local picker folder
+
+SETTING_ARTWORK_PICKER_FOLDER = "artwork_picker_folder"
+
+
+# Picker roots, in listing order. "bundled" ships with the app, "art" is the user's own reusable
+# stash under config, "folder" is whatever folder they point the picker at.
+BUNDLED_ARTWORK_DIR = Path(__file__).resolve().parent.parent / "assets" / "artwork"
+PICKER_SOURCES = ("bundled", "art", "folder")
+
+
+class PickerFile(BaseModel):
+    name: str
+    path: str          # relative to its own root
+    source: str        # bundled | art | folder — which root `path` is relative to
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class PickerFolderResponse(BaseModel):
+    folder: str
+    art_dir: str = ""             # config/artwork/art — where reusable artwork can be dropped
+    backgrounds: list[PickerFile] = []
+    squareart: list[PickerFile] = []
+    truncated: bool = False
+    error: Optional[str] = None   # folder configured but currently unusable
+
+
+class SetPickerFolderRequest(BaseModel):
+    folder: str
+
+
+class AddLocalRequest(BaseModel):
+    sync_target_index: int
+    title: str
+    media_type: str        # movie | tv | collection
+    subtype: str           # background | squareart (logos aren't picked from folders)
+    path: str              # relative to the root named by `source`
+    source: str = "folder"
+    year: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    confirm_overwrite: bool = False
+
+    _year = field_validator("year", mode="before")(_year_or_none)
+
+
+def _picker_folder(db: Session) -> Optional[Path]:
+    setting = get_setting(db, SETTING_ARTWORK_PICKER_FOLDER)
+    raw = str((setting.value if setting else "") or "").strip()
+    return Path(raw) if raw else None
+
+
+def _art_dir() -> Path:
+    """The user's reusable artwork stash, alongside the text-logo fonts."""
+    return app_settings.config_dir / "artwork" / "art"
+
+
+def _picker_root(db: Session, source: str) -> Path:
+    """The directory a picker `source` names, or 400 when it's unusable."""
+    src = str(source or "folder").strip().lower()
+    if src not in PICKER_SOURCES:
+        raise HTTPException(status_code=400, detail=f"source must be one of {', '.join(PICKER_SOURCES)}")
+    if src == "bundled":
+        return BUNDLED_ARTWORK_DIR
+    if src == "art":
+        return _art_dir()
+    folder = _picker_folder(db)
+    if folder is None:
+        raise HTTPException(status_code=400, detail="No artwork folder configured. Set one in the picker first.")
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Artwork folder not found on the server: {folder}")
+    return folder
+
+
+def _resolve_picker_file(folder: Path, rel: str) -> Path:
+    """`rel` resolved inside one picker root, or 4xx. The containment check is the security
+    boundary — /local-image is auth-exempt like the other source-image endpoints.
+    `rel` is joined VERBATIM — filenames legitimately start with spaces, so stripping here
+    breaks them (it 404'd real files in the field)."""
+    raw = str(rel or "")
+    if not raw.strip():
+        raise HTTPException(status_code=400, detail="path is required")
+    root = folder.resolve()
+    target = (root / raw).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=403, detail="path is outside the configured artwork folder")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    if target.suffix.lower() not in af.PICKER_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="not an image file")
+    return target
+
+
+def _picker_listing(db: Session, folder: Optional[Path]) -> dict:
+    """Every picker root merged into one listing: the bundled artwork first, then the user's
+    config/artwork/art stash, then the chosen folder."""
+    backgrounds: list[dict] = []
+    squareart: list[dict] = []
+    truncated = False
+    roots: list[tuple[Path, str]] = [(BUNDLED_ARTWORK_DIR, "bundled"), (_art_dir(), "art")]
+    if folder is not None and folder.is_dir():
+        roots.append((folder, "folder"))
+    for root, source in roots:
+        if not root.is_dir():
+            continue
+        scan = af.scan_picker_folder(root, source=source)
+        backgrounds.extend(scan["backgrounds"])
+        squareart.extend(scan["squareart"])
+        truncated = truncated or scan["truncated"]
+    return {"backgrounds": backgrounds, "squareart": squareart, "truncated": truncated,
+            "art_dir": str(_art_dir())}
+
+
+@router.get("/local-folder", response_model=PickerFolderResponse)
+def get_picker_folder(db: Session = Depends(get_db)) -> PickerFolderResponse:
+    """The picker's images — bundled artwork and the config/artwork/art stash always, plus the
+    configured folder when one is set and usable. A set-but-missing folder still returns its path
+    plus an error string, so the UI can prefill the input for fixing."""
+    folder = _picker_folder(db)
+    error = "Folder not found on the server." if folder is not None and not folder.is_dir() else None
+    return PickerFolderResponse(folder=str(folder) if folder else "", error=error,
+                                **_picker_listing(db, folder))
+
+
+@router.put("/local-folder", response_model=PickerFolderResponse)
+def set_picker_folder(request: SetPickerFolderRequest, db: Session = Depends(get_db)) -> PickerFolderResponse:
+    """Save the picker folder path (absolute, no '..', must exist server-side) and list it."""
+    raw = str(request.folder or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="folder is required")
+    folder = Path(raw)
+    if not folder.is_absolute() or ".." in folder.parts:
+        raise HTTPException(status_code=400, detail="folder must be an absolute path without '..'")
+    folder = folder.resolve()
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Folder not found on the server: {folder}")
+    upsert_setting(db, SETTING_ARTWORK_PICKER_FOLDER, str(folder))
+    db.commit()
+    return PickerFolderResponse(folder=str(folder), **_picker_listing(db, folder))
+
+
+@router.get("/local-image")
+def picker_image(path: str, source: str = "folder", db: Session = Depends(get_db)) -> FileResponse:
+    """Stream an image from inside one of the picker roots for thumbnails / preview."""
+    target = _resolve_picker_file(_picker_root(db, source), path)
+    return FileResponse(str(target), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@router.post("/add-local", response_model=AddResponse)
+def add_local_artwork(request: AddLocalRequest, db: Session = Depends(get_db)) -> AddResponse:
+    """Copy a picked file from one of the picker roots into the selected artwork scope under
+    IDarr's canonical name — the folder-picker counterpart of /add."""
+    if request.subtype not in ("background", "squareart"):
+        raise HTTPException(status_code=400, detail="subtype must be background or squareart")
+    src = _resolve_picker_file(_picker_root(db, request.source), request.path)
+    source_dir, is_asset_drive, label = _resolve_artwork_scope(db, request.sync_target_index)
+    item = _make_item(title=request.title, media_type=request.media_type, year=request.year,
+                      tmdb_id=request.tmdb_id, tvdb_id=request.tvdb_id, imdb_id=request.imdb_id)
+    try:
+        result = af.save_local_file(source_dir=source_dir, is_asset_drive=is_asset_drive, item=item,
+                                    subtype=request.subtype, src=src,
+                                    confirm_overwrite=request.confirm_overwrite)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if result["status"] == "added":
+        log_user_action("Added artwork from local folder", scope=label or str(source_dir),
+                        subtype=request.subtype, written=result["written"], source_file=src.name)
+    return AddResponse(success=True, source_dir=str(source_dir), **result)
+
+
+# ------------------------------------------------------------------ text logo
+
+class TextLogoRequest(BaseModel):
+    top: str = ""       # small condensed line above the title
+    main: str           # the big Bebas line
+    suffix: str = ""    # the spread-out "COLLECTION" line
+    # Optional styling overrides for the title lines (the suffix stays fixed). Tracking is
+    # Photoshop 1/1000-em units; scale is a horizontal-width percent for squeezing long titles;
+    # fonts are ids from GET /text-logo/fonts.
+    top_tracking: Optional[int] = None
+    top_scale: Optional[int] = None
+    main_tracking: Optional[int] = None
+    main_scale: Optional[int] = None
+    top_font: Optional[str] = None
+    main_font: Optional[str] = None
+
+
+class TextLogoPreviewResponse(BaseModel):
+    png_base64: str
+    width: int
+    height: int
+
+
+class AddTextLogoRequest(TextLogoRequest):
+    sync_target_index: int
+    title: str
+    media_type: str        # movie | tv | collection
+    year: Optional[int] = None
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    confirm_overwrite: bool = False
+
+    _year = field_validator("year", mode="before")(_year_or_none)
+
+
+class TextLogoFont(BaseModel):
+    id: str        # filename stem — what the render endpoints take as top_font / main_font
+    label: str     # the font's own family/style name
+    source: str    # config | bundled
+
+
+@router.get("/text-logo/fonts")
+def text_logo_fonts() -> dict:
+    """Fonts available to the text-logo dialog's pickers: config/artwork/fonts first (those win
+    name collisions with the bundled set)."""
+    return {"fonts": [TextLogoFont(**f) for f in text_logo.list_fonts()]}
+
+
+@router.post("/text-logo/preview", response_model=TextLogoPreviewResponse)
+def text_logo_preview(request: TextLogoRequest) -> TextLogoPreviewResponse:
+    """Render the PSD-style text logo and return it inline (base64), so the dialog can live-preview
+    without an extra authed image round-trip."""
+    try:
+        image = text_logo.render_text_logo(
+            request.top, request.main, request.suffix,
+            top_tracking=request.top_tracking, top_scale=request.top_scale,
+            main_tracking=request.main_tracking, main_scale=request.main_scale,
+            top_font=request.top_font, main_font=request.main_font)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    buf = io.BytesIO()
+    image.save(buf, "PNG")
+    return TextLogoPreviewResponse(png_base64=base64.b64encode(buf.getvalue()).decode(),
+                                   width=image.width, height=image.height)
+
+
+@router.post("/text-logo", response_model=AddResponse)
+def add_text_logo(request: AddTextLogoRequest, db: Session = Depends(get_db)) -> AddResponse:
+    """Render the text logo and write it into the selected artwork scope under IDarr's canonical
+    name — same save contract as /add."""
+    if not request.main.strip():
+        raise HTTPException(status_code=400, detail="The main line is required.")
+    source_dir, is_asset_drive, label = _resolve_artwork_scope(db, request.sync_target_index)
+    item = _make_item(title=request.title, media_type=request.media_type, year=request.year,
+                      tmdb_id=request.tmdb_id, tvdb_id=request.tvdb_id, imdb_id=request.imdb_id)
+    try:
+        png = text_logo.render_text_logo_png(
+            request.top, request.main, request.suffix,
+            top_tracking=request.top_tracking, top_scale=request.top_scale,
+            main_tracking=request.main_tracking, main_scale=request.main_scale,
+            top_font=request.top_font, main_font=request.main_font)
+        result = af.save_artwork_bytes(source_dir=source_dir, is_asset_drive=is_asset_drive,
+                                       item=item, subtype="logo", data=png,
+                                       confirm_overwrite=request.confirm_overwrite)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if result["status"] == "added":
+        log_user_action("Added text logo via Artwork Finder", scope=label or str(source_dir),
+                        written=result["written"], text=request.main)
+    return AddResponse(success=True, source_dir=str(source_dir), **result)
 
 
 class BatchPullRequest(BaseModel):

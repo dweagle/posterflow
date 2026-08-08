@@ -56,3 +56,5 @@ settings.logs_dir.mkdir(parents=True, exist_ok=True)
 (settings.config_dir / "idarr").mkdir(parents=True, exist_ok=True)
 (settings.config_dir / "scripts").mkdir(parents=True, exist_ok=True)
 (settings.config_dir / "border_overlays").mkdir(parents=True, exist_ok=True)  # User border-frame uploads
+(settings.config_dir / "artwork" / "fonts").mkdir(parents=True, exist_ok=True)  # User text-logo font overrides
+(settings.config_dir / "artwork" / "art").mkdir(parents=True, exist_ok=True)  # User's own reusable artwork

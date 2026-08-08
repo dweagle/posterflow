@@ -1,4 +1,4 @@
-import { getData, postData } from './http'
+import { API_URL, getData, postData, putData } from './http'
 // Inlined as a data URI (Vite ?inline) so Photopea renders it without a network fetch.
 // A remote-URL icon at our origin is passive mixed content on an http LAN instance — Chrome
 // auto-upgrades it to https, the upgrade fails (no TLS), and the button shows with no image.
@@ -263,6 +263,7 @@ export interface ArtworkCandidate {
   language?: string | null        // ISO 639-1, or null when the image is textless
   off_white_pct?: number | null   // logos only, when evaluated
   is_white?: boolean | null
+  origin?: string | null          // collection logos: the member movie this came from
 }
 
 export interface ArtworkCandidatesResponse {
@@ -287,6 +288,7 @@ export const getArtworkCandidates = async (
   types: ArtworkListType[] = ['logo', 'background', 'squareart', 'poster'],
   evaluateWhite = true,
   source: ImageSource = 'tmdb',
+  language = 'en+textless',   // TMDB image language: all | en+textless | an ISO code
 ): Promise<ArtworkCandidatesResponse> => {
   const params = new URLSearchParams({
     tmdb_id: String(item.tmdb_id),
@@ -295,6 +297,7 @@ export const getArtworkCandidates = async (
     types: types.join(','),
     evaluate_white: String(evaluateWhite),
     source,
+    language,
   })
   if (item.year) params.set('year', String(item.year))
   if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
@@ -389,6 +392,113 @@ export const getArtworkScopeItems = async (
 /** Proxy URL for previewing a Gracenote (*.plex.tv) image (square art / clear logo). */
 export const getGracenoteImageProxyUrl = (url: string): string => {
   return `/api/artwork-finder/gracenote-image-proxy?url=${encodeURIComponent(url)}`
+}
+
+/** Which root a picked file lives under: artwork shipped with the app, the user's reusable
+ * config/artwork/art stash, or the folder they pointed the picker at. */
+export type LocalArtworkSource = 'bundled' | 'art' | 'folder'
+
+export interface LocalArtworkFile {
+  name: string
+  path: string     // relative to its own root
+  source: LocalArtworkSource
+  width: number | null
+  height: number | null
+}
+
+export interface LocalArtworkFolderResponse {
+  folder: string
+  art_dir: string          // config/artwork/art — where reusable artwork can be dropped
+  backgrounds: LocalArtworkFile[]
+  squareart: LocalArtworkFile[]
+  truncated: boolean
+  error?: string | null   // folder configured but currently unusable
+}
+
+/** The configured local artwork folder and its images, grouped background / square art. */
+export const getLocalArtworkFolder = async (): Promise<LocalArtworkFolderResponse> => {
+  return getData<LocalArtworkFolderResponse>('/api/artwork-finder/local-folder')
+}
+
+/** Save the local artwork folder path (absolute, server-side) and list it. */
+export const setLocalArtworkFolder = async (folder: string): Promise<LocalArtworkFolderResponse> => {
+  return putData<LocalArtworkFolderResponse>('/api/artwork-finder/local-folder', { folder })
+}
+
+/** Preview URL for an image inside one of the picker roots. API_URL-prefixed (like the IDarr
+ * source-image previews): <img> tags resolve bare paths against the PAGE origin, which is the
+ * wrong host whenever the frontend isn't served by the backend itself. */
+export const getLocalArtworkImageUrl = (path: string, source: LocalArtworkSource = 'folder'): string => {
+  return `${API_URL}/api/artwork-finder/local-image?path=${encodeURIComponent(path)}&source=${source}`
+}
+
+export interface AddLocalArtworkRequest extends Omit<ArtworkItemRef, 'tmdb_id'> {
+  tmdb_id?: number | null   // custom collections have none
+  sync_target_index: number
+  subtype: Exclude<ArtworkSubtype, 'logo'>
+  path: string     // relative to the root named by `source`
+  source: LocalArtworkSource
+  confirm_overwrite?: boolean
+}
+
+/** Copy a picked local file into the scope under the canonical IDarr name. */
+export const addLocalArtwork = async (req: AddLocalArtworkRequest): Promise<AddArtworkResponse> => {
+  return postData<AddArtworkResponse>('/api/artwork-finder/add-local', req)
+}
+
+export interface TextLogoFields {
+  top: string      // small condensed line above the title
+  main: string     // the big Bebas line
+  suffix: string   // the spread-out "COLLECTION" line
+}
+
+/** Prefill for the text-logo dialog: the whole title (minus any trailing "Collection") uppercased
+ * on the main line — the dialog still renders whatever case the user types afterwards. The top
+ * line starts empty, and the suffix is the dialog's fixed COLLECTION checkbox (off). */
+export const defaultTextLogoFields = (item: { title: string }): TextLogoFields => {
+  const stripped = item.title.replace(/\s+collection\s*$/i, '').trim()
+  return { top: '', main: (stripped || item.title.trim()).toUpperCase(), suffix: '' }
+}
+
+/** Styling overrides for the title lines (the suffix line stays fixed). Tracking is Photoshop
+ * 1/1000-em units; scale is a horizontal-width percent for squeezing long titles; fonts are
+ * ids from listTextLogoFonts. */
+export interface TextLogoRenderOptions {
+  top_tracking?: number
+  top_scale?: number
+  main_tracking?: number
+  main_scale?: number
+  top_font?: string
+  main_font?: string
+}
+
+export interface TextLogoFont {
+  id: string       // what the render endpoints take as top_font / main_font
+  label: string    // the font's own family/style name
+  source: 'config' | 'bundled'
+}
+
+/** Fonts available to the text-logo dialog's pickers (config/fonts + bundled). */
+export const listTextLogoFonts = async (): Promise<{ fonts: TextLogoFont[] }> => {
+  return getData('/api/artwork-finder/text-logo/fonts')
+}
+
+export interface TextLogoRenderRequest extends TextLogoFields, TextLogoRenderOptions {}
+
+/** Server-render the PSD-style text logo for the dialog preview (inline base64 PNG). */
+export const previewTextLogo = async (fields: TextLogoRenderRequest): Promise<{ png_base64: string; width: number; height: number }> => {
+  return postData('/api/artwork-finder/text-logo/preview', fields)
+}
+
+export interface AddTextLogoRequest extends TextLogoRenderRequest, Omit<ArtworkItemRef, 'tmdb_id'> {
+  tmdb_id?: number | null   // custom collections have none
+  sync_target_index: number
+  confirm_overwrite?: boolean
+}
+
+/** Render the text logo and save it into the scope as the item's logo. */
+export const addTextLogo = async (req: AddTextLogoRequest): Promise<AddArtworkResponse> => {
+  return postData<AddArtworkResponse>('/api/artwork-finder/text-logo', req)
 }
 
 /** Download a TMDB gallery image with a canonical `Title (Year) {ids}[ - Season N][ - tag].ext`

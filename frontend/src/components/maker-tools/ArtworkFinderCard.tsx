@@ -1,5 +1,5 @@
-import { useCallback, useState, type CSSProperties } from 'react'
-import { Check, ChevronDown, ChevronUp, Clapperboard as MovieIcon, Copy, Crop as CropIcon, Download, FolderOpen, Image as ImageIcon, Plus, Sparkles, Tv, Wand2 } from 'lucide-react'
+import { useCallback, useState, type CSSProperties, type ReactNode } from 'react'
+import { Check, ChevronDown, ChevronUp, Clapperboard as MovieIcon, Copy, Crop as CropIcon, Download, FolderOpen, Globe, Image as ImageIcon, Plus, Sparkles, Tv, Type as TypeIcon, Wand2 } from 'lucide-react'
 import {
   addArtwork,
   cropArtworkSquare,
@@ -17,6 +17,9 @@ import {
 } from '../../api/client'
 import { useToast } from '../Toast'
 import SquareCropModal from './SquareCropModal'
+import LocalArtworkPickerModal from './LocalArtworkPickerModal'
+import TextLogoModal from './TextLogoModal'
+import { TMDB_IMAGE_LANGUAGES } from './TmdbItemCard'
 import { useTvdbEnabled } from '../../hooks/useTvdbEnabled'
 import ServiceLinks from './ServiceLinks'
 import { useCardOverview } from '../../hooks/useCardOverview'
@@ -30,6 +33,9 @@ type Props = {
   scopeLabel: string | null
   /** Artwork types this item is missing (unmatched view) — shown as badges in the card header. */
   missing?: ArtworkSubtype[]
+  /** Extra content for the card's info column (under the overview) — the unmatched view slots
+   *  its resolve-on-TMDB flow here for id-less collections. */
+  infoExtra?: ReactNode
 }
 
 const MISSING_LABEL: Record<ArtworkSubtype, string> = {
@@ -89,7 +95,7 @@ function downloadUrl(c: ArtworkCandidate): string {
 
 type ArtworkPreview = { src: string; download: string; filename: string; isLogo: boolean; white: boolean; dims: string }
 
-export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, missing }: Props) {
+export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, missing, infoExtra }: Props) {
   const { showToast } = useToast()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -98,7 +104,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   // once its tab is clicked.
   const tvdbEnabled = useTvdbEnabled()
   const overview = useCardOverview(item)
-  const [source, setSource] = useState<ImageSource>('tmdb')
+  // TVDB-only items (no TMDB id) open straight on the TVDB tab — TMDB has nothing for them.
+  const [source, setSource] = useState<ImageSource>((item.tmdb_id ?? 0) > 0 ? 'tmdb' : 'tvdb')
+  const [language, setLanguage] = useState('en+textless')   // TMDB image language preference
   const [dataBySource, setDataBySource] = useState<Partial<Record<ImageSource, ArtworkCandidatesResponse>>>({})
   const data = dataBySource[source] ?? null
   const [makeWhite, setMakeWhite] = useState<Record<string, boolean>>({})   // logo ref -> recolor on save
@@ -109,6 +117,8 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const [cropTarget, setCropTarget] = useState<ArtworkCandidate | null>(null)   // image open in the crop modal
   const [cropping, setCropping] = useState(false)
   const [cropOverwrite, setCropOverwrite] = useState<{ candidate: ArtworkCandidate; crop: { x: number; y: number; size: number } } | null>(null)
+  const [showLocalPicker, setShowLocalPicker] = useState(false)   // pick artwork from a server folder
+  const [showTextLogo, setShowTextLogo] = useState(false)         // render a styled text logo
 
   // Mirrors the maker card: a chip per source whether or not the item carries that id.
   const idChips = [
@@ -145,18 +155,18 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
     })
   }, [])
 
-  const load = useCallback(async (which: ImageSource) => {
+  const load = useCallback(async (which: ImageSource, lang = language) => {
     setLoading(true)
     setError(null)
     try {
-      const result = await getArtworkCandidates(item, undefined, undefined, which)
+      const result = await getArtworkCandidates(item, undefined, undefined, which, lang)
       setDataBySource((prev) => ({ ...prev, [which]: result }))
     } catch (e) {
       setError(getApiErrorMessage(e, 'Failed to load artwork'))
     } finally {
       setLoading(false)
     }
-  }, [item])
+  }, [item, language])
 
   const toggle = useCallback(() => {
     setOpen((prev) => {
@@ -173,7 +183,18 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
     if (!dataBySource[next]) void load(next)
   }, [source, dataBySource, load])
 
+  const handleLanguageChange = useCallback((next: string) => {
+    if (next === language) return
+    setLanguage(next)
+    setDataBySource({})   // every cached listing is language-scoped
+    setError(null)
+    void load(source, next)
+  }, [language, source, load])
+
   const noScope = syncTargetIndex == null
+  // Online browsing needs a TMDB id, or a TVDB id with TheTVDB configured. Custom collections
+  // have neither — their card offers only the local-folder picker.
+  const canBrowse = (item.tmdb_id ?? 0) > 0 || ((item.tvdb_id ?? 0) > 0 && tvdbEnabled)
 
   const handleAdd = useCallback(async (subtype: ArtworkSubtype, c: ArtworkCandidate, confirmOverwrite = false) => {
     if (noScope) {
@@ -304,6 +325,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
           </div>
 
           {overview && <p className="tmdb-result-overview">{overview}</p>}
+          {infoExtra}
         </div>
 
         {/* Same box as the maker card: everything actionable inside, poster + title outside. */}
@@ -356,17 +378,37 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             )}
           </div>
 
-          <button type="button" className="tmdb-gallery-toggle" onClick={toggle} disabled={loading}>
-            <ImageIcon size={13} />
-            {loading ? 'Loading…' : open ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Find artwork</>}
-          </button>
+          <div className="tmdb-gallery-toggle-row">
+            {canBrowse && (
+              <button type="button" className="tmdb-gallery-toggle" onClick={toggle} disabled={loading}>
+                <ImageIcon size={13} />
+                {loading ? 'Loading…' : open ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Find artwork</>}
+              </button>
+            )}
+            <button
+              type="button"
+              className="tmdb-gallery-toggle"
+              title="Pick a background / square art from a folder on the server"
+              onClick={() => noScope ? showToast('Pick an artwork scope first', 'error') : setShowLocalPicker(true)}
+            >
+              <FolderOpen size={13} /> From folder
+            </button>
+            <button
+              type="button"
+              className="tmdb-gallery-toggle"
+              title="Render a styled text logo for this title and add it to the scope"
+              onClick={() => noScope ? showToast('Pick an artwork scope first', 'error') : setShowTextLogo(true)}
+            >
+              <TypeIcon size={13} /> Text logo
+            </button>
+          </div>
         </div>
       </div>
 
       {open && (
         <div className="tmdb-gallery-panel">
-          {tvdbEnabled && (
-            <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
+          <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
+            {tvdbEnabled && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Artwork source">
                 {([['tmdb', 'TMDB', tmdbIcon], ['tvdb', 'TVDB', tvdbIcon]] as const).map(([id, label, icon]) => (
                   <button
@@ -382,8 +424,23 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                   </button>
                 ))}
               </div>
+            )}
+            {/* Same language preference as the maker card's gallery; applies to the TMDB listings. */}
+            <div className="tmdb-gallery-lang-wrapper">
+              <Globe size={13} className="tmdb-gallery-lang-icon" />
+              <select
+                className="tmdb-gallery-lang-select"
+                value={language}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                disabled={loading}
+                title="Image language preference"
+              >
+                {TMDB_IMAGE_LANGUAGES.map((lang) => (
+                  <option key={lang.value} value={lang.value}>{lang.label}</option>
+                ))}
+              </select>
             </div>
-          )}
+          </div>
           {error && <p className="tmdb-error">{error}</p>}
           {loading && !data && <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>Loading {source === 'tmdb' ? 'TMDB' : 'TheTVDB'} artwork…</p>}
           {data && source === 'tmdb' && !data.plex_available && (
@@ -442,6 +499,10 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                   }}
                                 />
                               </button>
+                              {/* Collection logos are borrowed from member movies — overlay which one. */}
+                              {c.origin && (
+                                <span className="tmdb-gallery-origin-badge" title={`From ${c.origin}`}>{c.origin}</span>
+                              )}
                             </div>
                             <div className="tmdb-gallery-item-meta">
                               <div className="tmdb-gallery-meta-row" style={{ gap: 6 }}>
@@ -619,6 +680,26 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pick backgrounds / square art from a server-side folder */}
+      {showLocalPicker && syncTargetIndex != null && (
+        <LocalArtworkPickerModal
+          item={item}
+          syncTargetIndex={syncTargetIndex}
+          scopeLabel={scopeLabel}
+          onClose={() => setShowLocalPicker(false)}
+        />
+      )}
+
+      {/* Render a styled text logo for this title */}
+      {showTextLogo && syncTargetIndex != null && (
+        <TextLogoModal
+          item={item}
+          syncTargetIndex={syncTargetIndex}
+          scopeLabel={scopeLabel}
+          onClose={() => setShowTextLogo(false)}
+        />
       )}
     </div>
   )

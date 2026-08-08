@@ -21,3 +21,35 @@ describe('posterLayerNames (tag → export payload)', () => {
     expect(posterLayerNames(posters, { '/y.jpg': 'main', '/x.jpg': 'show' })).toEqual(['show', 'main'])
   })
 })
+
+describe('getLocalArtworkImageUrl', () => {
+  it('is API_URL-prefixed (img tags resolve bare paths against the page origin) and URL-encoded', async () => {
+    const { getLocalArtworkImageUrl } = await import('../../src/api/makerTools')
+    const { API_URL } = await import('../../src/api/http')
+    expect(getLocalArtworkImageUrl('backgrounds/Dune (2021) - background.jpg'))
+      .toBe(`${API_URL}/api/artwork-finder/local-image?path=backgrounds%2FDune%20(2021)%20-%20background.jpg&source=folder`)
+    // Paths only mean anything against their own root, so the source rides along.
+    expect(getLocalArtworkImageUrl('film-square.jpg', 'bundled'))
+      .toBe(`${API_URL}/api/artwork-finder/local-image?path=film-square.jpg&source=bundled`)
+    expect(API_URL).not.toBe('')
+  })
+})
+
+describe('defaultTextLogoFields', () => {
+  it('uppercases the title, strips a trailing "Collection", and starts the suffix off', async () => {
+    const { defaultTextLogoFields } = await import('../../src/api/makerTools')
+    expect(defaultTextLogoFields({ title: 'James Bond Collection' }))
+      .toEqual({ top: '', main: 'JAMES BOND', suffix: '' })
+    expect(defaultTextLogoFields({ title: 'Dune' }))
+      .toEqual({ top: '', main: 'DUNE', suffix: '' })
+    expect(defaultTextLogoFields({ title: 'Collection' }).main).toBe('COLLECTION')
+  })
+
+  it('keeps the whole title on the main line — no auto-split to the top', async () => {
+    const { defaultTextLogoFields } = await import('../../src/api/makerTools')
+    expect(defaultTextLogoFields({ title: 'The Lord of the Rings Collection' }))
+      .toEqual({ top: '', main: 'THE LORD OF THE RINGS', suffix: '' })
+    expect(defaultTextLogoFields({ title: 'Star Wars: The Force Awakens' }))
+      .toEqual({ top: '', main: 'STAR WARS: THE FORCE AWAKENS', suffix: '' })
+  })
+})

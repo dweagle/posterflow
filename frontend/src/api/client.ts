@@ -276,6 +276,23 @@ export {
   getArtworkTaggedDownloadUrl,
   type SaveGalleryArtworkResponse,
   saveGalleryArtworkToFolder,
+  type LocalArtworkFile,
+  type LocalArtworkSource,
+  type LocalArtworkFolderResponse,
+  type AddLocalArtworkRequest,
+  getLocalArtworkFolder,
+  setLocalArtworkFolder,
+  getLocalArtworkImageUrl,
+  addLocalArtwork,
+  type TextLogoFields,
+  type TextLogoRenderOptions,
+  type TextLogoRenderRequest,
+  type TextLogoFont,
+  listTextLogoFonts,
+  type AddTextLogoRequest,
+  defaultTextLogoFields,
+  previewTextLogo,
+  addTextLogo,
 } from './makerTools'
 
 export {

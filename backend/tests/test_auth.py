@@ -281,3 +281,20 @@ class TestStatusEndpoint:
             set_password(test_db, "")
             test_db.commit()
             invalidate_auth_cache()
+
+
+def test_artwork_local_image_exempt_from_password(client):
+    """<img> tags can't send the Bearer header, so /local-image is auth-exempt (path containment
+    inside the configured picker folder is its guard). With a password enforced it must still
+    reach the endpoint — a 400 (no folder configured) here, never a 401."""
+    salt_hex, hash_hex = hash_password("testpass")
+    _cache.hash_val = hash_hex
+    _cache.salt_val = salt_hex
+    _cache.loaded_at = time.monotonic()
+    try:
+        resp = client.get("/api/artwork-finder/local-image", params={"path": "x.jpg"})
+        assert resp.status_code == 400
+    finally:
+        _cache.hash_val = ""
+        _cache.salt_val = ""
+        _cache.loaded_at = 0.0

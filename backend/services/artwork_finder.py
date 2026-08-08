@@ -173,15 +173,28 @@ def _tmdb_get(path: str, api_key: str, **params: Any) -> Optional[dict]:
     return None
 
 
-def tmdb_images(item: FinderItem, api_key: str) -> dict:
-    """TMDB images for the item: /{movie|tv}/{id}/images (en+textless) or the collection endpoint."""
+def tmdb_image_language(lang: str) -> Optional[str]:
+    """A UI language choice mapped to TMDB's include_image_language value (None = omit the param
+    and list every language). Mirrors the maker card: 'en+textless' -> 'en,null'; a bare ISO code
+    lists only that language (no textless)."""
+    lang = str(lang or "").strip().lower()
+    if lang in ("", "all"):
+        return None
+    if lang == "en+textless":
+        return "en,null"
+    return lang
+
+
+def tmdb_images(item: FinderItem, api_key: str, image_language: Optional[str] = "en,null") -> dict:
+    """TMDB images for the item: /{movie|tv}/{id}/images or the collection endpoint.
+    ``image_language`` is the ready include_image_language value (None = all languages)."""
     if not item.tmdb_id:
         return {}
+    params = {"include_image_language": image_language} if image_language else {}
     if item.is_collection:
-        return _tmdb_get(f"/collection/{item.tmdb_id}/images", api_key) or {}
+        return _tmdb_get(f"/collection/{item.tmdb_id}/images", api_key, **params) or {}
     mt = "tv" if item.is_tv else "movie"
-    return _tmdb_get(f"/{mt}/{item.tmdb_id}/images", api_key,
-                     include_image_language="en,null") or {}
+    return _tmdb_get(f"/{mt}/{item.tmdb_id}/images", api_key, **params) or {}
 
 
 def backdrop_candidates(images: dict, min_width: int, *, textless_only: bool = True) -> list[dict]:
@@ -214,6 +227,31 @@ def poster_candidates(images: dict) -> list[dict]:
     cands = list(images.get("posters") or [])
     cands.sort(key=lambda p: (0 if p.get("iso_639_1") is None else 1, -(p.get("vote_average") or 0)))
     return cands
+
+
+COLLECTION_LOGO_MOVIE_CAP = 1   # only the FIRST movie (release order) — its logo names the franchise
+
+
+def collection_member_logos(collection_id: int, api_key: str,
+                            cap: int = COLLECTION_LOGO_MOVIE_CAP,
+                            image_language: Optional[str] = "en,null") -> list[dict]:
+    """Logo candidates for a collection, borrowed from its first member movie by release date
+    (TMDB serves no collection logos at all; the first film's logo is usually the franchise
+    mark). Each candidate carries ``origin`` = the movie's title so the picker can say where a
+    logo came from."""
+    detail = _tmdb_get(f"/collection/{collection_id}", api_key) or {}
+    parts = [p for p in (detail.get("parts") or []) if isinstance(p, dict) and p.get("id")]
+    parts.sort(key=lambda p: str(p.get("release_date") or "9999"))
+    lang_params = {"include_image_language": image_language} if image_language else {}
+    out: list[dict] = []
+    for part in parts[:cap]:
+        images = _tmdb_get(f"/movie/{part['id']}/images", api_key, **lang_params) or {}
+        title = str(part.get("title") or "").strip() or None
+        for c in logo_candidates(images):
+            out.append({"source": "tmdb", "ref": c["file_path"], "width": c.get("width"),
+                        "height": c.get("height"), "language": c.get("iso_639_1"),
+                        "origin": title})
+    return out
 
 
 # ------------------------------------------------------------------ Plex / Gracenote provider (ported)
@@ -388,7 +426,8 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     min_backdrop_width: int = 1920, evaluate_white: bool = False,
                     white_top_n: int = 8, source: str = "tmdb",
                     tvdb_creds: Optional[tuple[str, str]] = None,
-                    textless_backgrounds: bool = True) -> dict:
+                    textless_backgrounds: bool = True,
+                    image_language: Optional[str] = "en,null") -> dict:
     """Candidates per requested type, from one source at a time.
 
     ``source='tmdb'`` is the default pairing: logos/backgrounds/posters from TMDB plus square art
@@ -410,7 +449,7 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
         groups = tvdb_candidate_groups(item, key, pin, min_backdrop_width,
                                        textless_backgrounds=textless_backgrounds)
     else:
-        tmdb_imgs = tmdb_images(item, tmdb_api_key) if item.tmdb_id else {}
+        tmdb_imgs = tmdb_images(item, tmdb_api_key, image_language) if item.tmdb_id else {}
         groups = {
             "logos": [{"source": "tmdb", "ref": c["file_path"], "width": c.get("width"),
                        "height": c.get("height"), "language": c.get("iso_639_1")}
@@ -428,9 +467,15 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
     want_square = "squareart" in types and plex is not None and not item.is_collection and not use_tvdb
     gn: dict = plex.images(item) if want_square else {}
 
-    # ---- logos (collections have none)
-    if "logo" in types and not item.is_collection:
-        logos: list[dict] = groups["logos"]
+    # ---- logos. Collections have none of their own on any source, so under TMDB they borrow
+    #      their member movies' logos instead (tagged with the movie each came from).
+    if "logo" in types:
+        if item.is_collection:
+            logos: list[dict] = (collection_member_logos(item.tmdb_id, tmdb_api_key,
+                                                         image_language=image_language)
+                                 if item.tmdb_id and not use_tvdb else [])
+        else:
+            logos = groups["logos"]
         if evaluate_white:
             for c in logos[:white_top_n]:
                 data = _download_bytes(session, _resolve_url(c["source"], c["ref"]))
@@ -485,22 +530,36 @@ def build_download_filename(item: FinderItem, role: str, season: Optional[int], 
     return IdarrRunner._generate_new_filename(item.to_asset(subtype), seed)
 
 
+JPEG_QUALITY = 92               # ≈ visually lossless, ~20% smaller than 95
+JPEG_RECODE_MIN_SAVING = 0.10   # recompress an untouched download only for at least this saving
+
+
+def _jpeg_bytes(im: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    kwargs: dict = {"quality": JPEG_QUALITY}
+    icc = im.info.get("icc_profile")
+    if icc:
+        kwargs["icc_profile"] = icc   # keep the source's color profile through the re-encode
+    im.convert("RGB").save(buf, "JPEG", **kwargs)
+    return buf.getvalue()
+
+
 def _encode(data: bytes, im: Image.Image, subtype: str, transformed: bool) -> bytes:
-    """Bytes to write. Re-encode to the forced format only when we transformed the image or the
-    source format doesn't already match; otherwise keep the original bytes (no generation loss).
-    IDarr re-converts on rename anyway, so this only needs to be a valid image of the right kind."""
+    """Bytes to write. Logos stay PNG (lossless — quality doesn't apply). Backgrounds/square art
+    encode to JPEG q92 when the pixels changed or the source wasn't JPEG. An untouched JPEG
+    download is recompressed to q92 only when that genuinely shrinks it (>= 10%) — re-encoding an
+    already-lean source would grow the file while still costing a lossy generation, so those keep
+    their original bytes verbatim."""
     if subtype == "logo":
         if transformed or (im.format or "").upper() != "PNG":
             buf = io.BytesIO()
             im.convert("RGBA").save(buf, "PNG")
             return buf.getvalue()
         return data
-    # background / squareart -> jpeg
     if transformed or (im.format or "").upper() != "JPEG":
-        buf = io.BytesIO()
-        im.convert("RGB").save(buf, "JPEG", quality=95)
-        return buf.getvalue()
-    return data
+        return _jpeg_bytes(im)
+    recoded = _jpeg_bytes(im)
+    return recoded if len(recoded) <= len(data) * (1 - JPEG_RECODE_MIN_SAVING) else data
 
 
 def prepare_artwork_payload(data: bytes, subtype: str, *, crop: Optional[tuple[int, int, int, int]] = None,
@@ -565,6 +624,84 @@ def save_candidate(*, source_dir: Path, is_asset_drive: bool, item: FinderItem, 
         "subfolder": subfolder,
         "archived": result["archived"],
     }
+
+
+# ------------------------------------------------------------------ local picker folder
+
+PICKER_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+PICKER_SCAN_CAP = 500
+
+
+def _picker_type(rel_path: str, width: int, height: int) -> str:
+    """background | squareart for a picker-folder file. Path keywords win ('background'/'backdrop'
+    checked before 'square', so 'Times Square … - background.jpg' lands right); with no keyword,
+    near-square aspect (within 8%) means square art."""
+    low = rel_path.lower()
+    if "background" in low or "backdrop" in low:
+        return "background"
+    if "square" in low:
+        return "squareart"
+    return "squareart" if height and abs(width / height - 1.0) <= 0.08 else "background"
+
+
+def scan_picker_folder(folder: Path, cap: int = PICKER_SCAN_CAP, source: str = "folder") -> dict:
+    """List the images in one picker root, grouped background / squareart. Hidden entries and
+    unreadable files are skipped; the scan stops at `cap` images (truncated=True) so pointing it
+    at a mistakenly-huge tree can't hang the request. Each entry carries its ``source`` root so
+    the caller can resolve it back to a file later."""
+    backgrounds: list[dict] = []
+    squareart: list[dict] = []
+    truncated = False
+    for path in sorted(folder.rglob("*")):
+        rel = path.relative_to(folder)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if not path.is_file() or path.suffix.lower() not in PICKER_IMAGE_EXTENSIONS:
+            continue
+        if len(backgrounds) + len(squareart) >= cap:
+            truncated = True
+            break
+        try:
+            with Image.open(path) as im:
+                width, height = im.size
+        except Exception:
+            continue
+        entry = {"name": path.name, "path": rel.as_posix(), "source": source,
+                 "width": width, "height": height}
+        (squareart if _picker_type(entry["path"], width, height) == "squareart" else backgrounds).append(entry)
+    return {"backgrounds": backgrounds, "squareart": squareart, "truncated": truncated}
+
+
+def save_artwork_bytes(*, source_dir: Path, is_asset_drive: bool, item: FinderItem, subtype: str,
+                       data: bytes, confirm_overwrite: bool = False) -> dict:
+    """Write already-obtained image bytes into the scope's subtype subfolder under IDarr's
+    canonical name — the download-free tail of save_candidate, same exists/confirm contract.
+    Used by the local-folder picker and the text-logo renderer."""
+    from services.idarr_assets import ASSET_SUBFOLDERS, place_asset_file, resolve_asset_dir
+
+    if subtype not in SUBTYPE_EXT:
+        raise ValueError(f"unknown artwork subtype: {subtype}")
+
+    filename = build_filename(item, subtype)
+    subfolder = ASSET_SUBFOLDERS.get(subtype, "logos") if is_asset_drive else ""
+    dest = resolve_asset_dir(source_dir, subtype, is_asset_drive) / filename
+    if dest.exists() and not confirm_overwrite:
+        return {"status": "exists", "written": filename, "subfolder": subfolder, "archived": False}
+
+    payload = prepare_artwork_payload(data, subtype)
+    result = place_asset_file(source_dir, subtype, filename, payload, is_asset_drive=is_asset_drive)
+    return {"status": "added", "written": filename, "subfolder": subfolder, "archived": result["archived"]}
+
+
+def save_local_file(*, source_dir: Path, is_asset_drive: bool, item: FinderItem, subtype: str,
+                    src: Path, confirm_overwrite: bool = False) -> dict:
+    """Copy a picked local file into the scope — the folder-picker counterpart of save_candidate."""
+    try:
+        data = src.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"could not read the selected file: {exc}")
+    return save_artwork_bytes(source_dir=source_dir, is_asset_drive=is_asset_drive, item=item,
+                              subtype=subtype, data=data, confirm_overwrite=confirm_overwrite)
 
 
 # ------------------------------------------------------------------ batch pull helpers
@@ -636,7 +773,10 @@ def _parse_with_identity(file_path: Path, identity: Optional[dict]) -> dict:
     cached = (identity or {}).get(file_path.name.strip().lower())
     if not cached:
         return parsed
-    if cached.get("asset_type"):
+    # Only a RESOLVED type may override the filename's own. Unresolvable files (custom
+    # collections especially) cache as type "pending", and stomping "collection" with that fell
+    # through to movie — so their artwork stopped matching the collection items it was made for.
+    if cached.get("asset_type") in ("movie", "tv_series", "collection"):
         parsed["type"] = cached["asset_type"]
     for key in ("tmdb_id", "tvdb_id", "imdb_id"):
         if parsed.get(key) is None and cached.get(key) is not None:

@@ -1235,6 +1235,23 @@
   margin-top: 0;
 }
 
+/* "Find artwork" + "From folder" share one row, splitting the box width evenly. */
+.tmdb-gallery-toggle-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tmdb-gallery-toggle-row .tmdb-gallery-toggle {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.tmdb-gallery-toggle-row .tmdb-gallery-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Service links sit as a row directly under the badge rule, inside the info column. They share
    the row evenly and span its full width, which is the span the id chips below them match. */
 .tmdb-result-logos {
@@ -1768,6 +1785,24 @@
   position: relative;
   display: block;
   line-height: 0;
+}
+
+/* Which member movie a borrowed collection logo came from — pinned over the thumbnail. */
+.tmdb-gallery-origin-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ddd;
+  font-size: 0.62rem;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;   /* clicks fall through to the preview button */
 }
 
 /* Overlay action buttons (P/B/L select, T tag, trash) live in a flex row in the top-left corner. */
@@ -2648,4 +2683,165 @@
 .psd-ccx-link:hover {
   text-decoration: underline;
   color: #90caf9;
+}
+
+/* ── Local-folder artwork picker ─────────────────────────────────────────── */
+
+.local-artwork-folder-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.local-artwork-folder-row input {
+  flex: 1;
+  min-width: 0;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #eee;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.local-artwork-folder-row input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.local-artwork-thumb--selected {
+  outline: 2px solid #4caf50;
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.local-artwork-name {
+  font-size: 0.68rem;
+  color: #aaa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+/* Resolve prompt slotted into an id-less collection's finder card (info column). */
+.unmatched-maker-inline-resolve {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.unmatched-maker-inline-resolve .muted {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+/* ── Text-logo dialog ────────────────────────────────────────────────────── */
+
+.text-logo-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.text-logo-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.text-logo-form label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: #aaa;
+}
+
+.text-logo-field-title {
+  font-size: 0.78rem;
+  color: #aaa;
+}
+
+.text-logo-form .text-logo-collection {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 0;   /* the checkbox's own margin-right spaces the pair */
+  align-self: flex-start;
+  font-size: 0.85rem;
+  color: #eee;
+  padding-top: 0.35rem;
+}
+
+.text-logo-form .text-logo-collection input[type="checkbox"] {
+  accent-color: #64b5f6;
+}
+
+/* Tracking / Width% tweaks under the title inputs. */
+.text-logo-tuning {
+  display: flex;
+  gap: 8px;
+}
+
+.text-logo-tuning label {
+  font-size: 0.7rem;
+}
+
+.text-logo-tuning .text-logo-tuning-font {
+  flex: 1.6;
+  min-width: 0;
+}
+
+/* The dropdown and its two number boxes share one explicit height — DriveEditModal.css leaks a
+   chunky `.modal-body input`/`select` padding that outranks plain class rules and made the
+   number boxes taller than the dropdown beside them. */
+.text-logo-form .text-logo-tuning select,
+.text-logo-form .text-logo-tuning input[type="number"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 1.9rem;
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #eee;
+}
+
+.text-logo-form input {
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #eee;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.text-logo-form input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+/* Dark backing so the white-text logo is visible; the PNG itself stays transparent. */
+.text-logo-preview {
+  background: #222;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.text-logo-preview img {
+  max-width: 100%;
+  max-height: 260px;
 }

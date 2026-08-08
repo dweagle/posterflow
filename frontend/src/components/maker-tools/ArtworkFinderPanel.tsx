@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Clapperboard as MovieIcon, FolderOpen, HardDrive, Play, Search, Tv } from 'lucide-react'
+import { Clapperboard as MovieIcon, FolderOpen, HardDrive, Play, RefreshCw, Search, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   searchTmdb,
@@ -47,6 +47,7 @@ export default function ArtworkFinderPanel() {
   )
 
   const [mode, setMode] = useState<'search' | 'batch' | 'drive'>('search')
+  const [driveRefresh, setDriveRefresh] = useState(0)   // bump -> My Drive re-scans
   const batchRunRef = useRef<(() => void) | null>(null)
   const [batchState, setBatchState] = useState({ running: false, busy: false, canRun: false })
   const [query, setQuery] = useState('')
@@ -99,6 +100,17 @@ export default function ArtworkFinderPanel() {
             <Play size={16} /> {batchState.running ? 'Running…' : batchState.busy ? 'Starting…' : 'Run Pull'}
           </button>
         )}
+        {mode === 'drive' && (
+          <button
+            type="button"
+            className="btn-toolbar"
+            onClick={() => setDriveRefresh((n) => n + 1)}
+            disabled={!selected}
+            title="Re-scan the drive for items and artwork gaps"
+          >
+            <RefreshCw size={16} /> Refresh
+          </button>
+        )}
       </Toolbar>
 
       <div className="pf-subtabs">
@@ -134,6 +146,7 @@ export default function ArtworkFinderPanel() {
           itemScopeIndex={itemSource.itemScopeIndex}
           sourceHint={itemSource.hint}
           sourceLabel={itemSource.label}
+          refreshKey={driveRefresh}
         />
       ) : mode === 'batch' ? (
         <BatchPullPanel

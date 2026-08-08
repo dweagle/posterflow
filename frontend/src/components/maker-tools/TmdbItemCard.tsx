@@ -195,7 +195,7 @@ const APPLE_TV_STOREFRONTS = [
 // ISO 3166-1 alpha-2 → Apple storefront id, for auto-selecting the region from origin country.
 const STOREFRONT_BY_ISO = new Map(APPLE_TV_STOREFRONTS.map((s) => [s.iso, s.value]))
 
-const TMDB_IMAGE_LANGUAGES = [
+export const TMDB_IMAGE_LANGUAGES = [
   { value: 'all', label: 'All Languages' },
   { value: 'en+textless', label: 'English + Textless' },
   { value: 'en', label: 'English' },

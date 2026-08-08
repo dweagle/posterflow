@@ -272,3 +272,376 @@ def test_tmdb_download_sets_canonical_filename(client, monkeypatch):
         "year": 2021, "tmdb_id": 438631})
     assert resp.status_code == 200
     assert "Dune (2021) {tmdb-438631} - logo.png" in resp.headers["content-disposition"]
+
+
+# ------------------------------------------------------------------ local picker folder
+
+def _png_bytes(size=(800, 800)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, (5, 6, 7)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _set_picker_folder(client, folder) -> dict:
+    resp = client.put("/api/artwork-finder/local-folder", json={"folder": str(folder)})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_set_picker_folder_rejects_bad_paths(client, tmp_path):
+    assert client.put("/api/artwork-finder/local-folder", json={"folder": "relative/dir"}).status_code == 400
+    assert client.put("/api/artwork-finder/local-folder", json={"folder": str(tmp_path) + "/../x"}).status_code == 400
+    assert client.put("/api/artwork-finder/local-folder", json={"folder": str(tmp_path / "missing")}).status_code == 400
+
+
+def test_picker_folder_lists_and_classifies(client, tmp_path):
+    (tmp_path / "backgrounds").mkdir()
+    (tmp_path / "backgrounds" / "bg.jpg").write_bytes(_jpg_bytes(size=(1920, 1080)))
+    (tmp_path / "squareart").mkdir()
+    (tmp_path / "squareart" / "sq.jpg").write_bytes(_jpg_bytes(size=(1000, 1000)))
+    (tmp_path / "flat.png").write_bytes(_png_bytes(size=(800, 800)))     # square by aspect ratio
+    (tmp_path / "wide.png").write_bytes(_png_bytes(size=(1600, 900)))    # background by aspect ratio
+    (tmp_path / "notes.txt").write_text("skip me")
+
+    data = _set_picker_folder(client, tmp_path)
+    assert data["folder"] == str(tmp_path)
+    chosen = lambda key: sorted(f["path"] for f in data[key] if f["source"] == "folder")  # noqa: E731
+    assert chosen("backgrounds") == ["backgrounds/bg.jpg", "wide.png"]
+    assert chosen("squareart") == ["flat.png", "squareart/sq.jpg"]
+
+    # The app's own artwork rides along in every listing, ahead of the chosen folder's files.
+    assert [f["source"] for f in data["backgrounds"]][0] == "bundled"
+    assert {f["source"] for f in data["squareart"]} >= {"bundled", "folder"}
+
+    # GET lists the stored folder without re-setting it
+    again = client.get("/api/artwork-finder/local-folder").json()
+    assert again["folder"] == str(tmp_path)
+    assert len([f for f in again["squareart"] if f["source"] == "folder"]) == 2
+
+
+def test_picker_folder_unset_and_missing(client, tmp_path):
+    # No folder configured still lists the app's bundled artwork, and never errors.
+    unset = client.get("/api/artwork-finder/local-folder").json()
+    assert unset["folder"] == "" and unset["error"] is None
+    assert {f["source"] for f in unset["backgrounds"] + unset["squareart"]} == {"bundled"}
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    _set_picker_folder(client, gone)
+    gone.rmdir()
+    data = client.get("/api/artwork-finder/local-folder").json()
+    assert data["folder"] == str(gone) and data["error"]
+
+
+def test_picker_image_serves_and_guards(client, tmp_path):
+    inside = tmp_path / "art"
+    inside.mkdir()
+    (inside / "bg.jpg").write_bytes(_jpg_bytes())
+    (tmp_path / "secret.jpg").write_bytes(_jpg_bytes())
+    _set_picker_folder(client, inside)
+
+    assert client.get("/api/artwork-finder/local-image", params={"path": "bg.jpg"}).status_code == 200
+    assert client.get("/api/artwork-finder/local-image", params={"path": "../secret.jpg"}).status_code == 403
+    assert client.get("/api/artwork-finder/local-image", params={"path": "missing.jpg"}).status_code == 404
+
+
+def test_add_local_copies_and_converts(client, test_db, tmp_path):
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    art = tmp_path / "art"
+    art.mkdir()
+    (art / "bg.png").write_bytes(_png_bytes(size=(1920, 1080)))
+    _set_asset_scope(test_db, str(scope))
+    _set_picker_folder(client, art)
+
+    body = {"sync_target_index": 0, "title": "Dune", "media_type": "movie", "year": 2021,
+            "tmdb_id": 438631, "subtype": "background", "path": "bg.png"}
+    resp = client.post("/api/artwork-finder/add-local", json=body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "added"
+    assert data["written"] == "Dune (2021) {tmdb-438631} - background.jpg"
+    with Image.open(scope / "backgrounds" / data["written"]) as im:   # png source -> jpeg
+        assert im.format == "JPEG"
+        assert im.size == (1920, 1080)
+    assert (art / "bg.png").is_file()   # copied, not moved
+
+    assert client.post("/api/artwork-finder/add-local", json=body).json()["status"] == "exists"
+    over = client.post("/api/artwork-finder/add-local", json={**body, "confirm_overwrite": True}).json()
+    assert over["status"] == "added" and over["archived"] is True
+
+
+def test_add_local_requires_folder_and_savable_subtype(client, test_db, tmp_path):
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    _set_asset_scope(test_db, str(scope))
+    body = {"sync_target_index": 0, "title": "Dune", "media_type": "movie",
+            "tmdb_id": 438631, "subtype": "background", "path": "bg.png"}
+    assert client.post("/api/artwork-finder/add-local", json=body).status_code == 400  # no folder configured
+
+    art = tmp_path / "art"
+    art.mkdir()
+    (art / "l.png").write_bytes(_png_bytes(size=(400, 100)))
+    _set_picker_folder(client, art)
+    logo = client.post("/api/artwork-finder/add-local", json={**body, "subtype": "logo", "path": "l.png"})
+    assert logo.status_code == 400
+
+
+def test_add_local_collection_without_ids(client, test_db, tmp_path):
+    # Custom collections (decades, holidays, …) have no TMDB entry — the canonical name simply
+    # carries no id tags.
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    art = tmp_path / "art"
+    art.mkdir()
+    (art / "sq.jpg").write_bytes(_jpg_bytes(size=(1000, 1000)))
+    _set_asset_scope(test_db, str(scope))
+    _set_picker_folder(client, art)
+
+    resp = client.post("/api/artwork-finder/add-local", json={
+        "sync_target_index": 0, "title": "1980s Collection", "media_type": "collection",
+        "subtype": "squareart", "path": "sq.jpg"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["written"] == "1980s Collection - squareart.jpg"
+    assert (scope / "squareart" / data["written"]).is_file()
+
+
+def test_picker_paths_with_leading_spaces_survive(client, test_db, tmp_path):
+    # Real folders contain names like " background.jpg" — the relative path must round-trip
+    # verbatim through listing, image serving, and add-local (stripping it 404'd in the field).
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    art = tmp_path / "art"
+    art.mkdir()
+    (art / " background.jpg").write_bytes(_jpg_bytes(size=(1920, 1080)))
+    _set_asset_scope(test_db, str(scope))
+    data = _set_picker_folder(client, art)
+    assert [f["path"] for f in data["backgrounds"] if f["source"] == "folder"] == [" background.jpg"]
+
+    img = client.get("/api/artwork-finder/local-image", params={"path": " background.jpg"})
+    assert img.status_code == 200, img.text
+
+    add = client.post("/api/artwork-finder/add-local", json={
+        "sync_target_index": 0, "title": "Dune", "media_type": "movie", "year": 2021,
+        "tmdb_id": 438631, "subtype": "background", "path": " background.jpg"})
+    assert add.status_code == 200, add.text
+    assert add.json()["status"] == "added"
+
+
+# ------------------------------------------------------------------ text logo
+
+def test_text_logo_preview_renders_png(client):
+    import base64
+    resp = client.post("/api/artwork-finder/text-logo/preview",
+                       json={"top": "THE", "main": "JAMES BOND", "suffix": "COLLECTION"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    with Image.open(io.BytesIO(base64.b64decode(data["png_base64"]))) as im:
+        assert im.format == "PNG" and im.mode == "RGBA"
+        assert im.size == (data["width"], data["height"])
+        assert im.width > im.height
+
+
+def test_text_logo_preview_requires_text(client):
+    assert client.post("/api/artwork-finder/text-logo/preview", json={"main": "  "}).status_code == 400
+
+
+def test_add_text_logo_saves_and_overwrites(client, test_db, tmp_path):
+    _set_asset_scope(test_db, str(tmp_path))
+    body = {"sync_target_index": 0, "title": "James Bond Collection", "media_type": "collection",
+            "tmdb_id": 645, "top": "THE", "main": "JAMES BOND", "suffix": "COLLECTION"}
+    resp = client.post("/api/artwork-finder/text-logo", json=body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "added"
+    assert data["written"] == "James Bond Collection {tmdb-645} - logo.png"
+    with Image.open(tmp_path / "logos" / data["written"]) as im:   # transparent PNG survives save
+        assert im.format == "PNG" and im.mode == "RGBA"
+    assert client.post("/api/artwork-finder/text-logo", json=body).json()["status"] == "exists"
+    over = client.post("/api/artwork-finder/text-logo", json={**body, "confirm_overwrite": True}).json()
+    assert over["status"] == "added" and over["archived"] is True
+
+
+def test_text_logo_reports_missing_font(client, monkeypatch):
+    monkeypatch.setattr("services.text_logo._resolve_font", lambda candidates: None)
+    resp = client.post("/api/artwork-finder/text-logo/preview", json={"main": "DUNE"})
+    assert resp.status_code == 400
+    assert "font" in resp.json()["detail"].lower()
+
+
+def test_text_logo_tuning_overrides_change_width(client):
+    # Squeezing the width or zeroing the tracking must both narrow the main line; the suffix
+    # line has no overrides.
+    def width(body):
+        resp = client.post("/api/artwork-finder/text-logo/preview", json=body)
+        assert resp.status_code == 200, resp.text
+        return resp.json()["width"]
+
+    base = width({"main": "JAMES BOND"})
+    assert width({"main": "JAMES BOND", "main_scale": 50}) < base
+    assert width({"main": "JAMES BOND", "main_tracking": 0}) < base
+
+
+def test_text_logo_font_override_matches_otf_by_stem(tmp_path, monkeypatch):
+    # A user-dropped .otf in config/artwork/fonts must satisfy a .ttf candidate name — matching
+    # is by stem, and the override dir wins over the bundled fonts.
+    from core.config import settings as app_settings
+    from services.text_logo import _resolve_font
+    fonts = tmp_path / "artwork" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "bebasneuebold.otf").write_bytes(b"stub")
+    monkeypatch.setattr(app_settings, "config_dir", tmp_path)
+    hit = _resolve_font(["BebasNeueBold.ttf", "BebasNeue-Bold.ttf", "BebasNeue-Regular.ttf"])
+    assert hit == fonts / "bebasneuebold.otf"
+
+
+def test_text_logo_fonts_lists_config_and_bundled(client, tmp_path, monkeypatch):
+    import shutil
+    from core.config import settings as app_settings
+    from services import text_logo as tl
+    # Any bundled font will do — which ones ship is a packaging choice, not this test's subject.
+    a_bundled = next(p for p in sorted(tl.BUNDLED_FONT_DIR.iterdir()) if p.suffix.lower() in (".ttf", ".otf"))
+    fonts_dir = tmp_path / "artwork" / "fonts"
+    fonts_dir.mkdir(parents=True)
+    shutil.copy(a_bundled, fonts_dir / "MyCustom.ttf")
+    (fonts_dir / "broken.otf").write_bytes(b"junk")   # unreadable -> not offered
+    monkeypatch.setattr(app_settings, "config_dir", tmp_path)
+
+    fonts = client.get("/api/artwork-finder/text-logo/fonts").json()["fonts"]
+    by_id = {f["id"]: f for f in fonts}
+    assert by_id["MyCustom"]["source"] == "config"
+    assert by_id["MyCustom"]["label"] == "MyCustom"   # config fonts label by FILENAME (renameable)
+    assert "broken" not in by_id
+    assert by_id[a_bundled.stem]["source"] == "bundled"
+    # bundled fonts label by their embedded family name, not the filename
+    assert by_id[a_bundled.stem]["label"] != a_bundled.stem or " " in a_bundled.stem
+
+
+def test_text_logo_render_honors_font_override(client):
+    def preview(body):
+        resp = client.post("/api/artwork-finder/text-logo/preview", json=body)
+        return resp
+
+    base = preview({"main": "DUNE"}).json()
+    other = preview({"main": "DUNE", "main_font": "LiberationSans-Regular"}).json()
+    assert other["width"] != base["width"]   # a different face measures differently
+    missing = preview({"main": "DUNE", "main_font": "NopeFont"})
+    assert missing.status_code == 400
+    assert "NopeFont" in missing.json()["detail"]
+
+
+def test_candidates_collection_borrows_first_movie_logos(client, test_db, monkeypatch):
+    # TMDB serves no collection logos — the card borrows logos from the collection's FIRST
+    # movie by release date (its logo is usually the franchise mark), tagged with that movie.
+    _set_tmdb_key(test_db)
+    fetched_movies = []
+
+    def fake_get(path, api_key, **params):
+        if path == "/collection/1241":
+            return {"parts": [
+                {"id": 672, "title": "Chamber of Secrets", "release_date": "2002-11-13"},
+                {"id": 671, "title": "Philosopher's Stone", "release_date": "2001-11-16"},
+            ]}
+        if path.startswith("/movie/"):
+            fetched_movies.append(path)
+            return {"logos": [{"file_path": "/l1.png", "width": 800, "height": 300,
+                               "vote_average": 5, "iso_639_1": "en"},
+                              {"file_path": "/skip.svg", "width": 1, "height": 1}]}
+        return {}
+
+    monkeypatch.setattr("services.artwork_finder._tmdb_get", fake_get)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 1241, "media_type": "collection", "title": "Harry Potter Collection",
+        "evaluate_white": False})
+    assert resp.status_code == 200, resp.text
+    logos = resp.json()["logos"]
+    assert fetched_movies == ["/movie/671/images"]   # only the earliest release is consulted
+    assert [l["ref"] for l in logos] == ["/l1.png"]  # svg dropped
+    assert logos[0]["origin"] == "Philosopher's Stone"
+
+
+def test_parse_with_identity_pending_type_never_overrides(tmp_path):
+    # IDarr caches unresolvable files (custom collections) as type "pending"; that must not
+    # stomp the filename's own typing — it fell through to movie and the artwork stopped
+    # matching the collection it was made for (field bug, Aug 2026).
+    f = tmp_path / "1940s Collection - background.jpg"
+    pending = {"1940s collection - background.jpg":
+               {"asset_type": "pending", "tmdb_id": None, "tvdb_id": None, "imdb_id": None}}
+    parsed = af._parse_with_identity(f, pending)
+    assert parsed["type"] == "collection"
+    assert af.finder_from_parsed_asset(parsed).media_type == "collection"
+
+    # A genuinely resolved type still wins over the filename's guess.
+    resolved = {"1940s collection - background.jpg":
+                {"asset_type": "tv_series", "tmdb_id": 225948, "tvdb_id": None, "imdb_id": None}}
+    assert af._parse_with_identity(f, resolved)["type"] == "tv_series"
+
+
+def test_candidates_language_param_maps_to_tmdb_value(client, test_db, monkeypatch):
+    # UI choice -> include_image_language: default en+textless -> 'en,null', all -> omit (None),
+    # a bare ISO code passes through.
+    _set_tmdb_key(test_db)
+    seen = {}
+
+    def fake_list(*args, **kwargs):
+        seen.update(kwargs)
+        return {"logos": [], "backgrounds": [], "squareart": [], "posters": [], "plex_available": False}
+
+    monkeypatch.setattr("services.artwork_finder.list_candidates", fake_list)
+    base = {"tmdb_id": 105, "media_type": "movie", "title": "Back to the Future"}
+    for lang, expected in (("en+textless", "en,null"), ("all", None), ("de", "de")):
+        assert client.get("/api/artwork-finder/candidates", params={**base, "language": lang}).status_code == 200
+        assert seen["image_language"] == expected
+    # omitted -> the en+textless default
+    assert client.get("/api/artwork-finder/candidates", params=base).status_code == 200
+    assert seen["image_language"] == "en,null"
+
+
+def test_downloaded_jpegs_recompress_only_when_smaller():
+    # Untouched JPEG downloads recompress to q92 when that saves >=10%; already-lean sources
+    # keep their original bytes verbatim (a re-encode would grow them AND cost a generation).
+    noise = Image.effect_noise((800, 600), 60).convert("RGB")
+    fat, lean = io.BytesIO(), io.BytesIO()
+    noise.save(fat, "JPEG", quality=100)
+    noise.save(lean, "JPEG", quality=70)
+
+    recompressed = af.prepare_artwork_payload(fat.getvalue(), "background")
+    assert len(recompressed) <= len(fat.getvalue()) * 0.9
+    with Image.open(io.BytesIO(recompressed)) as im:
+        assert im.format == "JPEG" and im.size == (800, 600)
+
+    assert af.prepare_artwork_payload(lean.getvalue(), "background") == lean.getvalue()
+
+
+def test_picker_bundled_and_art_roots(client, test_db, tmp_path, monkeypatch):
+    # The app's own artwork and the user's config/artwork/art stash are always offered (bundled
+    # first), each resolvable by its own source root.
+    from core.config import settings as app_settings
+    art = tmp_path / "artwork" / "art"
+    art.mkdir(parents=True)
+    (art / "mine-background.jpg").write_bytes(_jpg_bytes(size=(1920, 1080)))
+    monkeypatch.setattr(app_settings, "config_dir", tmp_path)
+
+    data = client.get("/api/artwork-finder/local-folder").json()
+    assert data["art_dir"] == str(art)
+    sources = [f["source"] for f in data["backgrounds"]]
+    assert sources[0] == "bundled" and "art" in sources          # bundled listed ahead of the stash
+    assert any(f["name"] == "mine-background.jpg" for f in data["backgrounds"])
+    bundled = next(f for f in data["backgrounds"] if f["source"] == "bundled")
+
+    # Each root serves and saves through its own source, and roots can't reach each other.
+    assert client.get("/api/artwork-finder/local-image",
+                      params={"path": "mine-background.jpg", "source": "art"}).status_code == 200
+    assert client.get("/api/artwork-finder/local-image",
+                      params={"path": bundled["path"], "source": "bundled"}).status_code == 200
+    assert client.get("/api/artwork-finder/local-image",
+                      params={"path": "mine-background.jpg", "source": "bundled"}).status_code == 404
+
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    _set_asset_scope(test_db, str(scope))
+    add = client.post("/api/artwork-finder/add-local", json={
+        "sync_target_index": 0, "title": "Dune", "media_type": "movie", "year": 2021,
+        "tmdb_id": 438631, "subtype": "background", "source": "bundled", "path": bundled["path"]})
+    assert add.status_code == 200, add.text
+    assert (scope / "backgrounds" / add.json()["written"]).is_file()
