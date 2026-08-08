@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
-COPY --from=rclone/rclone:1.74.4 /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --from=rclone/rclone:1.75.0 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
