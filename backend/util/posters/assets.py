@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from core.logging import log_debug, log_warning, log_phase, LogTags, logger
 from util.posters.index import build_search_index, create_new_empty_index, search_matches
 from util.posters.match import is_match
-from util.data.construct import ITEM_SLOTS
+from util.data.construct import ITEM_SLOTS, SLOT_POSTER
 from util.data.normalization import normalize_file_names
 from util.posters.scanner import process_files
 
@@ -285,33 +285,42 @@ def merge_assets(
                 new_basenames = {os.path.basename(f): f for f in new["files"]}
 
                 # Files the incoming drive also had, where the existing (higher priority) copy won.
-                kept_count = 0
+                kept_names = []
                 kept_from_drive = None
                 for pre_base, pre_full in pre_basenames.items():
                     if pre_full == post_basenames.get(pre_base) and pre_base in new_basenames:
                         if pre_full != new_basenames[pre_base]:
-                            kept_count += 1
+                            kept_names.append(_short_name(pre_full))
                             if not kept_from_drive:
                                 kept_from_drive = _drive_of(pre_full, source_priority)
 
                 added = sorted(_short_name(p) for b, p in post_basenames.items() if b not in pre_basenames)
 
+                # Say WHAT the incoming box carries. "(movies) - from [Drive]" read as "this
+                # item's poster came from [Drive]" even when the box was artwork joining a
+                # poster it never contested.
+                incoming_slots = new.get("slots") or {}
+                incoming_kind = (
+                    "poster" if incoming_slots.get(SLOT_POSTER) or incoming_slots.get("seasons")
+                    or not incoming_slots else "artwork"
+                )
                 year = f" ({final['year']})" if final.get("year") else ""
                 log_debug(
                     LogTags.MERGE,
                     f"{final['title']}{year} ({final['type'] or 'artwork'}) - "
-                    f"from [{src_parent}]: Reason {reason}",
-                    title=final["title"], type=final["type"], source=src_parent,
+                    f"merged {incoming_kind} from [{src_parent}]: Reason {reason}",
+                    title=final["title"], type=final["type"], source=src_parent, merged=incoming_kind,
                     files_before=pre_file_count, files_after=post_file_count, reason=reason,
                 )
 
                 detail = []
                 if added:
                     detail.append(f"Added {len(added)} file(s) from [{src_parent}]: {', '.join(added)}")
-                if kept_count and kept_from_drive:
+                if kept_names and kept_from_drive:
+                    # Name the files kept — the old line said "poster" for what was often a logo.
                     detail.append(
-                        f"Kept {kept_count} higher priority file(s) from [{kept_from_drive}], "
-                        f"not using poster from [{src_parent}]"
+                        f"Kept {len(kept_names)} higher priority file(s) from [{kept_from_drive}] "
+                        f"over [{src_parent}]: {', '.join(sorted(kept_names))}"
                     )
                 if detail:
                     # No icon, indented under the header — same style as before.

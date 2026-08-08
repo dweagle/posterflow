@@ -100,9 +100,8 @@ class TestMergeLogging:
         header = [m for m in lines if "Reason" in m]
         detail = [m for m in lines if "Kept" in m]
         assert len(header) == 1 and len(detail) == 1
-        assert "Dune (2020) (movies) - from [driveB]: Reason by tmdb_id" in header[0]
-        assert "Kept 1 higher priority file(s) from [driveA]" in detail[0]
-        assert "not using poster from [driveB]" in detail[0]
+        assert "Dune (2020) (movies) - merged poster from [driveB]: Reason by tmdb_id" in header[0]
+        assert "Kept 1 higher priority file(s) from [driveA] over [driveB]: Dune (2020).jpg" in detail[0]
 
     def test_added_files_are_named_on_the_detail_line(self):
         # Only the distinguishing tail — the line already names the item, and drives repeat
