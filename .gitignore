@@ -21,6 +21,13 @@ frontend/dist/
 # Data and logs
 /posters/
 /config/
+/.dev/
+
+# Local dev tooling
+/dev.sh
+/dev-services.sh
+/docker-compose.dev.yml
+/docs/dev-sandbox.md
 *.db
 *.log
 
