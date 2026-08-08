@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-08-08
+### Added
+- Artwork Finder: two new options for artwork. "From folder" copies a background and square art from a server-side folder into the scope under IDarr's canonical name, and "Text logo" builds a collection-style logo with live preview, font pickers, and tracking/width controls.
+- Docs: a community drive recommendation page on GitHub Pages- tabbed guides with sortable tables, copy buttons on drive IDs, and sample poster previews. <https://dweagle.github.io/posterflow/gdrives/>  Thank you Chris.DC!
+
+### Changed
+- Plex Upload: improved end summary loggging and discord messaging.
+- Logging: more detailed asset-merge logging.
+- Dependencies: rclone 1.75.0 and latest frontend/backend packages.
+
+### Fixed
+- Plex Upload: artwork matching settles movie-vs-show title ties via the *arr index, so logos/backgrounds are no longer silently skipped.
+- Photopea/Photoshop Plugin: the Logo button's export filename now gets the " - logo" suffix. (Thanks, Bostafari!)
+- Settings: Google Drive storage path handling is now environment-aware.
+
 ## [0.13.5] - 2026-08-06
 ### Added
 - Unmatched Assets: a per-item match report — a diagnosis button on unmatched items opens a popup explaining why the item didn't match, with a downloadable report file you can share for support.
