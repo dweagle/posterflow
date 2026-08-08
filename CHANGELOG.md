@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-08-08
+### Fixed
+- Photopea Plugin: update X-Frame-Options handling for Photopea plugin iframe
+
 ## [0.13.6] - 2026-08-08
 ### Added
 - Artwork Finder: two new options for artwork. "From folder" copies a background and square art from a server-side folder into the scope under IDarr's canonical name, and "Text logo" builds a collection-style logo with live preview, font pickers, and tracking/width controls.
