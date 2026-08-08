@@ -86,7 +86,7 @@
       "rank": 3,
       "ack": "yes",
       "content": "Homemade + collection of others",
-      "feedback": "<li>Posters *without* number overlay</li><li>Posters *with* small \"THE\"/\"A\" overlay</li><li>Personal favorites</li><li>Homemade (variants)</li><li>Collection of others</li>"
+      "feedback": "<li><NO LONGER MAINTAINED></li><li>Posters *without* number overlay</li><li>Posters *with* small \"THE\"/\"A\" overlay</li><li>Collection of others</li>"
     },
     "1qBC7p9K4zur5dOCf3F6VTyUROVvHQoSb": {
       "owner": "Jpalenz77",
@@ -273,7 +273,7 @@
       "owner": "Chodeus",
       "priority": "+",
       "rank": 1,
-      "ack": "no",
+      "ack": "yes",
       "content": "CL2K Homemade (Mainstream & mid-budget film)"
     },
     "1MiNjT3t_eIdaMTiQ4E89IMNXasco7r6q": {
@@ -410,11 +410,11 @@
   "artwork": {
     "1zUE6LDrrxPo66ch8voZlgVyG_wi-4V7s": {
       "owner": "Bostafari",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "18jgCydHW8lalrq_vDZAYRGKx6ZHcP1Zp": {
       "owner": "BZ",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "1IlmtsQ7aJ1RjpaGSskEtgEt9ZNmSyukL": {
       "owner": "Dweagle79",
@@ -422,23 +422,23 @@
     },
     "110Xtee9O414M1xPGxI6DCvkbDw9FNXqO": {
       "owner": "Fusen",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "1BHB1IHQwB5dywv4c4GdpiPkK5fkBcXSE": {
       "owner": "Iamspartacus",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "13Fzw1PgZj_MuJGpY7TRChc-3ywM1ENzX": {
       "owner": "MiniMyself",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "1umW2aPKgZhvH3yzJs2Of-jlLAr1Ax-aV": {
       "owner": "Tarantula212",
-      "ack": "unknown"
+      "ack": "yes"
     },
     "18Yr85mO65WpEXMvtM57OXB_umusADWdF": {
       "owner": "TokenMinal",
-      "ack": "unknown"
+      "ack": "yes"
     }
   }
 }
