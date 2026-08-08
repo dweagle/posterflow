@@ -515,6 +515,17 @@ async def stamp_app_version(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def stamp_security_headers(request: Request, call_next):
+    """Stamp baseline security headers on every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"  # no MIME-sniffing responses
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"  # block cross-origin iframe embedding
+    response.headers["Referrer-Policy"] = "same-origin"  # don't leak URLs to external sites
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"  # features we never use
+    return response
+
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(drives_router)
