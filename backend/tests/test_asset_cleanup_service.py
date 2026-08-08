@@ -1,68 +1,8 @@
 """Tests for AssetCleanupService — the reverse-renamer assets-folder cleanup."""
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
 from models.plex_upload import PlexUploadRecord
 from models.poster import Poster
-from services.asset_cleanup import AssetCleanupService
-from util.data.normalization import normalize_titles
-
-
-# ── fixtures / helpers ─────────────────────────────────────────────────────
-
-def _make_folder(root: Path, name: str, files: List[str]) -> Path:
-    folder = root / name
-    folder.mkdir(parents=True, exist_ok=True)
-    for file_name in files:
-        (folder / file_name).write_bytes(b"poster-bytes")
-    return folder
-
-
-def _movie(title: str, year: int, folder: str, tmdb_id: Optional[int] = None) -> Dict[str, Any]:
-    return {
-        "type": "movies",
-        "title": title,
-        "year": year,
-        "tmdb_id": tmdb_id,
-        "imdb_id": None,
-        "normalized_title": normalize_titles(title),
-        "alternate_titles": [],
-        "normalized_alternate_titles": [],
-        "folder": folder,
-    }
-
-
-def _series(title: str, year: int, folder: str, tvdb_id: Optional[int] = None) -> Dict[str, Any]:
-    return {
-        "type": "series",
-        "title": title,
-        "year": year,
-        "tvdb_id": tvdb_id,
-        "imdb_id": None,
-        "normalized_title": normalize_titles(title),
-        "alternate_titles": [],
-        "normalized_alternate_titles": [],
-        "folder": folder,
-        "seasons": [{"season_number": 1, "season_has_episodes": True}],
-    }
-
-
-def _collection(title: str) -> Dict[str, Any]:
-    return {
-        "type": "collections",
-        "title": title,
-        "year": None,
-        "tmdb_id": None,
-        "normalized_title": normalize_titles(title),
-        "alternate_titles": [],
-        "normalized_alternate_titles": [],
-        "folder": title,
-    }
-
-
-def _run(test_db, dest: Path, media_dict, **kwargs):
-    return AssetCleanupService(test_db).cleanup(str(dest), media_dict=media_dict, **kwargs)
+from asset_helpers import _collection, _make_folder, _movie, _run, _series
 
 
 # ── tests ──────────────────────────────────────────────────────────────────

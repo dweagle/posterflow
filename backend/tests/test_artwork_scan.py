@@ -14,6 +14,7 @@ from services.artwork_scan import (
     scan_destination_artwork,
     build_artwork_index,
 )
+from asset_helpers import _seed_artwork
 
 
 def _make_drive(db, name, drive_id, path, subscribed=True):
@@ -27,15 +28,6 @@ def _make_drive(db, name, drive_id, path, subscribed=True):
 def _set_priority(db, *drive_ids):
     upsert_setting(db, "artwork_drive_priority", '{"drive_ids": [%s]}' % ", ".join(str(i) for i in drive_ids))
     db.commit()
-
-
-def _seed_artwork(root, *, logo=None, background=None, squareart=None):
-    for sub, fname in (("logos", logo), ("backgrounds", background), ("squareart", squareart)):
-        if not fname:
-            continue
-        d = root / sub
-        d.mkdir(parents=True, exist_ok=True)
-        (d / fname).write_bytes(b"img")
 
 
 def _movie(title, year, tmdb_id, folder):

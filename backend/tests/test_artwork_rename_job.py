@@ -14,6 +14,7 @@ from models.artwork_drive import ArtworkDrive
 from models.job import Job, JOB_TYPE_POSTER_RENAMER, create_job
 from models.setting import Setting, upsert_setting
 from modules.renamer import run_rename_background_job
+from asset_helpers import _seed_artwork
 
 
 def _make_drive(db, name, drive_id, path):
@@ -22,15 +23,6 @@ def _make_drive(db, name, drive_id, path):
     db.commit()
     db.refresh(drive)
     return drive
-
-
-def _seed_artwork(root, *, logo=None, background=None, squareart=None):
-    for sub, fname in (("logos", logo), ("backgrounds", background), ("squareart", squareart)):
-        if not fname:
-            continue
-        d = root / sub
-        d.mkdir(parents=True, exist_ok=True)
-        (d / fname).write_bytes(b"img")
 
 
 FOLDER = "Inception (2010) {tmdb-27205}"

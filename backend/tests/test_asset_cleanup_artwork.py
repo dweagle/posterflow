@@ -10,46 +10,11 @@ here the source map is controlled directly so the cleanup logic and its guards a
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from models.artwork_drive import ArtworkDrive
 from models.setting import upsert_setting
-from services.asset_cleanup import AssetCleanupService
 from services.artwork_scan import sourced_types_by_media
-from util.data.normalization import normalize_titles
-
-
-def _make_folder(root: Path, name: str, files: List[str]) -> Path:
-    folder = root / name
-    folder.mkdir(parents=True, exist_ok=True)
-    for file_name in files:
-        (folder / file_name).write_bytes(b"img")
-    return folder
-
-
-def _movie(title: str, year: int, folder: str, tmdb_id: Optional[int] = None) -> Dict[str, Any]:
-    return {
-        "type": "movies", "title": title, "year": year, "tmdb_id": tmdb_id, "imdb_id": None,
-        "normalized_title": normalize_titles(title), "alternate_titles": [],
-        "normalized_alternate_titles": [], "folder": folder,
-    }
-
-
-def _series(title: str, year: int, folder: str, tvdb_id: Optional[int] = None) -> Dict[str, Any]:
-    return {
-        "type": "series", "title": title, "year": year, "tvdb_id": tvdb_id, "imdb_id": None,
-        "normalized_title": normalize_titles(title), "alternate_titles": [],
-        "normalized_alternate_titles": [], "folder": folder,
-        "seasons": [{"season_number": 1, "season_has_episodes": True}],
-    }
-
-
-def _collection(title: str) -> Dict[str, Any]:
-    return {
-        "type": "collections", "title": title, "year": None, "tmdb_id": None,
-        "normalized_title": normalize_titles(title), "alternate_titles": [],
-        "normalized_alternate_titles": [], "folder": title,
-    }
+from asset_helpers import _collection, _make_folder, _movie, _run, _seed_artwork, _series
 
 
 def _patch_sourced(monkeypatch, builder):
@@ -58,10 +23,6 @@ def _patch_sourced(monkeypatch, builder):
         "services.artwork_scan.sourced_types_by_media",
         lambda db, media_dict, boxes=None: builder(media_dict),
     )
-
-
-def _run(test_db, dest: Path, media_dict, **kwargs):
-    return AssetCleanupService(test_db).cleanup(str(dest), media_dict=media_dict, **kwargs)
 
 
 def test_prunes_artwork_whose_source_left_the_drive(test_db, tmp_path, monkeypatch):
@@ -291,15 +252,6 @@ def test_ignore_list_protects_a_folders_artwork(test_db, tmp_path, monkeypatch):
 
 
 # ── sourced_types_by_media: the drive-scan half, end to end ─────────────────
-
-
-def _seed_artwork(root, *, logo=None, background=None):
-    for sub, fname in (("logos", logo), ("backgrounds", background)):
-        if not fname:
-            continue
-        d = root / sub
-        d.mkdir(parents=True, exist_ok=True)
-        (d / fname).write_bytes(b"img")
 
 
 def test_sourced_types_drops_a_type_when_its_file_is_removed(test_db, tmp_path):
