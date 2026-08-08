@@ -33,6 +33,10 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: str = "http://localhost:8357,http://127.0.0.1:8357,http://localhost:5173,http://127.0.0.1:5173,https://www.photopea.com"
+
+    # Iframe embedding — comma-separated origins (e.g. an Organizr dashboard) allowed to
+    # embed the app; empty keeps the strict X-Frame-Options: SAMEORIGIN default
+    allowed_frame_origins: str = ""
     
     # Logging
     log_level: str = "INFO"

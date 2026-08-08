@@ -82,6 +82,7 @@ services:
       - DEBUG=false      # Optional. true forces file logging to DEBUG on startup.
       - LOG_LEVEL=INFO   # Optional. File log level when DEBUG=false.
       - CORS_ORIGINS=    # Optional. Comma-separated origins (see configuration.md).
+      - ALLOWED_FRAME_ORIGINS=  # Optional. Comma-separated origins allowed to embed the app in an iframe (e.g. http://organizr.local:8080).
     restart: unless-stopped
 ```
 
@@ -117,5 +118,6 @@ docker run -d \
 | `DEBUG` | `false` | Enable debug logging on startup (can be toggled in-app) |
 | `LOG_LEVEL` | `INFO` | File log verbosity when debug mode is off |
 | `CORS_ORIGINS` | *(localhost defaults)* | Comma-separated allowed browser origins |
+| `ALLOWED_FRAME_ORIGINS` | *(empty)* | Comma-separated origins allowed to embed the app in an iframe (e.g. an Organizr/Homarr dashboard). Format `http(s)://host[:port]` — no paths or wildcards; invalid entries are ignored with a startup warning. Empty keeps embedding blocked for all other sites. |
 
 > Debug mode state is persisted in the database and restored on restart. You can toggle it from Settings without restarting the container.

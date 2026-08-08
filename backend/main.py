@@ -17,6 +17,7 @@ from api.setup import router as setup_router
 from api.settings import router as settings_router
 from api.auth import router as auth_router
 from core.auth import AppAuthMiddleware
+from core.frame_origins import get_allowed_frame_origins
 from api.test import router as test_router
 from api.logs import router as logs_router
 from api.jobs import router as jobs_router
@@ -520,11 +521,14 @@ async def stamp_security_headers(request: Request, call_next):
     """Stamp baseline security headers on every response."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"  # no MIME-sniffing responses
+    user_origins = get_allowed_frame_origins()
     if request.url.path == "/photopea-plugin.html":
         # Photopea iframes the plugin panel cross-origin; XFO can't allow a foreign origin
-        response.headers["Content-Security-Policy"] = (
-            "frame-ancestors 'self' https://www.photopea.com https://photopea.com"
-        )
+        ancestors = ["'self'", "https://www.photopea.com", "https://photopea.com", *user_origins]
+        response.headers["Content-Security-Policy"] = "frame-ancestors " + " ".join(ancestors)
+    elif user_origins:
+        # user-approved dashboards (Organizr etc.) may embed the app
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'self' " + " ".join(user_origins)
     else:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"  # block cross-origin iframe embedding
     response.headers["Referrer-Policy"] = "same-origin"  # don't leak URLs to external sites
