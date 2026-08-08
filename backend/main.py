@@ -520,7 +520,13 @@ async def stamp_security_headers(request: Request, call_next):
     """Stamp baseline security headers on every response."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"  # no MIME-sniffing responses
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"  # block cross-origin iframe embedding
+    if request.url.path == "/photopea-plugin.html":
+        # Photopea iframes the plugin panel cross-origin; XFO can't allow a foreign origin
+        response.headers["Content-Security-Policy"] = (
+            "frame-ancestors 'self' https://www.photopea.com https://photopea.com"
+        )
+    else:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"  # block cross-origin iframe embedding
     response.headers["Referrer-Policy"] = "same-origin"  # don't leak URLs to external sites
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"  # features we never use
     return response
