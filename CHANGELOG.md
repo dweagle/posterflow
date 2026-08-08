@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.8] - 2026-08-08
+### Added
+- Security: a new `ALLOWED_FRAME_ORIGINS` environment variable lets you list origins (e.g. an Organizr dashboard) allowed to embed the app in an iframe. Leaving it empty keeps the strict same-origin default.
+
 ## [0.13.7] - 2026-08-08
 ### Fixed
 - Photopea Plugin: update X-Frame-Options handling for Photopea plugin iframe
