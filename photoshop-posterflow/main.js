@@ -24,6 +24,9 @@ const logoBtn   = document.querySelector('[data-act="logo"]');
 const fitBtn    = document.querySelector('[data-act="fit"]');
 const trimBtn   = document.querySelector('[data-act="trim"]');
 const logoExpBtn = document.querySelector('[data-act="logo-export"]');
+const squareArtBtn = document.querySelector('[data-act="squareart"]');
+const sqCancelBtn  = document.querySelector('[data-act="sq-cancel"]');
+const sqPresetsEl  = document.querySelector('.sqpresets');
 const batchBtn    = document.querySelector('[data-act="batch"]');          // amber ⚡ — name-tag batch
 const seasonsBtn  = document.querySelector('[data-act="batch-seasons"]');  // blue ⚡ — seasons from one poster
 const batchBar    = document.querySelector('.batchbar');
@@ -40,6 +43,9 @@ let curLogoGroup = null;   // path of the LOGO group in the active doc (null = n
 const remoteDocs = {};     // doc.id → { filename, style, name, entry } for docs opened from the Posterflow queue
 const remoteCtx = () => (hasDoc() ? remoteDocs[app.activeDocument.id] : null) || null;
 let batchMode = 'tags', batchConvention = false, batchItems = [], batchWarnings = [], batchBusy = false;
+let sqArmed = false, sqBusy = false;      // Square Art: crop tab open / op in flight
+let sqTemp = null, sqHome = null;         // { doc, width, height } crop doc + the PSD to return to
+let sqCtx = null, sqWant = 0;             // remote ctx captured at start + last preset size
 
 // UXP widget click events don't reliably carry modifier flags (altKey is false on Windows), so track
 // the Alt key ourselves as a fallback signal for the "re-pick folder" gestures.
@@ -62,7 +68,7 @@ function runExclusive(fn) {
 }
 
 // ---- small helpers ----
-const NOTE_TTL = 8000;   // ms a note stays before clearing itself
+const NOTE_TTL = 15000;   // ms a note stays before clearing itself
 const notesEl = document.querySelector('.notes');   // dedicated container — render() never wipes it
 const note = (t) => {
   const d = document.createElement('div');
@@ -73,7 +79,7 @@ const note = (t) => {
 const showError = (e) => note('Error: ' + (e && e.message ? e.message : e));
 const flash = (btn, mark, restore) => { btn.textContent = mark; setTimeout(() => { btn.textContent = restore; }, 1400); };
 const hasDoc = () => app.documents && app.documents.length > 0;
-const baseName = () => (app.activeDocument.name || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+const baseName = (doc) => (((doc || app.activeDocument) || {}).name || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
 
 function updateBadge(style) {
   styleEl.textContent = style || '—';
@@ -286,6 +292,113 @@ async function onTrim() {
   catch (e) { flash(trimBtn, '✗', 'Trim'); showError(e); }
 }
 
+// ---- Square Art crop ----
+// Temp-tab flow (mirrors the Photopea panels): duplicate + isolate the POSTER art into its own
+// tab, presets/marquee pick the square there, Crop snaps non-square selections visibly, then
+// crops the DUPLICATE natively, saves, closes the tab, and returns to the PSD.
+const SQ_MIN = 500;   // square art must be at least 500×500
+function sqSetUI(armed) {
+  sqArmed = armed;
+  sqPresetsEl.classList.toggle('hidden', !armed);
+  sqCancelBtn.classList.toggle('hidden', !armed);
+  document.querySelector('.sqrow').classList.toggle('armed', armed);
+  squareArtBtn.textContent = armed ? 'Crop' : 'Square Art';
+}
+async function sqCleanup() {   // close the crop tab, return home, hand the Move tool back
+  const t = sqTemp; sqTemp = null;
+  if (t) await runExclusive(() => TL.closeCropDoc(t.doc, sqHome));
+  sqHome = null; sqCtx = null; sqWant = 0;
+  TL.selectTool('moveTool');
+}
+const flashSq = (m) => {
+  sqBusy = false; sqSetUI(false);
+  squareArtBtn.textContent = m; setTimeout(() => { if (!sqArmed) squareArtBtn.textContent = 'Square Art'; }, 1400);
+};
+async function onSquareArt(ev) {
+  if (sqBusy) return;
+  if (!sqArmed) {
+    if (!hasDoc()) { note('No document open.'); return; }
+    sqBusy = true; squareArtBtn.textContent = '…';
+    try {
+      sqHome = app.activeDocument;
+      sqCtx = remoteCtx();
+      const res = await runExclusive(() => TL.makeCropDoc(sqHome, constants));
+      if (!res.ok) {
+        flashSq('✗');
+        note(res.reason === 'noposter' ? 'No POSTER group in this document.'
+          : res.reason === 'empty' ? 'The POSTER group has no visible variant.' : 'Square Art failed.');
+        await sqCleanup();
+        return;
+      }
+      sqTemp = res;
+      sqBusy = false; sqSetUI(true);
+      TL.selectTool('marqueeRectTool');
+      note('Opened the poster art in its own tab — pick a preset or drag a marquee square, then press Crop.');
+    } catch (e) { flashSq('✗'); showError(e); await sqCleanup(); }
+    return;
+  }
+  // Armed → the selection lives ON the crop doc, so it reads correctly even if the user switched tabs.
+  sqBusy = true; squareArtBtn.textContent = '…';
+  try {
+    const s = await TL.readSelectionBounds(sqTemp.doc);
+    if (!s) { sqBusy = false; squareArtBtn.textContent = 'Crop'; note('No selection — pick a preset or drag a square with the marquee tool (M).'); return; }
+    let side = Math.round(Math.min(s.r - s.l, s.b - s.t, s.cw, s.ch));
+    if (side < SQ_MIN) { sqBusy = false; squareArtBtn.textContent = 'Crop'; note('Selection is ' + side + 'px — square art must be at least ' + SQ_MIN + '×' + SQ_MIN + '.'); return; }
+    const x = Math.max(0, Math.min(Math.round((s.l + s.r) / 2 - side / 2), s.cw - side));
+    const y = Math.max(0, Math.min(Math.round((s.t + s.b) / 2 - side / 2), s.ch - side));
+    // Non-square → snap the on-canvas selection so the user sees the exact crop first.
+    if (Math.abs(Math.round(s.r - s.l) - Math.round(s.b - s.t)) > 2) {
+      await runExclusive(() => TL.setSquareSelection(sqTemp.doc, x, y, side));
+      sqBusy = false; squareArtBtn.textContent = 'Crop';
+      note('Snapped the selection to ' + side + '×' + side + ' — adjust it if needed, then press Crop.');
+      return;
+    }
+    // Upscale to the wanted preset size ONLY when the art itself capped the selection.
+    const want = (sqWant > side && side >= Math.min(sqTemp.width, sqTemp.height)) ? sqWant : 0;
+    const ctx = sqCtx;
+    const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
+    if (!folder) { sqBusy = false; squareArtBtn.textContent = 'Crop'; note('Square Art cancelled — no folder chosen.'); return; }
+    const filename = ((ctx && ctx.name) || baseName(sqHome)) + ' - squareart.jpg';
+    const res = await runExclusive(() => TL.cropSaveSquare(sqTemp.doc, folder, filename, { x, y, side }, want));
+    if (!res.ok) { flashSq('✗'); note('Square Art export failed.'); await sqCleanup(); return; }
+    const sizeTxt = res.side + '×' + res.side + (res.srcSide < res.side ? ' (art was ' + res.srcSide + 'px, upscaled)' : '');
+    if (ctx) {
+      const bytes = await R.readBytes(res.entry);
+      try {
+        await R.putBytes('/api/maker-tools/squareart-exports/' + encodeURIComponent(res.filename), bytes);
+        note('Saved "' + res.filename + '" (' + sizeTxt + ') → Posterflow square art folder.');
+      } catch (e) {
+        if (!/HTTP 400/.test(String(e && e.message))) throw e;
+        note('Server has no square art folder — saving locally instead.');
+        const localFolder = await FS.getSquareartFolder({});
+        if (localFolder) { await FS.writeFileBytes(localFolder, res.filename, bytes); note('Saved "' + res.filename + '" (' + sizeTxt + ') → ' + localFolder.name); }
+      }
+    } else {
+      note('Saved "' + res.filename + '" (' + sizeTxt + ') → ' + res.folderName);
+    }
+    await sqCleanup();
+    flashSq('✓');
+  } catch (e) { flashSq('✗'); showError(e); await sqCleanup(); }
+}
+async function onSqPreset(size) {
+  if (sqBusy || !sqArmed || !sqTemp) return;
+  sqWant = size;   // remembered so a preset larger than the art can upscale the output to match
+  const s = Math.min(size, sqTemp.width, sqTemp.height);
+  const x = Math.round((sqTemp.width - s) / 2), y = Math.max(0, Math.min(100, sqTemp.height - s));   // centered, 100px from the top
+  try {
+    await runExclusive(() => TL.setSquareSelection(sqTemp.doc, x, y, s));
+    // batchPlay can no-op without rejecting — only claim success if the selection really exists.
+    const check = await TL.readSelectionBounds(sqTemp.doc);
+    if (check) note('Placed a ' + s + '×' + s + ' selection — drag inside it to position, then press Crop.');
+    else note('Could not place the selection — drag one with the marquee tool instead.');
+  } catch (e) { showError(e); }
+}
+async function onSqCancel() {
+  if (sqBusy) return;
+  sqSetUI(false);
+  await sqCleanup();
+}
+
 // ---- Batch export ----
 const batchNote = (t) => { batchMsgEl.textContent = t; };
 const modeBtn = () => batchMode === 'seasons' ? seasonsBtn : batchBtn;
@@ -405,9 +518,12 @@ logoBtn.addEventListener('click', () => onPlace('logo', logoBtn, 'Place Logo'));
 fitBtn.addEventListener('click', () => onPlace('fit', fitBtn, 'Fit Poster'));
 trimBtn.addEventListener('click', onTrim);
 logoExpBtn.addEventListener('click', onLogoExport);
+squareArtBtn.addEventListener('click', onSquareArt);
+sqCancelBtn.addEventListener('click', onSqCancel);
+document.querySelectorAll('[data-sq]').forEach((b) => b.addEventListener('click', () => onSqPreset(parseInt(b.getAttribute('data-sq'), 10))));
 document.querySelector('[data-act="folders"]').addEventListener('click', () => {
   FS.clearAllFolders();
-  note('Remembered folders cleared — the next JPG / Logo export will ask again.');
+  note('Remembered folders cleared — the next JPG / Logo / Square Art export will ask again.');
 });
 document.querySelector('[data-act="refresh"]').addEventListener('click', refresh);
 batchBtn.addEventListener('click', () => boltClick('tags'));
@@ -436,7 +552,7 @@ let linkStatus = null;   // last poll result: null = none yet, { ok: true } | { 
 function updateLinkMsg() {
   const cfg = R.getConfig();
   if (!(cfg.enabled && cfg.url)) {
-    linkMsg.textContent = 'Posterflow server link is off. Enter the server URL (and app password if one is set), Save, then Enable.';
+    linkMsg.textContent = 'Posterflow server link is off. Enter the server URL (plain http works on Windows; Mac needs https) and the app password if one is set, then Save and Enable.';
   } else if (!linkStatus) {
     linkMsg.textContent = 'Connecting to ' + R.baseUrl(cfg) + '…';
   } else if (linkStatus.ok) {
@@ -481,7 +597,7 @@ linkToggleBtn.addEventListener('click', () => {
 // throttled to one note per streak so a down server doesn't spam.
 let pollErrNoted = false;
 setInterval(async () => {
-  if (busy || batchBusy) return;
+  if (busy || batchBusy || sqBusy) return;
   if (!R.isConfigured(R.getConfig())) return;
   let items;
   try { items = await R.pollQueue(); }
@@ -514,13 +630,13 @@ setInterval(async () => {
 let rescanT = null;
 const scheduleRescan = () => {
   if (rescanT) clearTimeout(rescanT);
-  rescanT = setTimeout(() => { rescanT = null; if (!busy && !batchBusy) refresh(); }, 500);
+  rescanT = setTimeout(() => { rescanT = null; if (!busy && !batchBusy && !sqBusy) refresh(); }, 500);
 };
 try {
   require('photoshop').action.addNotificationListener(['show', 'hide', 'open', 'close'], scheduleRescan);
 } catch (e) { console.log('Posterflow: event listener unavailable, relying on poll only.', e); }
 setInterval(() => {
-  if (busy || batchBusy) return;
+  if (busy || batchBusy || sqBusy) return;
   const id = hasDoc() ? app.activeDocument.id : 0;
   if (id !== lastDocId) refresh();
 }, 2000);

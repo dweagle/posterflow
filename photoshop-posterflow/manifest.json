@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.posterflow.makertools",
   "name": "Posterflow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "index.html",
   "host": {
     "app": "PS",
@@ -25,8 +25,8 @@
       "label": { "default": "Posterflow" },
       "minimumSize": { "width": 200, "height": 400 },
       "maximumSize": { "width": 600, "height": 1600 },
-      "preferredDockedSize": { "width": 220, "height": 430 },
-      "preferredFloatingSize": { "width": 220, "height": 430 },
+      "preferredDockedSize": { "width": 220, "height": 620 },
+      "preferredFloatingSize": { "width": 220, "height": 620 },
       "icons": [
         {
           "width": 23,

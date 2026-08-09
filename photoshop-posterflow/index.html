@@ -35,15 +35,16 @@
     <div class="batchhelp hidden"></div>
   </div>
 
-  <div class="notes"></div>
   <div class="singles hidden"></div>
   <div class="sequels hidden"></div>
   <div class="list"><div class="msg">Open a poster PSD, then press the reload button.</div></div>
 
   <div class="linkbar hidden">
     <div class="linkmsg"></div>
-    <sp-textfield class="linkurl" placeholder="http://server:8357 (https on Mac)"></sp-textfield>
-    <sp-textfield class="linkpass" type="password" placeholder="App password (if set)"></sp-textfield>
+    <sp-label for="link-url">Server URL</sp-label>
+    <sp-textfield id="link-url" size="s" class="linkinput linkurl" type="text" placeholder="http://server:8357"></sp-textfield>
+    <sp-label for="link-pass">Password (blank if none)</sp-label>
+    <sp-textfield id="link-pass" size="s" class="linkinput linkpass" type="password"></sp-textfield>
     <div class="linkrow">
       <sp-action-button size="s" data-act="link-save">Save</sp-action-button>
       <sp-action-button size="s" data-act="link-toggle">Enable</sp-action-button>
@@ -54,9 +55,24 @@
   <div class="trimbar">
     <sp-action-button size="s" data-act="trim" title="Trim off-canvas pixels from ALL layers. Shrinks the saved file, no visible change. Save after.">Trim</sp-action-button>
     <sp-action-button size="s" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG">Logo</sp-action-button>
-    <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders — the next JPG / Logo export asks again">📂</sp-action-button>
+    <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders — the next JPG / Logo / Square Art export asks again">📂</sp-action-button>
     <sp-action-button size="s" data-act="link" title="Posterflow server link — exports queued as 'PS' in the web app open here automatically">🔗</sp-action-button>
   </div>
+  <div class="trimbar sqbar">
+    <div class="sqrow">
+      <sp-action-button size="s" data-act="squareart" title="Crop square art: opens the poster art in its own tab — pick a preset (or drag a marquee square), position it, then press Crop. It saves, closes the tab, and returns to the PSD.">Square Art</sp-action-button>
+      <sp-action-button size="s" class="sqcancel hidden" data-act="sq-cancel" title="Cancel">✕</sp-action-button>
+    </div>
+    <div class="sqpresets hidden">
+      <sp-action-button size="s" data-sq="500" title="Place a 500×500 selection 100px from the top">500</sp-action-button>
+      <sp-action-button size="s" data-sq="600" title="Place a 600×600 selection 100px from the top">600</sp-action-button>
+      <sp-action-button size="s" data-sq="700" title="Place a 700×700 selection 100px from the top">700</sp-action-button>
+      <sp-action-button size="s" data-sq="800" title="Place a 800×800 selection 100px from the top">800</sp-action-button>
+      <sp-action-button size="s" data-sq="900" title="Place a 900×900 selection 100px from the top">900</sp-action-button>
+      <sp-action-button size="s" data-sq="1000" title="Place a 1000×1000 selection 100px from the top">1000</sp-action-button>
+    </div>
+  </div>
+  <div class="notes"></div>
 
   <script src="main.js"></script>
 </body>

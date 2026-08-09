@@ -47,10 +47,28 @@ async function getLogoFolder({ forcePick = false } = {}) {
   return folder;
 }
 
-// Forget every remembered folder (both image styles + logo) — the next export prompts again.
+// Square Art export folder — one folder, not per style.
+const SQUAREART_KEY = 'posterflow.squareartFolder';
+async function getSquareartFolder({ forcePick = false } = {}) {
+  if (!forcePick) {
+    let tok = null;
+    try { tok = localStorage.getItem(SQUAREART_KEY); } catch (_) {}
+    if (tok) {
+      try { return await fs.getEntryForPersistentToken(tok); }
+      catch (_) { try { localStorage.removeItem(SQUAREART_KEY); } catch (_e) {} }
+    }
+  }
+  const folder = await fs.getFolder();
+  if (!folder) return null;
+  try { localStorage.setItem(SQUAREART_KEY, await fs.createPersistentToken(folder)); } catch (_) {}
+  return folder;
+}
+
+// Forget every remembered folder (image styles + logo + square art) — the next export prompts again.
 function clearAllFolders() {
   ['CL2K', 'MM2K', 'default'].forEach((s) => clearImageFolder(s));
   try { localStorage.removeItem(LOGO_KEY); } catch (_) {}
+  try { localStorage.removeItem(SQUAREART_KEY); } catch (_) {}
 }
 
 // Write raw bytes into a folder (used when a server upload falls back to a local save).
@@ -59,4 +77,4 @@ async function writeFileBytes(folder, name, bytes) {
   await f.write(bytes, { format: formats.binary });
 }
 
-module.exports = { getImageFolder, clearImageFolder, getLogoFolder, clearAllFolders, writeFileBytes };
+module.exports = { getImageFolder, clearImageFolder, getLogoFolder, getSquareartFolder, clearAllFolders, writeFileBytes };

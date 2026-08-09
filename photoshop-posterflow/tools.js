@@ -5,8 +5,9 @@
 // no UnitValue sign-flip trap — all arithmetic is plain JS numbers.
 'use strict';
 
-const { core, action } = require('photoshop');
+const { app, core, action } = require('photoshop');
 const G = require('./geometry');
+const { JPG_QUALITY } = require('./save');
 
 // Neutral density: the export's logo formula has a transparency term that needs the layer's pixels
 // (fragile to read for one layer), so — like the Photopea panel — we skip it and use 0.30 (no sparse
@@ -245,4 +246,101 @@ async function exportLogoPng(doc, constants, folder, filename) {
   return result;
 }
 
-module.exports = { placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible, hideManualCollectionLogos, LOGO_DENSITY };
+// ---- Square Art crop ------------------------------------------------------
+// Isolate the POSTER group's topmost visible child on `dup` (hide everything else).
+// Returns '' on success, else 'noposter' / 'empty' — fail rather than guess at chrome.
+function isolatePosterArt(dup, constants) {
+  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
+  const top = dup.layers;
+  let pi = -1;
+  for (let i = 0; i < top.length; i++) {
+    if (isGroup(top[i]) && /^\s*poster\s*$/i.test(top[i].name)) { pi = i; break; }
+  }
+  if (pi < 0) return 'noposter';
+  for (let i = 0; i < top.length; i++) top[i].visible = (i === pi);
+  const kids = top[pi].layers;
+  let ai = -1;
+  for (let i = 0; i < kids.length; i++) { if (kids[i].visible) { ai = i; break; } }
+  if (ai < 0) return 'empty';
+  for (let i = 0; i < kids.length; i++) kids[i].visible = (i === ai);
+  return '';
+}
+
+// Create the crop doc: duplicate, isolate the POSTER art, trim to its pixels. Leaves the
+// duplicate OPEN as the active tab — the caller closes it via closeCropDoc.
+async function makeCropDoc(doc, constants) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    const dup = await doc.duplicate();
+    const iso = isolatePosterArt(dup, constants);
+    if (iso) { await dup.closeWithoutSaving(); result = { ok: false, reason: iso }; return; }
+    await dup.trim(constants.TrimType.TRANSPARENT);
+    result = { ok: true, doc: dup, width: Math.round(dup.width), height: Math.round(dup.height) };
+  }, { commandName: 'Open Square Art crop' });
+  return result;
+}
+
+// Place a square selection on `dup` (activating it) and switch to the rectangular marquee.
+async function setSquareSelection(dup, x, y, side) {
+  await core.executeAsModal(async () => {
+    app.activeDocument = dup;
+    await action.batchPlay([{
+      _obj: 'set',
+      _target: [{ _ref: 'channel', _property: 'selection' }],
+      to: { _obj: 'rectangle',
+        top: { _unit: 'pixelsUnit', _value: y }, left: { _unit: 'pixelsUnit', _value: x },
+        bottom: { _unit: 'pixelsUnit', _value: y + side }, right: { _unit: 'pixelsUnit', _value: x + side } },
+    }], {});
+    await action.batchPlay([{ _obj: 'select', _target: [{ _ref: 'marqueeRectTool' }] }], {});
+  }, { commandName: 'Place crop selection' });
+}
+
+// Read `dup`'s selection bounds (plain px numbers); null when there is no selection.
+async function readSelectionBounds(dup) {
+  try {
+    const r = await action.batchPlay([{ _obj: 'get', _target: [{ _property: 'selection' }, { _ref: 'document', _id: dup.id }] }], {});
+    const s = r && r[0] && r[0].selection;
+    if (!s || s.left === undefined) return null;
+    return { l: s.left._value, t: s.top._value, r: s.right._value, b: s.bottom._value,
+             cw: Math.round(dup.width), ch: Math.round(dup.height) };
+  } catch (_) { return null; }
+}
+
+// Fire-and-forget tool switch ('marqueeRectTool' / 'moveTool').
+async function selectTool(toolRef) {
+  try {
+    await core.executeAsModal(async () => {
+      await action.batchPlay([{ _obj: 'select', _target: [{ _ref: toolRef }] }], {});
+    }, { commandName: 'Switch tool' });
+  } catch (_) {}
+}
+
+// Crop `dup` to the square, upscale to wantSide when the art capped the selection, save JPG.
+async function cropSaveSquare(dup, folder, filename, rect, wantSide) {
+  let result = { ok: false, reason: 'error' };
+  await core.executeAsModal(async () => {
+    await dup.crop({ left: rect.x, top: rect.y, right: rect.x + rect.side, bottom: rect.y + rect.side });
+    const up = wantSide && wantSide > rect.side;
+    if (up) await dup.resizeImage(wantSide, wantSide);
+    const file = await folder.createFile(filename, { overwrite: true });
+    await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+    result = { ok: true, filename, folderName: folder.name, entry: file, side: up ? wantSide : rect.side, srcSide: rect.side };
+  }, { commandName: 'Crop square art' });
+  return result;
+}
+
+// Close the crop doc and reactivate the home document.
+async function closeCropDoc(dup, homeDoc) {
+  try {
+    await core.executeAsModal(async () => {
+      await dup.closeWithoutSaving();
+      if (homeDoc) { try { app.activeDocument = homeDoc; } catch (_) {} }
+    }, { commandName: 'Close Square Art crop' });
+  } catch (_) {}
+}
+
+module.exports = {
+  placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible,
+  hideManualCollectionLogos, LOGO_DENSITY, makeCropDoc, setSquareSelection, readSelectionBounds,
+  selectTool, cropSaveSquare, closeCropDoc,
+};
