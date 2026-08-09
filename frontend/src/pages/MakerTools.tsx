@@ -973,9 +973,10 @@ function MakerTools() {
                       <div>
                         <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
                         <InfoTip>
-                          Default export fills the full canvas. Enable this to scale posters to the canvas width
-                          minus a 25px border on each side, preserve aspect ratio, and align the poster 25px
-                          from the top edge.
+                          Default export fills the full canvas. Enable this to cover-fit posters into the
+                          bordered area (25px side borders, top-aligned) down to the template&apos;s bottom
+                          guide — the line where the bottom fade begins — scaling up so the art always
+                          reaches it (non-2:3 posters may overhang the side borders slightly, centered).
                         </InfoTip>
                       </div>
                       <label className="toggle-switch" style={{ flexShrink: 0 }}>

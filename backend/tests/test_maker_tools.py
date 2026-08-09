@@ -38,6 +38,7 @@ from api.maker_tools import (
     _sanitize_monitor_config,
     compute_logo_geometry,
     compute_poster_fit_geometry,
+    find_bottom_guide_y,
     MakerMonitorConfig,
     MakerMonitorLibraryResult,
     MakerMonitorShowResult,
@@ -1315,11 +1316,28 @@ def test_compute_logo_geometry_scales_with_canvas():
     assert ll == (2000 - lw) // 2
 
 
-def test_compute_poster_fit_geometry_bordered_and_top_aligned():
-    assert compute_poster_fit_geometry(1000, 1500, 1000, 1500) == (950, 1425, 25, 25)
-    assert compute_poster_fit_geometry(500, 750, 2000, 3000) == (1950, 2925, 25, 25)
-    w, h, left, top = compute_poster_fit_geometry(800, 1200, 1000, 1500)
-    assert w == 950 and left == 25 and top == 25   # canvas − 25px each side, top-aligned
+def test_compute_poster_fit_geometry_cover_fits_to_bottom_bound():
+    # 2:3 sources are width-driven — identical to the historical bordered-width fit.
+    assert compute_poster_fit_geometry(1000, 1500, 1000, 1375) == (950, 1425, 25, 25)
+    assert compute_poster_fit_geometry(800, 1200, 1000, 1375) == (950, 1425, 25, 25)
+    # A squarer source is height-driven: it scales up to REACH the bottom bound and overhangs
+    # the side borders (centered, left can go negative) instead of leaving a gap above the fade.
+    w, h, left, top = compute_poster_fit_geometry(1000, 1200, 1000, 1375)
+    assert h == 1350 and top == 25
+    assert w == 1125 and left == (1000 - 1125) // 2
+    assert top + h == 1375   # bottom lands exactly on the guide
+
+
+def test_find_bottom_guide_y_reads_bundled_templates():
+    """Pinned against the real templates: the lowest horizontal guide marks the bottom fade."""
+    from pathlib import Path
+    from psd_tools import PSDImage
+    import api.maker_tools as _mt
+
+    assets = Path(_mt.__file__).parent.parent / "assets"
+    assert find_bottom_guide_y(PSDImage.open(assets / "default_template.psd")) == 1375.0
+    assert find_bottom_guide_y(PSDImage.open(assets / "default_template_mm2k.psd")) == 1415.65625
+    assert find_bottom_guide_y(PSDImage.new("RGB", (100, 100))) is None
 
 
 def test_measure_logo_density_opaque_vs_transparent():

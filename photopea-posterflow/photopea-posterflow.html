@@ -94,7 +94,7 @@
   </div>
   <div class="tools">
     <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo (keeps the logo's colors)">Place Logo</button>
-    <button class="btn" data-act="fit" title="Fit the SELECTED poster layer inside the 25px border (top-aligned, centered)">Fit Poster</button>
+    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</button>
   </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
@@ -511,8 +511,16 @@
     const w = rnd(srcW * scale), h = rnd(srcH * scale);
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
   };
-  const computePosterFitGeometry = (srcW, srcH, cw) => {
-    const border = 25, targetW = Math.max(1, cw - border * 2), scale = targetW / srcW;
+  // Lowest horizontal guide in the bundled templates — the bottom-fade line fitted posters must
+  // reach. By-style constants (reading guides via Photopea hangs its engine); supported custom
+  // templates match the defaults. Unknown style falls back to canvas − 25.
+  const BOTTOM_GUIDE = { CL2K: 1375, MM2K: 1415.65625 };
+  // Cover-fit into the bordered box (25px sides, top y=25, bottom at bottomY): the larger
+  // width/height ratio wins so the art always reaches the bottom bound; centered horizontally
+  // (may overhang the sides). Mirrors compute_poster_fit_geometry in backend/api/maker_tools.py.
+  const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
+    const border = 25, boxW = Math.max(1, cw - border * 2), boxH = Math.max(1, bottomY - border);
+    const scale = Math.max(boxW / srcW, boxH / srcH);
     const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
     return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
   };
@@ -569,7 +577,7 @@
     if (!(geo.lw > 0 && geo.lh > 0)) { finishPlace(false, 'Select a layer first, then press Place Logo / Fit Poster.'); return; }
     const res = pendingMode === 'logo'
       ? computeLogoGeometry(geo.lw, geo.lh, geo.cw, geo.ch, LOGO_DENSITY)
-      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw);
+      : computePosterFitGeometry(geo.lw, geo.lh, geo.cw, BOTTOM_GUIDE[detectedStyle] || (geo.ch - 25));
     applyPlacement(geo, res);
   };
 

@@ -201,8 +201,11 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
 
 // ---- geometry ----
 {
-  const fit = G.computePosterFitGeometry(1000, 1500, 1000);
-  ok(fit.width === 950 && fit.left === 25 && fit.top === 25, 'Fit Poster: 1000-wide src in 1000 canvas → 950px, left 25, top 25');
+  const fit = G.computePosterFitGeometry(1000, 1500, 1000, 1375);
+  ok(fit.width === 950 && fit.left === 25 && fit.top === 25, 'Fit Poster: 2:3 src is width-driven → 950px, left 25, top 25');
+  const sq = G.computePosterFitGeometry(1000, 1200, 1000, 1375);
+  ok(sq.height === 1350 && sq.top + sq.height === 1375, 'Fit Poster: squarer src reaches the bottom guide');
+  ok(sq.width === 1125 && sq.left === Math.floor((1000 - 1125) / 2), 'Fit Poster: side overhang stays centered');
 
   const logo = G.computeLogoGeometry(600, 200, 1000, 1500, 0.30);
   ok(logo.width > 0 && logo.height > 0, 'Place Logo: positive dimensions');

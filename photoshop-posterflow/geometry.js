@@ -35,8 +35,12 @@ const computeLogoGeometry = (srcW, srcH, cw, ch, density) => {
   return { width: w, height: h, left: Math.floor((cw - w) / 2), top: logoBottom - h };
 };
 
-const computePosterFitGeometry = (srcW, srcH, cw) => {
-  const border = 25, targetW = Math.max(1, cw - border * 2), scale = targetW / srcW;
+// Cover-fit into the bordered box (25px sides, top y=25, bottom at bottomY — the template's
+// lowest horizontal guide, or canvas − 25 when none): the larger width/height ratio wins, so the
+// art always reaches the bottom bound; centered horizontally (may overhang the sides).
+const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
+  const border = 25, boxW = Math.max(1, cw - border * 2), boxH = Math.max(1, bottomY - border);
+  const scale = Math.max(boxW / srcW, boxH / srcH);
   const w = Math.max(1, rnd(srcW * scale)), h = Math.max(1, rnd(srcH * scale));
   return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
 };

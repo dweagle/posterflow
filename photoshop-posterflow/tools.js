@@ -14,6 +14,19 @@ const { JPG_QUALITY } = require('./save');
 // boost / dense shrink). Aspect ratio + pixel area (the dominant factors) are still exact.
 const LOGO_DENSITY = 0.30;
 
+// The doc's lowest horizontal guide (the template's bottom-fade line), or canvas − 25.
+function bottomGuideY(doc, constants) {
+  let y = 0;
+  try {
+    const gs = doc.guides;
+    for (let i = 0; i < gs.length; i++) {
+      const g = gs[i];
+      if (g.direction === constants.Direction.HORIZONTAL && g.coordinate > y) y = g.coordinate;
+    }
+  } catch (_) {}
+  return y > 0 ? y : doc.height - 25;
+}
+
 // mode: 'logo' | 'fit'. Returns { ok } or { ok:false, reason:'no-layer' }.
 async function placeSelected(doc, mode, constants) {
   const layer = doc.activeLayers && doc.activeLayers[0];
@@ -25,7 +38,7 @@ async function placeSelected(doc, mode, constants) {
     if (!(lw > 0 && lh > 0)) throw new Error('selected layer has empty bounds');
     const res = mode === 'logo'
       ? G.computeLogoGeometry(lw, lh, cw, ch, LOGO_DENSITY)
-      : G.computePosterFitGeometry(lw, lh, cw);
+      : G.computePosterFitGeometry(lw, lh, cw, bottomGuideY(doc, constants));
     const sc = (res.width / lw) * 100;
     await layer.scale(sc, sc, constants.AnchorPosition.MIDDLECENTER);
     const b1 = layer.bounds;                                    // re-measure after the resize
