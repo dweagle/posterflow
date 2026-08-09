@@ -799,7 +799,8 @@ export const openPhotopeaWithPsd = (
   const config = {
     files: [psdUrl],
     script: `try{var d=app.activeDocument;if(d&&d.name!==${JSON.stringify(docName)})d.name=${JSON.stringify(docName)};}catch(e){}`,
-    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 196, h: 420 }] },
+    // 550 = 420 of controls + the Square Art preset row + the fixed 96px message strip.
+    environment: { plugins: [{ name: 'PosterFlow (App)', url: pluginUrl, icon, w: 196, h: 550 }] },
   }
   const w = window.open(`https://www.photopea.com#${encodeURIComponent(JSON.stringify(config))}`, '_blank')
   if (sameTab) {

@@ -2658,7 +2658,7 @@ async def upload_psd_to_export_folder(filename: str, request: Request, style: st
         log_error(LogTags.API, f"PSD upload failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded PSD: {exc}")
 
-    return JSONResponse({"filename": filename, "saved": True})
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
 
 
 @router.put("/image-exports/{filename}")
@@ -2689,7 +2689,8 @@ async def save_image_export(filename: str, request: Request, style: str = "", db
         log_error(LogTags.API, f"Image export save failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save image: {exc}")
 
-    return JSONResponse({"filename": filename, "saved": True})
+    # folder is shown in the panel's "Saved → <path>" note.
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
 
 
 @router.put("/logo-exports/{filename}")
@@ -2720,7 +2721,36 @@ async def save_logo_export(filename: str, request: Request, db: Session = Depend
         log_error(LogTags.API, f"Logo export save failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save logo: {exc}")
 
-    return JSONResponse({"filename": filename, "saved": True})
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
+
+
+@router.put("/squareart-exports/{filename}")
+async def save_squareart_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a panel-cropped square-art JPG to the square art export folder (shared with the
+    gallery crop tool). Bytes arrive already cropped client-side.
+    400s when unconfigured so the panel falls back to a browser download.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_SQUAREART_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No square art export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported square art", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Square art export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save square art: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
 
 
 class SaveGalleryArtworkRequest(BaseModel):

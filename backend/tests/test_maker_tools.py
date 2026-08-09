@@ -1649,6 +1649,51 @@ def test_save_image_export_mm2k_writes_to_mm2k_folder(client, test_db):
 
 
 # ---------------------------------------------------------------------------
+# API: PUT /api/maker-tools/squareart-exports/{filename} — panel Square Art crop
+# ---------------------------------------------------------------------------
+
+
+def test_save_squareart_export_writes_to_configured_folder(client, test_db):
+    """Panel crops land in the same squareart_export_folder as the gallery crop tool."""
+    with tempfile.TemporaryDirectory() as squareart_dir:
+        test_db.add(Setting(key="squareart_export_folder", value=squareart_dir))
+        test_db.commit()
+
+        response = client.put(
+            "/api/maker-tools/squareart-exports/Show (2026) {tmdb-123} - squareart.jpg",
+            content=b"SQUAREARTBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+        assert response.status_code == 200
+        saved = Path(squareart_dir) / "Show (2026) {tmdb-123} - squareart.jpg"
+        assert saved.is_file()
+        assert saved.read_bytes() == b"SQUAREARTBYTES"
+
+
+def test_save_squareart_export_no_folder_configured_returns_400(client):
+    response = client.put(
+        "/api/maker-tools/squareart-exports/Show (2026) - squareart.jpg",
+        content=b"SQUAREARTBYTES",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 400
+
+
+def test_save_squareart_export_invalid_filename_rejected(client, test_db):
+    with tempfile.TemporaryDirectory() as squareart_dir:
+        test_db.add(Setting(key="squareart_export_folder", value=squareart_dir))
+        test_db.commit()
+        response = client.put(
+            "/api/maker-tools/squareart-exports/evil.exe",
+            content=b"SQUAREARTBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert response.status_code == 400
+        assert not (Path(squareart_dir) / "evil.exe").exists()
+
+
+# ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/psd-exports/{filename} — security & serving
 # ---------------------------------------------------------------------------
 

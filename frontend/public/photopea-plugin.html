@@ -70,6 +70,21 @@
   .msg { padding: 8px; color: #9aa; }
   .trimbar { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
+  /* Shared width for Trim/Logo (direct children only) — lines up with the Crop/✕ pair below. */
+  .trimbar > .btn { width: 66px; box-sizing: border-box; padding: 4px 0; text-align: center; }
+  /* Fixed height: the preset row's space is reserved, so arming expands DOWN, not up. */
+  .sqbar { flex-direction: column; align-items: center; height: 68px; box-sizing: border-box; }
+  .sqrow { display: flex; gap: 6px; justify-content: center; }
+  /* Armed: Crop and ✕ match Trim/Logo's width; idle keeps natural width (label fits). */
+  .sqrow:has(.sqcancel:not(.hidden)) .btn { width: 66px; box-sizing: border-box; padding: 4px 0; text-align: center; }
+  .sqcancel.hidden { display: none; }
+  /* Message strip — fixed height (fits a couple of notes; extras scroll), never grows or moves. */
+  .notes { height: 96px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
+    border-top: 1px solid #3a3a42; font-size: 11px; scrollbar-width: thin; scrollbar-color: #3a3a42 transparent; }
+  .notes .msg { padding: 2px 0; }
+  .sqpresets { display: flex; justify-content: center; gap: 3px; }
+  .sqpresets.hidden { display: none; }
+  .sqpresets .btn { padding: 4px 3px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -95,7 +110,6 @@
     </div>
     <div class="batchhelp hidden"></div>
   </div>
-  <div class="notes"></div>
   <div class="singles hidden"></div>
   <div class="sequels hidden"></div>
   <div class="list"><div class="msg">Loading…</div></div>
@@ -103,6 +117,21 @@
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
     <button class="btn" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG (to the logo folder, or download)">Logo</button>
   </div>
+  <div class="trimbar sqbar">
+    <div class="sqrow">
+      <button class="btn" data-act="squareart" title="Crop square art: click to open the poster art in its own tab, pick a preset (or drag your own square), position it, then press Crop — it saves, closes the tab, and returns to the PSD. If dragging moves pixels instead of the selection outline, press M (Rectangle Select) first.">Square Art</button>
+      <button class="btn sqcancel hidden" data-act="sq-cancel" title="Cancel">✕</button>
+    </div>
+    <span class="sqpresets hidden">
+      <button class="btn" data-sq="500" title="Place a 500×500 selection 100px from the top">500</button>
+      <button class="btn" data-sq="600" title="Place a 600×600 selection 100px from the top">600</button>
+      <button class="btn" data-sq="700" title="Place a 700×700 selection 100px from the top">700</button>
+      <button class="btn" data-sq="800" title="Place a 800×800 selection 100px from the top">800</button>
+      <button class="btn" data-sq="900" title="Place a 900×900 selection 100px from the top">900</button>
+      <button class="btn" data-sq="1000" title="Place a 1000×1000 selection 100px from the top">1000</button>
+    </span>
+  </div>
+  <div class="notes"></div>
 
 <script>
 (function () {
@@ -120,6 +149,13 @@
   let trimBusy = false;
   const logoExpBtn = document.querySelector('[data-act="logo-export"]');
   let logoExpBusy = false, logoRestore = null;   // Logo export: busy flag + visibility changes to undo
+  const squareArtBtn = document.querySelector('[data-act="squareart"]');
+  const sqPresets = document.querySelector('.sqpresets');
+  const sqCancelBtn = document.querySelector('[data-act="sq-cancel"]');
+  let sqArmed = false, squareArtBusy = false;   // armed = crop tab open, waiting for Crop
+  let posterRestore = null;                     // visibility changes to undo after the isolate render
+  let sqArt = null, sqCtx = null, sqWant = 0;   // trimmed art PNG (ArrayBuffer) + export ctx + last preset size
+  let sqHomeName = '', sqTempName = '';         // the poster PSD tab to return to + the crop tab's name
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
   let saving = false, jpgBusy = false;
@@ -425,7 +461,7 @@
   const DETECT = 'function hasGrp(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hasGrp(L.layers,re))return true;}}return false;}' +
     'var st=hasGrp(d.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hasGrp(d.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");';
   const saveDoc = () => {
-    if (saving || placeBusy || logoExpBusy) return;
+    if (saving || placeBusy || logoExpBusy || squareArtBusy) return;
     saving = true; saveBtn.textContent = '…';
     send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
       'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));d.saveToOE("psd");}' +
@@ -456,7 +492,7 @@
   };
   const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
   const exportJpg = () => {
-    if (jpgBusy || placeBusy || logoExpBusy) return;
+    if (jpgBusy || placeBusy || logoExpBusy || squareArtBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
     // Capture the ACTIVE doc's context so the JPG is named/routed for whatever doc is in front:
     // source ctx (if it sticks) → the first doc's cfg → live name+detected style → else a bare
@@ -511,8 +547,10 @@
       try {
         const r = await fetch(target, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf });
         if (!r.ok) throw new Error('HTTP ' + r.status);
+        let folder = ''; try { folder = (await r.json()).folder || ''; } catch (_) {}
+        note('Saved "' + (ex.name || pendingDocName) + '.psd" → ' + (folder || 'the PSD export folder') + '.');
         flashSave('✓');
-      } catch (e) { flashSave('✗'); console.error('PSD save failed:', e); }
+      } catch (e) { flashSave('✗'); note('PSD save failed: ' + (e && e.message ? e.message : e)); console.error('PSD save failed:', e); }
       return;
     }
     // Name the JPG after the doc's authoritative full name (from its context) — Photopea mangles
@@ -529,10 +567,13 @@
         method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: buf,
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
+      let folder = ''; try { folder = (await r.json()).folder || ''; } catch (_) {}
+      note('Saved "' + filename + '" → ' + (folder || 'the image export folder') + '.');
       flashJpg('✓');
     } catch (e) {
       console.warn('Image-folder PUT failed, downloading instead:', e);
       download(buf, filename); flashJpg('✓');
+      note('Downloaded "' + filename + '" — no image export folder configured (or the save failed).');
     }
   };
 
@@ -546,7 +587,7 @@
   // layer and re-measure its bounds → translate it into place. Place Logo also needs the
   // layer's pixels for the transparency ("density") term, so it first exports the layer to a
   // throwaway doc as PNG and measures density in a local canvas.
-  const NOTE_TTL = 8000;   // ms a note stays before clearing itself
+  const NOTE_TTL = 15000;   // ms a note stays before clearing itself
   const notesEl = document.querySelector('.notes');   // dedicated container — re-renders never wipe it
   const note = (t) => {
     const d = document.createElement('div');
@@ -654,7 +695,7 @@
   };
 
   const startPlace = (mode, btn, label) => {
-    if (placeBusy || logoExpBusy) return;
+    if (placeBusy || logoExpBusy || squareArtBusy) return;
     placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = label;
     btn.textContent = '…';
     placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 12000);
@@ -668,7 +709,7 @@
   // pixels don't show anyway). Save afterwards to reclaim the space.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
-    if (trimBusy || placeBusy || batchBusy || logoExpBusy) return;
+    if (trimBusy || placeBusy || batchBusy || logoExpBusy || squareArtBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
     send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('PFLTRIM:ok');"));
   };
@@ -681,7 +722,7 @@
   const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
   const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
   const exportLogo = () => {
-    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy) return;
+    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || squareArtBusy) return;
     logoExpBusy = true; logoExpBtn.textContent = '…';
     // Same per-doc context resolution as the JPG path (names the PNG after the poster), then:
     // find the LOGO group, hide non-chain siblings at every level of its path (recording prior
@@ -741,13 +782,177 @@
           method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: blob,
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
+        let folder = ''; try { folder = (await r.json()).folder || ''; } catch (_) {}
+        note('Saved "' + filename + '" → ' + (folder || 'the logo export folder') + '.');
       } catch (e) {
         console.warn('Logo PUT failed, downloading instead:', e);
         download(blob, filename);
+        note('Downloaded "' + filename + '" — no logo export folder configured (or the save failed).');
       }
       flashLogoExp('✓');
     } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
+
+  // ---- Square Art crop -----------------------------------------------------
+  // Temp-tab flow: isolate the POSTER group's visible variant → PNG → trim → open the bytes as a
+  // "Square Art Crop" tab (pure art, no chrome/gutter). Presets/marquee pick the square there;
+  // Crop cuts it from the STORED PNG (no re-export), saves, closes the tab, returns to the PSD.
+  const SQ_MIN = 500;   // square art must be at least 500×500
+  const SQ_TEMP = 'Square Art Crop';   // the crop tab's name — how we verify, find, and close it
+  // ActionManager slct — the only working tool switch (app.currentTool is a no-op). It SWITCHES
+  // but still throws, so it's fire-and-forget: never branch on it.
+  const SQ_TOOL_JS = 'function swT(t){try{var r=new ActionReference();r.putClass(stringIDToTypeID(t));var dd=new ActionDescriptor();dd.putReference(charIDToTypeID("null"),r);executeAction(charIDToTypeID("slct"),dd,DialogModes.NO);}catch(e){}}';
+  const restorePosterVis = () => { if (posterRestore && posterRestore.length) setVis(posterRestore); posterRestore = null; };
+  // Close the crop tab (by name — the user may have switched docs) and reactivate the poster PSD.
+  const closeTempReturnHome = () => {
+    if (!sqTempName) return;
+    send('try{var D=app.documents;for(var i=0;i<D.length;i++){if(D[i].name==' + JSON.stringify(sqTempName) + '){app.activeDocument=D[i];app.activeDocument.close(SaveOptions.DONOTSAVECHANGES);break}}' +
+      'if(' + JSON.stringify(sqHomeName) + '){for(var i=0;i<app.documents.length;i++){if(app.documents[i].name==' + JSON.stringify(sqHomeName) + '){app.activeDocument=app.documents[i];break}}}' +
+      '}catch(e){}');
+    sqTempName = '';
+  };
+  const disarmSquare = () => {
+    sqArmed = false; squareArtBusy = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden'); squareArtBtn.textContent = 'Square Art';
+    closeTempReturnHome();
+    sqArt = null; sqCtx = null; sqWant = 0;
+    send('try{' + SQ_TOOL_JS + 'swT("moveTool");}catch(e){}');   // hand the Move tool back
+  };
+  const flashSquare = (m) => {
+    squareArtBusy = false; sqArmed = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden');
+    squareArtBtn.textContent = m; setTimeout(() => { if (!sqArmed) squareArtBtn.textContent = 'Square Art'; }, 1400);
+    closeTempReturnHome();
+    sqArt = null; sqCtx = null; sqWant = 0;
+    send('try{' + SQ_TOOL_JS + 'swT("moveTool");}catch(e){}');   // done (or failed) — hand the Move tool back
+  };
+  const placePreset = (size) => {
+    if (squareArtBusy) return;
+    sqWant = size;   // remembered so a preset larger than the art can upscale the output to match
+    send(px(SQ_TOOL_JS + "var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));" +
+      "var s=Math.min(" + size + ",w,h);var x=Math.round((w-s)/2),y=Math.max(0,Math.min(100,h-s));" +   // horizontally centered, 100px from the top (poster subjects sit high)
+      "d.selection.select([[x,y],[x+s,y],[x+s,y+s],[x,y+s]]);swT('marqueeRectTool');app.echoToOE('PFLSQSET:'+s);"));
+  };
+  const squareArtClick = () => {
+    if (squareArtBusy) return;
+    if (!sqArmed) {
+      if (saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy) return;
+      squareArtBusy = true; squareArtBtn.textContent = '…'; sqWant = 0;
+      // Capture ctx + home doc, isolate the POSTER art (recording changes → PFLSQVIS), export PNG.
+      send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
+        'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
+        'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);}' +
+        'else if(' + JSON.stringify(cfg.name) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');}' +
+        'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));}' +
+        'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}' +
+        'app.echoToOE("PFLSQHOME:"+d.name);' +
+        'function isG(L){return L.typename=="LayerSet";}' +
+        'var top=d.layers,pi=-1;' +
+        'for(var i=0;i<top.length;i++){if(isG(top[i])&&/^\\s*poster\\s*$/i.test(top[i].name)){pi=i;break;}}' +
+        'if(pi<0){app.echoToOE("PFLSQNOPOSTER:");}else{' +
+        'var chg=[];' +
+        'for(var i=0;i<top.length;i++){var w1=(i==pi);if(top[i].visible!=w1){chg.push({p:[i],v:top[i].visible});top[i].visible=w1;}}' +
+        'var kids=top[pi].layers,ai=-1;' +
+        'for(var i=0;i<kids.length;i++){if(kids[i].visible){ai=i;break;}}' +
+        'if(ai<0){app.echoToOE("PFLSQVIS:"+JSON.stringify(chg));app.echoToOE("PFLSQEMPTY:");}else{' +
+        'for(var i=0;i<kids.length;i++){var w2=(i==ai);if(kids[i].visible!=w2){chg.push({p:[pi,i],v:kids[i].visible});kids[i].visible=w2;}}' +
+        'app.echoToOE("PFLSQVIS:"+JSON.stringify(chg));' +
+        'd.saveToOE("png");}}' +
+        '}catch(e){app.echoToOE("PFLERR:"+e);}');
+      return;
+    }
+    // Armed → read the crop tab's selection; onSquareBounds verifies the doc and crops locally.
+    squareArtBusy = true; squareArtBtn.textContent = '…';
+    send(px("var d=app.activeDocument;" +
+      "try{var b=d.selection.bounds;" +
+      "app.echoToOE('PFLSQB:'+nv(b[0])+','+nv(b[1])+','+nv(b[2])+','+nv(b[3])+','+Math.round(nv(d.width))+','+Math.round(nv(d.height))+'|'+d.name);}" +
+      "catch(e){app.echoToOE('PFLNOSEL:'+d.name);}"));
+  };
+  // Isolated PNG arrived: restore the PSD, trim, keep the bytes, open them as the crop tab; the
+  // delayed script renames the NEW doc (skipped if the open didn't happen) and arms via PFLSQTEMP.
+  const onSquareIsoBytes = async (buf) => {
+    sqCtx = pendingExport || {}; pendingExport = null;
+    restorePosterVis();
+    try {
+      const trimmed = await trimPngAlpha(buf);
+      sqArt = await trimmed.arrayBuffer();
+      PP.postMessage(sqArt, '*');   // NO transfer list — the panel keeps sqArt for the crop
+      setTimeout(() => send('try{var d=app.activeDocument;' +
+        'if(d.name!=' + JSON.stringify(sqHomeName) + '){d.name=' + JSON.stringify(SQ_TEMP) + ';' + SQ_TOOL_JS + 'swT("marqueeRectTool");app.echoToOE("PFLSQTEMP:"+d.name);}' +
+        'else{app.echoToOE("PFLSQTEMP:");}' +
+        '}catch(e){app.echoToOE("PFLERR:"+e);}'), 600);
+    } catch (e) { flashSquare('✗'); note('Square Art failed: ' + (e && e.message ? e.message : e)); }
+  };
+  // Bounds arrived → verify the crop tab, snap non-square selections visibly, else crop the
+  // stored PNG, save, close the tab, return home.
+  const onSquareBounds = async (raw) => {
+    const bar = raw.indexOf('|');
+    const docName = bar >= 0 ? raw.slice(bar + 1) : '';
+    if (docName !== sqTempName) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('That isn\'t the crop tab — switch to "' + SQ_TEMP + '", or press ✕ to cancel.'); return; }
+    const n = raw.slice(0, bar).split(',').map(parseFloat);
+    const [l, t, r, b, cw, ch] = n;
+    if (n.length !== 6 || n.some((v) => !isFinite(v))) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Could not read the selection.'); return; }
+    let side = Math.round(Math.min(r - l, b - t, cw, ch));
+    if (side < SQ_MIN) { squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Selection is ' + side + 'px — square art must be at least ' + SQ_MIN + '×' + SQ_MIN + '.'); return; }
+    const x = Math.max(0, Math.min(Math.round((l + r) / 2 - side / 2), cw - side));
+    const y = Math.max(0, Math.min(Math.round((t + b) / 2 - side / 2), ch - side));
+    // Non-square → snap the on-canvas selection so the user sees the exact crop first.
+    if (Math.abs(Math.round(r - l) - Math.round(b - t)) > 2) {
+      send(px("var d=app.activeDocument;d.selection.select([[" + x + "," + y + "],[" + (x + side) + "," + y + "],[" + (x + side) + "," + (y + side) + "],[" + x + "," + (y + side) + "]]);app.echoToOE('PFLSQSNAP:" + side + "');"));
+      return;
+    }
+    try {
+      if (!sqArt) throw new Error('crop source lost');
+      const { blob, side: outSide, srcSide } = await cropPngToJpg(sqArt, { x, y, side, want: sqWant });
+      const sizeTxt = outSide + '×' + outSide + (srcSide < outSide ? ' (art was ' + srcSide + 'px, upscaled)' : '');
+      const ex = sqCtx || {};
+      const base = ex.name ? ex.name : (ex.raw || sqHomeName || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+      const filename = base + ' - squareart.jpg';
+      try {
+        const r2 = await fetch(location.origin + '/api/maker-tools/squareart-exports/' + encodeURIComponent(filename), {
+          method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: blob,
+        });
+        if (!r2.ok) throw new Error('HTTP ' + r2.status);
+        let folder = ''; try { folder = (await r2.json()).folder || ''; } catch (_) {}
+        note('Saved "' + filename + '" (' + sizeTxt + ') → ' + (folder || 'the square art folder') + '.');
+      } catch (e) {
+        console.warn('Square art PUT failed, downloading instead:', e);
+        download(blob, filename);
+        note('Downloaded "' + filename + '" (' + sizeTxt + ') — no square art folder configured (or the save failed).');
+      }
+      flashSquare('✓');
+    } catch (e) { flashSquare('✗'); note('Square Art failed: ' + (e && e.message ? e.message : e)); }
+  };
+  // Crop the stored PNG to the square, clamped into the art's alpha bounds; rect.want (preset)
+  // upscales the output only when the art itself was the limit. Resolves { blob, side, srcSide }.
+  const cropPngToJpg = (buf, rect) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'image/png' }));
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = img.width, h = img.height;
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      const a = cx.getImageData(0, 0, w, h).data;
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+        if (a[(yy * w + xx) * 4 + 3] > 0) { if (xx < minX) minX = xx; if (xx > maxX) maxX = xx; if (yy < minY) minY = yy; if (yy > maxY) maxY = yy; }
+      }
+      if (maxX < 0) { reject(new Error('poster art has no visible pixels')); return; }
+      const artW = maxX - minX + 1, artH = maxY - minY + 1;
+      const srcSide = Math.min(rect.side, artW, artH);
+      const x = Math.max(minX, Math.min(rect.x, maxX + 1 - srcSide));
+      const y = Math.max(minY, Math.min(rect.y, maxY + 1 - srcSide));
+      // Upscale to the wanted preset size ONLY when the selection was maxed out by the art.
+      const outSide = (rect.want > srcSide && srcSide >= Math.min(artW, artH)) ? rect.want : srcSide;
+      const out = document.createElement('canvas'); out.width = outSide; out.height = outSide;
+      const ox = out.getContext('2d');
+      ox.imageSmoothingQuality = 'high';
+      ox.fillStyle = '#fff'; ox.fillRect(0, 0, outSide, outSide);
+      ox.drawImage(cv, x, y, srcSide, srcSide, 0, 0, outSide, outSide);
+      out.toBlob((bb) => bb ? resolve({ blob: bb, side: outSide, srcSide }) : reject(new Error('JPEG encode failed')), 'image/jpeg', 0.9);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('PNG decode failed')); };
+    img.src = url;
+  });
 
   // ---- Batch export --------------------------------------------------------
   // The pure batch/convention/range logic below mirrors frontend/src/lib/photopeaBatch.ts (tested by
@@ -1150,7 +1355,7 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { if (logoExpBusy) { onLogoBytes(d); } else { onSaved(d); } return; }   // ArrayBuffer = saveToOE result
+    if (typeof d !== 'string') { if (squareArtBusy) { onSquareIsoBytes(d); } else if (logoExpBusy) { onLogoBytes(d); } else { onSaved(d); } return; }   // ArrayBuffer = saveToOE result
     if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
     else if (d.startsWith('PFLEXP:'))   { try { pendingExport = JSON.parse(d.slice(7)); } catch (_) { pendingExport = null; } }
     else if (d.startsWith('PFLDOC:'))   { let o = null; try { o = JSON.parse(d.slice(7)); } catch (_) {} pendingExport = o ? { save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(o.name + '.psd') + '?style=' + encodeURIComponent(o.style), name: o.name, style: o.style } : null; }
@@ -1177,7 +1382,7 @@
       send(collectionMoveScript(dy));
     }
     else if (d.startsWith('PFLCLEAN:')) { /* collection logo restored — ack only */ }
-    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) { lastActiveSig = sig; fetchLayers(); } }
+    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
@@ -1185,8 +1390,32 @@
     else if (d.startsWith('PFLTRIM:'))  { flashTrim('✓'); }
     else if (d.startsWith('PFLLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(11)); } catch (_) { logoRestore = null; } }
     else if (d.startsWith('PFLNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
+    else if (d.startsWith('PFLSQSET:')) { const s = d.slice(9); note('Placed a ' + s + '×' + s + ' selection — drag inside it to position, then press Crop.'); }
+    else if (d.startsWith('PFLSQSNAP:')) { const s = d.slice(10); squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note('Snapped the selection to ' + s + '×' + s + ' — adjust it if needed, then press Crop.'); }
+    else if (d.startsWith('PFLSQB:'))   { onSquareBounds(d.slice(7)); }
+    else if (d.startsWith('PFLNOSEL:')) {
+      const nm = d.slice(9);
+      squareArtBusy = false; squareArtBtn.textContent = 'Crop';
+      note(nm !== sqTempName ? 'That isn\'t the crop tab — switch to "' + SQ_TEMP + '", or press ✕ to cancel.'
+        : 'No selection — pick a preset or drag a square with the marquee tool (M).');
+    }
+    else if (d.startsWith('PFLSQHOME:')) { sqHomeName = d.slice(10) || ''; }
+    else if (d.startsWith('PFLSQTEMP:')) {
+      const nm = d.slice(10);
+      if (!nm) { flashSquare('✗'); note('Square Art: Photopea didn\'t open the crop tab.'); }
+      else {
+        sqTempName = nm;
+        squareArtBusy = false; sqArmed = true;
+        sqPresets.classList.remove('hidden'); sqCancelBtn.classList.remove('hidden');
+        squareArtBtn.textContent = 'Crop';
+        note('Opened the poster art in its own tab — pick a preset or drag a square, then press Crop.');
+      }
+    }
+    else if (d.startsWith('PFLSQVIS:')) { try { posterRestore = JSON.parse(d.slice(9)); } catch (_) { posterRestore = null; } }
+    else if (d.startsWith('PFLSQNOPOSTER:')) { flashSquare('✗'); note('No POSTER group in this document.'); }
+    else if (d.startsWith('PFLSQEMPTY:')) { restorePosterVis(); flashSquare('✗'); note('The POSTER group has no visible variant.'); }
     else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); note('"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.'); }
-    else if (d.startsWith('PFLERR:'))   { if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
+    else if (d.startsWith('PFLERR:'))   { if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
     // PFLVIS: ack handled optimistically in commit().
   });
 
@@ -1197,10 +1426,13 @@
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
   logoExpBtn.addEventListener('click', exportLogo);
+  squareArtBtn.addEventListener('click', squareArtClick);
+  document.querySelectorAll('[data-sq]').forEach((b) => b.addEventListener('click', () => placePreset(parseInt(b.dataset.sq, 10))));
+  document.querySelector('[data-act="sq-cancel"]').addEventListener('click', disarmSquare);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
   const boltClick = (mode) => {
-    if (batchBusy || logoExpBusy) return;
+    if (batchBusy || logoExpBusy || squareArtBusy) return;
     if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
     startBatch(mode);
   };
@@ -1257,7 +1489,7 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
-  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy) send(POLL); }, 1200);
+  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !squareArtBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
 })();
