@@ -342,6 +342,61 @@ async function cropSaveSquare(dup, folder, filename, rect, wantSide) {
   return result;
 }
 
+// Export each SELECTED layer alone as a trimmed JPG (duplicate → only that layer's chain
+// visible → trim → save → close). nameFor(layerName) supplies each filename.
+// Returns { ok, files: [{ filename, entry }], folderName } or { ok:false, reason:'no-layer' }.
+async function exportSelectedLayersJpg(doc, constants, folder, nameFor) {
+  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
+  const layers = (doc.activeLayers || []).slice();
+  if (!layers.length) return { ok: false, reason: 'no-layer' };
+  // Compare by id — UXP hands out a FRESH wrapper object on every collection access, so
+  // object identity (===) never matches between doc.layers and doc.activeLayers.
+  const pathOf = (target) => {
+    const walk = (ls, pre) => {
+      for (let i = 0; i < ls.length; i++) {
+        const L = ls[i], here = pre.concat(i);
+        if (L.id === target.id) return here;
+        if (isGroup(L)) { const f = walk(L.layers, here); if (f) return f; }
+      }
+      return null;
+    };
+    return walk(doc.layers, []);
+  };
+  const files = [];
+  const used = {};   // two plain-named layers in one run map to the same name — number the extras
+  const dedupe = (filename) => {
+    if (!used[filename]) { used[filename] = true; return filename; }
+    const stem = filename.replace(/\.jpg$/i, '');
+    let k = 2;
+    while (used[stem + ' (' + k + ').jpg']) k++;
+    const out = stem + ' (' + k + ').jpg';
+    used[out] = true;
+    return out;
+  };
+  await core.executeAsModal(async () => {
+    for (const target of layers) {
+      const path = pathOf(target);
+      if (!path) continue;
+      const dup = await doc.duplicate();
+      try {
+        let cont = dup.layers;
+        for (let k = 0; k < path.length; k++) {
+          for (let i = 0; i < cont.length; i++) cont[i].visible = (i === path[k]);
+          if (k < path.length - 1) cont = cont[path[k]].layers;
+        }
+        await dup.trim(constants.TrimType.TRANSPARENT);
+        const filename = dedupe(nameFor(target.name));
+        const file = await folder.createFile(filename, { overwrite: true });
+        await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+        files.push({ filename, entry: file });
+      } finally {
+        await dup.closeWithoutSaving();
+      }
+    }
+  }, { commandName: 'Export poster JPG' });
+  return files.length ? { ok: true, files, folderName: folder.name } : { ok: false, reason: 'no-layer' };
+}
+
 // Close the crop doc and reactivate the home document.
 async function closeCropDoc(dup, homeDoc) {
   try {
@@ -355,5 +410,5 @@ async function closeCropDoc(dup, homeDoc) {
 module.exports = {
   placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible,
   hideManualCollectionLogos, LOGO_DENSITY, makeCropDoc, setSquareSelection, readSelectionBounds,
-  selectTool, cropSaveSquare, closeCropDoc,
+  selectTool, cropSaveSquare, closeCropDoc, exportSelectedLayersJpg,
 };

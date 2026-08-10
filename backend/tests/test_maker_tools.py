@@ -1711,6 +1711,45 @@ def test_save_squareart_export_invalid_filename_rejected(client, test_db):
         assert not (Path(squareart_dir) / "evil.exe").exists()
 
 
+def test_save_poster_export_writes_to_configured_folder(client, test_db):
+    with tempfile.TemporaryDirectory() as poster_dir:
+        test_db.add(Setting(key="poster_export_folder", value=poster_dir))
+        test_db.commit()
+
+        response = client.put(
+            "/api/maker-tools/poster-exports/Show (2026) {tmdb-123} - Season 2.jpg",
+            content=b"POSTERBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+        assert response.status_code == 200
+        saved = Path(poster_dir) / "Show (2026) {tmdb-123} - Season 2.jpg"
+        assert saved.is_file()
+        assert saved.read_bytes() == b"POSTERBYTES"
+
+
+def test_save_poster_export_no_folder_configured_returns_400(client):
+    response = client.put(
+        "/api/maker-tools/poster-exports/Show (2026).jpg",
+        content=b"POSTERBYTES",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 400
+
+
+def test_save_poster_export_invalid_filename_rejected(client, test_db):
+    with tempfile.TemporaryDirectory() as poster_dir:
+        test_db.add(Setting(key="poster_export_folder", value=poster_dir))
+        test_db.commit()
+        response = client.put(
+            "/api/maker-tools/poster-exports/evil.exe",
+            content=b"POSTERBYTES",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert response.status_code == 400
+        assert not (Path(poster_dir) / "evil.exe").exists()
+
+
 # ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/psd-exports/{filename} — security & serving
 # ---------------------------------------------------------------------------

@@ -1884,6 +1884,7 @@ SETTING_LOGO_EXPORT_FOLDER = "logo_export_folder"                 # panel Logo b
 SETTING_ARTWORK_LOGO_EXPORT_FOLDER = "artwork_logo_export_folder"
 SETTING_BACKGROUND_EXPORT_FOLDER = "background_export_folder"
 SETTING_SQUAREART_EXPORT_FOLDER = "squareart_export_folder"
+SETTING_POSTER_EXPORT_FOLDER = "poster_export_folder"             # panel Poster button JPGs (selected poster layer)
 # subtype → the folder setting its gallery save button writes into
 _ARTWORK_EXPORT_FOLDER_KEYS = {
     "logo": SETTING_ARTWORK_LOGO_EXPORT_FOLDER,
@@ -2769,6 +2770,35 @@ async def save_squareart_export(filename: str, request: Request, db: Session = D
     except Exception as exc:
         log_error(LogTags.API, f"Square art export save failed: {exc}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to save square art: {exc}")
+
+    return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
+
+
+@router.put("/poster-exports/{filename}")
+async def save_poster_export(filename: str, request: Request, db: Session = Depends(get_db)) -> Response:
+    """Write a poster JPG (the panel's Poster button — the selected poster layer, exported alone
+    and named by its tag: plain / - Season N / - Specials) to the poster export folder.
+    400s when unconfigured so the panel falls back to a browser download.
+    Security: filename is validated (no traversal, must be an image extension).
+    """
+    _validate_image_filename(filename)
+    folder = (get_setting_value(db, SETTING_POSTER_EXPORT_FOLDER) or "").strip()
+    if not folder:
+        raise HTTPException(status_code=400, detail="No poster export folder configured.")
+    save_dir = Path(folder)
+
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty request body.")
+        (save_dir / filename).write_bytes(body)
+        log_user_action("Saved exported poster", filename=filename, folder=str(save_dir))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(LogTags.API, f"Poster export save failed: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to save poster: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
 

@@ -79,6 +79,7 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
    expands into it and never shifts the bars above. */
 .sqbar { flex-direction: column; align-items: center; }
 .sqrow { display: flex; justify-content: center; }
+.sqrow sp-action-button { width: 86px; }   /* Poster and Square Art as a matched pair */
 .sqrow.armed sp-action-button { width: 66px; }   /* Crop and X as a matched pair */
 .sqpresets { display: flex; flex-wrap: wrap; justify-content: center; margin-top: 2px; }
 /* Narrow fixed widths so all six presets sit on one row at the panel's 220px width. */

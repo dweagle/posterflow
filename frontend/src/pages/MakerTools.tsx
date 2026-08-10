@@ -149,6 +149,7 @@ function MakerTools() {
   const [artworkLogoExportFolder, setArtworkLogoExportFolder] = useState('')   // gallery logo save button
   const [backgroundExportFolder, setBackgroundExportFolder] = useState('')
   const [squareartExportFolder, setSquareartExportFolder] = useState('')
+  const [posterExportFolder, setPosterExportFolder] = useState('')       // panel Poster button (selected layer)
   const [psdDefaultEditor, setPsdDefaultEditor] = useState<'photopea' | 'photoshop'>('photopea')
   const [psdExportFolderMm2k, setPsdExportFolderMm2k] = useState('')
   const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
@@ -244,6 +245,7 @@ function MakerTools() {
       setArtworkLogoExportFolder((settings.artwork_logo_export_folder || '').trim())
       setBackgroundExportFolder((settings.background_export_folder || '').trim())
       setSquareartExportFolder((settings.squareart_export_folder || '').trim())
+      setPosterExportFolder((settings.poster_export_folder || '').trim())
       setPsdDefaultEditor(cfg.defaultEditor)
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -305,6 +307,7 @@ function MakerTools() {
         artwork_logo_export_folder: artworkLogoExportFolder.trim(),
         background_export_folder: backgroundExportFolder.trim(),
         squareart_export_folder: squareartExportFolder.trim(),
+        poster_export_folder: posterExportFolder.trim(),
         psd_default_editor: psdDefaultEditor,
       })
       showToast('PSD settings saved', 'success')
@@ -1118,6 +1121,31 @@ function MakerTools() {
                         value={squareartExportFolder}
                         onChange={(e) => setSquareartExportFolder(e.target.value)}
                         placeholder="(blank = no crop button)"
+                      />
+                    </label>
+                    <div style={{ fontWeight: 600, margin: '1.25rem 0 0.5rem' }}>
+                      PSD Poster Pulls
+                      <InfoTip>
+                        For pulling the raw poster art layer <strong>out of</strong> an open PSD via the
+                        panels&apos; <strong>Poster</strong> button. This is NOT where finished posters
+                        land — the JPG button and batch exports use the Style Folders&apos; image export
+                        folders below.
+                      </InfoTip>
+                    </div>
+                    <label>
+                      Poster Pull Folder
+                      <InfoTip>
+                        Optional. Where the panels&apos; <strong>Poster</strong> button saves the SELECTED
+                        poster layer(s) as JPGs, named by tag —
+                        <code> Title (Year) {'{ids}'}.jpg</code>, or <code>- Season N</code> /{' '}
+                        <code>- Specials</code> for s1/s2/s0 layers. When blank, the panels fall back
+                        to a browser download.
+                      </InfoTip>
+                      <input
+                        type="text"
+                        value={posterExportFolder}
+                        onChange={(e) => setPosterExportFolder(e.target.value)}
+                        placeholder="(blank = download)"
                       />
                     </label>
                   </div>

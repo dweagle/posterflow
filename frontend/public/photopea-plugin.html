@@ -75,6 +75,8 @@
   /* Fixed height: the preset row's space is reserved, so arming expands DOWN, not up. */
   .sqbar { flex-direction: column; align-items: center; height: 68px; box-sizing: border-box; }
   .sqrow { display: flex; gap: 6px; justify-content: center; }
+  .sqrow .btn { width: 86px; box-sizing: border-box; padding: 4px 0; text-align: center; }
+  .pexbtn.hidden { display: none; }
   /* Armed: Crop and ✕ match Trim/Logo's width; idle keeps natural width (label fits). */
   .sqrow:has(.sqcancel:not(.hidden)) .btn { width: 66px; box-sizing: border-box; padding: 4px 0; text-align: center; }
   .sqcancel.hidden { display: none; }
@@ -119,6 +121,7 @@
   </div>
   <div class="trimbar sqbar">
     <div class="sqrow">
+      <button class="btn pexbtn" data-act="poster-export" title="Export the SELECTED poster layer(s) — one JPG each, named by tag (s1 → Season 1, s0 → Specials, anything else → plain) — to the poster folder, or download">Poster</button>
       <button class="btn" data-act="squareart" title="Crop square art: click to open the poster art in its own tab, pick a preset (or drag your own square), position it, then press Crop — it saves, closes the tab, and returns to the PSD. If dragging moves pixels instead of the selection outline, press M (Rectangle Select) first.">Square Art</button>
       <button class="btn sqcancel hidden" data-act="sq-cancel" title="Cancel">✕</button>
     </div>
@@ -149,6 +152,9 @@
   let trimBusy = false;
   const logoExpBtn = document.querySelector('[data-act="logo-export"]');
   let logoExpBusy = false, logoRestore = null;   // Logo export: busy flag + visibility changes to undo
+  const posterExpBtn = document.querySelector('[data-act="poster-export"]');
+  let posterExpBusy = false, pexRestore = null, pexCtx = null;   // Poster export: busy + visibility undo + doc ctx
+  let pexQueue = [], pexIdx = 0, pexOk = 0, pexUsed = {};                      // selected layers awaiting export (one at a time)
   const squareArtBtn = document.querySelector('[data-act="squareart"]');
   const sqPresets = document.querySelector('.sqpresets');
   const sqCancelBtn = document.querySelector('[data-act="sq-cancel"]');
@@ -461,7 +467,7 @@
   const DETECT = 'function hasGrp(ls,re){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(re.test(L.name))return true;if(hasGrp(L.layers,re))return true;}}return false;}' +
     'var st=hasGrp(d.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hasGrp(d.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");';
   const saveDoc = () => {
-    if (saving || placeBusy || logoExpBusy || squareArtBusy) return;
+    if (saving || placeBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
     saving = true; saveBtn.textContent = '…';
     send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
       'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));d.saveToOE("psd");}' +
@@ -492,7 +498,7 @@
   };
   const flashJpg = (m) => { jpgBusy = false; jpgBtn.textContent = m; setTimeout(() => { jpgBtn.textContent = 'JPG'; }, 1400); };
   const exportJpg = () => {
-    if (jpgBusy || placeBusy || logoExpBusy || squareArtBusy) return;
+    if (jpgBusy || placeBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
     jpgBusy = true; jpgBtn.textContent = '…';
     // Capture the ACTIVE doc's context so the JPG is named/routed for whatever doc is in front:
     // source ctx (if it sticks) → the first doc's cfg → live name+detected style → else a bare
@@ -703,7 +709,7 @@
   };
 
   const startPlace = (mode, btn, label) => {
-    if (placeBusy || logoExpBusy || squareArtBusy) return;
+    if (placeBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
     placeBusy = true; pendingMode = mode; placeBtn = btn; placeLabel = label;
     btn.textContent = '…';
     placeWatch = setTimeout(() => finishPlace(false, 'Timed out — is a layer selected?'), 12000);
@@ -717,7 +723,7 @@
   // pixels don't show anyway). Save afterwards to reclaim the space.
   const flashTrim = (m) => { trimBusy = false; trimBtn.textContent = m; setTimeout(() => { trimBtn.textContent = 'Trim'; }, 1400); };
   const trimDoc = () => {
-    if (trimBusy || placeBusy || batchBusy || logoExpBusy || squareArtBusy) return;
+    if (trimBusy || placeBusy || batchBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
     trimBusy = true; trimBtn.textContent = '…';
     send(px("var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));d.crop([0,0,w,h]);app.echoToOE('PFLTRIM:ok');"));
   };
@@ -730,7 +736,7 @@
   const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
   const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
   const exportLogo = () => {
-    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || squareArtBusy) return;
+    if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || posterExpBusy || squareArtBusy) return;
     logoExpBusy = true; logoExpBtn.textContent = '…';
     // Same per-doc context resolution as the JPG path (names the PNG after the poster), then:
     // find the LOGO group, hide non-chain siblings at every level of its path (recording prior
@@ -801,6 +807,123 @@
     } catch (e) { flashLogoExp('✗'); note('Logo export failed: ' + (e && e.message ? e.message : e)); }
   };
 
+  // ---- Poster export -------------------------------------------------------
+  // Export the SELECTED layer alone as a JPG (Logo-button visibility pattern: isolate its chain,
+  // record changes → PFLPEXVIS, restore after), named by its tag: s1/s2… → " - Season N",
+  // s0 → " - Specials", anything else → plain "Title (Year) {ids}.jpg".
+  // Photopea exports WebP (fast like JPG but KEEPS ALPHA) and the panel trims to the alpha
+  // bounding box — Layer.bounds can't locate content (it reports raster extent incl. padding).
+  const pexSuffix = (nm) => {
+    const m = ('' + nm).trim().toLowerCase().match(/^s0*(\d+)$/);
+    if (!m) return '';
+    const n = parseInt(m[1], 10);
+    return n === 0 ? ' - Specials' : ' - Season ' + n;
+  };
+  // Decode WebP bytes, find the alpha bounding box (Layer.bounds is USELESS here — Photopea
+  // reports raster extent incl. transparent padding), re-encode that region as JPG on white.
+  const trimAlphaToJpg = (buf, quality) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([buf], { type: 'image/webp' }));
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = img.width, h = img.height;
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      const a = cx.getImageData(0, 0, w, h).data;
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+        if (a[(yy * w + xx) * 4 + 3] > 0) { if (xx < minX) minX = xx; if (xx > maxX) maxX = xx; if (yy < minY) minY = yy; if (yy > maxY) maxY = yy; }
+      }
+      if (maxX < 0) { reject(new Error('layer has no visible pixels')); return; }
+      const tw = maxX - minX + 1, th = maxY - minY + 1;
+      const out = document.createElement('canvas'); out.width = tw; out.height = th;
+      const ox = out.getContext('2d');
+      ox.fillStyle = '#fff'; ox.fillRect(0, 0, tw, th);
+      ox.drawImage(cv, minX, minY, tw, th, 0, 0, tw, th);
+      out.toBlob((b) => b ? resolve(b) : reject(new Error('JPEG encode failed')), 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image decode failed')); };
+    img.src = url;
+  });
+  const flashPex = (m) => { posterExpBusy = false; posterExpBtn.textContent = m; setTimeout(() => { posterExpBtn.textContent = 'Poster'; }, 1400); };
+  const restorePexVis = () => { if (pexRestore && pexRestore.length) setVis(pexRestore); pexRestore = null; };
+  // Enumerate every SELECTED layer (Photopea's custom Layer.selected — plain ExtendScript can't
+  // see multi-selections) with its path + bounds; falls back to the active layer.
+  const exportPosterLayer = () => {
+    if (posterExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy || squareArtBusy) return;
+    posterExpBusy = true; posterExpBtn.textContent = '…';
+    send(px('var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
+      'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
+      'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);}' +
+      'else if(' + JSON.stringify(cfg.name) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');}' +
+      'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));}' +
+      'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}' +
+      'var out=[];' +
+      'function wk(ls,pa){for(var i=0;i<ls.length;i++){var X=ls[i],h=pa.concat(i);' +
+      'if(X.selected){out.push({p:h,n:X.name});}' +
+      'if(X.typename=="LayerSet"){wk(X.layers,h);}}}' +
+      'wk(d.layers,[]);' +
+      'if(!out.length){var L=d.activeLayer;' +
+      'function fp(ls,pa){for(var i=0;i<ls.length;i++){var X=ls[i],h=pa.concat(i);if(X==L)return h;if(X.typename=="LayerSet"){var f=fp(X.layers,h);if(f)return f;}}return null;}' +
+      'var pth=L?fp(d.layers,[]):null;' +
+      'if(pth){out.push({p:pth,n:L.name});}}' +
+      'if(!out.length){app.echoToOE("PFLNOPEX:");}' +
+      'else{app.echoToOE("PFLPEXLIST:"+JSON.stringify({items:out}));}'));
+  };
+  // Export the queue one layer at a time: isolate its chain (chg → PFLPEXVIS), JPG the canvas,
+  // then onPosterBytes restores, crops by that layer's bounds, delivers, and advances.
+  const pexNext = () => {
+    if (pexIdx >= pexQueue.length) {
+      const total = pexQueue.length;
+      pexQueue = [];
+      flashPex('✓');
+      if (total > 1) note('Exported ' + pexOk + ' of ' + total + ' posters.');
+      return;
+    }
+    const it = pexQueue[pexIdx];
+    note('Exporting "' + it.n + '"' + (pexQueue.length > 1 ? ' (' + (pexIdx + 1) + '/' + pexQueue.length + ')' : '') + '…');
+    send(px('var d=app.activeDocument;var pth=' + JSON.stringify(it.p) + ';' +
+      'var chg=[],cont=d,pref=[];' +
+      'for(var k=0;k<pth.length;k++){for(var i=0;i<cont.layers.length;i++){var X=cont.layers[i];var want=(i==pth[k]);' +
+      'if(X.visible!=want){chg.push({p:pref.concat(i),v:X.visible});X.visible=want;}}' +
+      'cont=cont.layers[pth[k]];pref=pref.concat(pth[k]);}' +
+      'app.echoToOE("PFLPEXVIS:"+JSON.stringify(chg));' +
+      'd.saveToOE("webp:0.90");'));
+  };
+  const onPosterBytes = async (buf) => {
+    const it = pexQueue[pexIdx];
+    restorePexVis();
+    try {
+      if (!it) throw new Error('export queue lost');
+      const jpg = await trimAlphaToJpg(buf, 0.9);
+      const ex = pexCtx || {};
+      const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+      let filename = base + pexSuffix(it.n) + '.jpg';
+      if (pexUsed[filename]) {   // two plain-named layers in one run — number the extras
+        const stem = filename.replace(/\.jpg$/i, '');
+        let k = 2;
+        while (pexUsed[stem + ' (' + k + ').jpg']) k++;
+        filename = stem + ' (' + k + ').jpg';
+      }
+      pexUsed[filename] = true;
+      try {
+        const r = await fetch(location.origin + '/api/maker-tools/poster-exports/' + encodeURIComponent(filename), {
+          method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()), body: jpg,
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        let folder = ''; try { folder = (await r.json()).folder || ''; } catch (_) {}
+        note('Saved "' + filename + '" → ' + (folder || 'the poster export folder') + '.');
+      } catch (e) {
+        console.warn('Poster PUT failed, downloading instead:', e);
+        download(jpg, filename);
+        note('Downloaded "' + filename + '" — no poster export folder configured (or the save failed).');
+        await sleep(DL_GAP);   // space rapid downloads out so the browser doesn't drop them
+      }
+      pexOk++; pexIdx++;
+      pexNext();
+    } catch (e) { pexQueue = []; flashPex('✗'); note('Poster export failed: ' + (e && e.message ? e.message : e)); }
+  };
+
   // ---- Square Art crop -----------------------------------------------------
   // Temp-tab flow: isolate the POSTER group's visible variant → PNG → trim → open the bytes as a
   // "Square Art Crop" tab (pure art, no chrome/gutter). Presets/marquee pick the square there;
@@ -821,12 +944,14 @@
   };
   const disarmSquare = () => {
     sqArmed = false; squareArtBusy = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden'); squareArtBtn.textContent = 'Square Art';
+    posterExpBtn.classList.remove('hidden');
     closeTempReturnHome();
     sqArt = null; sqCtx = null; sqWant = 0;
     send('try{' + SQ_TOOL_JS + 'swT("moveTool");}catch(e){}');   // hand the Move tool back
   };
   const flashSquare = (m) => {
     squareArtBusy = false; sqArmed = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden');
+    posterExpBtn.classList.remove('hidden');
     squareArtBtn.textContent = m; setTimeout(() => { if (!sqArmed) squareArtBtn.textContent = 'Square Art'; }, 1400);
     closeTempReturnHome();
     sqArt = null; sqCtx = null; sqWant = 0;
@@ -842,8 +967,9 @@
   const squareArtClick = () => {
     if (squareArtBusy) return;
     if (!sqArmed) {
-      if (saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy) return;
+      if (saving || jpgBusy || placeBusy || batchBusy || trimBusy || logoExpBusy || posterExpBusy) return;
       squareArtBusy = true; squareArtBtn.textContent = '…'; sqWant = 0;
+      posterExpBtn.classList.add('hidden');
       // Capture ctx + home doc, isolate the POSTER art (recording changes → PFLSQVIS), export PNG.
       send('try{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
         'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
@@ -1363,7 +1489,7 @@
   // ---- incoming messages from Photopea -------------------------------------
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (typeof d !== 'string') { if (squareArtBusy) { onSquareIsoBytes(d); } else if (logoExpBusy) { onLogoBytes(d); } else { onSaved(d); } return; }   // ArrayBuffer = saveToOE result
+    if (typeof d !== 'string') { if (squareArtBusy) { onSquareIsoBytes(d); } else if (posterExpBusy) { onPosterBytes(d); } else if (logoExpBusy) { onLogoBytes(d); } else { onSaved(d); } return; }   // ArrayBuffer = saveToOE result
     if (d.startsWith('PFLNAME:'))       { pendingDocName = d.slice(8) || 'poster'; if (!posterDocName) posterDocName = pendingDocName; }
     else if (d.startsWith('PFLEXP:'))   { try { pendingExport = JSON.parse(d.slice(7)); } catch (_) { pendingExport = null; } }
     else if (d.startsWith('PFLDOC:'))   { let o = null; try { o = JSON.parse(d.slice(7)); } catch (_) {} pendingExport = o ? { save: location.origin + '/api/maker-tools/psd-exports/' + encodeURIComponent(o.name + '.psd') + '?style=' + encodeURIComponent(o.style), name: o.name, style: o.style } : null; }
@@ -1390,7 +1516,7 @@
       send(collectionMoveScript(dy));
     }
     else if (d.startsWith('PFLCLEAN:')) { /* collection logo restored — ack only */ }
-    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
+    else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
     else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
@@ -1419,11 +1545,23 @@
         note('Opened the poster art in its own tab — pick a preset or drag a square, then press Crop.');
       }
     }
+    else if (d.startsWith('PFLPEXLIST:')) {
+      let o = null; try { o = JSON.parse(d.slice(11)); } catch (_) {}
+      if (!o || !o.items || !o.items.length) { flashPex('✗'); note('Poster export failed.'); }
+      else {
+        pexCtx = pendingExport || {}; pendingExport = null;
+        pexQueue = o.items.slice();
+        pexIdx = 0; pexOk = 0; pexUsed = {};
+        pexNext();
+      }
+    }
+    else if (d.startsWith('PFLPEXVIS:')) { try { pexRestore = JSON.parse(d.slice(10)); } catch (_) { pexRestore = null; } }
+    else if (d.startsWith('PFLNOPEX:')) { flashPex('✗'); note('Select the poster layer first, then press Poster.'); }
     else if (d.startsWith('PFLSQVIS:')) { try { posterRestore = JSON.parse(d.slice(9)); } catch (_) { posterRestore = null; } }
     else if (d.startsWith('PFLSQNOPOSTER:')) { flashSquare('✗'); note('No POSTER group in this document.'); }
     else if (d.startsWith('PFLSQEMPTY:')) { restorePosterVis(); flashSquare('✗'); note('The POSTER group has no visible variant.'); }
     else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); note('"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.'); }
-    else if (d.startsWith('PFLERR:'))   { if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
+    else if (d.startsWith('PFLERR:'))   { if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); note('Poster export failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
     // PFLVIS: ack handled optimistically in commit().
   });
 
@@ -1434,13 +1572,14 @@
   fitBtn.addEventListener('click', startFit);
   trimBtn.addEventListener('click', trimDoc);
   logoExpBtn.addEventListener('click', exportLogo);
+  posterExpBtn.addEventListener('click', exportPosterLayer);
   squareArtBtn.addEventListener('click', squareArtClick);
   document.querySelectorAll('[data-sq]').forEach((b) => b.addEventListener('click', () => placePreset(parseInt(b.dataset.sq, 10))));
   document.querySelector('[data-act="sq-cancel"]').addEventListener('click', disarmSquare);
   document.querySelector('[data-act="refresh"]').addEventListener('click', fetchLayers);
   // Each bolt toggles ITS mode: click the same bolt again to dismiss; click the other to switch modes.
   const boltClick = (mode) => {
-    if (batchBusy || logoExpBusy || squareArtBusy) return;
+    if (batchBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
     if (!batchBar.classList.contains('hidden') && batchMode === mode) { closeBatch(); return; }
     startBatch(mode);
   };
@@ -1497,7 +1636,7 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
-  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !squareArtBusy) send(POLL); }, 1200);
+  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) send(POLL); }, 1200);
 
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
 })();

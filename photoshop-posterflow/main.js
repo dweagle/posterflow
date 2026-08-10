@@ -24,6 +24,7 @@ const logoBtn   = document.querySelector('[data-act="logo"]');
 const fitBtn    = document.querySelector('[data-act="fit"]');
 const trimBtn   = document.querySelector('[data-act="trim"]');
 const logoExpBtn = document.querySelector('[data-act="logo-export"]');
+const posterExpBtn = document.querySelector('[data-act="poster-export"]');
 const squareArtBtn = document.querySelector('[data-act="squareart"]');
 const sqCancelBtn  = document.querySelector('[data-act="sq-cancel"]');
 const sqPresetsEl  = document.querySelector('.sqpresets');
@@ -292,6 +293,53 @@ async function onTrim() {
   catch (e) { flash(trimBtn, '✗', 'Trim'); showError(e); }
 }
 
+// ---- Poster export ----
+// Export the SELECTED layer(s) alone as trimmed JPGs, named by tag: s1/s2… → " - Season N",
+// s0 → " - Specials", anything else → plain. Alt-click re-picks the folder; remote docs upload.
+const pexSuffix = (nm) => {
+  const m = ('' + nm).trim().toLowerCase().match(/^s0*(\d+)$/);
+  if (!m) return '';
+  const n = parseInt(m[1], 10);
+  return n === 0 ? ' - Specials' : ' - Season ' + n;
+};
+async function onPosterExport(ev) {
+  if (!hasDoc()) { note('No document open.'); return; }
+  const ctx = remoteCtx();
+  posterExpBtn.textContent = '…';
+  try {
+    const folder = ctx ? await R.tempFolder() : await FS.getPosterFolder({ forcePick: wantsRepick(ev) });
+    if (!folder) { posterExpBtn.textContent = 'Poster'; note('Poster export cancelled — no folder chosen.'); return; }
+    const base = (ctx && ctx.name) || baseName();
+    const n = (app.activeDocument.activeLayers || []).length;
+    note('Exporting ' + (n === 1 ? 'the selected layer' : n + ' selected layers') + '…');
+    const res = await runExclusive(() => TL.exportSelectedLayersJpg(app.activeDocument, constants, folder, (nm) => base + pexSuffix(nm) + '.jpg'));
+    if (!res.ok) {
+      flash(posterExpBtn, '✗', 'Poster');
+      note(res.reason === 'no-layer' ? 'Select the poster layer(s) first, then press Poster.' : 'Poster export failed.');
+      return;
+    }
+    if (ctx) {
+      for (const f of res.files) {
+        const bytes = await R.readBytes(f.entry);
+        try {
+          await R.putBytes('/api/maker-tools/poster-exports/' + encodeURIComponent(f.filename), bytes);
+          note('Saved "' + f.filename + '" → Posterflow poster folder.');
+        } catch (e) {
+          if (!/HTTP 400/.test(String(e && e.message))) throw e;
+          note('Server has no poster export folder — saving locally instead.');
+          const localFolder = await FS.getPosterFolder({});
+          if (!localFolder) break;
+          await FS.writeFileBytes(localFolder, f.filename, bytes);
+          note('Saved "' + f.filename + '" → ' + localFolder.name);
+        }
+      }
+    } else {
+      res.files.forEach((f) => note('Saved "' + f.filename + '" → ' + res.folderName));
+    }
+    flash(posterExpBtn, '✓', 'Poster');
+  } catch (e) { flash(posterExpBtn, '✗', 'Poster'); showError(e); }
+}
+
 // ---- Square Art crop ----
 // Temp-tab flow (mirrors the Photopea panels): duplicate + isolate the POSTER art into its own
 // tab, presets/marquee pick the square there, Crop snaps non-square selections visibly, then
@@ -301,6 +349,7 @@ function sqSetUI(armed) {
   sqArmed = armed;
   sqPresetsEl.classList.toggle('hidden', !armed);
   sqCancelBtn.classList.toggle('hidden', !armed);
+  posterExpBtn.classList.toggle('hidden', armed);   // Poster steps aside while Square Art works
   document.querySelector('.sqrow').classList.toggle('armed', armed);
   squareArtBtn.textContent = armed ? 'Crop' : 'Square Art';
 }
@@ -319,6 +368,7 @@ async function onSquareArt(ev) {
   if (!sqArmed) {
     if (!hasDoc()) { note('No document open.'); return; }
     sqBusy = true; squareArtBtn.textContent = '…';
+    posterExpBtn.classList.add('hidden');
     try {
       sqHome = app.activeDocument;
       sqCtx = remoteCtx();
@@ -518,6 +568,7 @@ logoBtn.addEventListener('click', () => onPlace('logo', logoBtn, 'Place Logo'));
 fitBtn.addEventListener('click', () => onPlace('fit', fitBtn, 'Fit Poster'));
 trimBtn.addEventListener('click', onTrim);
 logoExpBtn.addEventListener('click', onLogoExport);
+posterExpBtn.addEventListener('click', onPosterExport);
 squareArtBtn.addEventListener('click', onSquareArt);
 sqCancelBtn.addEventListener('click', onSqCancel);
 document.querySelectorAll('[data-sq]').forEach((b) => b.addEventListener('click', () => onSqPreset(parseInt(b.getAttribute('data-sq'), 10))));
