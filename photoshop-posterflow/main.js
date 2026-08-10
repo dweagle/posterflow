@@ -35,6 +35,10 @@ const batchMsgEl  = document.querySelector('.batchmsg');
 const batchRow    = document.querySelector('.batchrow');
 const batchInput  = document.querySelector('.batchinput');
 const batchHelp   = document.querySelector('.batchhelp');
+// Gradient safety net opt-out — remembered across sessions, ON by default.
+const gradChk = document.querySelector('[data-act="batch-grad"]');
+try { gradChk.checked = localStorage.getItem('posterflow.batchGradient') !== '0'; } catch (_) { gradChk.checked = true; }
+gradChk.addEventListener('change', () => { try { localStorage.setItem('posterflow.batchGradient', gradChk.checked ? '1' : '0'); } catch (_) {} });
 
 // ---- state ----
 let model = { singles: [], seasons: [], sequels: [], seqGroup: null };
@@ -504,10 +508,12 @@ async function runBatch() {
   let ok = 0;
   try {
     // Gradient safety net: turn a forgotten-off GRADIENT group on (and leave it on) before exporting.
-    try {
-      if (await runExclusive(() => TL.forceGradientVisible(app.activeDocument, constants)))
-        note('The GRADIENT group had hidden layers — turned on and left visible in the PSD.');
-    } catch (_) {}
+    if (gradChk.checked) {
+      try {
+        if (await runExclusive(() => TL.forceGradientVisible(app.activeDocument, constants)))
+          note('The GRADIENT group had hidden layers — turned on and left visible in the PSD.');
+      } catch (_) {}
+    }
     // Manual collection logos (c/c1/c2… in LOGO) stay hidden for non-collection exports.
     try { await runExclusive(() => TL.hideManualCollectionLogos(app.activeDocument, constants)); } catch (_) {}
     for (let i = 0; i < batchItems.length; i++) {

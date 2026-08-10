@@ -29,10 +29,8 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .batchmsg { color: var(--uxp-host-text-color); font-size: 10px; margin-bottom: 4px; }
 .batchrow { display: flex; align-items: center; }
 .batchrow.hidden { display: none; }
-/* Inputs are deliberately BLACK with light text in EVERY theme: a current PS UXP regression
-   renders a dark block behind input text that no CSS can remove (transparency, appearance and
-   spectrum-token overrides are all ignored) - opaque black is the only clean rendering. */
-.batchinput { flex: 1; min-width: 0; background: #000; border: 1px solid var(--uxp-host-border-color); color: #e6e6e6; border-radius: 4px; padding: 4px 6px; }
+/* sp-textfield size="s" like the link bar fields - theme-native, no CSS height (it clips). */
+.batchrow sp-textfield.batchinput { flex: 1; min-width: 0; }
 .batchinput.hidden { display: none; }
 .batchrow sp-action-button { margin-left: 4px; }
 .batchhelp { color: var(--uxp-host-text-color-secondary); font-size: 10px; line-height: 1.6; margin-top: 4px; }

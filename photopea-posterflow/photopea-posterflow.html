@@ -80,6 +80,7 @@
   .batchrow { display: flex; gap: 5px; }
   .batchrow.hidden { display: none; }
   .batchhelp { color: #99aaaa; font-size: 10px; line-height: 1.6; margin-top: 5px; }
+  .gradopt { display: block; color: #99aaaa; font-size: 10px; margin-top: 5px; }
   .batchhelp b { color: #cfcfcf; font-weight: 600; }
   .batchhelp.hidden { display: none; }
   .batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6;
@@ -106,6 +107,7 @@
       <button class="btn" data-act="batch-help" title="Show what you can type here">?</button>
       <button class="btn" data-act="batch-cancel" title="Cancel">✕</button>
     </div>
+    <label class="gradopt"><input type="checkbox" data-act="batch-grad" /> force gradient visible</label>
     <div class="batchhelp hidden"></div>
   </div>
   <div class="singles hidden"></div>
@@ -926,6 +928,10 @@
   const batchRow = document.querySelector('.batchrow');
   const batchInput = document.querySelector('.batchinput');
   const batchHelp = document.querySelector('.batchhelp');
+  // Gradient safety net opt-out — remembered across sessions, ON by default.
+  const gradChk = document.querySelector('[data-act="batch-grad"]');
+  try { gradChk.checked = localStorage.getItem('posterflow.batchGradient') !== '0'; } catch (_) { gradChk.checked = true; }
+  gradChk.addEventListener('change', () => { try { localStorage.setItem('posterflow.batchGradient', gradChk.checked ? '1' : '0'); } catch (_) {} });
   const modeBtn = () => batchMode === 'seasons' ? seasonsBtn : batchBtn;    // the bolt driving the current run
   const resetBolts = () => { batchBtn.textContent = '⚡'; seasonsBtn.textContent = '⚡'; };
 
@@ -1274,7 +1280,7 @@
     batchBusy = true; modeBtn().textContent = '…'; batchRow.classList.add('hidden');
     batchWarnings.forEach((w) => note('Batch: ' + w));
     batchIdx = 0; batchOk = 0; batchColMove = null;
-    send(GRAD_SCRIPT);   // gradient safety net first (runs before the first item — messages are ordered)
+    if (gradChk.checked) send(GRAD_SCRIPT);   // gradient safety net first (runs before the first item — messages are ordered)
     batchNext();
   };
 

@@ -27,11 +27,12 @@
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
     <div class="batchrow hidden">
-      <input class="batchinput" type="text" placeholder="e.g. 8, 0-5, or blank = all" />
+      <sp-textfield size="s" class="batchinput" placeholder="e.g. 8, 0-5, or blank = all"></sp-textfield>
       <sp-action-button size="s" data-act="batch-run">Run</sp-action-button>
       <sp-action-button size="s" data-act="batch-help" title="Show what you can type here">?</sp-action-button>
       <sp-action-button size="s" data-act="batch-cancel" title="Cancel">✕</sp-action-button>
     </div>
+    <sp-checkbox size="s" class="gradopt" data-act="batch-grad">Force gradient visible</sp-checkbox>
     <div class="batchhelp hidden"></div>
   </div>
 
