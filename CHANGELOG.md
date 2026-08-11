@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.9] - 2026-08-11
+### Added
+- Photopea/Photoshop Plugins: a Square Art crop tool in both plugins — opens the poster art in its own tab, crops a preset or marquee square (upscaling smaller art), and saves to the squareart folder (in-app) or downloads (standalone) before returning to the PSD.
+- Photopea/Photoshop Plugins: a Poster button pulls the selected poster layers out of a PSD as JPGs named by tag (Season N / Specials / plain title), saved to a new poster export folder configured under "PSD Poster Pulls" in Maker Tools.
+- Plugins: the batch gradient safety net is now optional — a "Force gradient visible" checkbox in the batch bar (on by default, remembered across sessions).
+
+### Changed
+- Plugins: Fit Poster and New Export now cover-fit posters down to the template's bottom guide.
+- Photoshop Plugin: the panel now matches the Photopea layout, with theme-aware colors and a fixed message strip reporting saved/downloaded exports.
+
 ## [0.13.8] - 2026-08-08
 ### Added
 - Security: a new `ALLOWED_FRAME_ORIGINS` environment variable lets you list origins (e.g. an Organizr dashboard) allowed to embed the app in an iframe. Leaving it empty keeps the strict same-origin default.
