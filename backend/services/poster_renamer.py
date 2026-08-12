@@ -1221,20 +1221,18 @@ class PosterRenameService:
                 actual_destination = os.path.join(destination_dir, "tmp")
                 log_info(LogTags.RENAMER, f"Using temp folder for border replacer workflow: {actual_destination}")
             
-            # Create destination directory if it doesn't exist
+            # Create destination directory if it doesn't exist (parents included, so a
+            # first run creates the destination itself, not just tmp/ inside it)
             if not os.path.exists(actual_destination):
-                # When using tmp/ staging, the parent (destination_dir) must already exist.
-                # We cannot create a volume mount point — that must be configured in Docker.
-                if use_temp_folder:
-                    parent_dir = destination_dir
-                    if not os.path.exists(parent_dir):
-                        raise FileNotFoundError(
-                            f"Destination directory does not exist: {parent_dir}\n"
-                            "Please ensure the destination folder is created and mounted correctly in Docker."
-                        )
                 log_info(LogTags.RENAMER, f"Creating destination directory: {actual_destination}")
                 if not dry_run:
-                    os.makedirs(actual_destination, exist_ok=True)
+                    try:
+                        os.makedirs(actual_destination, exist_ok=True)
+                    except OSError as e:
+                        raise FileNotFoundError(
+                            f"Could not create destination directory: {actual_destination} ({e})\n"
+                            "Please ensure the destination folder is mounted correctly in Docker."
+                        ) from e
             
             if dry_run:
                 log_info(LogTags.RENAMER, "DRY RUN - NO CHANGES WILL BE MADE")

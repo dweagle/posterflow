@@ -327,6 +327,29 @@ def test_artwork_bypasses_tmp_staging(test_db, tmp_path, monkeypatch):
     assert not (dest / "tmp" / item / "logo.png").exists()  # never staged in tmp/
 
 
+def test_missing_destination_is_created_with_tmp_staging(test_db, tmp_path, monkeypatch):
+    """A first run has no destination yet, and tmp/ staging is always on for the poster pass —
+    so it must create the destination, not refuse (Detect tells users to rename first)."""
+    posrc = tmp_path / "Movie One.jpg"; posrc.write_bytes(b"p")
+    matched = {"collections": [], "series": [],
+               "movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123,
+                           "folder": "Movie One (2024)", "files": [str(posrc)]}]}
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 123, "folder": "Movie One (2024)"}],
+             "series": [], "collections": []}
+
+    monkeypatch.setattr("services.poster_renamer.get_assets_files", lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [str(posrc)]}], {"m": []}))
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "config" / "posters" / "assets"  # nothing in this chain exists
+    result = PosterRenameService(test_db).rename_posters(
+        source_dirs=["/x"], destination_dir=str(dest), asset_folders=True,
+        dry_run=False, use_temp_folder=True, media_dict=media,
+    )
+
+    assert result["success"]
+    assert (dest / "tmp" / "Movie One (2024)" / "poster.jpg").is_file()
+
+
 def test_placement_without_artwork_index_is_poster_only(test_db, tmp_path):
     # No artwork index -> unchanged poster-only behavior (the default path).
     src = tmp_path / "src"; f = _seed(src, ["Inception (2010).jpg"])
