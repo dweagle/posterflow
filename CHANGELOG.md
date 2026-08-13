@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.10] - 2026-08-12
+### Changed
+- Drives: bulk poster and artwork subscribe/unsubscribe now adds and removes drives from Drive Priority automatically
+- Poster Renamer: destination directory creation now has error handling for tmp staging.
+- Match Report: verdicts report yearless folders
+- WebSocket: a disconnect watcher detects dropped connections and cleans them up.
+
 ## [0.13.9] - 2026-08-11
 ### Added
 - Photopea/Photoshop Plugins: a Square Art crop tool in both plugins — opens the poster art in its own tab, crops a preset or marquee square (upscaling smaller art), and saves to the squareart folder (in-app) or downloads (standalone) before returning to the PSD.
