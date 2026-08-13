@@ -990,6 +990,12 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 "Sonarr lists this series as upcoming — it has not aired yet, so a community "
                 "poster may simply not exist.")
 
+    # A yearless *arr folder deprives the matcher of the folder's title and year.
+    yearless_folders = [
+        r for r in (library.get("records") or [])
+        if r.get("folder") and not r.get("folder_has_year")
+    ]
+
     matched = [c for c in candidates if c["matched"]]
     best = matched[0] if matched else (candidates[0] if candidates else None)
 
@@ -1069,6 +1075,13 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                     "A poster with this title has no '(Year)' in its filename. Without a year, "
                     "Posterflow can't confirm it is the same item (and treats yearless posters as "
                     "collection posters). Add the year to the filename, e.g. 'Title (2020).jpg'.")
+            elif yearless_folders:
+                folders = ", ".join(f"[{r.get('instance')}] {r['folder']}" for r in yearless_folders)
+                add("problem", "yearless_folder",
+                    "A poster matches by title but the years don't line up - the "
+                    f"Sonarr/Radarr folder has no '(Year)' in its path ({folders}), so the "
+                    "folder can't confirm the poster's year. Rename the folder to include "
+                    "the year, e.g. 'Title (2020)', or fix the year in the poster filename.")
             else:
                 add("problem", "year_mismatch",
                     "A poster matches by title but the years don't line up. Add the year to the "
@@ -1086,6 +1099,13 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
             f"({report['drives']['total_assets']:,} assets scanned, "
             f"{report['candidates']['considered']} similar titles checked). It may not exist yet, "
             "live on a drive you don't subscribe to, or your last sync may predate it.")
+        if yearless_folders:
+            folders = ", ".join(f"[{r.get('instance')}] {r['folder']}" for r in yearless_folders)
+            add("info", "yearless_folder",
+                f"The Sonarr/Radarr folder has no '(Year)' in its path ({folders}), so the "
+                "folder's name can't be used for matching — a poster named after the folder "
+                "instead of the title won't be found. Renaming the folder to 'Title (Year)' "
+                "gives posters another name and year to match on.")
 
     # Things the priority-drive scan cannot see, checked only when nothing matched.
     for hit in report.get("nonpriority_hits") or []:

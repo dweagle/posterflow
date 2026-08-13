@@ -107,9 +107,29 @@ class TestVerdicts:
         report = _base_report(candidates={"considered": 3, "shown": 1, "omitted": 0, "items": [candidate]})
         assert _build_verdicts(report)[0]["code"] == "year_mismatch"
 
+    def test_year_mismatch_names_yearless_arr_folder(self):
+        candidate = _candidate(matched=False, reason=YEAR_MISMATCH)
+        report = _base_report(candidates={"considered": 3, "shown": 1, "omitted": 0, "items": [candidate]})
+        report["library"]["records"][0]["folder"] = "RIPLEY"
+        report["library"]["records"][0]["folder_has_year"] = False
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "yearless_folder"
+        assert "[Sonarr] RIPLEY" in verdicts[0]["message"]
+        assert "year_mismatch" not in [v["code"] for v in verdicts]
+
     def test_no_candidates_reports_not_found(self):
         verdicts = _build_verdicts(_base_report())
         assert verdicts[0]["code"] == "no_poster_found"
+
+    def test_no_candidates_notes_yearless_arr_folder(self):
+        report = _base_report()
+        report["library"]["records"][0]["folder"] = "RIPLEY"
+        report["library"]["records"][0]["folder_has_year"] = False
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "no_poster_found"
+        note = next(v for v in verdicts if v["code"] == "yearless_folder")
+        assert note["level"] == "info"
+        assert "[Sonarr] RIPLEY" in note["message"]
 
     def test_not_in_sources_leads(self):
         report = _base_report()
