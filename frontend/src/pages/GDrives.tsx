@@ -42,7 +42,8 @@ function GDrives() {
   const [editingDrive, setEditingDrive] = useState<Drive | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{show: boolean, driveId: number | null, driveName: string, isDeprecated: boolean}>({show: false, driveId: null, driveName: '', isDeprecated: false})
-  const [priorityPrompt, setPriorityPrompt] = useState<{show: boolean, driveId: number | null, driveName: string}>({show: false, driveId: null, driveName: ''})
+  // bulkStyle set = the prompt covers a Subscribe All batch rather than one drive
+  const [priorityPrompt, setPriorityPrompt] = useState<{show: boolean, driveIds: number[], label: string, bulkStyle: string | null}>({show: false, driveIds: [], label: '', bulkStyle: null})
   const [promptDontAsk, setPromptDontAsk] = useState(false)
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{show: boolean, driveId: number | null, driveName: string}>({show: false, driveId: null, driveName: ''})
@@ -147,7 +148,7 @@ function GDrives() {
     if (pref === 'never') { void doSubscribe(driveId, false); return }
     const drive = drives.find(d => d.id === driveId)
     setPromptDontAsk(false)
-    setPriorityPrompt({ show: true, driveId, driveName: drive?.display_name || drive?.name || 'this drive' })
+    setPriorityPrompt({ show: true, driveIds: [driveId], label: drive?.display_name || drive?.name || 'this drive', bulkStyle: null })
   }
 
   const doSubscribe = async (driveId: number, addToPriority: boolean) => {
@@ -168,10 +169,12 @@ function GDrives() {
   }
 
   const resolvePriorityPrompt = (add: boolean) => {
-    if (promptDontAsk) setAddToPriorityPref('poster', add ? 'always' : 'never')
-    const id = priorityPrompt.driveId
-    setPriorityPrompt({ show: false, driveId: null, driveName: '' })
-    if (id != null) void doSubscribe(id, add)
+    const { driveIds, bulkStyle } = priorityPrompt
+    if (!bulkStyle && promptDontAsk) setAddToPriorityPref('poster', add ? 'always' : 'never')
+    setPriorityPrompt({ show: false, driveIds: [], label: '', bulkStyle: null })
+    if (driveIds.length === 0) return
+    if (bulkStyle) { void doBulkSubscribe(bulkStyle, driveIds, add); return }
+    void doSubscribe(driveIds[0], add)
   }
 
   const handleUnsubscribe = (driveId: number) => {
@@ -186,7 +189,7 @@ function GDrives() {
       const result = await unsubscribeDrive(driveId, deleteDownloadedFiles)
       fetchDrives()
       if (result.removed_from_priority) {
-        showToast('Unsubscribed. This drive was removed from Asset Manager → Drive Priority.', 'info')
+        showToast('Unsubscribed and removed from Drive Priority. Its position is saved for when you resubscribe.', 'info')
       }
       if (deleteDownloadedFiles) {
         showToast(result.files_deleted
@@ -196,7 +199,7 @@ function GDrives() {
     }, 'Error unsubscribing:')
   }
 
-  const handleBulkSubscribe = async (styleType: string) => {
+  const handleBulkSubscribe = (styleType: string) => {
     const drivesToSubscribe = drives.filter(d => {
       if (styleType === 'custom') return d.is_custom && !d.subscribed
       return d.style_type === styleType && !d.subscribed
@@ -207,17 +210,30 @@ function GDrives() {
       return
     }
 
+    // Bulk always asks, even when the single-drive pref is set
+    const driveIds = drivesToSubscribe.map(d => d.id)
+    setPromptDontAsk(false)
+    setPriorityPrompt({ show: true, driveIds, label: `${driveIds.length} ${styleType} drive(s)`, bulkStyle: styleType })
+  }
+
+  const doBulkSubscribe = async (styleType: string, driveIds: number[], addToPriority: boolean) => {
     try {
-      const results = await Promise.all(drivesToSubscribe.map(d => subscribeDrive(d.id)))
+      // One at a time — parallel subscribes race the shared priority setting
+      const results = []
+      for (const id of driveIds) results.push(await subscribeDrive(id, addToPriority))
       const restoredCount = results.filter(result => result.restored_to_priority).length
-      const newCount = drivesToSubscribe.length - restoredCount
+      const addedCount = results.filter(result => result.added_to_priority).length
       fetchDrives()
-      showToast(`Subscribed to ${drivesToSubscribe.length} ${styleType} drives`)
+      showToast(`Subscribed to ${driveIds.length} ${styleType} drives`)
       if (restoredCount > 0) {
-        showToast(`${restoredCount} drive(s) were restored to Asset Manager → Drive Priority`, 'info')
+        showToast(`${restoredCount} drive(s) restored to their previous spot in Asset Manager → Drive Priority`, 'info')
       }
-      if (newCount > 0) {
-        showToast(`Remember to add ${newCount} new drive(s) to your list in Asset Manager → Drive Priority`, 'info')
+      if (addedCount > 0) {
+        showToast(`${addedCount} drive(s) added to Asset Manager → Drive Priority`, 'info')
+      }
+      // Only nag when the user declined adding them
+      if (!addToPriority && driveIds.length - restoredCount > 0) {
+        showToast(`Remember to add ${driveIds.length - restoredCount} drive(s) to your list in Asset Manager → Drive Priority`, 'info')
       }
     } catch (error) {
       console.error('Error bulk subscribing:', error)
@@ -237,12 +253,14 @@ function GDrives() {
     }
 
     try {
-      const results = await Promise.all(drivesToUnsubscribe.map(d => unsubscribeDrive(d.id)))
+      // Sequential — the prune rewrites the same shared setting
+      const results = []
+      for (const d of drivesToUnsubscribe) results.push(await unsubscribeDrive(d.id))
       const prunedCount = results.filter(result => result.removed_from_priority).length
       fetchDrives()
       showToast(`Unsubscribed from ${drivesToUnsubscribe.length} ${styleType} drives`)
       if (prunedCount > 0) {
-        showToast(`${prunedCount} drive(s) were also removed from Asset Manager → Drive Priority`, 'info')
+        showToast(`${prunedCount} drive(s) left Drive Priority — unsubscribed drives can't stay in the list. Their positions are saved for when you resubscribe.`, 'info')
       }
     } catch (error) {
       console.error('Error bulk unsubscribing:', error)
@@ -916,23 +934,27 @@ function GDrives() {
       <ConfirmDialog
         isOpen={priorityPrompt.show}
         title="Add to Drive Priority?"
-        message={`Also add "${priorityPrompt.driveName}" to your Drive Priority list so it's used for matching? You can reorder or remove it anytime in Asset Manager → Drive Priority.`}
+        message={priorityPrompt.bulkStyle
+          ? `Also add ${priorityPrompt.label} to your Drive Priority list so they're used for matching? You can reorder or remove them anytime in Asset Manager → Drive Priority.`
+          : `Also add "${priorityPrompt.label}" to your Drive Priority list so it's used for matching? You can reorder or remove it anytime in Asset Manager → Drive Priority.`}
         confirmText="Add to Priority"
         cancelText="Just Subscribe"
         variant="info"
         onConfirm={() => resolvePriorityPrompt(true)}
         onCancel={() => resolvePriorityPrompt(false)}
       >
-        <label className="delete-files-checkbox">
-          <input type="checkbox" checked={promptDontAsk} onChange={(e) => setPromptDontAsk(e.target.checked)} />
-          <span>Don't ask again for poster drives</span>
-        </label>
+        {!priorityPrompt.bulkStyle && (
+          <label className="delete-files-checkbox">
+            <input type="checkbox" checked={promptDontAsk} onChange={(e) => setPromptDontAsk(e.target.checked)} />
+            <span>Don't ask again for poster drives</span>
+          </label>
+        )}
       </ConfirmDialog>
 
       <ConfirmDialog
         isOpen={unsubscribeConfirm.show}
         title="Unsubscribe from Drive?"
-        message={`Stop syncing "${unsubscribeConfirm.driveName}"? Posters placed from it are removed on the next rename + cleanup run.`}
+        message={`Stop syncing "${unsubscribeConfirm.driveName}"? It leaves your Drive Priority list (its position is saved for a resubscribe), and posters placed from it are removed on the next rename + cleanup run.`}
         confirmText="Unsubscribe"
         cancelText="Cancel"
         variant="info"

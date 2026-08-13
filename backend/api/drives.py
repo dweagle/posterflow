@@ -7,6 +7,7 @@ from uuid import uuid4
 import traceback
 import shutil
 import json
+import threading
 from pydantic import BaseModel, ConfigDict, field_serializer
 from datetime import datetime, timezone
 
@@ -19,11 +20,15 @@ from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
 from services.drive_loader import get_drive_descriptions
+from util.drive_priority import restore_drive_position, stash_drive_position
 
 router = APIRouter(prefix="/api/drives", tags=["drives"])
 
 SETTING_POSTER_DRIVE_PRIORITY = "poster_drive_priority"
 SETTING_POSTER_DRIVE_PRIORITY_REMOVED = "poster_drive_priority_removed"
+
+# Serializes read-modify-write of the priority blob; must be held across the commit
+_PRIORITY_LOCK = threading.Lock()
 
 
 def _load_removed_priority_map(db: Session) -> Dict[str, int]:
@@ -71,70 +76,47 @@ def _prune_drive_from_priority(db: Session, drive_id: int) -> bool:
     if not isinstance(drive_ids, list):
         return False
 
-    removed_index = None
-    filtered_drive_ids = []
-    for index, existing_id in enumerate(drive_ids):
-        if str(existing_id) == str(drive_id):
-            if removed_index is None:
-                removed_index = index
-            continue
-        filtered_drive_ids.append(existing_id)
-
-    if removed_index is None:
+    new_ids, new_map, removed = stash_drive_position(drive_ids, _load_removed_priority_map(db), drive_id)
+    if not removed:
         return False
 
-    priority_data["drive_ids"] = filtered_drive_ids
+    priority_data["drive_ids"] = new_ids
     if "enabled_styles" not in priority_data or not isinstance(priority_data.get("enabled_styles"), list):
         priority_data["enabled_styles"] = ["MM2K", "CL2K", "Custom"]
 
-    removed_map = _load_removed_priority_map(db)
-    removed_map[str(drive_id)] = removed_index
-
     upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
-    _save_removed_priority_map(db, removed_map)
+    _save_removed_priority_map(db, new_map)
     return True
 
 
 def _restore_drive_to_priority(db: Session, drive_id: int) -> bool:
     """Reinsert a previously-pruned drive into poster priority if a saved position exists."""
     removed_map = _load_removed_priority_map(db)
-    removed_index = removed_map.pop(str(drive_id), None)
-
-    if removed_index is None:
-        if removed_map:
-            _save_removed_priority_map(db, removed_map)
+    if str(drive_id) not in removed_map:
         return False
 
     priority_setting = get_setting(db, SETTING_POSTER_DRIVE_PRIORITY)
-    if not priority_setting or not priority_setting.value:
-        _save_removed_priority_map(db, removed_map)
-        return False
-
-    try:
-        priority_data = json.loads(priority_setting.value)
-    except json.JSONDecodeError:
-        _save_removed_priority_map(db, removed_map)
-        log_warning(LogTags.DRIVES, "Skipping priority restore due to invalid poster_drive_priority JSON")
-        return False
+    priority_data: Dict[str, Any] = {}
+    if priority_setting and priority_setting.value:
+        try:
+            priority_data = json.loads(priority_setting.value)
+        except json.JSONDecodeError:
+            log_warning(LogTags.DRIVES, "Skipping priority restore due to invalid poster_drive_priority JSON")
+            return False
 
     drive_ids = priority_data.get("drive_ids", [])
     if not isinstance(drive_ids, list):
-        _save_removed_priority_map(db, removed_map)
-        return False
+        drive_ids = []
 
-    if any(str(existing_id) == str(drive_id) for existing_id in drive_ids):
-        _save_removed_priority_map(db, removed_map)
-        return False
-
-    insert_index = max(0, min(int(removed_index), len(drive_ids)))
-    drive_ids.insert(insert_index, drive_id)
-    priority_data["drive_ids"] = drive_ids
-    if "enabled_styles" not in priority_data or not isinstance(priority_data.get("enabled_styles"), list):
-        priority_data["enabled_styles"] = ["MM2K", "CL2K", "Custom"]
-
-    upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
-    _save_removed_priority_map(db, removed_map)
-    return True
+    new_ids, new_map, restored = restore_drive_position(drive_ids, removed_map, drive_id)
+    if restored:
+        priority_data["drive_ids"] = new_ids
+        if "enabled_styles" not in priority_data or not isinstance(priority_data.get("enabled_styles"), list):
+            priority_data["enabled_styles"] = ["MM2K", "CL2K", "Custom"]
+        upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
+    if new_map != removed_map:
+        _save_removed_priority_map(db, new_map)
+    return restored
 
 
 def _append_drive_to_priority(db: Session, drive_id: int) -> bool:
@@ -274,11 +256,12 @@ def subscribe_drive(drive_id: int, add_to_priority: bool = False, db: Session = 
         raise HTTPException(status_code=404, detail="Drive not found")
 
     drive.subscribed = True
-    restored_to_priority = _restore_drive_to_priority(db, drive.id)
-    added_to_priority = False
-    if add_to_priority and not restored_to_priority:
-        added_to_priority = _append_drive_to_priority(db, drive.id)
-    db.commit()
+    with _PRIORITY_LOCK:
+        restored_to_priority = _restore_drive_to_priority(db, drive.id)
+        added_to_priority = False
+        if add_to_priority and not restored_to_priority:
+            added_to_priority = _append_drive_to_priority(db, drive.id)
+        db.commit()
     db.refresh(drive)
 
     log_message = f"Subscribed to drive: {drive.name} ({drive.style_type})"
@@ -328,26 +311,30 @@ def unsubscribe_drive(drive_id: int, delete_files: bool = False, db: Session = D
         raise HTTPException(status_code=404, detail="Drive not found")
 
     drive.subscribed = False
-    removed_from_priority = _prune_drive_from_priority(db, drive.id)
 
-    files_deleted = False
     poster_records_deleted = 0
+    folder_path = None
     if delete_files:
         folder_path = drive.get_local_path(validate=False)
         poster_records_deleted = db.query(Poster).filter(Poster.drive_id == drive.drive_id).delete()
-        if folder_path.exists():
-            try:
-                shutil.rmtree(folder_path)
-                files_deleted = True
-                log_info(LogTags.DRIVES, f"Deleted folder: {folder_path}")
-            except Exception as e:
-                log_error(LogTags.DRIVES, f"Failed to delete folder {folder_path}: {e}\n{traceback.format_exc()}")
         drive.sync_file_count = 0
         drive.last_files_transferred = 0
         drive.last_synced = None
 
-    db.commit()
+    with _PRIORITY_LOCK:
+        removed_from_priority = _prune_drive_from_priority(db, drive.id)
+        db.commit()
     db.refresh(drive)
+
+    # Outside the lock so a big folder delete can't stall other requests
+    files_deleted = False
+    if folder_path is not None and folder_path.exists():
+        try:
+            shutil.rmtree(folder_path)
+            files_deleted = True
+            log_info(LogTags.DRIVES, f"Deleted folder: {folder_path}")
+        except Exception as e:
+            log_error(LogTags.DRIVES, f"Failed to delete folder {folder_path}: {e}\n{traceback.format_exc()}")
 
     log_message = f"Unsubscribed from drive: {drive.name}"
     if removed_from_priority:
@@ -514,8 +501,9 @@ def delete_drive(
     
     # Delete drive record
     db.delete(drive)
-    removed_from_priority = _prune_drive_from_priority(db, drive.id)
-    db.commit()
+    with _PRIORITY_LOCK:
+        removed_from_priority = _prune_drive_from_priority(db, drive.id)
+        db.commit()
     
     log_msg = f"Deleted {drive_type} drive: {drive_name} ({poster_count} poster records)"
     if files_deleted:

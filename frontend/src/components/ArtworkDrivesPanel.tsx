@@ -56,6 +56,8 @@ function ArtworkDrivesPanel() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; driveId: number | null; driveName: string; isDeprecated: boolean }>({ show: false, driveId: null, driveName: '', isDeprecated: false })
   const [deleteFiles, setDeleteFiles] = useState(false)
   const [subscribePrompt, setSubscribePrompt] = useState<{ driveId: number; driveName: string; askPriority: boolean } | null>(null)
+  // Subscribe All asks the priority question once for the batch; types stay per-drive
+  const [bulkPriorityPrompt, setBulkPriorityPrompt] = useState<{ show: boolean; driveIds: number[] }>({ show: false, driveIds: [] })
   const [typeRemoval, setTypeRemoval] = useState<{ driveId: number; driveName: string; updates: DriveUpdates; removed: ArtworkType[]; fileCount: number } | null>(null)
   const { showToast } = useToast()
   const { jobs } = useAppEvents()
@@ -138,12 +140,16 @@ function ArtworkDrivesPanel() {
     try {
       const result = await subscribeArtworkDrive(driveId, addToPriority, types)
       fetchDrives()
-      showToast(
-        result?.added_to_priority
-          ? 'Subscribed and added to Asset Manager → Drive Priority (Artwork).'
-          : 'Subscribed. Remember to add this drive to your list in Asset Manager → Drive Priority (Artwork).',
-        'info',
-      )
+      if (result?.restored_to_priority) {
+        showToast('Subscribed. This drive was restored to its previous position in Asset Manager → Drive Priority (Artwork).', 'info')
+      } else {
+        showToast(
+          result?.added_to_priority
+            ? 'Subscribed and added to Asset Manager → Drive Priority (Artwork).'
+            : 'Subscribed. Remember to add this drive to your list in Asset Manager → Drive Priority (Artwork).',
+          'info',
+        )
+      }
       if (types && types.length < ARTWORK_TYPES.length) {
         showToast(`Syncing ${types.map(t => ARTWORK_TYPE_LABELS[t].toLowerCase()).join(' + ')} only.`, 'info')
       }
@@ -157,24 +163,52 @@ function ArtworkDrivesPanel() {
 
   const handleUnsubscribe = async (driveId: number) => {
     try {
-      await unsubscribeArtworkDrive(driveId)
+      const result = await unsubscribeArtworkDrive(driveId)
       fetchDrives()
-      showToast('Unsubscribed.', 'info')
+      showToast(
+        result?.removed_from_priority
+          ? 'Unsubscribed and removed from Drive Priority (Artwork). Its position is saved for when you resubscribe.'
+          : 'Unsubscribed.',
+        'info',
+      )
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to unsubscribe'), 'error')
     }
   }
 
-  const handleBulkSubscribe = async () => {
+  const handleBulkSubscribe = () => {
     const targets = drives.filter(d => !d.subscribed && !d.is_deprecated)
     if (targets.length === 0) {
       showToast('All artwork drives are already subscribed', 'info')
       return
     }
+    setBulkPriorityPrompt({ show: true, driveIds: targets.map(d => d.id) })
+  }
+
+  const resolveBulkPriorityPrompt = (add: boolean) => {
+    const { driveIds } = bulkPriorityPrompt
+    setBulkPriorityPrompt({ show: false, driveIds: [] })
+    if (driveIds.length > 0) void doBulkSubscribe(driveIds, add)
+  }
+
+  const doBulkSubscribe = async (driveIds: number[], addToPriority: boolean) => {
     try {
-      await Promise.all(targets.map(d => subscribeArtworkDrive(d.id)))
+      // One at a time — parallel subscribes race the shared priority setting
+      const results = []
+      for (const id of driveIds) results.push(await subscribeArtworkDrive(id, addToPriority))
+      const restoredCount = results.filter(r => r?.restored_to_priority).length
+      const addedCount = results.filter(r => r?.added_to_priority).length
       fetchDrives()
-      showToast(`Subscribed to ${targets.length} artwork drive(s)`)
+      showToast(`Subscribed to ${driveIds.length} artwork drive(s)`)
+      if (restoredCount > 0) {
+        showToast(`${restoredCount} drive(s) restored to their previous spot in Asset Manager → Drive Priority (Artwork)`, 'info')
+      }
+      if (addedCount > 0) {
+        showToast(`${addedCount} drive(s) added to Asset Manager → Drive Priority (Artwork)`, 'info')
+      }
+      if (!addToPriority && driveIds.length - restoredCount > 0) {
+        showToast(`Remember to add ${driveIds.length - restoredCount} drive(s) to your list in Asset Manager → Drive Priority (Artwork)`, 'info')
+      }
     } catch (error) {
       console.error('Error bulk subscribing:', error)
       showToast('Failed to subscribe to some drives', 'error')
@@ -188,9 +222,15 @@ function ArtworkDrivesPanel() {
       return
     }
     try {
-      await Promise.all(targets.map(d => unsubscribeArtworkDrive(d.id)))
+      // Sequential — the prune rewrites the same shared setting
+      const results = []
+      for (const d of targets) results.push(await unsubscribeArtworkDrive(d.id))
+      const prunedCount = results.filter(r => r?.removed_from_priority).length
       fetchDrives()
       showToast(`Unsubscribed from ${targets.length} artwork drive(s)`)
+      if (prunedCount > 0) {
+        showToast(`${prunedCount} drive(s) left Drive Priority (Artwork) — unsubscribed drives can't stay in the list. Their positions are saved for when you resubscribe.`, 'info')
+      }
     } catch (error) {
       console.error('Error bulk unsubscribing:', error)
       showToast('Failed to unsubscribe from some drives', 'error')
@@ -653,6 +693,17 @@ function ArtworkDrivesPanel() {
           <span>Also delete all artwork files from disk (cannot be undone)</span>
         </label>
       </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={bulkPriorityPrompt.show}
+        title="Add to Drive Priority?"
+        message={`Also add ${bulkPriorityPrompt.driveIds.length} artwork drive(s) to your Drive Priority list so they're used for matching? You can reorder or remove them anytime in Asset Manager → Drive Priority.`}
+        confirmText="Add to Priority"
+        cancelText="Just Subscribe"
+        variant="info"
+        onConfirm={() => resolveBulkPriorityPrompt(true)}
+        onCancel={() => resolveBulkPriorityPrompt(false)}
+      />
     </>
   )
 }

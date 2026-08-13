@@ -50,6 +50,8 @@ export const getArtworkDrives = async (): Promise<ArtworkDrive[]> => {
 export interface ArtworkDriveSubscriptionResponse {
   message?: string
   added_to_priority?: boolean
+  restored_to_priority?: boolean
+  removed_from_priority?: boolean
   scan_job_id?: number | null
   removed_types?: ArtworkType[]
   files_deleted?: number
@@ -64,7 +66,7 @@ export const subscribeArtworkDrive = async (
   return postData(`/api/artwork-drives/${driveId}/subscribe?add_to_priority=${addToPriority}`, { synced_types: syncedTypes ?? null })
 }
 
-export const unsubscribeArtworkDrive = async (driveId: number) => {
+export const unsubscribeArtworkDrive = async (driveId: number): Promise<ArtworkDriveSubscriptionResponse> => {
   return postData(`/api/artwork-drives/${driveId}/unsubscribe`)
 }
 

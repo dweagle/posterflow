@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, ReactNode } from 'react'
 import './Toast.css'
 
 interface Toast {
@@ -23,9 +23,11 @@ export const useToast = () => {
 
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
+  // Counter, not Date.now() — same-millisecond toasts must not share ids/keys
+  const nextIdRef = useRef(0)
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    const id = Date.now()
+    const id = ++nextIdRef.current
     setToasts(prev => [...prev, { id, message, type }])
     
     setTimeout(() => {

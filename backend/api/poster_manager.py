@@ -713,9 +713,12 @@ def save_drive_priority(
             "enabled_styles": priority.enabled_styles
         }
 
-        upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
-
-        db.commit()
+        from api.drives import _PRIORITY_LOCK, _save_removed_priority_map
+        with _PRIORITY_LOCK:
+            upsert_setting(db, SETTING_POSTER_DRIVE_PRIORITY, json.dumps(priority_data))
+            # A manual reorder defines a fresh order — stale stashed positions no longer apply
+            _save_removed_priority_map(db, {})
+            db.commit()
 
         log_user_action(
             f"Updated drive priority: {len(priority.drive_ids)} drives, {len(priority.enabled_styles)} styles enabled",

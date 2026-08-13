@@ -6,6 +6,7 @@ from uuid import uuid4
 import traceback
 import shutil
 import json
+import threading
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 from datetime import datetime, timezone
 
@@ -20,10 +21,15 @@ from services.artwork_drive_loader import get_artwork_drive_descriptions, load_a
 from services.artwork_sync import ArtworkSyncService
 from modules.artwork_sync import run_artwork_sync_job
 from modules.sync import run_sync_all_job
+from util.drive_priority import restore_drive_position, stash_drive_position
 
 router = APIRouter(prefix="/api/artwork-drives", tags=["artwork-drives"])
 
 SETTING_ARTWORK_DRIVE_PRIORITY = "artwork_drive_priority"
+SETTING_ARTWORK_DRIVE_PRIORITY_REMOVED = "artwork_drive_priority_removed"
+
+# Serializes read-modify-write of the artwork priority blob; must be held across the commit
+_ARTWORK_PRIORITY_LOCK = threading.Lock()
 
 
 class ArtworkDriveSchema(BaseModel):
@@ -205,6 +211,89 @@ def _apply_synced_types(db: Session, drive: ArtworkDrive, types: List[str]) -> D
     return {"removed_types": removed, "files_deleted": files_deleted, "records_deleted": records_deleted}
 
 
+def _load_removed_artwork_priority_map(db: Session) -> Dict[str, int]:
+    """Load temporarily removed artwork drive positions keyed by drive id."""
+    setting = get_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY_REMOVED)
+    if not setting or not setting.value:
+        return {}
+
+    try:
+        removed_data = json.loads(setting.value)
+    except json.JSONDecodeError:
+        log_warning(LogTags.DRIVES, "Skipping removed artwork-priority restore due to invalid JSON")
+        return {}
+
+    if not isinstance(removed_data, dict):
+        return {}
+
+    normalized: Dict[str, int] = {}
+    for key, value in removed_data.items():
+        try:
+            normalized[str(key)] = max(0, int(value))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _save_removed_artwork_priority_map(db: Session, removed_map: Dict[str, int]) -> None:
+    """Persist removed artwork drive positions for future resubscribe restores."""
+    upsert_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY_REMOVED, json.dumps(removed_map))
+
+
+def _prune_artwork_drive_from_priority(db: Session, drive_id: int) -> bool:
+    """Remove an artwork drive from artwork priority, remembering where it sat."""
+    setting = get_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY)
+    if not setting or not setting.value:
+        return False
+
+    try:
+        data = json.loads(setting.value)
+    except json.JSONDecodeError:
+        log_warning(LogTags.DRIVES, "Skipping artwork priority prune due to invalid artwork_drive_priority JSON")
+        return False
+
+    drive_ids = data.get("drive_ids", [])
+    if not isinstance(drive_ids, list):
+        return False
+
+    new_ids, new_map, removed = stash_drive_position(drive_ids, _load_removed_artwork_priority_map(db), drive_id)
+    if not removed:
+        return False
+
+    data["drive_ids"] = new_ids
+    upsert_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY, json.dumps(data))
+    _save_removed_artwork_priority_map(db, new_map)
+    return True
+
+
+def _restore_artwork_drive_to_priority(db: Session, drive_id: int) -> bool:
+    """Reinsert a previously-pruned artwork drive at its remembered position."""
+    removed_map = _load_removed_artwork_priority_map(db)
+    if str(drive_id) not in removed_map:
+        return False
+
+    setting = get_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY)
+    data: Dict[str, Any] = {}
+    if setting and setting.value:
+        try:
+            data = json.loads(setting.value)
+        except json.JSONDecodeError:
+            log_warning(LogTags.DRIVES, "Skipping artwork priority restore due to invalid artwork_drive_priority JSON")
+            return False
+
+    drive_ids = data.get("drive_ids", [])
+    if not isinstance(drive_ids, list):
+        drive_ids = []
+
+    new_ids, new_map, restored = restore_drive_position(drive_ids, removed_map, drive_id)
+    if restored:
+        data["drive_ids"] = new_ids
+        upsert_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY, json.dumps(data))
+    if new_map != removed_map:
+        _save_removed_artwork_priority_map(db, new_map)
+    return restored
+
+
 def _append_artwork_drive_to_priority(db: Session, drive_id: int) -> bool:
     """Append an artwork drive to the bottom of artwork priority if not already present."""
     setting = get_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY)
@@ -245,15 +334,21 @@ def subscribe_artwork_drive(
     requested_types = request.synced_types if request else None
     selected_types = _normalize_synced_types(requested_types) if requested_types else drive.synced_type_list
     cleanup = _apply_synced_types(db, drive, selected_types)
-    added_to_priority = _append_artwork_drive_to_priority(db, drive.id) if add_to_priority else False
-    db.commit()
+    with _ARTWORK_PRIORITY_LOCK:
+        restored_to_priority = _restore_artwork_drive_to_priority(db, drive.id)
+        added_to_priority = False
+        if add_to_priority and not restored_to_priority:
+            added_to_priority = _append_artwork_drive_to_priority(db, drive.id)
+        db.commit()
     db.refresh(drive)
 
     types_note = "" if len(selected_types) == len(ARTWORK_TYPES) else f" ({', '.join(selected_types)} only)"
-    log_user_action(
-        f"Subscribed to artwork drive: {drive.name}{types_note}"
-        + (" (added to artwork priority)" if added_to_priority else "")
-    )
+    priority_note = ""
+    if restored_to_priority:
+        priority_note = " (restored to artwork priority)"
+    elif added_to_priority:
+        priority_note = " (added to artwork priority)"
+    log_user_action(f"Subscribed to artwork drive: {drive.name}{types_note}{priority_note}")
 
     # Auto-scan the local folder for drives with GDrive sync disabled, so files already on
     # disk are indexed immediately after subscribe (mirrors poster subscribe behaviour).
@@ -280,6 +375,7 @@ def subscribe_artwork_drive(
         "message": f"Subscribed to {drive.name}",
         "drive": ArtworkDriveSchema.model_validate(drive).model_dump(mode="json"),
         "added_to_priority": added_to_priority,
+        "restored_to_priority": restored_to_priority,
         "scan_job_id": scan_job_id,
         **cleanup,
     }
@@ -287,19 +383,25 @@ def subscribe_artwork_drive(
 
 @router.post("/{drive_id}/unsubscribe")
 def unsubscribe_artwork_drive(drive_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Unsubscribe from an artwork drive."""
+    """Unsubscribe from an artwork drive, pruning it from artwork priority (position stashed)."""
     drive = db.query(ArtworkDrive).filter(ArtworkDrive.id == drive_id).first()
     if not drive:
         raise HTTPException(status_code=404, detail="Artwork drive not found")
 
     drive.subscribed = False
-    db.commit()
+    with _ARTWORK_PRIORITY_LOCK:
+        removed_from_priority = _prune_artwork_drive_from_priority(db, drive.id)
+        db.commit()
     db.refresh(drive)
 
-    log_user_action(f"Unsubscribed from artwork drive: {drive.name}")
+    log_user_action(
+        f"Unsubscribed from artwork drive: {drive.name}"
+        + (" (removed from artwork priority)" if removed_from_priority else "")
+    )
     return {
         "message": f"Unsubscribed from {drive.name}",
         "drive": ArtworkDriveSchema.model_validate(drive).model_dump(mode="json"),
+        "removed_from_priority": removed_from_priority,
     }
 
 
@@ -419,9 +521,14 @@ def delete_artwork_drive(
         db.query(Artwork).filter(Artwork.artwork_drive_id == drive.drive_id).delete(synchronize_session=False)
 
     db.delete(drive)
-    db.commit()
+    with _ARTWORK_PRIORITY_LOCK:
+        removed_from_priority = _prune_artwork_drive_from_priority(db, drive.id)
+        db.commit()
 
-    log_user_action(f"Deleted artwork drive: {drive_name} ({artwork_records} artwork records)" + (" and files" if files_deleted else ""))
+    log_message = f"Deleted artwork drive: {drive_name} ({artwork_records} artwork records)" + (" and files" if files_deleted else "")
+    if removed_from_priority:
+        log_message += " (removed from artwork priority)"
+    log_user_action(log_message)
     return {"message": f"Deleted {drive_name}", "artwork_records_deleted": artwork_records, "files_deleted": files_deleted}
 
 
@@ -535,8 +642,11 @@ def get_artwork_drive_priority(db: Session = Depends(get_db)) -> Dict[str, Any]:
 def save_artwork_drive_priority(priority: ArtworkDrivePriorityRequest, db: Session = Depends(get_db)) -> Dict[str, bool]:
     """Save the artwork drive priority order."""
     try:
-        upsert_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY, json.dumps({"drive_ids": priority.drive_ids}))
-        db.commit()
+        with _ARTWORK_PRIORITY_LOCK:
+            upsert_setting(db, SETTING_ARTWORK_DRIVE_PRIORITY, json.dumps({"drive_ids": priority.drive_ids}))
+            # A manual reorder defines a fresh order — stale stashed positions no longer apply
+            _save_removed_artwork_priority_map(db, {})
+            db.commit()
         log_user_action(f"Updated artwork drive priority: {len(priority.drive_ids)} drives")
         return {"success": True}
     except Exception as e:

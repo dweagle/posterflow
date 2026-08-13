@@ -264,6 +264,61 @@ def test_subscribe_without_stashed_priority_does_not_restore(client, test_db):
     assert updated_priority["drive_ids"] == []
 
 
+def _seed_priority_drives(test_db, count, prefix):
+    drives = [Drive(name=f"{prefix} {i}", drive_id=f"{prefix}-{i}", style_type="MM2K", subscribed=True) for i in range(count)]
+    test_db.add_all(drives)
+    test_db.commit()
+    for d in drives:
+        test_db.refresh(d)
+    ids = [d.id for d in drives]
+    test_db.add(Setting(key="poster_drive_priority", value=json.dumps({"drive_ids": ids, "enabled_styles": ["MM2K", "CL2K", "Custom"]})))
+    test_db.commit()
+    return ids
+
+
+def _poster_priority_ids(test_db):
+    return json.loads(test_db.query(Setting).filter(Setting.key == "poster_drive_priority").first().value)["drive_ids"]
+
+
+def test_unsubscribe_all_then_resubscribe_all_restores_original_order(client, test_db):
+    """Bulk round-trip must come back in the original order, not reversed by stale stash indices."""
+    ids = _seed_priority_drives(test_db, 5, "order")
+
+    for did in ids:
+        assert client.post(f"/api/drives/{did}/unsubscribe").status_code == 200
+    assert _poster_priority_ids(test_db) == []
+    for did in ids:
+        assert client.post(f"/api/drives/{did}/subscribe").status_code == 200
+
+    assert _poster_priority_ids(test_db) == ids
+
+
+def test_adjacent_unsubscribes_restore_to_original_positions(client, test_db):
+    """Removing neighbours shifts later indices; restore must not swap them."""
+    ids = _seed_priority_drives(test_db, 5, "adj")
+
+    for did in (ids[1], ids[2]):
+        client.post(f"/api/drives/{did}/unsubscribe")
+    for did in (ids[1], ids[2]):
+        client.post(f"/api/drives/{did}/subscribe")
+
+    assert _poster_priority_ids(test_db) == ids
+
+
+def test_manual_reorder_clears_stashed_positions(client, test_db):
+    """A manual priority save defines a fresh order; earlier stashes must not apply anymore."""
+    ids = _seed_priority_drives(test_db, 3, "fresh")
+
+    client.post(f"/api/drives/{ids[0]}/unsubscribe")
+    reordered = [ids[2], ids[1]]
+    response = client.post("/api/posterflow/priority", json={"drive_ids": reordered, "enabled_styles": ["MM2K"]})
+    assert response.status_code == 200
+
+    response = client.post(f"/api/drives/{ids[0]}/subscribe")
+    assert response.json()["restored_to_priority"] is False
+    assert _poster_priority_ids(test_db) == reordered
+
+
 def test_delete_drive_prunes_drive_from_poster_priority(client, test_db):
     drive = Drive(
         name="Custom Drive",

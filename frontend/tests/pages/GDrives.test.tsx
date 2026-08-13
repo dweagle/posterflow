@@ -183,6 +183,66 @@ describe('GDrives', () => {
     })
   })
 
+  // Overlapping subscribes race the shared drive-priority setting server-side
+  it('bulk subscribe issues one request at a time', async () => {
+    const user = userEvent.setup()
+    mockGetDrives.mockResolvedValue([
+      buildDrive({ id: 1, name: 'Drive A', style_type: 'CL2K', subscribed: false }),
+      buildDrive({ id: 2, name: 'Drive B', style_type: 'CL2K', subscribed: false }),
+      buildDrive({ id: 3, name: 'Drive C', style_type: 'CL2K', subscribed: false }),
+    ])
+    let inFlight = 0
+    let maxInFlight = 0
+    mockSubscribeDrive.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      inFlight -= 1
+      return { added_to_priority: true }
+    })
+
+    renderWithRouter(<GDrives />)
+    await screen.findByText('Drive A')
+    await user.click(screen.getAllByRole('button', { name: 'Subscribe All' })[0])
+    await user.click(screen.getByRole('button', { name: 'Add to Priority' }))
+
+    await waitFor(() => expect(mockSubscribeDrive).toHaveBeenCalledTimes(3))
+    expect(maxInFlight).toBe(1)
+  })
+
+  it('does not nag about adding drives the user just chose to add', async () => {
+    const user = userEvent.setup()
+    mockGetDrives.mockResolvedValue([buildDrive({ id: 1, style_type: 'CL2K', subscribed: false })])
+    // added_to_priority false (already listed) used to leak a "Remember to add" toast.
+    mockSubscribeDrive.mockResolvedValue({ added_to_priority: false })
+
+    renderWithRouter(<GDrives />)
+    await screen.findByText('Test Drive')
+    await user.click(screen.getAllByRole('button', { name: 'Subscribe All' })[0])
+    await user.click(screen.getByRole('button', { name: 'Add to Priority' }))
+
+    await waitFor(() => expect(mockSubscribeDrive).toHaveBeenCalledWith(1, true))
+    expect(mockShowToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('Remember to add'), 'info',
+    )
+  })
+
+  it('still nags when the user declines to add them', async () => {
+    const user = userEvent.setup()
+    mockGetDrives.mockResolvedValue([buildDrive({ id: 1, style_type: 'CL2K', subscribed: false })])
+    mockSubscribeDrive.mockResolvedValue({})
+
+    renderWithRouter(<GDrives />)
+    await screen.findByText('Test Drive')
+    await user.click(screen.getAllByRole('button', { name: 'Subscribe All' })[0])
+    await user.click(screen.getByRole('button', { name: 'Just Subscribe' }))
+
+    await waitFor(() => expect(mockSubscribeDrive).toHaveBeenCalledWith(1, false))
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith(
+      expect.stringContaining('Remember to add'), 'info',
+    ))
+  })
+
   it('shows info toast when bulk unsubscribe has no subscribed drives', async () => {
     const user = userEvent.setup()
     mockGetDrives.mockResolvedValue([buildDrive({ style_type: 'CL2K', subscribed: false })])

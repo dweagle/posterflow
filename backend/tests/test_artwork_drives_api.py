@@ -183,3 +183,104 @@ def test_resubscribe_without_types_keeps_the_previous_selection(client, test_db)
     response = client.post(f"/api/artwork-drives/{drive.id}/subscribe")
     assert response.status_code == 200
     assert response.json()["drive"]["synced_types"] == ["logo"]
+
+
+def _artwork_priority(test_db, drive_ids):
+    from models.setting import upsert_setting
+    upsert_setting(test_db, "artwork_drive_priority", json.dumps({"drive_ids": drive_ids}))
+    test_db.commit()
+
+
+def _make_artwork_drives(test_db, names):
+    drives = [ArtworkDrive(name=n, drive_id=n, subscribed=True, sync_enabled=True) for n in names]
+    test_db.add_all(drives)
+    test_db.commit()
+    for d in drives:
+        test_db.refresh(d)
+    return drives
+
+
+def test_unsubscribe_artwork_drive_prunes_from_priority(client, test_db):
+    """Unsubscribe removes the drive from artwork priority and stashes its position."""
+    one, two = _make_artwork_drives(test_db, ["art-prio-1", "art-prio-2"])
+    _artwork_priority(test_db, [one.id, two.id])
+
+    response = client.post(f"/api/artwork-drives/{one.id}/unsubscribe")
+    assert response.status_code == 200
+    assert response.json()["removed_from_priority"] is True
+
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [two.id]
+    assert json.loads(get_setting(test_db, "artwork_drive_priority_removed").value) == {str(one.id): 0}
+
+
+def test_resubscribe_artwork_drive_restores_its_old_position(client, test_db):
+    """A resubscribed artwork drive goes back where it sat, not onto the bottom."""
+    one, two, three = _make_artwork_drives(test_db, ["art-pos-1", "art-pos-2", "art-pos-3"])
+    _artwork_priority(test_db, [one.id, two.id, three.id])
+
+    client.post(f"/api/artwork-drives/{two.id}/unsubscribe")
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [one.id, three.id]
+
+    response = client.post(f"/api/artwork-drives/{two.id}/subscribe")
+    assert response.status_code == 200
+    assert response.json()["restored_to_priority"] is True
+
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [one.id, two.id, three.id]
+    assert json.loads(get_setting(test_db, "artwork_drive_priority_removed").value) == {}
+
+
+def test_delete_artwork_drive_prunes_from_priority(client, test_db):
+    """Deleting a custom artwork drive must not leave its id dangling in the priority list."""
+    one, two = _make_artwork_drives(test_db, ["art-del-1", "art-del-2"])
+    one.is_custom = True
+    test_db.commit()
+    _artwork_priority(test_db, [one.id, two.id])
+
+    response = client.delete(f"/api/artwork-drives/{one.id}?confirm=true")
+    assert response.status_code == 200
+
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [two.id]
+
+
+def test_artwork_unsubscribe_all_then_resubscribe_all_restores_order(client, test_db):
+    """Bulk round-trip must come back in the original order, not reversed by stale stash indices."""
+    drives = _make_artwork_drives(test_db, [f"art-order-{i}" for i in range(4)])
+    ids = [d.id for d in drives]
+    _artwork_priority(test_db, ids)
+
+    for did in ids:
+        client.post(f"/api/artwork-drives/{did}/unsubscribe")
+    for did in ids:
+        client.post(f"/api/artwork-drives/{did}/subscribe")
+
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == ids
+
+
+def test_artwork_manual_reorder_clears_stashed_positions(client, test_db):
+    """A manual priority save defines a fresh order; earlier stashes must not apply anymore."""
+    one, two, three = _make_artwork_drives(test_db, ["art-fresh-1", "art-fresh-2", "art-fresh-3"])
+    _artwork_priority(test_db, [one.id, two.id, three.id])
+
+    client.post(f"/api/artwork-drives/{one.id}/unsubscribe")
+    response = client.post("/api/artwork-drives/priority", json={"drive_ids": [three.id, two.id]})
+    assert response.status_code == 200
+
+    response = client.post(f"/api/artwork-drives/{one.id}/subscribe")
+    assert response.json()["restored_to_priority"] is False
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [three.id, two.id]
+
+
+def test_subscribe_artwork_drive_appends_when_asked(client, test_db):
+    """add_to_priority appends a never-before-listed drive to the bottom."""
+    one, two = _make_artwork_drives(test_db, ["art-app-1", "art-app-2"])
+    two.subscribed = False
+    test_db.commit()
+    _artwork_priority(test_db, [one.id])
+
+    response = client.post(f"/api/artwork-drives/{two.id}/subscribe?add_to_priority=true")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["added_to_priority"] is True
+    assert payload["restored_to_priority"] is False
+
+    assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [one.id, two.id]
