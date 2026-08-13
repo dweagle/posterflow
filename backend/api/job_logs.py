@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from core.config import settings
 from core.logging import log_warning, log_error, LogTags
+from core.websocket import shutdown_event, watch_disconnect
 from fastapi.responses import FileResponse
 import asyncio
 import re
@@ -177,6 +178,8 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
 
     await websocket.accept()
 
+    disconnected, watcher = watch_disconnect(websocket)
+
     logs_dir = Path(settings.log_file).parent
     log_file = logs_dir / job_type / f"{job_type}.log"
 
@@ -198,6 +201,8 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
 
         while True:
             await asyncio.sleep(0.5)
+            if shutdown_event.is_set() or disconnected.is_set():
+                return
             now = asyncio.get_running_loop().time()
 
             if not log_file.exists():
@@ -243,3 +248,5 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
         return
     except Exception:
         return
+    finally:
+        watcher.cancel()

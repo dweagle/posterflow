@@ -12,7 +12,7 @@ from pathlib import Path
 from websockets.exceptions import ConnectionClosed
 from uvicorn.protocols.utils import ClientDisconnected
 from core.config import settings
-from core.websocket import WebSocketConnectionManager, shutdown_event
+from core.websocket import WebSocketConnectionManager, shutdown_event, watch_disconnect
 from database import get_db, SessionLocal
 from models.job import (
     Job,
@@ -103,13 +103,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     _ws.active_connections.append(websocket)
 
     _ws.check_warning()
-    
+
+    disconnected, watcher = watch_disconnect(websocket)
+
     try:
         previous_snapshot: str | None = None
         last_heartbeat_time = asyncio.get_running_loop().time()
 
         # Send updates with adaptive intervals while connection is active
         while True:
+            if disconnected.is_set():
+                return
             # Create new DB session for this update
             db = SessionLocal()
             try:
@@ -181,6 +185,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         # Log unexpected errors with full traceback
         log_error(LogTags.WEBSOCKET, f"Job WS #{conn_id} unexpected error: {e}\n{traceback.format_exc()}", conn_id=conn_id)
     finally:
+        watcher.cancel()
         # ALWAYS remove connection from list, regardless of how we exit
         if websocket in _ws.active_connections:
             _ws.active_connections.remove(websocket)

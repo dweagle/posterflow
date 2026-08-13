@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.logging import log_warning, log_error, log_user_action, LogTags
 from core.log_stream import hub
-from core.websocket import WebSocketConnectionManager, shutdown_event
+from core.websocket import WebSocketConnectionManager, shutdown_event, watch_disconnect
 from database import get_db
 from models.setting import upsert_setting
 import re
@@ -208,6 +208,8 @@ async def websocket_logs(websocket: WebSocket) -> None:
     _ws.active_connections.append(websocket)
     _ws.check_warning()
 
+    disconnected, watcher = watch_disconnect(websocket)
+
     # Subscribe BEFORE reading the backlog: lines logged during the file read may then
     # appear twice at the seam, but none can be lost (the reverse order drops them).
     queue = hub.subscribe()
@@ -226,7 +228,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
                 return
         
         while True:
-            if shutdown_event.is_set():
+            if shutdown_event.is_set() or disconnected.is_set():
                 return
             try:
                 first = await asyncio.wait_for(queue.get(), timeout=0.5)
@@ -259,6 +261,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
         # Silently handle errors during streaming - don't log to avoid recursion
         return
     finally:
+        watcher.cancel()
         hub.unsubscribe(queue)
         # ALWAYS remove connection from list, regardless of how we exit
         if websocket in _ws.active_connections:

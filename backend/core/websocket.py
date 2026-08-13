@@ -15,6 +15,24 @@ _DEFAULT_ENTER_THRESHOLD = 12
 _DEFAULT_EXIT_THRESHOLD = 8
 
 
+def watch_disconnect(websocket: WebSocket) -> tuple[asyncio.Event, asyncio.Task]:
+    """Background reader that flags client disconnect for send-only WS loops."""
+    disconnected = asyncio.Event()
+
+    async def _reader() -> None:
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+        except Exception:
+            pass
+        finally:
+            disconnected.set()
+
+    return disconnected, asyncio.create_task(_reader())
+
+
 class WebSocketConnectionManager:
     """
     Manages a pool of active WebSocket connections with high-count warnings.
