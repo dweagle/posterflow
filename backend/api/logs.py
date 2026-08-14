@@ -202,8 +202,6 @@ async def websocket_logs(websocket: WebSocket) -> None:
     logged, no file polling, no re-parsing. The log file is only read once per connection,
     for the initial backlog.
     """
-    conn_id = _ws.next_conn_id()
-
     await websocket.accept()
     _ws.active_connections.append(websocket)
     _ws.check_warning()
@@ -263,13 +261,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
     finally:
         watcher.cancel()
         hub.unsubscribe(queue)
-        # ALWAYS remove connection from list, regardless of how we exit
+        # Remove from the active list unless prune_stale() already did (routine race)
         if websocket in _ws.active_connections:
             _ws.active_connections.remove(websocket)
             _ws.check_warning()
-        else:
-            log_warning(
-                LogTags.WEBSOCKET,
-                f"Log WS #{conn_id} not in active list during cleanup",
-                connection_id=conn_id,
-            )

@@ -186,12 +186,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         log_error(LogTags.WEBSOCKET, f"Job WS #{conn_id} unexpected error: {e}\n{traceback.format_exc()}", conn_id=conn_id)
     finally:
         watcher.cancel()
-        # ALWAYS remove connection from list, regardless of how we exit
+        # Remove from the active list unless prune_stale() already did (routine race)
         if websocket in _ws.active_connections:
             _ws.active_connections.remove(websocket)
             _ws.check_warning()
-        else:
-            log_warning(LogTags.WEBSOCKET, f"Job WS #{conn_id} not in active list during cleanup!", conn_id=conn_id)
 
 class JobSchema(BaseModel):
     id: int
