@@ -6,7 +6,7 @@ import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
 import ArtworkDrivesPanel from '../components/ArtworkDrivesPanel'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink, Image, Layers } from 'lucide-react'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink, Image, Layers, BookOpen } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './GDrives.css'
@@ -18,6 +18,12 @@ const driveFolderUrl = (driveId: string): string | null =>
   driveId && !driveId.startsWith('manual-')
     ? `https://drive.google.com/drive/folders/${driveId}`
     : null
+
+const GDRIVES_GUIDE_URL = 'https://dweagle.github.io/posterflow/gdrives/'
+const GUIDE_ANCHORS: Record<string, string> = {
+  CL2K: 'cl2k-style-drives',
+  MM2K: 'mm2k-style-drives',
+}
 
 type CustomDriveModalInput = {
   name: string
@@ -498,6 +504,17 @@ function GDrives() {
             Subscribe to community poster collections from Google Drive. Use <strong>Scheduling</strong> to automate syncs, <strong>Configure</strong> to set your local storage path, and <strong>Reload</strong> to refresh the community drive list.
           </>
         }
+        titleControl={
+          <a
+            className="section-guide-link"
+            href={GDRIVES_GUIDE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open the community drive guide"
+          >
+            <BookOpen size={12} /> Guide
+          </a>
+        }
       >
           <div className="btn-pair">
             <button
@@ -617,7 +634,20 @@ function GDrives() {
           {Object.entries(groupedDrives).map(([type, typeDrives]) => 
             typeDrives.length > 0 ? (
               <div key={type} className="drive-section">
-                <h2 className="section-header">{type} Drives</h2>
+                <h2 className="section-header">
+                  {type} Drives
+                  {GUIDE_ANCHORS[type] && (
+                    <a
+                      className="section-guide-link"
+                      href={`${GDRIVES_GUIDE_URL}#${GUIDE_ANCHORS[type]}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open the ${type} drive guide`}
+                    >
+                      <BookOpen size={12} /> Guide
+                    </a>
+                  )}
+                </h2>
                 <div className="drives-grid">
                   {typeDrives.map(drive => (
                     <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>

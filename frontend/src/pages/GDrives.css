@@ -145,6 +145,12 @@
   transform: scale(0.98);
 }
 
+/* Standalone links keep their natural width so nowrap text wraps to a new row
+   instead of being squeezed out of the button (flex-basis 0 never triggers a wrap). */
+.gdrives .action-buttons > .btn-toolbar.btn-toolbar-link {
+  flex: 1 1 auto;
+}
+
 .gdrives .btn-toolbar.btn-reload {
   display: flex;
   align-items: center;
@@ -235,12 +241,36 @@
 }
 
 .section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
   color: #64b5f6;
   font-size: 1.1rem;
   font-weight: 600;
   margin-bottom: 0.875rem;
   padding-bottom: 0.5rem;
   border-bottom: 2px solid #333;
+}
+
+.section-guide-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #4b5563;
+  border-radius: 999px;
+  background: #2e2e2e;
+  color: #b0bec5;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.section-guide-link:hover {
+  background: #3a3a3a;
+  color: #e8ecef;
+  border-color: #64748b;
 }
 
 .drives-grid {
