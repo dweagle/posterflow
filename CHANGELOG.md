@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-14
+### Added
+- Native install: PosterFlow can now run directly from a source checkout without Docker. Verified on Linux (systemd service) and FreeBSD. Install guide at docs/native-install.md and linked on main readme.md.
+- GDrives: the poster drives page now has links to the community drive recommendations page.
+
+### Changed
+- WebSocket: routine cleanup-race warnings no longer appear in logs when connections close.
+
 ## [0.13.10] - 2026-08-12
 ### Changed
 - Drives: bulk poster and artwork subscribe/unsubscribe now adds and removes drives from Drive Priority automatically
