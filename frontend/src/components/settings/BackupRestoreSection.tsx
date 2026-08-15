@@ -23,6 +23,7 @@ function BackupRestoreSection({
   const [backupPath, setBackupPath] = useState('')
   const [retention, setRetention] = useState('7')
   const [defaultPath, setDefaultPath] = useState('/config/backups')
+  const [isDocker, setIsDocker] = useState(true)
   const [storageSaving, setStorageSaving] = useState(false)
   const [savingToLocation, setSavingToLocation] = useState(false)
 
@@ -36,6 +37,7 @@ function BackupRestoreSection({
           setBackupPath(storage.path)
           setRetention(String(storage.retention))
           setDefaultPath(storage.default_path)
+          if (storage.is_docker !== undefined) setIsDocker(storage.is_docker)
         }
       } catch (error) {
         console.error('Error loading backup storage settings:', error)
@@ -138,7 +140,7 @@ function BackupRestoreSection({
                   placeholder={defaultPath}
                 />
                 <p className="field-hint">
-                  Container path where backups are saved. Leave empty to use the default.
+                  {isDocker ? 'Container path' : 'Absolute path'} where backups are saved. Leave empty to use the default.
                 </p>
               </div>
               <div className="form-group">

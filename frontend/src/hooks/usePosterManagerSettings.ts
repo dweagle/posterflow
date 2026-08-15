@@ -52,7 +52,7 @@ export function usePosterManagerSettings({
     // field silently keeps the old path.
     const resolved: PosterConfig = {
       ...config,
-      destination: config.destination.trim() || DEFAULT_POSTER_DESTINATION,
+      destination: config.destination.trim() || config.default_destination || DEFAULT_POSTER_DESTINATION,
     }
 
     try {

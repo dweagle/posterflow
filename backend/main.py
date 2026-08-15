@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -577,6 +577,9 @@ async def version_update_check() -> dict[str, Any]:
 
 # Check if frontend static files exist
 frontend_dist = Path(__file__).parent / "frontend" / "dist"
+if not frontend_dist.exists():
+    # Source checkouts build the UI at <repo>/frontend/dist; Docker copies it next to the backend
+    frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if frontend_dist.exists():
     # Mount static files (CSS, JS, images, etc.)
     app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="assets")
@@ -586,7 +589,7 @@ if frontend_dist.exists():
     async def serve_frontend(full_path: str) -> Any:
         # Don't catch API routes
         if full_path.startswith("api/"):
-            return {"error": "Not found"}
+            return JSONResponse({"error": "Not found"}, status_code=404)
         
         # If requesting a file with extension and it exists, serve it
         if "." in full_path:
@@ -629,8 +632,8 @@ if __name__ == "__main__":
 
     _config = uvicorn.Config(
         app,
-        host="0.0.0.0",  # nosec B104
-        port=8000,
+        host=settings.host,
+        port=settings.port,
         log_level="warning",
         access_log=False,
         timeout_graceful_shutdown=3,

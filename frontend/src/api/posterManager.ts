@@ -1,12 +1,14 @@
 import client, { getData, postData, putData, deleteData } from './http'
 
 // Poster types and functions
-// Where posters and artwork are renamed to when the destination is left blank. Matches
-// the backend's own fallback (poster_destination default).
+// Display fallback for the blank-destination default until GET /config reports the
+// backend's actual one (default_destination) — native installs root it elsewhere.
 export const DEFAULT_POSTER_DESTINATION = '/config/posters/assets'
 
 export interface PosterConfig {
   destination: string
+  default_destination?: string  // backend's blank-destination fallback, from GET /config
+  is_docker?: boolean  // install type, from GET /config — drives volume-vs-folder help text
   asset_folders: boolean
   dry_run: boolean
   match_threshold: number

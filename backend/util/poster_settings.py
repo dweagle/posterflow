@@ -12,11 +12,12 @@ import json
 
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from models.setting import get_setting_value
 
 SETTING_POSTER_DESTINATION = "poster_destination"
 
-DEFAULT_POSTER_DESTINATION = "/config/posters/assets"
+DEFAULT_POSTER_DESTINATION = str(settings.config_dir / "posters" / "assets")
 
 SETTING_ASSET_INCLUDE = "asset_renamer_include"
 

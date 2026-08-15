@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from database import get_db
+from core.config import running_in_container
 from core.job_queue import job_queue
 from core.logging import LogTags, log_warning, log_error, log_user_action, log_info
 from models.job import (
@@ -538,6 +539,10 @@ def get_rename_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
         dest_dir_setting = get_setting(db, SETTING_POSTER_DESTINATION)
         config["destination"] = dest_dir_setting.value if dest_dir_setting else ""
+        # The effective blank-destination fallback — the UI shows this instead of assuming /config
+        config["default_destination"] = DEFAULT_POSTER_DESTINATION
+        # Lets the UI phrase path help for the install type (volume mounts vs plain folders)
+        config["is_docker"] = running_in_container()
 
         action_type_setting = get_setting(db, SETTING_POSTER_ACTION_TYPE)
         config["action_type"] = action_type_setting.value if action_type_setting else "copy"

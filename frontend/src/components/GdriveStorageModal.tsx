@@ -16,13 +16,19 @@ function GdriveStorageModal({ onClose, variant = 'posters' }: GdriveStorageModal
   const assetNoun = isArtwork ? 'artwork' : 'poster'
 
   const [path, setPath] = useState('')
+  const [defaultPath, setDefaultPath] = useState(DEFAULT_PATH)
+  const [isDocker, setIsDocker] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { showToast } = useToast()
 
   useEffect(() => {
     getStoragePath()
-      .then((data) => setPath(data.path))
+      .then((data) => {
+        setPath(data.path)
+        if (data.default_path) setDefaultPath(data.default_path)
+        if (data.is_docker !== undefined) setIsDocker(data.is_docker)
+      })
       .catch(() => setPath(''))
       .finally(() => setLoading(false))
   }, [])
@@ -60,7 +66,9 @@ function GdriveStorageModal({ onClose, variant = 'posters' }: GdriveStorageModal
             <>
               <p className="gdrive-storage-description">
                 Set the base folder where synced {assetNoun} files will be stored on disk.
-                Leave blank to use the default location inside the <code>/config</code> volume.
+                Leave blank to use the default location inside {isDocker
+                  ? <>the <code>/config</code> volume</>
+                  : "PosterFlow's config directory"}.
               </p>
 
               <div className="form-group">
@@ -70,12 +78,18 @@ function GdriveStorageModal({ onClose, variant = 'posters' }: GdriveStorageModal
                   type="text"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
-                  placeholder={DEFAULT_PATH}
+                  placeholder={defaultPath}
                 />
                 <small>
-                  Default: <code>{DEFAULT_PATH}</code>
-                  {' '}— lives inside your <code>/config</code> volume mount.
-                  Set a custom absolute path if you mount a separate volume.
+                  Default: <code>{defaultPath}</code>
+                  {isDocker ? (
+                    <>
+                      {' '}— lives inside your <code>/config</code> volume mount.
+                      Set a custom absolute path if you mount a separate volume.
+                    </>
+                  ) : (
+                    <> — set a custom absolute path to store {assetNoun} files elsewhere.</>
+                  )}
                 </small>
               </div>
 

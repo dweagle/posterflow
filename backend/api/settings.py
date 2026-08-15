@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import requests
 from database import get_db
 from models.setting import Setting, get_setting, upsert_setting
-from core.config import Settings, settings as app_settings
+from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -1093,11 +1093,15 @@ class GdriveStoragePathRequest(BaseModel):
 
 
 @router.get("/gdrive-storage")
-def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
+def get_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return the current GDrive poster storage path setting."""
     setting = get_setting(db, "gdrive_storage_path")
     current_path = setting.value.strip() if setting and setting.value else ""
-    return {"path": current_path}
+    return {
+        "path": current_path,
+        "default_path": str(app_settings.config_dir / "posters" / "gdrive"),
+        "is_docker": running_in_container(),
+    }
 
 
 @router.post("/gdrive-storage")
@@ -1145,11 +1149,15 @@ def save_gdrive_storage_path(
 
 
 @router.get("/artwork-gdrive-storage")
-def get_artwork_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, str]:
+def get_artwork_gdrive_storage_path(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Return the current GDrive artwork (logo/backdrop/squareart) storage path setting."""
     setting = get_setting(db, "artwork_gdrive_storage_path")
     current_path = setting.value.strip() if setting and setting.value else ""
-    return {"path": current_path}
+    return {
+        "path": current_path,
+        "default_path": str(app_settings.config_dir / "artwork" / "gdrive"),
+        "is_docker": running_in_container(),
+    }
 
 
 @router.post("/artwork-gdrive-storage")
@@ -1214,6 +1222,7 @@ def get_backup_storage(db: Session = Depends(get_db)) -> Dict[str, Any]:
         "path": current_path,
         "retention": get_backup_retention(db),
         "default_path": str(default_backup_dir()),
+        "is_docker": running_in_container(),
     }
 
 

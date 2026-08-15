@@ -1,20 +1,54 @@
+import os
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
+
+
+def _default_config_dir() -> Path:
+    """/config when usable (the Docker volume); XDG data dir for native installs."""
+    docker_dir = Path("/config")
+    if docker_dir.is_dir() and os.access(docker_dir, os.W_OK):
+        return docker_dir
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+    return base / "posterflow"
+
+
+def running_in_container() -> bool:
+    """Docker/Podman detection — lets the UI phrase paths for the install type."""
+    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
+
+
+_CONFIG_DIR = _default_config_dir()
+
+# Always-allowed CORS origins (Photopea save-back depends on being listed here)
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:8357",
+    "http://127.0.0.1:8357",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://www.photopea.com",
+)
+
 
 class Settings(BaseSettings):
     # Application
     app_name: str = "Posterflow"
     debug: bool = False
-    
-    # Paths
-    config_dir: Path = Path("/config")   # Database, rclone config, drives cache
-    gdrive_dir: Path = Path("/config/posters/gdrive")  # Synced GDrive poster folders (overrideable via DB setting)
-    artwork_gdrive_dir: Path = Path("/config/artwork/gdrive")  # Synced GDrive artwork folders (logos/backgrounds/squareart)
-    logs_dir: Path = Path("/config/logs")  # Application logs
 
-    
+    # Paths — config_dir is the root; the others re-derive from it when only CONFIG_DIR is overridden
+    config_dir: Path = _CONFIG_DIR   # Database, rclone config, drives cache
+    gdrive_dir: Path = _CONFIG_DIR / "posters" / "gdrive"  # Synced GDrive poster folders (overrideable via DB setting)
+    artwork_gdrive_dir: Path = _CONFIG_DIR / "artwork" / "gdrive"  # Synced GDrive artwork folders (logos/backgrounds/squareart)
+    logs_dir: Path = _CONFIG_DIR / "logs"  # Application logs
+
+    # Server bind — 8357 is Posterflow's port everywhere; the Docker image pins
+    # PORT=8000 internally so existing 8357:8000 compose mappings keep working
+    host: str = "0.0.0.0"  # nosec B104
+    port: int = 8357
+
     # Database
-    database_url: str = "sqlite:////config/posterflow.db"
+    database_url: str = f"sqlite:///{_CONFIG_DIR / 'posterflow.db'}"
     
     # Jobs
     max_concurrent_jobs: int = 1  # Maximum concurrent sync jobs
@@ -31,8 +65,8 @@ class Settings(BaseSettings):
     rclone_upload_tps_limit: int | None = None
     rclone_upload_pacer_min_sleep: str | None = None
 
-    # CORS
-    cors_origins: str = "http://localhost:8357,http://127.0.0.1:8357,http://localhost:5173,http://127.0.0.1:5173,https://www.photopea.com"
+    # CORS — extra origins appended to the built-in defaults, never replacing them
+    cors_origins: str = ""
 
     # Iframe embedding — comma-separated origins (e.g. an Organizr dashboard) allowed to
     # embed the app; empty keeps the strict X-Frame-Options: SAMEORIGIN default
@@ -40,15 +74,34 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = "INFO"
-    log_file: str = "/config/logs/posterflow.log"
+    log_file: str = str(_CONFIG_DIR / "logs" / "posterflow.log")
     max_log_size: int = 10 * 1024 * 1024  # 10 MB
     backup_count: int = 1
     
     model_config = SettingsConfigDict(case_sensitive=False)
 
+    @model_validator(mode="after")
+    def _rederive_paths(self) -> "Settings":
+        """When CONFIG_DIR is overridden, follow it for every path not itself overridden."""
+        explicit = self.model_fields_set
+        if "config_dir" not in explicit:
+            return self
+        if "gdrive_dir" not in explicit:
+            self.gdrive_dir = self.config_dir / "posters" / "gdrive"
+        if "artwork_gdrive_dir" not in explicit:
+            self.artwork_gdrive_dir = self.config_dir / "artwork" / "gdrive"
+        if "logs_dir" not in explicit:
+            self.logs_dir = self.config_dir / "logs"
+        if "database_url" not in explicit:
+            self.database_url = f"sqlite:///{self.config_dir / 'posterflow.db'}"
+        if "log_file" not in explicit:
+            self.log_file = str(self.logs_dir / "posterflow.log")
+        return self
+
     def get_cors_origins(self) -> list[str]:
-        """Return normalized CORS allowlist from comma-separated config."""
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        """Built-in origins plus any CORS_ORIGINS extras, deduped."""
+        extras = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return list(dict.fromkeys([*_DEFAULT_CORS_ORIGINS, *extras]))
 
 # Create settings instance
 settings = Settings()

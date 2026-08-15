@@ -21,6 +21,7 @@ vi.mock('../../src/components/Toast', () => ({
 vi.mock('../../src/api/client', () => ({
   DEFAULT_POSTER_DESTINATION: '/config/posters/assets',
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
+  getPosterConfig: vi.fn().mockResolvedValue({ default_destination: '/config/posters/assets', is_docker: true }),
   saveSettings: (...args: unknown[]) => mockSaveSettings(...args),
   saveGdriveStoragePath: vi.fn().mockResolvedValue({ path: '/config/posters/gdrive' }),
   saveArtworkGdriveStoragePath: vi.fn().mockResolvedValue({ path: '/config/artwork/gdrive' }),

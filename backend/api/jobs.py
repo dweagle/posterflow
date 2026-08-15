@@ -239,7 +239,6 @@ class StartIdarrSyncRequest(BaseModel):
     mode: str | None = None
 
 
-WORKFLOW_LOG_PATH = Path("/config/logs/workflow/workflow.log")
 WORKFLOW_START_MARKER = "JOB STARTED: Poster Workflow"
 WORKFLOW_END_MARKERS = [
     "Workflow completed",
@@ -247,6 +246,11 @@ WORKFLOW_END_MARKERS = [
     "JOB FAILED",
 ]
 WORKFLOW_TIME_RE = re.compile(r"^(\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})")
+
+
+def _workflow_log_path() -> Path:
+    # Matches the sink layout in core/logging.py: <log dir>/<job_type>/<job_type>.log
+    return Path(settings.log_file).parent / "workflow" / "workflow.log"
 
 
 def _parse_workflow_log_timestamp(line: str) -> datetime | None:
@@ -348,11 +352,12 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> JobSchema:
 @router.get("/workflow/last-run-timeline")
 def get_last_workflow_timeline() -> Dict[str, Any]:
     """Return timeline points from the most recent real workflow run log."""
-    timeline = _extract_last_workflow_timeline(WORKFLOW_LOG_PATH)
+    log_path = _workflow_log_path()
+    timeline = _extract_last_workflow_timeline(log_path)
     if not timeline:
         return {
             "available": False,
-            "source": str(WORKFLOW_LOG_PATH),
+            "source": str(log_path),
             "timeline": [],
             "message": "No workflow timeline found in log file.",
         }
@@ -360,7 +365,7 @@ def get_last_workflow_timeline() -> Dict[str, Any]:
     duration_seconds = timeline[-1]["elapsed_seconds"] if timeline else 0
     return {
         "available": True,
-        "source": str(WORKFLOW_LOG_PATH),
+        "source": str(log_path),
         "points": len(timeline),
         "duration_seconds": duration_seconds,
         "timeline": timeline,

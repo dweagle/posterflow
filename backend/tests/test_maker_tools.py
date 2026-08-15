@@ -1757,8 +1757,8 @@ def test_save_poster_export_invalid_filename_rejected(client, test_db):
 
 def test_serve_psd_export_path_traversal_rejected(client):
     # %2F (encoded slash) is decoded by Starlette's routing layer, which normalises
-    # the path and returns 404 (no matching route). Either 400 or 404 means the
-    # traversal was blocked — the file was never read.
+    # the path so it never matches this route — the fallthrough (SPA catch-all's api/
+    # guard, or bare 404 without a built frontend) blocks it; the file is never read.
     response = client.get("/api/maker-tools/psd-exports/..%2Fetc%2Fpasswd.psd")
     assert response.status_code in (400, 404, 422)
 

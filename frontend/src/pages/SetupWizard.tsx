@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
+import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, getPosterConfig, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -52,6 +52,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [skipSonarr, setSkipSonarr] = useState(false)
   const [skipRadarr, setSkipRadarr] = useState(false)
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+  const [defaultPosterDestination, setDefaultPosterDestination] = useState(DEFAULT_POSTER_DESTINATION)
+  const [isDocker, setIsDocker] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
   const [showRestoreRestartConfirm, setShowRestoreRestartConfirm] = useState(false)
@@ -169,6 +171,16 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
     radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
   })
+
+  // The backend's blank-destination fallback depends on its install layout (Docker vs native)
+  useEffect(() => {
+    getPosterConfig()
+      .then((config) => {
+        if (config.default_destination) setDefaultPosterDestination(config.default_destination)
+        if (config.is_docker !== undefined) setIsDocker(config.is_docker)
+      })
+      .catch(() => {})
+  }, [])
 
   // Fetch existing settings from backend on mount
   useEffect(() => {
@@ -585,7 +597,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleSaveStep5 = async () => {
     setIsSaving(true)
     try {
-      const posterDestination = formData.poster_destination.trim() || DEFAULT_POSTER_DESTINATION
+      const posterDestination = formData.poster_destination.trim() || defaultPosterDestination
       await saveSettings({ poster_destination: posterDestination })
       setStep(6)
     } catch (error) {
@@ -974,8 +986,17 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   onChange={(e) => updateGoogleCreds('gdrive_storage_path', e.target.value)}
                   placeholder="ex. /posters/gdrive"
                 />
-                <small>Leave blank to use default: <code>/config/posters/gdrive</code> — stored inside your <code>/config</code> volume.</small>
-                <small>Set a custom absolute path only if you mount a separate volume for posters (e.g. <code>/posters</code>).</small>
+                {isDocker ? (
+                  <>
+                    <small>Leave blank to use default: <code>/config/posters/gdrive</code> — stored inside your <code>/config</code> volume.</small>
+                    <small>Set a custom absolute path only if you mount a separate volume for posters (e.g. <code>/posters</code>).</small>
+                  </>
+                ) : (
+                  <>
+                    <small>Leave blank to use the default folder inside PosterFlow's config directory.</small>
+                    <small>Set a custom absolute path to store synced posters elsewhere.</small>
+                  </>
+                )}
               </div>
 
               <div className="form-group">
@@ -988,7 +1009,11 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   placeholder="ex. /artwork/gdrive"
                 />
                 <small>Logos, backgrounds, and square art sync here, separately from posters.</small>
-                <small>Leave blank to use default: <code>/config/artwork/gdrive</code> — stored inside your <code>/config</code> volume.</small>
+                {isDocker ? (
+                  <small>Leave blank to use default: <code>/config/artwork/gdrive</code> — stored inside your <code>/config</code> volume.</small>
+                ) : (
+                  <small>Leave blank to use the default folder inside PosterFlow's config directory.</small>
+                )}
               </div>
 
               <div className="button-group">
@@ -1461,8 +1486,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   onChange={(e) => updateGoogleCreds('poster_destination', e.target.value)}
                   placeholder="ex. /kometa/config/assets"
                 />
-                <small>Leave blank to use default: <code>{DEFAULT_POSTER_DESTINATION}</code></small>
-                <small className="destination-warning">⚠️ Where organized and renamed posters will be saved. Must be a mounted volume in your Docker container</small>
+                <small>Leave blank to use default: <code>{defaultPosterDestination}</code></small>
+                <small className="destination-warning">⚠️ Where organized and renamed posters will be saved. {isDocker ? 'Must be a mounted volume in your Docker container' : 'Must be a path PosterFlow can write to'}</small>
               </div>
 
               <div className="button-group">

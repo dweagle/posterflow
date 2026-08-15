@@ -12,8 +12,8 @@ type SettingsTabProps = {
 
 // Posters and artwork are renamed into the same destination, so the example shows both.
 // A blank destination previews the default, which is what saving blank will store.
-function layoutExample(destination: string, assetFolders: boolean): string[] {
-  const dest = (destination.trim() || DEFAULT_POSTER_DESTINATION).replace(/\/+$/, '')
+function layoutExample(destination: string, assetFolders: boolean, defaultDestination: string): string[] {
+  const dest = (destination.trim() || defaultDestination).replace(/\/+$/, '')
   return assetFolders
     ? [`${dest}/Title (2023)/poster.jpg`, `${dest}/Title (2023)/logo.png`]
     : [`${dest}/Title (2023).jpg`, `${dest}/Title (2023) - logo.png`]
@@ -26,6 +26,7 @@ function SettingsTab({
   onSaveConfig,
   onConfigChange,
 }: SettingsTabProps) {
+  const defaultDestination = config?.default_destination || DEFAULT_POSTER_DESTINATION
   return (
     <>
       <Toolbar title="Asset Manager Settings" description="Configure how PosterFlow organizes and renames your poster and artwork files">
@@ -56,17 +57,26 @@ function SettingsTab({
                 posters, logos, backdrops and square art — grouped per movie, show or
                 collection. If you use Kometa, point this at its <code>asset_directory</code> so
                 it picks the files up. Leave blank to use the default:{' '}
-                <code>{DEFAULT_POSTER_DESTINATION}</code>
+                <code>{defaultDestination}</code>
               </small>
               <div className="path-example">
                 <span className="path-example-label">Files land like this:</span>
-                {layoutExample(config.destination, config.asset_folders).map((path) => (
+                {layoutExample(config.destination, config.asset_folders, defaultDestination).map((path) => (
                   <code key={path}>{path}</code>
                 ))}
               </div>
               <small className="standalone-warning">
-                ⚠️ Use the path as PosterFlow's container sees it, not the host path. It must be
-                a mounted volume, and Kometa must see the same folder for its own path.
+                {config.is_docker === false ? (
+                  <>
+                    ⚠️ Use an absolute path PosterFlow can write to. If Kometa runs in Docker,
+                    mount this same folder into its container so both see it.
+                  </>
+                ) : (
+                  <>
+                    ⚠️ Use the path as PosterFlow's container sees it, not the host path. It must be
+                    a mounted volume, and Kometa must see the same folder for its own path.
+                  </>
+                )}
               </small>
             </div>
 

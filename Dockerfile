@@ -18,13 +18,14 @@ ARG BRANCH
 # Use bash with pipefail for safer pipe handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system dependencies; pull latest openssl security patches (orig. CVE-2026-28390; trixie renamed libssl3 -> libssl3t64)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies; upgrade applies every pending Debian security fix at
+# build time (generalizes the old openssl-only CVE-2026-28390 pattern)
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     gosu \
     libcairo2 \
-    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
@@ -32,6 +33,8 @@ COPY --from=rclone/rclone:1.75.0 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
+# Container-internal port — compose files map host 8357 to this; the app's own default is 8357
+ENV PORT=8000
 ENV BRANCH=${BRANCH}
 # Limit glibc memory arenas to reduce fragmentation and improve malloc_trim effectiveness
 ENV MALLOC_ARENA_MAX=2
@@ -71,7 +74,7 @@ COPY --chmod=755 entrypoint.sh /entrypoint.sh
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8000') + '/api/health')" || exit 1
 
 # Container starts as root; entrypoint remaps PUID/PGID then drops to posterflow user
 ENTRYPOINT ["/entrypoint.sh"]

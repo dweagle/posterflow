@@ -399,7 +399,13 @@ export const savePlexLibraryConfig = async (config: PlexLibraryConfig) => {
   return postData('/api/settings/plex-libraries', config)
 }
 
-export const getGdriveStoragePath = async (): Promise<{ path: string }> => {
+export interface GdriveStorageSettings {
+  path: string
+  default_path?: string
+  is_docker?: boolean
+}
+
+export const getGdriveStoragePath = async (): Promise<GdriveStorageSettings> => {
   return getData('/api/settings/gdrive-storage')
 }
 
@@ -411,6 +417,7 @@ export interface BackupStorageSettings {
   path: string
   retention: number
   default_path: string
+  is_docker?: boolean
 }
 
 export const getBackupStorage = async (): Promise<BackupStorageSettings> => {
@@ -421,7 +428,7 @@ export const saveBackupStorage = async (path: string, retention: number): Promis
   return postData('/api/settings/backup-storage', { path, retention })
 }
 
-export const getArtworkGdriveStoragePath = async (): Promise<{ path: string }> => {
+export const getArtworkGdriveStoragePath = async (): Promise<GdriveStorageSettings> => {
   return getData('/api/settings/artwork-gdrive-storage')
 }
 

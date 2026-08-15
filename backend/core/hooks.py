@@ -88,7 +88,7 @@ def _validate_script(filename: str) -> tuple[bool, str]:
         return False, f"Not a file: '{filename}'"
 
     if not os.access(script_path, os.X_OK):
-        return False, f"Script is not executable: '{filename}' — run: chmod +x /config/scripts/{filename}"
+        return False, f"Script is not executable: '{filename}' — run: chmod +x {SCRIPTS_DIR}/{filename}"
 
     try:
         with open(script_path, "rb") as f:
@@ -96,7 +96,7 @@ def _validate_script(filename: str) -> tuple[bool, str]:
         if first_line.endswith(b"\r\n"):
             return False, (
                 f"Script '{filename}' has Windows line endings (CRLF). "
-                f"Convert with: sed -i 's/\\r//' /config/scripts/{filename}"
+                f"Convert with: sed -i 's/\\r//' {SCRIPTS_DIR}/{filename}"
             )
     except OSError:
         pass

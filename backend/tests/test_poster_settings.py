@@ -9,6 +9,7 @@ selection means the same thing everywhere. These pin both contracts.
 
 import json
 
+from core.config import settings
 from models.setting import Setting
 from util.poster_settings import (
     DEFAULT_POSTER_DESTINATION,
@@ -51,10 +52,10 @@ def test_strips_surrounding_whitespace(test_db):
     assert get_poster_destination(test_db) == "/kometa/config/assets"
 
 
-def test_default_matches_the_frontend_constant():
-    """Paired with DEFAULT_POSTER_DESTINATION in frontend/src/api/posterManager.ts,
-    which is what the settings page documents and saves."""
-    assert DEFAULT_POSTER_DESTINATION == "/config/posters/assets"
+def test_default_follows_config_dir():
+    """The blank-destination fallback lives under config_dir so native (non-/config)
+    installs get a writable default; the UI fetches it via GET /config."""
+    assert DEFAULT_POSTER_DESTINATION == str(settings.config_dir / "posters" / "assets")
 
 
 # --- Include selection (one policy for every entry point) ---
