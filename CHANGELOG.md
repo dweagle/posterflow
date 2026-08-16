@@ -6,6 +6,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-16
+### Added
+- Unmatched Assets: modal items can now be sorted by date added or release date (from Sonarr/Radarr, or Plex for collections). Dates populate on the next Unmatched run.
+- Maker Tools: an air-date indicator on the seasons badge flags unaired seasons at a glance.
+- Plugins: the Square Art button now starts with a default 1000×1000 selection. (Photoshop plugin 1.1.1 — reinstall the .ccx to pick it up.)
+
+### Fixed
+- Maker Tools: PSDs with Photoshop 2024+ linked layers (v8) no longer produce exports Photoshop refuses to open — files are saved Photoshop-compatible.
+- Maker Tools: Apple TV art lookups for Japanese shows default to the US store. 
+- Dashboard: layout fixes for the active jobs bar and queue popover.
+
 ## [0.14.0] - 2026-08-14
 ### Added
 - Native install: PosterFlow can now run directly from a source checkout without Docker. Verified on Linux (systemd service) and FreeBSD. Install guide at docs/native-install.md and linked on main readme.md.
