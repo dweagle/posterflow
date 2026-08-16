@@ -416,6 +416,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     getTmdbOriginCountry(item.tmdb_id, item.media_type)
       .then((countries) => {
         for (const iso of countries) {
+          if (iso.toUpperCase() === 'JP') continue  // JP store lists Japanese titles; English queries find nothing there
           const storefront = STOREFRONT_BY_ISO.get(iso.toUpperCase())
           if (storefront) { setAppleTvStorefront(storefront); break }
         }
