@@ -2210,6 +2210,25 @@ def _place_logo(pil: Image.Image, canvas_w: int, canvas_h: int) -> tuple[Image.I
     return white, left, top, density
 
 
+def _downgrade_v8_linked_layers(psd) -> int:
+    """psd-tools reads liFD version-8 smart-object entries (Photoshop 2024+) but silently
+    drops their trailing contentID descriptor on save while still writing version=8;
+    Photoshop then refuses the file as "not compatible". Claim version 7 so the saved
+    entries are self-consistent. Returns the number of entries downgraded."""
+    from psd_tools.constants import Tag
+
+    downgraded = 0
+    tagged = psd._record.layer_and_mask_information.tagged_blocks
+    if tagged is None:
+        return 0
+    for tag in (Tag.LINKED_LAYER1, Tag.LINKED_LAYER2, Tag.LINKED_LAYER3, Tag.LINKED_LAYER_EXTERNAL):
+        for entry in tagged.get_data(tag, None) or []:
+            if entry.version == 8:
+                entry.version = 7
+                downgraded += 1
+    return downgraded
+
+
 def _build_psd(
     poster_bytes_list: list[bytes],
     logo_bytes_list: list[bytes],
@@ -2252,6 +2271,9 @@ def _build_psd(
     if template_path is not None:
         psd = PSDImage.open(str(template_path))
         canvas_w, canvas_h = psd.width, psd.height
+        fixed = _downgrade_v8_linked_layers(psd)
+        if fixed:
+            log_info(LogTags.API, f"Downgraded {fixed} v8 smart-object entr{'y' if fixed == 1 else 'ies'} to v7 for Photoshop compatibility")
     else:
         psd = PSDImage.new("RGB", (canvas_w, canvas_h))
     bottom_guide_y = find_bottom_guide_y(psd)   # None on scratch/guideless PSDs → canvas − 25

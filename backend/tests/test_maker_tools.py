@@ -1277,6 +1277,45 @@ def test_build_psd_backdrop_layer_names_tag_the_backdrop_layer():
     assert any(n.startswith("Test Show (2026) - Backdrop") for n in untagged)
 
 
+@_psd_tools_missing
+def test_downgrade_v8_linked_layers_saves_self_consistent_v7_entries():
+    """Photoshop 2024+ writes liFD version-8 smart-object entries whose trailing contentID
+    descriptor psd-tools drops on save while keeping version=8 — Photoshop then refuses the
+    exported file. The downgrade helper must rewrite them as self-consistent v7 entries."""
+    from io import BytesIO
+    from PIL import Image as PILImage
+    from psd_tools import PSDImage
+    from psd_tools.api.layers import PixelLayer
+    from psd_tools.constants import LinkedLayerType, Tag
+    from psd_tools.psd.linked_layer import LinkedLayer
+    from psd_tools.psd.tagged_blocks import TaggedBlocks
+    from api.maker_tools import _downgrade_v8_linked_layers
+
+    entry = LinkedLayer(
+        kind=LinkedLayerType.DATA, version=8, uuid="0123456789abcdef0123456789abcdef",
+        filename="Logo.png\x00", filetype=b"png ", data=b"fake-embedded-bytes",
+        child_id="\x00", mod_time=0.0, lock_state=0,
+    )
+    psd = PSDImage.new("RGB", (4, 4))
+    # a layerless PSD round-trips badly in psd-tools regardless of linked layers
+    psd._layers.insert(0, PixelLayer.frompil(PILImage.new("RGB", (4, 4)), psd, name="L", top=0, left=0))
+    blocks = TaggedBlocks()
+    blocks.set_data(Tag.LINKED_LAYER2, [entry])
+    psd._record.layer_and_mask_information.tagged_blocks = blocks
+
+    assert _downgrade_v8_linked_layers(psd) == 1
+    assert entry.version == 7
+
+    buf = BytesIO()
+    psd.save(buf)
+    buf.seek(0)
+    reread = PSDImage.open(buf)
+    entries = reread._record.layer_and_mask_information.tagged_blocks.get_data(Tag.LINKED_LAYER2)
+    assert [e.version for e in entries] == [7]
+    assert entries[0].data == b"fake-embedded-bytes"
+    assert _downgrade_v8_linked_layers(reread) == 0
+
+
 # ---------------------------------------------------------------------------
 # Shared placement formula: compute_logo_geometry / compute_poster_fit_geometry /
 # _measure_logo_density. These back both the PSD export and the plugin's
