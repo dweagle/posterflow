@@ -1431,14 +1431,20 @@ def test_measure_logo_density_opaque_vs_transparent():
 # ---------------------------------------------------------------------------
 
 
-def test_psd_export_no_images_streams_blank_psd(client, test_db):
-    """No images selected → blank PSD from the template is exported (no selection required)."""
+def test_psd_export_no_images_streams_template_untouched(client, test_db):
+    """No images selected → the template PSD streams through byte-for-byte, with no
+    psd-tools rewrite (a rewrite can mangle undocumented Photoshop data, e.g. liFD v8)."""
+    import api.maker_tools as _mt
     _seed_tmdb_key(test_db)
-    with patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
+    template = Path(_mt.__file__).parent.parent / "assets" / "default_template.psd"
+    if not template.exists():
+        pytest.skip("bundled default template missing")
+    with patch("api.maker_tools._build_psd") as build_psd:
         response = client.post("/api/maker-tools/tmdb/psd-export", json={"title": "Test", "year": "2026"})
     assert response.status_code == 200
-    assert response.content == b"FAKEPSD"
+    assert response.content == template.read_bytes()
     assert response.headers["content-type"] == "application/octet-stream"
+    build_psd.assert_not_called()
 
 
 def test_psd_export_no_images_no_api_key_still_succeeds(client):
@@ -1446,7 +1452,31 @@ def test_psd_export_no_images_no_api_key_still_succeeds(client):
     with patch("api.maker_tools._build_psd", return_value=b"FAKEPSD"):
         response = client.post("/api/maker-tools/tmdb/psd-export", json={"title": "Test", "year": "2026"})
     assert response.status_code == 200
-    assert response.content == b"FAKEPSD"
+    assert len(response.content) > 0
+
+
+def test_psd_export_use_existing_blank_selection_skips_rewrite_and_self_write(client, test_db):
+    """use_existing + blank selection: the existing PSD is returned untouched — no psd-tools
+    rewrite and no self-write (content and mtime unchanged on disk)."""
+    _seed_tmdb_key(test_db)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db.add(Setting(key="psd_export_folder", value=tmpdir))
+        test_db.commit()
+        existing = Path(tmpdir) / "My Show (2026).psd"
+        existing.write_bytes(b"ORIGINALPSD")
+        mtime_before = existing.stat().st_mtime_ns
+
+        with patch("api.maker_tools._build_psd") as build_psd:
+            response = client.post(
+                "/api/maker-tools/tmdb/psd-export",
+                json={"title": "My Show", "year": "2026", "use_existing": True},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["filename"] == "My Show (2026).psd"
+        build_psd.assert_not_called()
+        assert existing.read_bytes() == b"ORIGINALPSD"
+        assert existing.stat().st_mtime_ns == mtime_before
 
 
 def test_psd_export_invalid_path_no_leading_slash_returns_400(client, test_db):

@@ -2568,7 +2568,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             return JSONResponse(status_code=404, content={"not_found": True, "expected_filename": filename})
         template_path = existing_psd
         output_filename = existing_psd.name
-        log_info(LogTags.API, f"Existing PSD found — adding poster layers: {existing_psd.name}", folder=str(save_dir))
+        log_info(LogTags.API, f"Existing PSD found: {existing_psd.name}", folder=str(save_dir))
     else:
         if save_dir is not None:
             existing = _find_psd_by_title(save_dir, base_stem, payload.tmdb_id)
@@ -2588,34 +2588,49 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
     poster_bytes_list, backdrop_bytes_list, logo_bytes_list = _fetch_export_images(payload, api_key)
 
-    # Optional override to fit posters inside a 25px border while preserving aspect
-    # ratio. Canvas/template/backdrop/logo behavior is unchanged.
-    fit_within_border = (get_setting_value(db, SETTING_PSD_POSTER_FIT_BORDER) or "").lower() == "true"
-    if fit_within_border:
-        log_info(LogTags.API, "Poster fit override enabled: fit within 25px border (top-aligned)")
+    # Pass through byte-for-byte.
+    passthrough = template_path is not None and not all_paths
+    if passthrough:
+        try:
+            psd_bytes = template_path.read_bytes()
+        except OSError as exc:
+            log_error(LogTags.API, f"PSD read failed: {exc}")
+            raise HTTPException(status_code=500, detail=f"Failed to read PSD: {exc}")
+        log_info(LogTags.API, f"No images selected — passing {template_path.name} through untouched")
+    else:
+        # Optional override to fit posters inside a 25px border while preserving aspect
+        # ratio. Canvas/template/backdrop/logo behavior is unchanged.
+        fit_within_border = (get_setting_value(db, SETTING_PSD_POSTER_FIT_BORDER) or "").lower() == "true"
+        if fit_within_border:
+            log_info(LogTags.API, "Poster fit override enabled: fit within 25px border (top-aligned)")
 
-    try:
-        psd_bytes = _build_psd(
-            poster_bytes_list,
-            logo_bytes_list,
-            backdrop_bytes_list=backdrop_bytes_list,
-            fit_within_border=fit_within_border,
-            template_path=template_path,
-            title=payload.title,
-            year=payload.year,
-            poster_layer_names=payload.poster_layer_names,
-            backdrop_layer_names=payload.backdrop_layer_names,
-        )
-    except Exception as exc:
-        log_error(LogTags.API, f"PSD build failed: {exc}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to build PSD: {exc}")
+        try:
+            psd_bytes = _build_psd(
+                poster_bytes_list,
+                logo_bytes_list,
+                backdrop_bytes_list=backdrop_bytes_list,
+                fit_within_border=fit_within_border,
+                template_path=template_path,
+                title=payload.title,
+                year=payload.year,
+                poster_layer_names=payload.poster_layer_names,
+                backdrop_layer_names=payload.backdrop_layer_names,
+            )
+        except Exception as exc:
+            log_error(LogTags.API, f"PSD build failed: {exc}\n{traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to build PSD: {exc}")
 
     # ── Persist to the save folder, or stream as a browser download ──
     if save_dir is not None:
         try:
             save_dir.mkdir(parents=True, exist_ok=True)
-            (save_dir / output_filename).write_bytes(psd_bytes)
-            log_info(LogTags.API, f"PSD saved: {output_filename}", folder=str(save_dir))
+            destination = save_dir / output_filename
+            if passthrough and destination == template_path:
+                # untouched use_existing re-export: already in place
+                log_info(LogTags.API, f"PSD already in place: {output_filename}", folder=str(save_dir))
+            else:
+                destination.write_bytes(psd_bytes)
+                log_info(LogTags.API, f"PSD saved: {output_filename}", folder=str(save_dir))
         except Exception as exc:
             log_warning(LogTags.API, f"PSD save failed: {exc}")
             raise HTTPException(status_code=500, detail=f"Failed to save PSD: {exc}")
