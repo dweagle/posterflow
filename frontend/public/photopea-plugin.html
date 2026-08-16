@@ -124,7 +124,7 @@
   <div class="trimbar sqbar">
     <div class="sqrow">
       <button class="btn pexbtn" data-act="poster-export" title="Export the SELECTED poster layer(s) — one JPG each, named by tag (s1 → Season 1, s0 → Specials, anything else → plain) — to the poster folder, or download">Poster</button>
-      <button class="btn" data-act="squareart" title="Crop square art: click to open the poster art in its own tab, pick a preset (or drag your own square), position it, then press Crop — it saves, closes the tab, and returns to the PSD. If dragging moves pixels instead of the selection outline, press M (Rectangle Select) first.">Square Art</button>
+      <button class="btn" data-act="squareart" title="Crop square art: click to open the poster art in its own tab with a 1000×1000 selection ready — drag it into place (or pick another preset / drag your own square), then press Crop — it saves, closes the tab, and returns to the PSD. If dragging moves pixels instead of the selection outline, press M (Rectangle Select) first.">Square Art</button>
       <button class="btn sqcancel hidden" data-act="sq-cancel" title="Cancel">✕</button>
     </div>
     <span class="sqpresets hidden">
@@ -1549,6 +1549,7 @@
         sqPresets.classList.remove('hidden'); sqCancelBtn.classList.remove('hidden');
         squareArtBtn.textContent = 'Crop';
         note('Opened the poster art in its own tab — pick a preset or drag a square, then press Crop.');
+        placePreset(1000);   // start with a 1000×1000 selection placed — saves a click
       }
     }
     else if (d.startsWith('PFLPEXLIST:')) {

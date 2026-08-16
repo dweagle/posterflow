@@ -388,6 +388,7 @@ async function onSquareArt(ev) {
       sqBusy = false; sqSetUI(true);
       TL.selectTool('marqueeRectTool');
       note('Opened the poster art in its own tab — pick a preset or drag a marquee square, then press Crop.');
+      await onSqPreset(1000);   // start with a 1000×1000 selection placed — saves a click
     } catch (e) { flashSq('✗'); showError(e); await sqCleanup(); }
     return;
   }
