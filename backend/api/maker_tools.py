@@ -1482,9 +1482,12 @@ class TmdbImagesResponse(BaseModel):
 class TmdbSeasonInfo(BaseModel):
     season_number: int
     name: str
-    episode_count: int    # 0 when the seasons came from TVDB, which doesn't publish per-season counts
+    episode_count: int    # -1 when the source couldn't say (a failed TVDB episode lookup)
     air_date: str | None = None
     poster_url: str | None = None
+    # True = at least one dated episode (TVDB) or a premiere date (TMDB); False = listed but
+    # fully undated (announced/TBA); None = couldn't be determined.
+    has_air_date: bool | None = None
 
 
 class TmdbTvDetails(BaseModel):
@@ -1616,11 +1619,12 @@ def _tvdb_season_list(tvdb_id: int, db: Session) -> list[TmdbSeasonInfo] | None:
         TmdbSeasonInfo(
             season_number=r["number"],
             name=r["name"] or ("Specials" if r["number"] == 0 else f"Season {r['number']}"),
-            # Only looked up for specials, where it decides whether the season is real; -1 marks
-            # "not determined" so an unknown is never mistaken for an empty season.
+            # -1 marks "not determined" so an unknown is never mistaken for an empty season.
             episode_count=r.get("episode_count") if r.get("episode_count") is not None else -1,
             air_date=r["year"],       # TVDB gives a year only, not a full date
             poster_url=r["image"] or None,
+            has_air_date=(r["dated_episode_count"] > 0)
+            if isinstance(r.get("dated_episode_count"), int) else None,
         )
         for r in rows
     ]
@@ -1672,12 +1676,14 @@ def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) ->
     for s in (data.get("seasons") or []):
         sn = int(s.get("season_number") or 0)
         poster_path = str(s.get("poster_path") or "")
+        air_date = str(s.get("air_date") or "") or None
         tmdb_seasons.append(TmdbSeasonInfo(
             season_number=sn,
             name=str(s.get("name") or f"Season {sn}"),
             episode_count=int(s.get("episode_count") or 0),
-            air_date=str(s.get("air_date") or "") or None,
+            air_date=air_date,
             poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else None,
+            has_air_date=air_date is not None,
         ))
 
     # TheTVDB lists a Specials season for every series whether or not it holds episodes (its own

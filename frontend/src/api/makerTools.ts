@@ -182,6 +182,8 @@ export interface TmdbSeasonInfo {
   episode_count: number
   air_date: string | null
   poster_url: string | null
+  // true = dated episodes exist; false = listed but fully undated (TBA); null = undetermined
+  has_air_date: boolean | null
 }
 
 export interface TmdbTvDetails {

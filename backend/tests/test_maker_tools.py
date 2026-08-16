@@ -962,6 +962,48 @@ def test_dropping_specials_leaves_the_season_count_alone(client, test_db):
     assert response.json()["season_count"] == 1
 
 
+def test_tv_details_flags_an_undated_tvdb_season_without_hiding_it(client, test_db):
+    """An announced-but-TBA season stays in the list and the count — has_air_date=False is the
+    card's cue to color the badge edge, not a reason to drop anything."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    rows = [
+        {"id": 11, "number": 1, "name": "", "image": "", "year": "2020",
+         "episode_count": 12, "dated_episode_count": 12},
+        {"id": 12, "number": 2, "name": "", "image": "", "year": None,
+         "episode_count": 1, "dated_episode_count": 0},
+    ]
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=rows):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    data = response.json()
+    assert [s["season_number"] for s in data["tvdb_seasons"]] == [1, 2]
+    assert [s["has_air_date"] for s in data["tvdb_seasons"]] == [True, False]
+    assert data["season_count"] == 2
+
+
+def test_tv_details_leaves_the_air_flag_unknown_without_episode_data(client, test_db):
+    """A failed episode fetch must not paint a false green or red — unknown stays uncolored."""
+    _seed_tmdb_key(test_db)
+    _seed_tvdb_key(test_db)
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1])), \
+         patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_rows(None)):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396&tvdb_id=81189")
+
+    assert all(s["has_air_date"] is None for s in response.json()["tvdb_seasons"])
+
+
+def test_tv_details_flags_tmdb_seasons_by_their_air_date(client, test_db):
+    _seed_tmdb_key(test_db)
+    undated = {"season_number": 2, "name": "Season 2", "episode_count": 0,
+               "air_date": None, "poster_path": ""}
+    with patch("api.maker_tools.requests.get", return_value=_tmdb_details([_S1, undated])):
+        response = client.get("/api/maker-tools/tv-details?tmdb_id=1396")
+
+    assert [s["has_air_date"] for s in response.json()["tmdb_seasons"]] == [True, False]
+
+
 def test_tv_details_ignores_tvdb_without_a_tvdb_id(client, test_db):
     _seed_tmdb_key(test_db)
     _seed_tvdb_key(test_db)

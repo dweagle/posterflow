@@ -759,6 +759,18 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       ? (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons)
       : tvDetails.seasons
 
+  // Air-date state for the seasons badge edge: red = a numbered season is listed with no air
+  // dates yet (announced/TBA), green = every one is dated. Unknowns stay uncolored so a failed
+  // lookup never reads as "all clear"; specials don't count — they're not "a season on the way".
+  const seasonAirFlags = (tvDetails?.seasons ?? [])
+    .filter((s) => s.season_number > 0)
+    .map((s) => s.has_air_date)
+  const seasonAirState = seasonAirFlags.some((f) => f === false)
+    ? 'unaired'
+    : seasonAirFlags.length > 0 && seasonAirFlags.every((f) => f === true)
+      ? 'aired'
+      : null
+
   const galleryTabs: Array<{ id: 'posters' | 'backdrops' | 'logos' | 'season-posters'; label: string; count: number | null }> =
     galleryImages
       ? [
@@ -934,10 +946,12 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             {item.media_type === 'tv' && tvDetails && (
               <>
                 <span
-                  className="badge badge-grey"
-                  title={tvDetails.season_source === 'tvdb'
+                  className={`badge badge-grey${seasonAirState ? ` badge-air-${seasonAirState}` : ''}`}
+                  title={(tvDetails.season_source === 'tvdb'
                     ? 'Season count from TheTVDB — the same source Sonarr uses'
-                    : 'Season count from TMDB'}
+                    : 'Season count from TMDB')
+                    + (seasonAirState === 'unaired' ? '\nRed edge: a listed season has no air dates yet (TBA)' : '')
+                    + (seasonAirState === 'aired' ? '\nGreen edge: every season has air dates' : '')}
                 >
                   <Layers size={11} /> {tvDetails.season_count} season{tvDetails.season_count !== 1 ? 's' : ''}
                 </span>

@@ -495,6 +495,33 @@ input, textarea, select {
   border-color: rgba(156, 39, 176, 0.32);
 }
 
+/* Air-date sliver on the seasons badge: red = a listed season has no air dates yet (TBA),
+   green = every season is dated. Absent when it couldn't be determined. */
+.tmdb-result-wrapper .badge-air-unaired,
+.tmdb-result-wrapper .badge-air-aired {
+  position: relative;
+  overflow: hidden;
+  padding-right: calc(0.25rem + 9px);
+}
+
+.tmdb-result-wrapper .badge-air-unaired::after,
+.tmdb-result-wrapper .badge-air-aired::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+}
+
+.tmdb-result-wrapper .badge-air-unaired::after {
+  background: rgba(239, 83, 80, 0.85);
+}
+
+.tmdb-result-wrapper .badge-air-aired::after {
+  background: rgba(76, 175, 80, 0.85);
+}
+
 /* Metadata-source attribution — used wherever the TMDB or TheTVDB API is exposed in the UI.
    Both providers require a linked logo; TMDB additionally requires its "not endorsed" notice,
    which rides alongside as text. See components/SourceAttribution.tsx. */

@@ -259,6 +259,65 @@ def test_fetch_series_seasons_handles_a_missing_series(monkeypatch):
     assert tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="") == []
 
 
+def test_fetch_series_seasons_asks_for_the_episode_list_in_the_same_call(monkeypatch):
+    calls = []
+
+    def fake_get(path, *a, params=None, **k):
+        calls.append((path, params))
+        return {"seasons": []}
+
+    monkeypatch.setattr(tvdb, "_get", fake_get)
+    tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")
+    assert calls == [("/series/1/extended", {"short": "true", "meta": "episodes"})]
+
+
+def test_fetch_series_seasons_counts_dated_episodes_per_season(monkeypatch):
+    """A TBA episode is a real row with aired=null (live example: series 453694 S2), so the
+    dated count is what tells an announced season from one that actually airs."""
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {
+        "seasons": [_season(0), _season(1), _season(2)],
+        "episodes": [
+            {"seasonNumber": 0, "aired": "2020-12-25"},
+            {"seasonNumber": 1, "aired": "2020-02-01"},
+            {"seasonNumber": 1, "aired": "2020-02-08"},
+            {"seasonNumber": 2, "aired": None},
+        ],
+    })
+    by_number = {s["number"]: s for s in tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")}
+    assert by_number[0]["episode_count"] == 1 and by_number[0]["dated_episode_count"] == 1
+    assert by_number[1]["episode_count"] == 2 and by_number[1]["dated_episode_count"] == 2
+    assert by_number[2]["episode_count"] == 1 and by_number[2]["dated_episode_count"] == 0
+
+
+def test_fetch_series_seasons_counts_a_listed_but_episodeless_season_as_empty(monkeypatch):
+    """An empty placeholder Specials contributes no episode rows at all — its zero count is
+    what lets callers drop it, same as the old per-season lookup did."""
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {
+        "seasons": [_season(0), _season(1)],
+        "episodes": [{"seasonNumber": 1, "aired": "2020-02-01"}],
+    })
+    by_number = {s["number"]: s for s in tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")}
+    assert by_number[0]["episode_count"] == 0 and by_number[0]["dated_episode_count"] == 0
+
+
+def test_fetch_series_seasons_counts_are_none_without_an_episode_list(monkeypatch):
+    """No episode list means "unknown", never "empty" — callers err towards keeping seasons."""
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [_season(1)]})
+    season = tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")[0]
+    assert season["episode_count"] is None
+    assert season["dated_episode_count"] is None
+
+
+def test_fetch_series_seasons_skips_malformed_episode_rows(monkeypatch):
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {
+        "seasons": [_season(1)],
+        "episodes": ["not-a-dict", {"seasonNumber": "x"}, {"seasonNumber": 1, "aired": "2020-02-01"}],
+    })
+    season = tvdb.fetch_series_seasons(tvdb_id=1, api_key="k", pin="")[0]
+    assert season["episode_count"] == 1
+    assert season["dated_episode_count"] == 1
+
+
 def test_fetch_season_artwork_resolves_the_number_through_the_season_list(monkeypatch):
     monkeypatch.setattr(tvdb, "fetch_series_seasons",
                         lambda **k: [{"id": 55, "number": 2, "name": "", "image": "", "year": None}])

@@ -331,7 +331,8 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
     Only the official one lines up with what Sonarr shows, so the alternates are dropped;
     otherwise a show would appear to have several times its real number of seasons.
 
-    Returns [{id, number, name, image, year}] sorted by season number, specials (0) first.
+    Returns [{id, number, name, image, year, episode_count, dated_episode_count}] sorted by
+    season number, specials (0) first.
 
     Cached because every TV maker card asks for its series, and a list view mounts many at once —
     without this the same series is re-fetched on each render. Failures are cached briefly too, so
@@ -342,11 +343,31 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
         return cached
 
     try:
-        data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"},
-                    what="series seasons")
+        # meta=episodes folds the full episode list (with aired dates) into this same call, so
+        # per-season counts never need a per-season lookup.
+        data = _get(f"/series/{tvdb_id}/extended", api_key, pin,
+                    params={"short": "true", "meta": "episodes"}, what="series seasons")
     except TvdbError:
         _store_seasons(tvdb_id, [], ttl=_SEASONS_FAIL_TTL)
         raise
+
+    # A TBA episode is a real row with no ``aired`` value, so the dated count — not the row
+    # count — is what tells an announced season from one that actually airs.
+    episodes = (data or {}).get("episodes")
+    episode_totals: dict[int, int] = {}
+    dated_totals: dict[int, int] = {}
+    for ep in (episodes or []):
+        if not isinstance(ep, dict):
+            continue
+        try:
+            ep_season = int(ep.get("seasonNumber"))
+        except (TypeError, ValueError):
+            continue
+        episode_totals[ep_season] = episode_totals.get(ep_season, 0) + 1
+        if str(ep.get("aired") or "").strip():
+            dated_totals[ep_season] = dated_totals.get(ep_season, 0) + 1
+    has_episode_data = isinstance(episodes, list)
+
     seasons: list[dict] = []
     for season in ((data or {}).get("seasons") or []):
         if not isinstance(season, dict):
@@ -367,35 +388,14 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
             "name": str(season.get("name") or "").strip(),
             "image": absolute_image_url(season.get("image")),
             "year": str(season.get("year") or "").strip() or None,
-            # Season records carry no episode count, and it's only worth a lookup for specials
-            # (see below). None = not asked.
-            "episode_count": None,
+            # None = TVDB sent no episode list, so "unknown" is never mistaken for "empty" —
+            # a caller deciding whether to hide an empty Specials errs towards showing it.
+            "episode_count": episode_totals.get(number, 0) if has_episode_data else None,
+            "dated_episode_count": dated_totals.get(number, 0) if has_episode_data else None,
         })
     seasons.sort(key=lambda s: s["number"])
-
-    # TVDB lists a Specials season for every series whether or not it holds episodes, so callers
-    # need the real count to tell a genuine Specials from an empty placeholder. It costs one extra
-    # call, only for series that have a season 0, and rides along in this function's cache.
-    specials = next((s for s in seasons if s["number"] == 0), None)
-    if specials is not None:
-        specials["episode_count"] = _season_episode_count(specials["id"], api_key, pin)
     _store_seasons(tvdb_id, seasons)
     return seasons
-
-
-def _season_episode_count(season_id: int, api_key: str, pin: str) -> Optional[int]:
-    """How many episodes a season holds, or None if it couldn't be determined.
-
-    None rather than 0 on failure, so a caller deciding whether to hide an empty Specials errs
-    towards showing it — hiding a season the user's library actually has is the worse mistake.
-    """
-    try:
-        data = _get(f"/seasons/{season_id}/extended", api_key, pin, what="season episodes")
-    except TvdbError:
-        return None
-    if data is None:
-        return None
-    return len((data.get("episodes") or []))
 
 
 def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
