@@ -39,6 +39,8 @@ interface NormalizedItem {
   imdb_id?: string | null
   poster_url?: string | null
   available?: boolean | null
+  added?: string | null
+  releaseDate?: string | null
 }
 
 type UnmatchedItemsModalProps = {
@@ -81,14 +83,16 @@ function getModalTitle(modalType: UnmatchedModalType, typeNoun: string, hasSeaso
   return ''
 }
 
-// Authoritative refs (IDs + poster) carried from Plex/*arr, normalized to null.
-function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null }) {
+// Authoritative refs (IDs + poster + dates) carried from Plex/*arr, normalized to null.
+function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null; added?: string | null; release_date?: string | null }) {
   return {
     tmdb_id: item.tmdb_id ?? null,
     tvdb_id: item.tvdb_id ?? null,
     imdb_id: item.imdb_id ?? null,
     poster_url: item.poster_url ?? null,
     available: item.available ?? null,
+    added: item.added ?? null,
+    releaseDate: item.release_date ?? null,
   }
 }
 
@@ -496,6 +500,8 @@ function UnmatchedItemsModal({
     const cleanedTitle = item.year
       ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
       : item.title
+    // Surface the active sort's date so a date-sorted list is readable at a glance.
+    const sortDate = prefs.field === 'added' ? item.added : prefs.field === 'released' ? item.releaseDate : null
 
     return (
       <div key={key} className={`unmatched-item-with-tmdb${isExpanded ? ' expanded' : ''}`}>
@@ -504,6 +510,11 @@ function UnmatchedItemsModal({
           <div className="unmatched-item-meta">
             <span className="item-title">{cleanedTitle}</span>
             {item.year && <span className="item-year">({item.year})</span>}
+            {sortDate && (
+              <span className="item-year item-sort-date" title={prefs.field === 'added' ? 'Date added' : 'Release date'}>
+                · {new Date(sortDate).toLocaleDateString()}
+              </span>
+            )}
             {item.category && (
               <span className={`unmatched-cat-badge unmatched-cat-badge--${item.category.toLowerCase()}`}>
                 {item.category}
@@ -714,7 +725,7 @@ function UnmatchedItemsModal({
             )}
           </div>
 
-          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} />
+          <SortControls prefs={prefs} onChange={setPrefs} showGroup={showGroup} showSeasons={hasSeasons} showDates />
 
           <div className="unmatched-list">
             <p className="list-count">

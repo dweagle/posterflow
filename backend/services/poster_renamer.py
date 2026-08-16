@@ -343,11 +343,13 @@ class PosterRenameService:
                         
                         # Pre-sanitize folder name to remove illegal chars (matches DAPS behavior)
                         folder = illegal_chars_regex.sub("", title)
-                        
+
+                        added_at = getattr(collection, "addedAt", None)
                         media_dict["collections"].append({
                             "type": "collections",
                             "title": title,
                             "year": None,
+                            "added": added_at.isoformat() if added_at else None,
                             "folder": folder,  # Use pre-sanitized folder name
                             "normalized_title": normalized_title,
                             "alternate_titles": title_variants["alternate_titles"],

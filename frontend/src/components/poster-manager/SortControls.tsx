@@ -1,11 +1,12 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { GroupFilter, SortField, SortPrefs } from './itemSort'
+import { GroupFilter, SortDir, SortField, SortPrefs } from './itemSort'
 
 type SortControlsProps = {
   prefs: SortPrefs
   onChange: (patch: Partial<SortPrefs>) => void
   showGroup?: boolean
   showSeasons?: boolean
+  showDates?: boolean
 }
 
 const GROUP_OPTIONS: { value: GroupFilter; label: string }[] = [
@@ -15,7 +16,21 @@ const GROUP_OPTIONS: { value: GroupFilter; label: string }[] = [
   { value: 'collection', label: 'Collections' },
 ]
 
-export default function SortControls({ prefs, onChange, showGroup = true, showSeasons = false }: SortControlsProps) {
+// Natural direction applied whenever a field is picked (dates read newest-first);
+// the arrow still toggles it afterward.
+const DEFAULT_DIR: Record<SortField, SortDir> = {
+  title: 'asc',
+  year: 'asc',
+  seasons: 'asc',
+  added: 'desc',
+  released: 'desc',
+}
+
+export default function SortControls({ prefs, onChange, showGroup = true, showSeasons = false, showDates = false }: SortControlsProps) {
+  // A persisted field whose option isn't offered in this view falls back to title.
+  const fieldVisible = (f: SortField) =>
+    f === 'title' || f === 'year' || (f === 'seasons' && showSeasons) || ((f === 'added' || f === 'released') && showDates)
+
   return (
     <div className="sort-controls">
       {showGroup && (
@@ -37,11 +52,16 @@ export default function SortControls({ prefs, onChange, showGroup = true, showSe
         <label className="sort-label">Sort</label>
         <select
           className="sort-select"
-          value={!showSeasons && prefs.field === 'seasons' ? 'title' : prefs.field}
-          onChange={(e) => onChange({ field: e.target.value as SortField })}
+          value={fieldVisible(prefs.field) ? prefs.field : 'title'}
+          onChange={(e) => {
+            const field = e.target.value as SortField
+            onChange({ field, dir: DEFAULT_DIR[field] })
+          }}
         >
           <option value="title">Title</option>
           <option value="year">Year</option>
+          {showDates && <option value="added">Date added</option>}
+          {showDates && <option value="released">Release date</option>}
           {showSeasons && <option value="seasons">Missing seasons</option>}
         </select>
         <button

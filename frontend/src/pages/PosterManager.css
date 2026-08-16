@@ -2512,6 +2512,11 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   white-space: nowrap;
 }
 
+.unmatched-item-meta .item-sort-date {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .unmatched-item {
   display: flex;
   flex-direction: column;

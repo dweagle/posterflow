@@ -2,7 +2,7 @@
 import { useCallback, useState } from 'react'
 
 export type ItemType = 'movie' | 'show' | 'collection'
-export type SortField = 'title' | 'year' | 'seasons'
+export type SortField = 'title' | 'year' | 'seasons' | 'added' | 'released'
 export type SortDir = 'asc' | 'desc'
 export type GroupFilter = 'all' | ItemType
 
@@ -13,12 +13,16 @@ export interface SortPrefs {
 }
 
 // Minimal shape the comparator/grouping needs. Both modals' item types satisfy
-// this structurally (with extra fields of their own).
+// this structurally (with extra fields of their own). Dates are ISO strings
+// (arr added / digital-physical release), optional — views without them just
+// don't offer the date sorts.
 export interface SortableItem {
   title: string
   year: number | null
   type: ItemType
   seasonCount: number
+  added?: string | null
+  releaseDate?: string | null
 }
 
 const DEFAULT_PREFS: SortPrefs = { group: 'all', field: 'title', dir: 'asc' }
@@ -44,6 +48,19 @@ export function compareItems(a: SortableItem, b: SortableItem, field: SortField,
     }
   } else if (field === 'seasons') {
     if (a.seasonCount !== b.seasonCount) return (a.seasonCount - b.seasonCount) * sign
+  } else if (field === 'added' || field === 'released') {
+    // ISO strings compare lexically; items without a date always sink to the bottom.
+    const av = (field === 'added' ? a.added : a.releaseDate) ?? null
+    const bv = (field === 'added' ? b.added : b.releaseDate) ?? null
+    if (av == null && bv == null) {
+      /* fall through to tiebreak */
+    } else if (av == null) {
+      return 1
+    } else if (bv == null) {
+      return -1
+    } else if (av !== bv) {
+      return (av < bv ? -1 : 1) * sign
+    }
   } else {
     const t = normTitle(a.title).localeCompare(normTitle(b.title))
     if (t !== 0) return t * sign

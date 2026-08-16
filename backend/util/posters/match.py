@@ -52,6 +52,9 @@ def media_source_refs(media: Dict[str, Any]) -> Dict[str, Any]:
         "poster_url": media.get("poster_url"),
         # False = tracked in Sonarr/Radarr but not downloaded ("Missing in Arr").
         "available": available,
+        # ISO dates for modal sorting: arr added date + digital/physical (or firstAired) release
+        "added": media.get("added"),
+        "release_date": media.get("release_date"),
     }
 
 

@@ -164,7 +164,9 @@ class ARRClient:
                 folder = movie.get("path", "")
                 tmdb_id = movie.get("tmdbId")
                 imdb_id = movie.get("imdbId")
-                
+                # Earliest obtainable release (digital/physical) for date sorting
+                release_dates = [d for d in (movie.get("digitalRelease"), movie.get("physicalRelease")) if d]
+
                 parsed_movies.append({
                     "type": "movies",
                     "title": title,
@@ -173,6 +175,8 @@ class ARRClient:
                     "root_folder": movie.get("rootFolderPath"),
                     "tmdb_id": tmdb_id,
                     "imdb_id": imdb_id,
+                    "added": movie.get("added"),
+                    "release_date": min(release_dates) if release_dates else None,
                     "poster_url": self._poster_remote_url(movie),
                     "monitored": movie.get("monitored"),
                     "normalized_title": normalize_titles(title),
@@ -238,6 +242,8 @@ class ARRClient:
                     # Surfaced so published list cards get a TMDB link/poster/panel.
                     "tmdb_id_ref": tmdb_id,
                     "imdb_id": imdb_id,
+                    "added": show.get("added"),
+                    "release_date": show.get("firstAired"),
                     "poster_url": self._poster_remote_url(show),
                     "monitored": show.get("monitored"),
                     "normalized_title": normalize_titles(title),
