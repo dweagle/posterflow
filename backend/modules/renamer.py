@@ -547,6 +547,20 @@ def _run_artwork_only_pass(db, job, config_data, media_dict, artwork_boxes, artw
         dry_run=dry_run, progress_callback=_rename_progress,
         artwork_slot_filter=artwork_slot_filter,
     )
+
+    # Refresh just the artwork drive-usage keys in the stats blob (the poster pass owns the
+    # rest) so an artwork-only run still updates the Drive Usage report.
+    if not dry_run:
+        from services.poster_renamer import build_artwork_drive_usage
+        stats_setting = get_setting(db, "poster_renamer_stats")
+        try:
+            stored = json.loads(stats_setting.value) if stats_setting and stats_setting.value else {}
+        except json.JSONDecodeError:
+            stored = {}
+        stored.update(build_artwork_drive_usage(db, artwork_renamed))
+        upsert_setting(db, "poster_renamer_stats", json.dumps(stored))
+        db.commit()
+
     # Files actually written this run (not resolved slots), so "placed" means placed.
     matched_slots = sum(len(it.get("_artwork_slots") or {}) for at in matched for it in matched[at])
     from services.artwork_scan import sourced_types_from_matched

@@ -968,7 +968,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .priority-tab {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 0.75rem;
 }
 
 /* Style usage panel */
@@ -1095,6 +1095,162 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   font-size: 0.85rem;
   min-width: 2.5rem;
   text-align: right;
+}
+
+.drive-usage-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.drive-usage-toggle .style-usage-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.drive-usage-chevron {
+  transition: transform 0.15s ease;
+}
+
+.drive-usage-chevron.open {
+  transform: rotate(90deg);
+}
+
+.drive-usage-hint {
+  color: #888;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.drive-usage-row .drive-usage-name {
+  flex: 0 4 11rem;
+  min-width: 4.5rem;
+  color: #ddd;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-row {
+  gap: 0.5rem;
+}
+
+.drive-usage-row .style-badge,
+.drive-usage-row .style-usage-count,
+.drive-usage-row .drive-usage-outranked-count,
+.drive-usage-row .style-usage-download-btn {
+  flex-shrink: 0;
+}
+
+.drive-usage-row .style-badge {
+  width: auto;
+  min-width: 3rem;
+}
+
+.drive-usage-row .style-usage-bar-track {
+  display: flex;
+  min-width: 4rem;
+}
+
+@media (max-width: 768px) {
+  .drive-usage-row {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid #2a2a2a;
+  }
+
+  .drive-usage-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .drive-usage-row .drive-usage-name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .drive-usage-row .style-usage-bar-track {
+    min-width: 100%;
+  }
+
+  .drive-usage-row .style-usage-count {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .drive-usage-row .drive-usage-outranked-count {
+    min-width: 0;
+  }
+
+  .drive-usage-row .style-usage-download-btn:first-of-type {
+    margin-left: auto;
+  }
+}
+
+.drive-usage-row .style-usage-bar-fill {
+  height: 100%;
+  background: #64b5f6;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.drive-usage-row .has-extension .style-usage-bar-fill {
+  border-radius: 4px 0 0 4px;
+}
+
+.drive-usage-outranked-fill {
+  height: 100%;
+  background: #5c6882;
+  border-radius: 0 4px 4px 0;
+  transition: width 0.3s ease;
+}
+
+.drive-usage-outranked-count {
+  color: #8a93a5;
+  font-size: 0.8rem;
+  min-width: 2.6rem;
+}
+
+.drive-usage-view-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.drive-usage-view-tab {
+  background-color: #2a2a2a;
+  border: 1px solid #424242;
+  color: #aaa;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.drive-usage-view-tab:hover {
+  color: #fff;
+  border-color: #64b5f6;
+}
+
+.drive-usage-view-tab.active {
+  background-color: #64b5f6;
+  border-color: #64b5f6;
+  color: #1a1a1a;
+}
+
+.style-usage-download-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
 }
 
 .style-usage-fallback-note {

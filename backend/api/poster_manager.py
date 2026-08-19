@@ -617,6 +617,11 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         series = 0
         style_counts: Dict[str, Any] = {}
         style_fallbacks: Dict[str, Any] = {}
+        drive_usage: List[Dict[str, Any]] = []
+        drive_outranked: Dict[str, Any] = {}
+        artwork_drive_usage: List[Dict[str, Any]] = []
+        artwork_drive_items: Dict[str, Any] = {}
+        artwork_drive_outranked: Dict[str, Any] = {}
 
         if stats_setting and stats_setting.value:
             try:
@@ -627,6 +632,11 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 series = stored_stats.get("series", 0)
                 style_counts = stored_stats.get("style_counts", {})
                 style_fallbacks = stored_stats.get("style_fallbacks", {})
+                drive_usage = stored_stats.get("drive_usage", [])
+                drive_outranked = stored_stats.get("drive_outranked", {})
+                artwork_drive_usage = stored_stats.get("artwork_drive_usage", [])
+                artwork_drive_items = stored_stats.get("artwork_drive_items", {})
+                artwork_drive_outranked = stored_stats.get("artwork_drive_outranked", {})
             except json.JSONDecodeError:
                 pass
         else:
@@ -672,6 +682,11 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "last_scan": last_scan.isoformat() if last_scan else None,
             "style_counts": style_counts,
             "style_fallbacks": style_fallbacks,
+            "drive_usage": drive_usage,
+            "drive_outranked": drive_outranked,
+            "artwork_drive_usage": artwork_drive_usage,
+            "artwork_drive_items": artwork_drive_items,
+            "artwork_drive_outranked": artwork_drive_outranked,
         }
 
     except Exception as e:

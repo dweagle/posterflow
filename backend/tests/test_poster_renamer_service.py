@@ -220,6 +220,130 @@ def test_style_counts_attribute_by_drive_folder_not_index(test_db, tmp_path, mon
     assert result["stats"]["style_counts"] == {"MM2K": 1, "CL2K": 1}
     fallback_titles = {item["title"] for item in result["stats"]["style_fallbacks"]["MM2K"]}
     assert fallback_titles == {"Movie One"}
+    usage = {u["drive_id"]: u for u in result["stats"]["drive_usage"]}
+    assert usage["mm-1"]["count"] == 1 and usage["mm-1"]["name"] == "MM Drive" and usage["mm-1"]["style"] == "MM2K"
+    assert usage["cl-1"]["count"] == 1 and usage["cl-1"]["style"] == "CL2K"
+    assert result["stats"]["style_fallbacks"]["MM2K"][0]["drive_id"] == "mm-1"
+
+
+def test_merge_slots_records_poster_and_season_runners():
+    """Slot losers land in the box's slot_runners (poster + seasons only), winners in slots."""
+    from util.posters.assets import merge_slots
+
+    prio = {"/drives/A": 0, "/drives/B": 1}
+    final = {"slots": {"poster": "/drives/B/x/Movie.jpg", "seasons": {1: "/drives/B/x/S1.jpg"}}}
+    new = {"slots": {"poster": "/drives/A/x/Movie.jpg", "seasons": {1: "/drives/A/x/S1.jpg", 2: "/drives/A/x/S2.jpg"}}}
+    merge_slots(final, new, prio)  # incoming outranks current
+
+    assert final["slots"]["poster"] == "/drives/A/x/Movie.jpg"
+    assert final["slots"]["seasons"] == {1: "/drives/A/x/S1.jpg", 2: "/drives/A/x/S2.jpg"}
+    assert final["slot_runners"]["poster"] == ["/drives/B/x/Movie.jpg"]
+    assert final["slot_runners"]["seasons"] == {1: ["/drives/B/x/S1.jpg"]}
+
+    # current outranks incoming -> the incoming file is the runner
+    merge_slots(final, {"slots": {"poster": "/drives/B/y/Movie.jpg", "seasons": {}}}, prio)
+    assert final["slots"]["poster"] == "/drives/A/x/Movie.jpg"
+    assert final["slot_runners"]["poster"] == ["/drives/B/x/Movie.jpg", "/drives/B/y/Movie.jpg"]
+
+
+def test_merge_slots_records_artwork_slot_runners():
+    """Artwork slot losers are recorded too — they feed the artwork drive-usage report."""
+    from util.posters.assets import merge_slots
+
+    prio = {"/drives/A": 0, "/drives/B": 1}
+    final = {"slots": {"poster": None, "logo": "/drives/B/x/logos/T.png", "seasons": {}}}
+    new = {"slots": {"poster": None, "logo": "/drives/A/x/logos/T.png",
+                     "background": "/drives/A/x/backgrounds/T.jpg", "seasons": {}}}
+    merge_slots(final, new, prio)
+
+    assert final["slots"]["logo"] == "/drives/A/x/logos/T.png"
+    assert final["slots"]["background"] == "/drives/A/x/backgrounds/T.jpg"
+    assert final["slot_runners"]["logo"] == ["/drives/B/x/logos/T.png"]
+    assert "background" not in final["slot_runners"]  # no competition -> no runner
+
+
+def test_build_artwork_drive_usage(test_db, tmp_path):
+    """Artwork winners/losers aggregate per artwork drive, with slot-tagged item lists."""
+    from models.artwork_drive import ArtworkDrive
+    from services.poster_renamer import build_artwork_drive_usage
+
+    a_root = tmp_path / "art-a"; b_root = tmp_path / "art-b"
+    a_root.mkdir(); b_root.mkdir()
+    test_db.add_all([
+        ArtworkDrive(name="Art A", drive_id="art-a", subscribed=True, custom_path=str(a_root)),
+        ArtworkDrive(name="Art B", drive_id="art-b", subscribed=True, custom_path=str(b_root)),
+    ])
+    test_db.commit()
+
+    win_logo = str(a_root / "Item" / "logos" / "Movie One (2024).png")
+    lost_logo = str(b_root / "Item" / "logos" / "Movie One (2024).png")
+    win_bg = str(b_root / "Item" / "backgrounds" / "Movie One (2024).jpg")
+    artwork_renamed = {
+        "winning_files": {
+            "/dest/Movie One (2024)/logo.png": (win_logo, "Movie One", 2024, "movie", "logo", 1, None, None, None, None),
+            "/dest/Movie One (2024)/background.jpg": (win_bg, "Movie One", 2024, "movie", "background", 1, None, None, None, None),
+        },
+        "outranked_files": [("/dest/Movie One (2024)/logo.png", lost_logo)],
+    }
+
+    result = build_artwork_drive_usage(test_db, artwork_renamed)
+    usage = {u["drive_id"]: u for u in result["artwork_drive_usage"]}
+    assert usage["art-a"]["count"] == 1 and usage["art-a"]["outranked"] == 0
+    assert usage["art-b"]["count"] == 1 and usage["art-b"]["outranked"] == 1
+    assert [i["slot"] for i in result["artwork_drive_items"]["art-a"]] == ["logo"]
+    assert [i["slot"] for i in result["artwork_drive_items"]["art-b"]] == ["background"]
+    assert [(i["title"], i["slot"]) for i in result["artwork_drive_outranked"]["art-b"]] == [("Movie One", "logo")]
+
+
+def test_drive_usage_counts_outranked_matches(test_db, tmp_path, monkeypatch):
+    """A lower-priority drive whose file matched but lost its slot to a higher-priority
+    drive shows as 'outranked' in drive_usage, without winning anything itself."""
+    from models.drive import Drive
+    from util.data.normalization import normalize_titles
+
+    mm_root = tmp_path / "mm"; cl_root = tmp_path / "cl"
+    mm = _seed(mm_root, ["Movie One (2024).jpg"])
+    cl = _seed(cl_root, ["Movie One (2024).jpg"])
+    test_db.add_all([
+        Drive(name="MM Drive", drive_id="mm-1", style_type="MM2K", subscribed=True, custom_path=str(mm_root)),
+        Drive(name="CL Drive", drive_id="cl-1", style_type="CL2K", subscribed=True, custom_path=str(cl_root)),
+    ])
+    test_db.commit()
+
+    win = mm["Movie One (2024).jpg"]; lost = cl["Movie One (2024).jpg"]
+    box = {"title": "Movie One", "year": 2024, "tmdb_id": 1, "tvdb_id": None, "imdb_id": None,
+           "normalized_title": normalize_titles("Movie One"), "type": "movies", "files": [win],
+           "slots": {"poster": win, "seasons": {}},
+           "slot_runners": {"poster": [lost]}}
+    matched = _matched(movies=[{
+        "title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)",
+        "files": [win], "asset_ref": box,
+    }])
+    media = {"movies": [{"title": "Movie One", "year": 2024, "tmdb_id": 1, "folder": "Movie One (2024)"}],
+             "series": [], "collections": []}
+
+    monkeypatch.setattr(
+        "services.poster_renamer.get_assets_files",
+        lambda source_dirs, per_dir_callback=None: ([{"title": "Movie One", "files": [win]}], {"m": []}),
+    )
+    monkeypatch.setattr("services.poster_renamer.match_assets_to_media", lambda *a, **k: matched)
+
+    dest = tmp_path / "dest"; dest.mkdir()
+    result = PosterRenameService(test_db).rename_posters(
+        source_dirs=[str(mm_root), str(cl_root)], destination_dir=str(dest),
+        asset_folders=True, dry_run=False, media_dict=media,
+    )
+
+    assert result["success"] is True
+    usage = {u["drive_id"]: u for u in result["stats"]["drive_usage"]}
+    assert usage["mm-1"]["count"] == 1 and usage["mm-1"]["outranked"] == 0
+    assert usage["cl-1"]["count"] == 0 and usage["cl-1"]["outranked"] == 1
+    # Winners sort first even when another drive has more outranked matches.
+    assert result["stats"]["drive_usage"][0]["drive_id"] == "mm-1"
+    # The outranked item list names the media the loser matched (via the winning entry).
+    outranked_items = result["stats"]["drive_outranked"]["cl-1"]
+    assert [(i["title"], i["year"], i["type"]) for i in outranked_items] == [("Movie One", 2024, "movie")]
+    assert "mm-1" not in result["stats"]["drive_outranked"]
 
 
 def test_mark_processed_stamps_rows_by_drive_and_name_despite_stale_path(test_db, tmp_path, monkeypatch):
@@ -294,6 +418,7 @@ def test_style_counts_unknown_for_file_outside_any_drive(test_db, tmp_path, monk
     )
 
     assert result["stats"]["style_counts"] == {"Unknown": 1}
+    assert result["stats"]["drive_usage"] == []
 
 
 def test_artwork_bypasses_tmp_staging(test_db, tmp_path, monkeypatch):
@@ -556,6 +681,7 @@ def test_rename_posters_successful_flow_returns_stats(test_db, monkeypatch):
             ["/tmp/dest/Movie One (2024)/poster.jpg"],
             ["/tmp/source/Movie One.jpg"],
             {"/tmp/dest/Movie One (2024)/poster.jpg": ("/tmp/source/Movie One.jpg", "Movie One", 2024, "movie", None, 27205, None, "tt0000001", "https://image.tmdb.org/t/p/original/x.jpg", True)},
+            [],  # outranked_source_files
             {"total": 0, "by_media": {"movies": 0, "series": 0, "collections": 0},
              "by_type": {"logo": 0, "background": 0, "squareart": 0}},  # artwork written this run
         ),

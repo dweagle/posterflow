@@ -126,6 +126,84 @@ def sourced_poster_slots_from_matched(matched: MediaDict) -> Dict[int, Dict[Any,
     return sourced
 
 
+def build_artwork_drive_usage(db, artwork_renamed: Dict) -> Dict[str, Any]:
+    """Per-artwork-drive usage stats from a rename's winner/loser tracking — bar counts plus
+    the item lists behind the View modal. Mirrors the poster drive_usage keys; the winning
+    entry for a destination doubles as the outranked item's metadata."""
+    from models.artwork_drive import ArtworkDrive
+
+    winning: Dict[str, tuple] = artwork_renamed.get("winning_files") or {}
+    outranked_files = artwork_renamed.get("outranked_files") or []
+
+    prefixes: List[tuple] = []
+    for drive in db.query(ArtworkDrive).all():
+        prefix = str(drive.get_local_path(validate=False)).rstrip(os.sep) + os.sep
+        prefixes.append((prefix, drive))
+    prefixes.sort(key=lambda entry: (-len(entry[0]), entry[0]))
+
+    def _drive_of(path: str):
+        for prefix, mapped in prefixes:
+            if path.startswith(prefix):
+                return mapped
+        return None
+
+    def _item(entry: tuple) -> Dict:
+        _, title, year, tmdb_type, slot, tmdb_id, tvdb_id, imdb_id, poster_url, available = entry
+        return {
+            "title": title,
+            "year": year,
+            "type": tmdb_type,
+            "season": None,
+            "slot": slot,
+            "tmdb_id": tmdb_id,
+            "tvdb_id": tvdb_id,
+            "imdb_id": imdb_id,
+            "poster_url": poster_url,
+            "available": available,
+        }
+
+    usage: Dict[str, Dict] = {}
+    items: Dict[str, List[Dict]] = {}
+    outranked_items: Dict[str, List[Dict]] = {}
+
+    def _entry(drive) -> Dict:
+        return usage.setdefault(drive.drive_id, {
+            "drive_id": drive.drive_id,
+            "name": drive.display_name or drive.name,
+            "count": 0,
+            "outranked": 0,
+        })
+
+    for dest_path, entry in winning.items():
+        drive = _drive_of(str(entry[0]))
+        if not drive:
+            continue
+        _entry(drive)["count"] += 1
+        items.setdefault(drive.drive_id, []).append(_item(entry))
+
+    # Same rules as the poster tally: once per destination per drive, never against a
+    # destination the drive won itself.
+    seen: set = set()
+    for dest_path, src_file in outranked_files:
+        drive = _drive_of(str(src_file))
+        if not drive or (dest_path, drive.drive_id) in seen:
+            continue
+        win_entry = winning.get(dest_path)
+        win_drive = _drive_of(str(win_entry[0])) if win_entry else None
+        if win_drive and win_drive.drive_id == drive.drive_id:
+            continue
+        seen.add((dest_path, drive.drive_id))
+        _entry(drive)["outranked"] += 1
+        if win_entry:
+            outranked_items.setdefault(drive.drive_id, []).append(_item(win_entry))
+
+    return {
+        "artwork_drive_usage": sorted(usage.values(), key=lambda u: (-u["count"], -u["outranked"])),
+        "artwork_drive_items": items,
+        "artwork_drive_outranked": outranked_items,
+    }
+
+
 def subscribed_priority_drives(db: Session) -> List[Any]:
     """The poster drives the renamer would use, in priority order. Raises ValueError when no
     priority list is configured or none of its drives are subscribed."""
@@ -588,7 +666,8 @@ class PosterRenameService:
         Returns:
             Tuple of (output dict, destination files copied/updated, source files processed,
             winning_source_files mapping dest_path -> (source_file_path, title, year,
-            tmdb_type, season, tmdb_id, tvdb_id, imdb_id, poster_url)).
+            tmdb_type, season, tmdb_id, tvdb_id, imdb_id, poster_url),
+            outranked_source_files list of (dest_path, source_file), artwork_renamed).
         """
         output: MediaDict = {}
         renamed_files = []  # Destination files that were copied/updated
@@ -598,6 +677,11 @@ class PosterRenameService:
             "total": 0,
             "by_media": {"movies": 0, "series": 0, "collections": 0},
             "by_type": {"logo": 0, "background": 0, "squareart": 0},
+            # Winner/loser tracking for the artwork drive-usage report, same shapes as the
+            # poster winning_source_files / outranked_source_files (season slot holds the
+            # artwork slot name instead).
+            "winning_files": {},   # dest_path -> (source_file, title, year, type, slot, ids...)
+            "outranked_files": [],  # (dest_path, source_file)
         }
 
         def _tally_artwork(media_type: str, slot: str) -> None:
@@ -611,6 +695,7 @@ class PosterRenameService:
         processed_source_files = []  # Source files that were checked (copied or skipped if identical)
         # dest_path -> (source_file_path, title, year, tmdb_type, season_num)
         winning_source_files: Dict[str, tuple] = {}
+        outranked_source_files: List[tuple] = []  # (dest_path, source_file) — matched but a higher-priority source won
         
         asset_types: List[str] = ["collections", "movies", "series"]
         log_info(LogTags.RENAMER, "Renaming assets, please wait...")
@@ -663,6 +748,7 @@ class PosterRenameService:
                     # match filled both — so it needs no separate lookup here.
                     # The matched box's slots are authoritative; artwork-only items have no box.
                     box_slots = (item.get("asset_ref") or {}).get("slots")
+                    box_runners = (item.get("asset_ref") or {}).get("slot_runners") or {}
                     if "_artwork_slots" in item:
                         artwork_slots = item["_artwork_slots"]
                     else:
@@ -710,6 +796,10 @@ class PosterRenameService:
                                 winning_file=winning_file,
                                 skipped_file=file_name,
                             )
+                            if not is_artwork:
+                                outranked_source_files.append((new_file_path, file))
+                            else:
+                                artwork_renamed["outranked_files"].append((new_file_path, file))
                             continue
 
                         # Check if destination exists and is different
@@ -783,13 +873,27 @@ class PosterRenameService:
                                 )
 
                         written_dest_paths[new_file_path] = file_name
+                        _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
                         if not is_artwork:
-                            _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
                             winning_source_files[new_file_path] = (
                                 file, item["title"], item.get("year"), _tmdb_type, _season_num,
                                 item.get("tmdb_id"), item.get("tvdb_id"), item.get("imdb_id"), item.get("poster_url"),
                                 item.get("available"),
                             )
+                            if _slot == SLOT_POSTER:
+                                runner_list = box_runners.get(SLOT_POSTER) or []
+                            else:
+                                runner_list = (box_runners.get("seasons") or {}).get(_season_num) or []
+                            for runner in runner_list:
+                                outranked_source_files.append((new_file_path, runner))
+                        else:
+                            artwork_renamed["winning_files"][new_file_path] = (
+                                file, item["title"], item.get("year"), _tmdb_type, _slot,
+                                item.get("tmdb_id"), item.get("tvdb_id"), item.get("imdb_id"), item.get("poster_url"),
+                                item.get("available"),
+                            )
+                            for runner in (box_runners.get(_slot) or []):
+                                artwork_renamed["outranked_files"].append((new_file_path, runner))
 
                     if progress_callback:
                         if item_had_changes:
@@ -809,7 +913,7 @@ class PosterRenameService:
             else:
                 log_debug(LogTags.RENAMER, f"No {asset_type} to rename")
         
-        return output, renamed_files, processed_source_files, winning_source_files, artwork_renamed
+        return output, renamed_files, processed_source_files, winning_source_files, outranked_source_files, artwork_renamed
 
     def _inject_manual_media(self, media_dict: MediaDict, log_tag: str = LogTags.RENAMER) -> None:
         """
@@ -1404,7 +1508,7 @@ class PosterRenameService:
                     progress = 50 + int((current / total) * 50)
                     progress_callback("renaming", progress, 100, status_message)
             
-            output, renamed_files, processed_source_files, winning_source_files, artwork_renamed = self.rename_files(
+            output, renamed_files, processed_source_files, winning_source_files, outranked_source_files, artwork_renamed = self.rename_files(
                 matched_assets,
                 actual_destination,  # Use actual_destination (may be tmp folder)
                 action_type,
@@ -1473,6 +1577,7 @@ class PosterRenameService:
 
             style_counts: Dict[str, int] = {}
             style_fallbacks: Dict[str, List[Dict]] = {}  # style -> list of {title, year, type, season}
+            drive_usage: Dict[str, Dict] = {}  # drive_id -> {drive_id, name, style, count}
 
             if winning_source_files:
                 for dest_path, entry in winning_source_files.items():
@@ -1491,10 +1596,60 @@ class PosterRenameService:
                         "imdb_id": f_imdb_id,
                         "poster_url": f_poster_url,
                         "available": f_available,
+                        "drive_id": src_drive.drive_id if src_drive else None,
+                    })
+                    if src_drive:
+                        usage = drive_usage.setdefault(src_drive.drive_id, {
+                            "drive_id": src_drive.drive_id,
+                            "name": src_drive.display_name or src_drive.name,
+                            "style": "Custom" if src_drive.is_custom else style,
+                            "count": 0,
+                            "outranked": 0,
+                        })
+                        usage["count"] += 1
+
+            # Matched-but-lost tally: a drive counts once per destination, and never
+            # against a destination it won itself (its own duplicate file losing).
+            # The winning entry names the same media the loser matched, so its metadata
+            # doubles as the outranked item list.
+            drive_outranked: Dict[str, List[Dict]] = {}  # drive_id -> [{title, year, ...}]
+            outranked_seen: set = set()
+            for dest_path, src_file in outranked_source_files:
+                src_drive = _drive_of(str(src_file))
+                if not src_drive or (dest_path, src_drive.drive_id) in outranked_seen:
+                    continue
+                win_entry = winning_source_files.get(dest_path)
+                win_drive = _drive_of(str(win_entry[0])) if win_entry else None
+                if win_drive and win_drive.drive_id == src_drive.drive_id:
+                    continue
+                outranked_seen.add((dest_path, src_drive.drive_id))
+                usage = drive_usage.setdefault(src_drive.drive_id, {
+                    "drive_id": src_drive.drive_id,
+                    "name": src_drive.display_name or src_drive.name,
+                    "style": "Custom" if src_drive.is_custom else (src_drive.style_type or "Unknown"),
+                    "count": 0,
+                    "outranked": 0,
+                })
+                usage["outranked"] += 1
+                if win_entry:
+                    _, w_title, w_year, w_type, w_season, w_tmdb, w_tvdb, w_imdb, w_poster, w_avail = win_entry
+                    drive_outranked.setdefault(src_drive.drive_id, []).append({
+                        "title": w_title,
+                        "year": w_year,
+                        "type": w_type,
+                        "season": w_season,
+                        "tmdb_id": w_tmdb,
+                        "tvdb_id": w_tvdb,
+                        "imdb_id": w_imdb,
+                        "poster_url": w_poster,
+                        "available": w_avail,
                     })
 
             stats["style_counts"] = style_counts
             stats["style_fallbacks"] = style_fallbacks
+            stats["drive_usage"] = sorted(drive_usage.values(), key=lambda u: (-u["count"], -u["outranked"]))
+            stats["drive_outranked"] = drive_outranked
+            stats.update(build_artwork_drive_usage(self.db, artwork_renamed))
 
             # Phase 6: Mark files as processed in DB (if not dry run)
             if not dry_run and processed_source_files:

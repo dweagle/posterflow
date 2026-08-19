@@ -1,10 +1,11 @@
-import { Download, GripVertical, List, Minus, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, GripVertical, List, Minus, Plus, Trash2 } from 'lucide-react'
 import PriorityHeader from './PriorityHeader'
 import { type PriorityScope } from './PriorityScopeSelector'
 import { DragEvent, TouchEvent as ReactTouchEvent, useState } from 'react'
 import { Drive } from '../../api/client'
 import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
 import PosterStyleModal from './PosterStyleModal'
+import DriveUsagePanel, { downloadText } from './DriveUsagePanel'
 
 type PriorityTabProps = {
   scope: PriorityScope
@@ -65,6 +66,7 @@ function PriorityTab({
 }: PriorityTabProps) {
   const PREVIEW_LIMIT = 5
   const [openFallbackStyle, setOpenFallbackStyle] = useState<string | null>(null)
+  const [fallbackOpen, setFallbackOpen] = useState(false)
 
   // Compute style usage data outside JSX for clean modal access
   const styleCounts = styleStats?.style_counts ?? {}
@@ -85,34 +87,17 @@ function PriorityTab({
   const fallbackEntries = styleEntries.slice(1).filter(([style, n]) => n > 0 && COMMUNITY_STYLES.includes(style))
   const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks[openFallbackStyle] ?? []) : []
 
+  const driveUsage = styleStats?.drive_usage ?? []
+  const allItems: FallbackItem[] = Object.values(styleFallbacks).flat()
+  const itemsForDrive = (driveId: string) => allItems.filter((it) => it.drive_id === driveId)
+  const outrankedForDrive = (driveId: string) => (styleStats?.drive_outranked ?? {})[driveId] ?? []
+
   const handleDownload = (style: string, items: FallbackItem[]) => {
-    const content = [
+    downloadText(`missing-${preferredStyle.toLowerCase()}-posters.txt`, [
       `# Missing ${preferredStyle} posters (used ${style} as fallback)`,
       `# Generated: ${new Date().toLocaleString()}`,
       `# Total: ${items.length}`,
-      '',
-      ...items.map(item => {
-        // Strip trailing (YYYY) from title if year is already appended separately
-        const cleanTitle = item.year
-          ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim()
-          : item.title
-        let line = item.year ? `${cleanTitle} (${item.year})` : cleanTitle
-        if (item.type === 'show' && item.season != null) {
-          line += item.season === 0 ? ' — Specials' : ` — Season ${item.season}`
-        }
-        if (item.type === 'collection') line += ' [Collection]'
-        return line
-      }),
-    ].join('\n')
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `missing-${preferredStyle.toLowerCase()}-posters.txt`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    ], items)
   }
 
   const getCardDropIndex = (e: DragEvent<HTMLElement>, index: number) => {
@@ -155,7 +140,21 @@ function PriorityTab({
             </div>
             {fallbackEntries.length > 0 && preferredStyle && (
               <div className="style-usage-fallback-note">
-                {fallbackEntries.map(([style, count]) => {
+                <button
+                  type="button"
+                  className="style-usage-header drive-usage-toggle"
+                  onClick={() => setFallbackOpen((o) => !o)}
+                  aria-expanded={fallbackOpen}
+                >
+                  <span className="style-usage-title">
+                    <ChevronRight size={15} className={`drive-usage-chevron${fallbackOpen ? ' open' : ''}`} />
+                    Missing {preferredStyle} Posters
+                  </span>
+                  <span className="style-usage-total">
+                    {fallbackEntries.reduce((a, [, n]) => a + n, 0).toLocaleString()} posters using fallback styles
+                  </span>
+                </button>
+                {fallbackOpen && fallbackEntries.map(([style, count]) => {
                   const items: FallbackItem[] = styleFallbacks[style] ?? []
                   // Distinct titles (a show's seasons collapse to one) vs the raw poster count.
                   const titleCount = new Set(items.map((it) => `${it.type}::${it.title}::${it.year}`)).size
@@ -210,6 +209,7 @@ function PriorityTab({
             )}
           </div>
         )}
+        <DriveUsagePanel usage={driveUsage} itemsForDrive={itemsForDrive} outrankedForDrive={outrankedForDrive} />
         {openFallbackStyle && preferredStyle && (
           <PosterStyleModal
             preferredStyle={preferredStyle}

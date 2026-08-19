@@ -27,6 +27,10 @@ export interface SortableItem {
 
 const DEFAULT_PREFS: SortPrefs = { group: 'all', field: 'title', dir: 'asc' }
 
+// Artwork slot names as placed on disk -> display labels (drive-usage views).
+export const SLOT_LABELS: Record<string, string> = { logo: 'Logo', background: 'Background', square: 'Square' }
+export const SLOT_ORDER = ['logo', 'background', 'square']
+
 // Strip a trailing "(YYYY)" so title comparisons ignore an appended year.
 function normTitle(title: string): string {
   return title.replace(/\s*\(\d{4}\)\s*$/, '').trim().toLowerCase()

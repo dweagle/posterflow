@@ -135,6 +135,10 @@ def merge_slots(
 
     Per-slot (not per-box) so an item's logo can come from one drive and its square from
     another — the artwork priority rule.
+
+    Slot losers are kept on the box as ``slot_runners`` (slot -> [paths], seasons nested)
+    so the renamer's drive-usage stats can count matched-but-outranked files — poster and
+    seasons feed the poster report, logo/background/square the artwork report.
     """
     new_slots = new.get("slots")
     if not new_slots:
@@ -144,19 +148,33 @@ def merge_slots(
         final["slots"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in new_slots.items()}
         return
 
+    def _slot_runner(slot: str, path: str) -> None:
+        final.setdefault("slot_runners", {}).setdefault(slot, []).append(path)
+
+    def _season_runner(season, path: str) -> None:
+        final.setdefault("slot_runners", {}).setdefault("seasons", {}).setdefault(season, []).append(path)
+
     for slot in ITEM_SLOTS:
         incoming = new_slots.get(slot)
         if not incoming:
             continue
         current = final_slots.get(slot)
         if not current or drive_rank(incoming, source_priority) < drive_rank(current, source_priority):
+            if current:
+                _slot_runner(slot, current)
             final_slots[slot] = incoming
+        else:
+            _slot_runner(slot, incoming)
 
     final_seasons = final_slots.setdefault("seasons", {})
     for season, incoming in (new_slots.get("seasons") or {}).items():
         current = final_seasons.get(season)
         if not current or drive_rank(incoming, source_priority) < drive_rank(current, source_priority):
+            if current:
+                _season_runner(season, current)
             final_seasons[season] = incoming
+        else:
+            _season_runner(season, incoming)
 
 
 def merge_assets(

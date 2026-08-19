@@ -540,7 +540,7 @@ function PosterManager() {
       {activeTab === 'priority' && (
         <>
           {priorityScope === 'artwork' ? (
-            <ArtworkPriorityTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} />
+            <ArtworkPriorityTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} styleStats={styleStats} />
           ) : (
             <PriorityTab
               scope={priorityScope}

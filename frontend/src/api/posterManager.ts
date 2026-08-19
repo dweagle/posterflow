@@ -552,11 +552,26 @@ export interface FallbackItem {
   imdb_id?: string | null
   poster_url?: string | null
   available?: boolean | null
+  drive_id?: string | null
+  slot?: string | null
+}
+
+export interface DriveUsage {
+  drive_id: string
+  name: string
+  style?: string
+  count: number
+  outranked?: number
 }
 
 export interface PosterStyleStats {
   style_counts: Record<string, number>
   style_fallbacks: Record<string, FallbackItem[]>
+  drive_usage?: DriveUsage[]
+  drive_outranked?: Record<string, FallbackItem[]>
+  artwork_drive_usage?: DriveUsage[]
+  artwork_drive_items?: Record<string, FallbackItem[]>
+  artwork_drive_outranked?: Record<string, FallbackItem[]>
 }
 
 export const getPosterStats = async (): Promise<PosterStyleStats> => {
