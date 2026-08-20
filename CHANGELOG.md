@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-08-20
+### Added
+- Drive Priority: last rename drive usage reports for poster and artwork drives. A collapsible per-drive bars showing items used vs. matched but outranked by higher-priority drives. A view modal (Used / Not used) and txt downloads. Data populates on the next rename run.
+
+### Fixed
+- Maker Tools: improved PSD export handling.
+
 ## [0.14.1] - 2026-08-16
 ### Added
 - Unmatched Assets: modal items can now be sorted by date added or release date (from Sonarr/Radarr, or Plex for collections). Dates populate on the next Unmatched run.
