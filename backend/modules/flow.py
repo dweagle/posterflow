@@ -1034,6 +1034,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         log_section_end(LogTags.WORKFLOW, f"Workflow stopped by user (Job ID: {job_id})")
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Workflow execution failed: {e}\n{traceback.format_exc()}")
+        db.rollback()  # reset a possibly-poisoned session before reusing it
         send_discord_notification(
             db,
             feature_key="workflow",

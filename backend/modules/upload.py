@@ -1192,21 +1192,25 @@ def _build_cache_clear_response(
     return summary
 
 
-def _save_webhook_stats(db: Session, stats: Dict[str, Any]) -> None:
+def _save_webhook_stats(db: Session, stats: Dict[str, Any], *, commit: bool = True) -> None:
     upsert_setting(db, SETTING_PLEX_WEBHOOK_STATS, json.dumps(stats))
-    db.commit()
+    if commit:
+        db.commit()
 
 
-def _increment_webhook_stat(db: Session, key: str, *, last_error: Optional[str] = None, queued: bool = False) -> None:
+def _increment_webhook_stat(db: Session, *keys: str, last_error: Optional[str] = None, queued: bool = False, commit: bool = True) -> None:
+    # Multiple keys batch into one stats write; commit=False defers to the caller's
+    # commit so a webhook event costs one write transaction, not several.
     stats = _load_webhook_stats(db)
-    if key in stats and isinstance(stats[key], int):
-        stats[key] += 1
+    for key in keys:
+        if key in stats and isinstance(stats[key], int):
+            stats[key] += 1
     stats["last_event_at"] = _utc_now_iso()
     if queued:
         stats["last_queued_at"] = stats["last_event_at"]
     if last_error:
         stats["last_error"] = last_error
-    _save_webhook_stats(db, stats)
+    _save_webhook_stats(db, stats, commit=commit)
 
 
 def _reset_webhook_stats(db: Session) -> Dict[str, Any]:
@@ -1443,7 +1447,7 @@ def _dedupe_instance_token(arr_instance: Optional[str]) -> str:
     return token or "_"
 
 
-def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any]) -> bool:
+def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any], *, commit: bool = True) -> bool:
     now_ts = int(datetime.now(timezone.utc).timestamp())
     cutoff_ts = now_ts - PLEX_WEBHOOK_DEDUPE_WINDOW_SECONDS
 
@@ -1463,7 +1467,8 @@ def _is_duplicate_webhook_event(db: Session, parsed_payload: Dict[str, Any]) -> 
     pruned_cache[identity] = record
 
     upsert_setting(db, SETTING_PLEX_WEBHOOK_DEDUPE_CACHE, json.dumps(pruned_cache))
-    db.commit()
+    if commit:
+        db.commit()
 
     return is_duplicate
 

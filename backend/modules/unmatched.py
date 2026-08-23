@@ -284,6 +284,7 @@ def run_unmatched_detection_background_job(
             error=error_msg,
             traceback=traceback.format_exc()
         )
+        db.rollback()  # reset a possibly-poisoned session before reusing it
         if not skip_discord:
             send_discord_notification(
                 db,

@@ -800,6 +800,7 @@ def run_rename_background_job(
         raise
     except Exception as e:
         log_error(LogTags.RENAMER, f"Background Asset Renamer failed: {e}\n{traceback.format_exc()}")
+        db.rollback()  # reset a possibly-poisoned session before reusing it
         if not skip_discord:
             send_discord_notification(
                 db,

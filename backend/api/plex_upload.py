@@ -897,8 +897,9 @@ def handle_plex_upload_webhook(
     supply the webhook token via ``?token=`` or the ``X-Webhook-Token`` header.
     """
     try:
-        increment_webhook_stat(db, "received")
-
+        # Each terminal path below counts "received" plus its outcome in a single
+        # stats write, so one webhook event costs one commit (SQLite write-lock
+        # churn here can starve a long-running job's session).
         if is_password_set(db):
             provided_token = request.query_params.get("token") or request.headers.get("X-Webhook-Token", "")
             if not verify_webhook_token(db, provided_token):
@@ -906,6 +907,7 @@ def handle_plex_upload_webhook(
                 # incrementing a misleading counter (key is intentionally not a stat).
                 increment_webhook_stat(
                     db,
+                    "received",
                     "auth_rejected",
                     last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Plex Upload page.",
                 )
@@ -919,13 +921,13 @@ def handle_plex_upload_webhook(
                 )
 
         if not is_webhook_enabled(db):
-            increment_webhook_stat(db, "rejected_disabled", last_error="Webhook disabled")
+            increment_webhook_stat(db, "received", "rejected_disabled", last_error="Webhook disabled")
             raise HTTPException(status_code=403, detail="Plex webhook is disabled. Enable it in Plex Upload settings.")
 
         parsed = parse_arr_webhook_payload(payload)
 
         if parsed.get("skip"):
-            increment_webhook_stat(db, "skipped_test")
+            increment_webhook_stat(db, "received", "skipped_test")
             return {
                 "success": True,
                 "queued": False,
@@ -934,14 +936,14 @@ def handle_plex_upload_webhook(
 
         parsed["arr_instance"] = resolve_arr_instance(db, request, parsed)
 
-        if is_duplicate_webhook_event(db, parsed):
+        if is_duplicate_webhook_event(db, parsed, commit=False):
             log_info(
                 LogTags.UPLOADER,
                 f"Skipping duplicate webhook event for {parsed.get('media_type')}: {parsed.get('title')}",
                 event_type=parsed.get("event_type"),
                 source=parsed.get("source"),
             )
-            increment_webhook_stat(db, "duplicates")
+            increment_webhook_stat(db, "received", "duplicates")
             return {
                 "success": True,
                 "queued": False,
@@ -950,6 +952,9 @@ def handle_plex_upload_webhook(
             }
 
         media_label = f"{parsed.get('media_type')}: {parsed.get('title')}"
+        # Stats and the dedupe record land in create_job's commit, before the job
+        # thread starts writing with its own session.
+        increment_webhook_stat(db, "received", "queued", queued=True, commit=False)
         job = create_job(
             db,
             job_type=JOB_TYPE_PLEX_UPLOAD_WEBHOOK,
@@ -968,7 +973,6 @@ def handle_plex_upload_webhook(
             get_webhook_retry_attempts(db),
             get_webhook_retry_delay_seconds(db),
         )
-        increment_webhook_stat(db, "queued", queued=True)
 
         return {
             "success": True,
@@ -978,12 +982,13 @@ def handle_plex_upload_webhook(
         }
 
     except ValueError as e:
-        increment_webhook_stat(db, "parse_errors", last_error=str(e))
+        increment_webhook_stat(db, "received", "parse_errors", last_error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        increment_webhook_stat(db, "internal_errors", last_error=str(e))
+        db.rollback()  # discard any deferred bookkeeping before counting the error
+        increment_webhook_stat(db, "received", "internal_errors", last_error=str(e))
         raise_internal_error("Failed processing plex upload webhook", e)
 
 

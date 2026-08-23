@@ -166,6 +166,7 @@ def run_border_replacer_background_job(job_id: int, dry_run: bool = False, mode:
         raise
     except Exception as e:
         log_error(LogTags.BORDER_REPLACER, f"Background border replacer failed: {e}\n{traceback.format_exc()}")
+        db.rollback()  # reset a possibly-poisoned session before reusing it
         try:
             mark_job_failed(db, job_id, e)
         except Exception as commit_error:
