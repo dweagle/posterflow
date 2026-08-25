@@ -811,3 +811,29 @@ def test_artwork_stat_counts_files_written_not_matched_slots(test_db, tmp_path):
     # Broken down like the poster counts (by media type) plus by artwork type.
     assert first_written["by_media"] == {"movies": 0, "series": 2, "collections": 0}
     assert first_written["by_type"] == {"logo": 1, "background": 0, "squareart": 1}
+
+
+def test_merge_assets_tmdb_year_guard_blocks_cross_namespace_fuse(tmp_path):
+    """A movie and a show can share one tmdb number (separate namespaces). With the guard,
+    a tmdb-only id match with disagreeing years stays two boxes; agreeing years still merge."""
+    from util.posters.assets import merge_assets
+    from util.posters.index import create_new_empty_index
+    from util.data.normalization import normalize_titles
+
+    def art_box(title, year, tmdb_id, drive, tvdb_id=None):
+        logo = str(tmp_path / drive / "logos" / f"{title} ({year}).png")
+        return {"title": title, "year": year, "tmdb_id": tmdb_id, "tvdb_id": tvdb_id, "imdb_id": None,
+                "normalized_title": normalize_titles(title), "type": None,
+                "files": [logo], "slots": {"poster": None, "logo": logo, "seasons": {}}}
+
+    final, index = [], create_new_empty_index()
+    merge_assets([art_box("Adventures of the Gummi Bears", 1985, 77, "a", tvdb_id=5)], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    merge_assets([art_box("Stomp the Yard", 2007, 77, "b")], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    assert len(final) == 2  # different years -> the shared tmdb number doesn't fuse them
+
+    # Same item spelled differently on another drive (same year) still merges by id.
+    merge_assets([art_box("Gummi Bears Adventures", 1985, 77, "c")], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    assert len(final) == 2

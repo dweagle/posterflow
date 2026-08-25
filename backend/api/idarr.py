@@ -1756,13 +1756,19 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
         selected_source = "manual"
         selected_candidate: dict[str, Any] | None = None
         if isinstance(resolved_tmdb_id, int):
+            _wanted_type = _normalize_idarr_asset_type(payload.tmdb_type) if isinstance(payload.tmdb_type, str) and payload.tmdb_type.strip() else None
+            _wanted_media = "show" if _wanted_type == "tv_series" else _wanted_type
             candidate_rows = cache_payload.get("candidate_results")
             if isinstance(candidate_rows, list):
                 for candidate in candidate_rows:
-                    if isinstance(candidate, dict) and candidate.get("tmdb_id") == resolved_tmdb_id:
-                        selected_source = "candidate"
-                        selected_candidate = candidate
-                        break
+                    if not (isinstance(candidate, dict) and candidate.get("tmdb_id") == resolved_tmdb_id):
+                        continue
+                    # Same number can exist in both namespaces — honor the requested type.
+                    if _wanted_media and str(candidate.get("media_type") or "").strip().lower() not in ("", _wanted_media):
+                        continue
+                    selected_source = "candidate"
+                    selected_candidate = candidate
+                    break
             if selected_source == "manual" and tmdb_input:
                 selected_source = "tmdb_input"
 
@@ -2071,15 +2077,18 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
         lookup_types = ["movie"]
 
     candidates: list[dict[str, Any]] = []
-    tmdb_external_ids_cache: dict[int, dict[str, Any]] = {}
-    seen_tmdb_ids: set[int] = set()
+    # Keyed by (lookup_type, id): movie and TV tmdb ids are separate namespaces sharing
+    # numbers, so a bare-id key could hand a movie's external ids to a show candidate.
+    tmdb_external_ids_cache: dict[tuple[str, int], dict[str, Any]] = {}
+    seen_tmdb_ids: set[tuple[str, int]] = set()
 
     def fetch_tmdb_external_ids(tmdb_id: int, lookup_type: str) -> dict[str, Any]:
-        if tmdb_id in tmdb_external_ids_cache:
-            return tmdb_external_ids_cache[tmdb_id]
+        cache_key = (lookup_type, tmdb_id)
+        if cache_key in tmdb_external_ids_cache:
+            return tmdb_external_ids_cache[cache_key]
 
         if lookup_type == "collection":
-            tmdb_external_ids_cache[tmdb_id] = {}
+            tmdb_external_ids_cache[cache_key] = {}
             return {}
 
         tmdb_entity = "tv" if lookup_type == "show" else "movie"
@@ -2092,12 +2101,12 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
             external_response.raise_for_status()
             external_payload = external_response.json()
             if isinstance(external_payload, dict):
-                tmdb_external_ids_cache[tmdb_id] = external_payload
+                tmdb_external_ids_cache[cache_key] = external_payload
                 return external_payload
         except requests.RequestException:
             pass
 
-        tmdb_external_ids_cache[tmdb_id] = {}
+        tmdb_external_ids_cache[cache_key] = {}
         return {}
 
     for tmdb_lookup_type in lookup_types:
@@ -2153,9 +2162,11 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
             if not isinstance(item, dict):
                 continue
             tmdb_id = item.get("id") if isinstance(item.get("id"), int) else None
-            if tmdb_id is None or tmdb_id in seen_tmdb_ids:
+            # Dedupe within the namespace only — the same number can be a valid movie
+            # AND a different show, and both belong in the picker.
+            if tmdb_id is None or (tmdb_lookup_type, tmdb_id) in seen_tmdb_ids:
                 continue
-            seen_tmdb_ids.add(tmdb_id)
+            seen_tmdb_ids.add((tmdb_lookup_type, tmdb_id))
             external_ids_payload = fetch_tmdb_external_ids(tmdb_id, tmdb_lookup_type)
             imdb_id = external_ids_payload.get("imdb_id") if isinstance(external_ids_payload.get("imdb_id"), str) else None
             tvdb_raw = external_ids_payload.get("tvdb_id")

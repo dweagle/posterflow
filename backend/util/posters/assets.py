@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from core.logging import log_debug, log_warning, log_phase, LogTags, logger
+from core.logging import log_debug, log_info, log_warning, log_phase, LogTags, logger
 from util.posters.index import build_search_index, create_new_empty_index, search_matches
 from util.posters.match import is_match
 from util.data.construct import ITEM_SLOTS, SLOT_POSTER
@@ -181,6 +181,7 @@ def merge_assets(
     new_assets: List[Dict], final_assets: List[Dict], prefix_index: Dict,
     source_priority: Optional[Dict[str, int]] = None,
     log_new: bool = True,
+    tmdb_year_guard: bool = False,
 ) -> None:
     """Merge new asset entries into the final asset list, collapsing duplicates,
     handling upgrades, and indexing.
@@ -193,6 +194,10 @@ def merge_assets(
             the poster scanner logs nothing per item, so this is a poster item's only record.
             Artwork callers pass False — the artwork scan already logs each item, with better
             detail (its slots and the real drive name).
+        tmdb_year_guard (bool): Reject a match made on tmdb id ALONE when both sides carry
+            years that disagree. Movie and TV tmdb ids share numbers, and a type-less
+            artwork box with no tvdb tag counts as namespace-compatible with anything — the
+            year is the only tiebreak. Artwork callers set this.
     """
     for new in new_assets:
         search_matched_assets = search_matches(prefix_index, new["title"])
@@ -229,6 +234,22 @@ def merge_assets(
                 continue
 
             is_matched, reason = is_match(final, new)
+            if (
+                is_matched
+                and tmdb_year_guard
+                and reason == "by tmdb_id"
+                and new.get("year") and final.get("year")
+                and new["year"] != final["year"]
+            ):
+                log_debug(
+                    LogTags.SCANNER,
+                    f"Year guard: not merging '{new['title']}' ({new['year']}) with "
+                    f"'{final['title']}' ({final['year']}) on a tmdb id alone — "
+                    f"movie/TV tmdb namespaces can share the number",
+                    new_title=new["title"], new_year=new["year"],
+                    existing_title=final["title"], existing_year=final["year"],
+                )
+                continue
             if is_matched and (
                 # A type-less box is artwork — a filename can't say movie vs series, so it
                 # fits whatever item it matched. Without this it only merged into a box with

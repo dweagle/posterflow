@@ -583,7 +583,8 @@ class IdarrRunner:
                         if not isinstance(candidate, dict):
                             continue
                         if not self._by_tmdb_hint_is_compatible(
-                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_group_title
+                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_group_title,
+                            year=group_year if isinstance(group_year, int) else None,
                         ):
                             continue
                         candidate_title = str(candidate.get("normalized_title") or "")
@@ -785,7 +786,9 @@ class IdarrRunner:
             type_is_inferred = False
         else:
             asset_type = "movie"
-            type_is_inferred = not bool(tmdb_match or imdb_match)
+            # A tmdb tag proves nothing about namespace (movie and TV ids share numbers),
+            # so it must NOT lock the type — only an imdb tag corroborates identity here.
+            type_is_inferred = not bool(imdb_match)
 
         has_id = bool(tmdb_match or tvdb_match or imdb_match)
         normalized_title, normalized_year, normalized_type = ensure_title_year(clean_title or stem, year, asset_type)
@@ -845,11 +848,12 @@ class IdarrRunner:
             # cross-type by_tmdb collisions.
             if isinstance(asset_tvdb_id, int):
                 file_intrinsic_type: str | None = "tv_series"
-            elif isinstance(year, int):
-                file_intrinsic_type = "movie"
             elif COLLECTION_REGEX.search(str(asset.get("title") or "").lower()):
                 file_intrinsic_type = "collection"
             else:
+                # A year proves nothing about namespace for artwork — TV artwork carries
+                # (YYYY) too. Unknown, so the cross-type hint guard can't be satisfied
+                # by a guessed "movie".
                 file_intrinsic_type = None
             if isinstance(asset_tmdb_id, int):
                 tmdb_candidates = group_cache_hints.get("by_tmdb", {}).get(asset_tmdb_id, [])
@@ -860,7 +864,8 @@ class IdarrRunner:
                         if not isinstance(candidate, dict):
                             continue
                         if not self._by_tmdb_hint_is_compatible(
-                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_title
+                            candidate, file_type=file_intrinsic_type, normalized_title=normalized_title,
+                            year=year if isinstance(year, int) else None,
                         ):
                             continue
                         candidate_title = str(candidate.get("normalized_title") or "")
@@ -896,10 +901,12 @@ class IdarrRunner:
                     if candidate_imdb.startswith("tt"):
                         asset_imdb_id = candidate_imdb
 
+            _indexed_hit = False
             if asset_tmdb_id is None or asset_tvdb_id is None or asset_imdb_id is None:
                 file_name_key = str(asset["file_path"].name).strip().lower()
                 indexed = filename_cache_index.get(file_name_key)
                 if indexed:
+                    _indexed_hit = True
                     cache_type = cache_type or self._normalize_asset_type(str(indexed.get("asset_type") or ""))
                     if asset_tmdb_id is None and isinstance(indexed.get("tmdb_id"), int):
                         asset_tmdb_id = int(indexed["tmdb_id"])
@@ -928,12 +935,15 @@ class IdarrRunner:
                 resolved_type = "movie"
 
             asset["type"] = resolved_type
-            _has_resolving_id = (
-                isinstance(asset_tmdb_id, int)
-                or isinstance(asset_tvdb_id, int)
+            # A bare tmdb id from the filename does NOT prove the namespace — keep the type
+            # inferred (so the dual-endpoint search still runs) unless tvdb/imdb or a
+            # corroborated cache row (hint or filename-keyed) backs the id.
+            _namespace_proven = (
+                is_series
                 or (isinstance(asset_imdb_id, str) and asset_imdb_id.startswith("tt"))
+                or (isinstance(asset_tmdb_id, int) and (cache_hint is not None or _indexed_hit))
             )
-            if is_series or _has_resolving_id:
+            if _namespace_proven:
                 asset["type_is_inferred"] = False
             if isinstance(asset_tmdb_id, int):
                 asset["tmdb_id"] = asset_tmdb_id
@@ -1154,6 +1164,7 @@ class IdarrRunner:
         *,
         file_type: str | None,
         normalized_title: str,
+        year: int | None = None,
     ) -> bool:
         """Reject a same-tmdb cache hint that is a cross-media-type collision.
 
@@ -1161,11 +1172,18 @@ class IdarrRunner:
         Yards") and tv 2122 ("King of the Hill") are different entities. Accept when
         the candidate's type matches the file's intrinsic type, or its title matches
         (covers a genuine same-entity row whose type the filename can't establish).
+        A nominal type agreement can itself be a guess (type-less artwork), so a title
+        mismatch with disagreeing known years still rejects — the year is the only
+        namespace tiebreak such files carry.
         """
+        cand_title = str(candidate.get("normalized_title") or "")
+        title_agrees = bool(cand_title and cand_title == normalized_title)
         cand_type = IdarrRunner._normalize_asset_type(str(candidate.get("asset_type") or ""))
         if file_type and cand_type and cand_type != file_type:
-            cand_title = str(candidate.get("normalized_title") or "")
-            return bool(cand_title and cand_title == normalized_title)
+            return title_agrees
+        cand_year = candidate.get("year") if isinstance(candidate.get("year"), int) else None
+        if not title_agrees and isinstance(year, int) and isinstance(cand_year, int) and year != cand_year:
+            return False
         return True
 
     @staticmethod

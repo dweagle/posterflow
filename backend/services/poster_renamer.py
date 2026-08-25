@@ -1398,7 +1398,7 @@ class PosterRenameService:
                 log_phase(LogTags.MERGE, f"Merging {len(artwork_boxes)} artwork item(s) into the poster index")
                 for box in artwork_boxes:
                     # log_new=False: the artwork scan already logged each of these per item.
-                    merge_assets([box], assets_dict, prefix_index, log_new=False)
+                    merge_assets([box], assets_dict, prefix_index, log_new=False, tmdb_year_guard=True)
                 log_info(
                     LogTags.RENAMER,
                     f"Merged {len(artwork_boxes)} artwork item(s) into the asset index",

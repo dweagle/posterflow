@@ -74,6 +74,26 @@ def test_idarr_runner_scan_rejects_cross_type_tmdb_collision(test_db, tmp_path):
     assert movie2.get("imdb_id") == "tt0327247"
 
 
+def test_idarr_asset_drive_rejects_same_type_tmdb_hint_with_disagreeing_year(test_db, tmp_path):
+    """A type-less artwork file defaults to "movie", NOMINALLY agreeing with a cached movie
+    row that shares its tmdb number from the other namespace (TV). Disagreeing years must
+    reject that hint: the movie's imdb id is not copied onto the TV file, and the type stays
+    inferred so the dual-endpoint search can find the real entity."""
+    runner = IdarrRunner(test_db)
+    test_db.add(IdarrAssetCache(
+        asset_key="movie::theunkabogablepraybeytbenjamin::2011::tmdb=79063",
+        title="The Unkabogable Praybeyt Benjamin", year=2011, asset_type="movie",
+        tmdb_id=79063, imdb_id="tt2057955", matched=True, payload_json="{}",
+    ))
+    test_db.commit()
+    (tmp_path / "Cunk on Earth (2022) {tmdb-79063}.png").write_bytes(b"x")
+
+    assets = runner._scan_assets_for_asset_drive(tmp_path)
+    cunk = next(a for a in assets if int(a.get("tmdb_id") or 0) == 79063)
+    assert cunk.get("imdb_id") is None
+    assert cunk["type_is_inferred"] is True
+
+
 def test_idarr_runner_load_cache_map_rejects_cross_type_tmdb_collision(test_db):
     """_load_cache_map must NOT match a TV asset to a cached *movie* row that only shares the
     numeric tmdb id. TMDB ids are namespaced per media type: movie 4599 ("Raising Helen") and

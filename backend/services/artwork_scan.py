@@ -163,7 +163,7 @@ def scan_artwork_drive_boxes(db: Session) -> List[Dict[str, Any]]:
     merged: List[Dict[str, Any]] = []
     merge_index = create_new_empty_index()
     for box in boxes:
-        merge_assets([box], merged, merge_index, source_priority, log_new=False)
+        merge_assets([box], merged, merge_index, source_priority, log_new=False, tmdb_year_guard=True)
     for box in merged:
         # Slots won per-slot above; re-derive files so the two never disagree (the filename
         # dedup inside merge_assets collapses artwork stems, which differ only by folder).
