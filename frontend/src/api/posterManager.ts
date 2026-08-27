@@ -1,4 +1,4 @@
-import client, { getData, postData, putData, deleteData } from './http'
+import client, { API_URL, getData, postData, putData, deleteData } from './http'
 
 // Poster types and functions
 // Display fallback for the blank-destination default until GET /config reports the
@@ -554,6 +554,55 @@ export interface FallbackItem {
   available?: boolean | null
   drive_id?: string | null
   slot?: string | null
+  file?: string | null
+  // Display-only source label, tagged when aggregating the All Drives view.
+  drive_name?: string | null
+  drive_style?: string | null
+}
+
+// Bare paths resolve against the page origin, not the backend — always prefix API_URL.
+export const getDriveImageUrl = (path: string): string =>
+  `${API_URL}/api/posterflow/drive-image?path=${encodeURIComponent(path)}`
+
+export interface PosterOverride {
+  id: number
+  media_type: 'movie' | 'show' | 'collection'
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  title: string
+  year?: number | null
+  domain?: 'poster' | 'artwork'
+  scope: 'slot' | 'set'
+  season?: number | null
+  slot?: string | null
+  drive_id: string
+}
+
+// One slot of an item for compare/override lookups: a season (posters) or an artwork slot.
+export interface CompareTarget {
+  season: number | null
+  slot: string | null
+}
+
+export const getPosterOverrides = async (): Promise<PosterOverride[]> => {
+  return getData('/api/posterflow/overrides')
+}
+
+export const savePosterOverride = async (input: Omit<PosterOverride, 'id'>): Promise<PosterOverride> => {
+  return postData('/api/posterflow/overrides', input)
+}
+
+export const deletePosterOverride = async (id: number): Promise<void> => {
+  await deleteData<void>(`/api/posterflow/overrides/${id}`)
+}
+
+// One drive's poster for an item/slot in the side-by-side compare view.
+export interface CompareCandidate {
+  drive_id: string
+  drive_name: string
+  file: string
+  used: boolean
 }
 
 export interface DriveUsage {

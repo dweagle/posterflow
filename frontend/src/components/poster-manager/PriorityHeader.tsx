@@ -2,10 +2,9 @@ import { Save } from 'lucide-react'
 import Toolbar from '../Toolbar'
 import PriorityScopeSelector, { type PriorityScope } from './PriorityScopeSelector'
 
-// One toolbar for both scopes, so it stays put when the switches are clicked — only the
-// panels below change. The description covers what each scope contributes.
-const TITLE = 'Configure Drive Priority'
-const DESCRIPTION =
+// One toolbar for all scopes; only the panels below change. Exported for the Drive Usage view.
+export const TITLE = 'Configure Drive Priority'
+export const DESCRIPTION =
   'Select which poster styles to use, and set the priority order of your poster and artwork ' +
   '(logo / backdrop / square-art) drives. Higher drives override lower ones when the same ' +
   'asset comes from multiple makers.'

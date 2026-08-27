@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronRight, Download, List } from 'lucide-react'
-import { DriveUsage, FallbackItem } from '../../api/posterManager'
-import DriveUsageModal from './DriveUsageModal'
+import { CompareCandidate, CompareTarget, DriveUsage, FallbackItem } from '../../api/posterManager'
+import DriveUsageModal, { ALL_DRIVES_ID } from './DriveUsageModal'
 import { SLOT_LABELS } from './itemSort'
 
 export const formatItemLine = (item: FallbackItem) => {
@@ -9,9 +9,9 @@ export const formatItemLine = (item: FallbackItem) => {
   const cleanTitle = item.year ? item.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : item.title
   let line = item.year ? `${cleanTitle} (${item.year})` : cleanTitle
   if (item.type === 'show' && item.season != null) {
-    line += item.season === 0 ? ' — Specials' : ` — Season ${item.season}`
+    line += item.season === 0 ? ' - Specials' : ` - Season ${item.season}`
   }
-  if (item.slot) line += ` — ${SLOT_LABELS[item.slot] ?? item.slot}`
+  if (item.slot) line += ` - ${SLOT_LABELS[item.slot] ?? item.slot}`
   if (item.type === 'collection') line += ' [Collection]'
   return line
 }
@@ -33,33 +33,94 @@ type DriveUsagePanelProps = {
   usage: DriveUsage[]
   itemsForDrive: (driveId: string) => FallbackItem[]
   outrankedForDrive: (driveId: string) => FallbackItem[]
+  compareForItem?: (item: FallbackItem, target: CompareTarget) => CompareCandidate[]
+  availableCountFor?: (item: FallbackItem, target: CompareTarget) => number
+  overrideDomain?: 'poster' | 'artwork'
   noun?: string
   filePrefix?: string
+  title?: string
+  defaultOpen?: boolean
+  collapsible?: boolean
 }
 
-// The "Last Rename — Drive Usage" card: collapsible bar list with a View/Download per
-// drive. Shared by the poster and artwork priority scopes — only the data differs.
+// The "Last Rename — Drive Usage" card, shared by the poster and artwork scopes.
 export default function DriveUsagePanel({
   usage,
   itemsForDrive,
   outrankedForDrive,
+  compareForItem,
+  availableCountFor,
+  overrideDomain = 'poster',
   noun = 'poster',
   filePrefix = 'drive-usage',
+  title = 'Last Rename - Drive Usage',
+  defaultOpen = false,
+  collapsible = true,
 }: DriveUsagePanelProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
+  const expanded = open || !collapsible
+
+  // Name column sized to the panel's longest drive name.
+  const nameColWidth = useMemo(() => {
+    if (usage.length === 0) return undefined
+    try {
+      const ctx = document.createElement('canvas').getContext('2d')
+      if (!ctx) return undefined
+      ctx.font = `13.6px ${getComputedStyle(document.body).fontFamily}`
+      const widest = Math.max(...usage.map((d) => ctx.measureText(d.name).width))
+      return Math.min(Math.ceil(widest) + 8, 256)
+    } catch {
+      return undefined
+    }
+  }, [usage])
   const [openDrive, setOpenDrive] = useState<DriveUsage | null>(null)
 
   if (usage.length === 0) return null
 
-  // Bars scale to the largest used+outranked total so every segment fits the track.
-  const usageScale = Math.max(1, ...usage.map((d) => d.count + (d.outranked ?? 0)))
+  // Sqrt bars scaled to the second-largest drive; only the off-scale drive passes 88%.
+  const totals = usage.map((d) => d.count + (d.outranked ?? 0))
+  const maxTotal = Math.max(1, ...totals)
+  const usageScale = Math.max(1, [...totals].sort((a, b) => b - a).find((t) => t < maxTotal) ?? maxTotal)
+  const scaledPct = (n: number) => (n > 0 ? Math.max(1.5, Math.sqrt(n / usageScale) * 88) : 0)
+
+  // Aggregate "All Drives" pseudo-entry: first stop in the modal's drive navigation.
+  const allEntry: DriveUsage = {
+    drive_id: ALL_DRIVES_ID,
+    name: 'All Drives',
+    count: usage.reduce((a, d) => a + d.count, 0),
+    outranked: usage.reduce((a, d) => a + (d.outranked ?? 0), 0),
+  }
+  const navList = [allEntry, ...usage]
+
+  const itemsFor = (driveId: string) =>
+    driveId === ALL_DRIVES_ID
+      ? usage.flatMap((u) => itemsForDrive(u.drive_id).map((it) => ({ ...it, drive_name: u.name, drive_style: u.style })))
+      : itemsForDrive(driveId)
+
+  const outrankedFor = (driveId: string) => {
+    if (driveId !== ALL_DRIVES_ID) return outrankedForDrive(driveId)
+    // No dedupe: each drive's tagged candidate rides along for the aggregate badges.
+    return usage.flatMap((u) =>
+      outrankedForDrive(u.drive_id).map((it) => ({ ...it, drive_name: u.name, drive_style: u.style }))
+    )
+  }
 
   const handleDownload = (entry: DriveUsage, mode: 'used' | 'outranked' = 'used') => {
-    const items = mode === 'used' ? itemsForDrive(entry.drive_id) : outrankedForDrive(entry.drive_id)
+    let items = mode === 'used' ? itemsFor(entry.drive_id) : outrankedFor(entry.drive_id)
+    if (entry.drive_id === ALL_DRIVES_ID && mode === 'outranked') {
+      // One txt line per title is enough for the aggregate.
+      const seen = new Set<string>()
+      items = items.filter((it) => {
+        const key = `${it.type}::${it.title}::${it.year}::${it.season ?? null}::${it.slot ?? ''}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+    }
     const slug = entry.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const header = mode === 'used'
       ? `# ${noun[0].toUpperCase()}${noun.slice(1)}s used from ${entry.name}${entry.style ? ` (${entry.style})` : ''}`
-      : `# ${noun[0].toUpperCase()}${noun.slice(1)}s matched from ${entry.name}${entry.style ? ` (${entry.style})` : ''} but not used — a higher-priority drive covered them`
+      : `# ${noun[0].toUpperCase()}${noun.slice(1)}s matched from ${entry.name}${entry.style ? ` (${entry.style})` : ''} but not used - a higher-priority drive covered them`
     downloadText(`${filePrefix}-${slug || 'drive'}${mode === 'outranked' ? '-not-used' : ''}.txt`, [
       header,
       `# Generated: ${new Date().toLocaleString()}`,
@@ -70,40 +131,72 @@ export default function DriveUsagePanel({
   return (
     <>
       <div className="style-usage-panel">
-        <button
-          type="button"
-          className="style-usage-header drive-usage-toggle"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-        >
-          <span className="style-usage-title">
-            <ChevronRight size={15} className={`drive-usage-chevron${open ? ' open' : ''}`} />
-            Last Rename — Drive Usage
-          </span>
-          <span className="style-usage-total">
-            {usage.length} drive{usage.length !== 1 ? 's' : ''} used
-          </span>
-        </button>
-        {open && (
+        {collapsible ? (
+          <button
+            type="button"
+            className="style-usage-header drive-usage-toggle"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+          >
+            <span className="style-usage-title">
+              <ChevronRight size={15} className={`drive-usage-chevron${open ? ' open' : ''}`} />
+              {title}
+            </span>
+            <span className="style-usage-total">
+              {usage.length} drive{usage.length !== 1 ? 's' : ''} used
+            </span>
+          </button>
+        ) : (
+          <div className="style-usage-header">
+            <span className="style-usage-title">{title}</span>
+            <span className="style-usage-total">
+              {usage.length} drive{usage.length !== 1 ? 's' : ''} used
+            </span>
+          </div>
+        )}
+        {expanded && (
           <>
-            <p className="drive-usage-hint">
-              Drives are listed by {noun}s used, not priority order. The dimmed end of a bar is {noun}s that
-              matched from that drive but were covered by a higher-priority drive.
-            </p>
-            <div className="style-usage-bars">
+            <div className="drive-usage-hint-row">
+              <p className="drive-usage-hint">
+                Drives are listed by {noun}s used, not priority order. The dimmed end of a bar is {noun}s that
+                matched from that drive but were covered by a higher-priority drive.
+              </p>
+              <button
+                className="style-usage-download-btn"
+                onClick={() => setOpenDrive(allEntry)}
+                title={`View all ${noun}s across every drive`}
+              >
+                <List size={13} />
+                View All
+              </button>
+            </div>
+            <div className="style-usage-bars drive-usage-bars">
               {usage.map((entry) => {
                 const outranked = entry.outranked ?? 0
-                const usedPct = (entry.count / usageScale) * 100
-                const outrankedPct = (outranked / usageScale) * 100
+                const total = entry.count + outranked
+                const capped = total > usageScale
+                const totalPct = capped ? 100 : scaledPct(total)
+                const usedPct = capped
+                  ? (total > 0 ? (entry.count / total) * 100 : 0)
+                  : Math.min(totalPct, scaledPct(entry.count))
+                const outrankedPct = totalPct - usedPct
                 const styleKey = (entry.style ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
                 return (
                   <div
                     key={entry.drive_id}
                     className={`style-usage-row drive-usage-row${styleKey ? ` style-usage-${styleKey}` : ''}`}
                   >
-                    <span className="drive-usage-name" title={entry.name}>{entry.name}</span>
+                    <span
+                      className="drive-usage-name"
+                      title={entry.name}
+                      style={nameColWidth ? ({ '--name-col': `${nameColWidth}px` } as React.CSSProperties) : undefined}
+                    >
+                      {entry.name}
+                    </span>
                     {entry.style && <span className={`style-badge style-${styleKey}`}>{entry.style}</span>}
-                    <div className={`style-usage-bar-track${outranked > 0 ? ' has-extension' : ''}`}>
+                    <div
+                      className={`style-usage-bar-track${outranked > 0 ? ' has-extension' : ''}${capped ? ' drive-usage-bar-capped' : ''}`}
+                    >
                       <div className="style-usage-bar-fill" style={{ width: `${usedPct}%` }} />
                       {outranked > 0 && (
                         <div className="drive-usage-outranked-fill" style={{ width: `${outrankedPct}%` }} />
@@ -111,8 +204,8 @@ export default function DriveUsagePanel({
                     </div>
                     <span className="style-usage-count">{entry.count.toLocaleString()}</span>
                     <span
-                      className="drive-usage-outranked-count"
-                      title={outranked > 0 ? `${outranked.toLocaleString()} matched but a higher-priority drive was used` : undefined}
+                      className={`drive-usage-outranked-count${outranked > 0 ? ' drive-usage-tip' : ''}`}
+                      data-tooltip={outranked > 0 ? `${outranked.toLocaleString()} matched but a higher-priority drive was used` : undefined}
                     >
                       {outranked > 0 ? `+${outranked.toLocaleString()}` : ''}
                     </span>
@@ -140,16 +233,28 @@ export default function DriveUsagePanel({
           </>
         )}
       </div>
-      {openDrive && (
-        <DriveUsageModal
-          drive={openDrive}
-          items={itemsForDrive(openDrive.drive_id)}
-          outrankedItems={outrankedForDrive(openDrive.drive_id)}
-          noun={noun}
-          onClose={() => setOpenDrive(null)}
-          onDownload={(mode) => handleDownload(openDrive, mode)}
-        />
-      )}
+      {openDrive && (() => {
+        const openIndex = navList.findIndex((u) => u.drive_id === openDrive.drive_id)
+        return (
+          <DriveUsageModal
+            drive={openDrive}
+            items={itemsFor(openDrive.drive_id)}
+            outrankedItems={outrankedFor(openDrive.drive_id)}
+            compareForItem={compareForItem}
+            availableCountFor={availableCountFor}
+            overrideDomain={overrideDomain}
+            noun={noun}
+            onClose={() => setOpenDrive(null)}
+            onDownload={(mode) => handleDownload(openDrive, mode)}
+            onNavigateDrive={(delta) => {
+              const next = navList[openIndex + delta]
+              if (next) setOpenDrive(next)
+            }}
+            hasPrevDrive={openIndex > 0}
+            hasNextDrive={openIndex >= 0 && openIndex < navList.length - 1}
+          />
+        )
+      })()}
     </>
   )
 }

@@ -31,22 +31,34 @@ input[type='number'] {
   appearance: textfield;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — clipped track channel + lighter thumb, visible on any surface. */
 ::-webkit-scrollbar {
   width: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: #2a2a2a;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: #555;
   border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #6a6a6a;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Firefox */
+:root {
+  scrollbar-color: #555 #2a2a2a;
 }
 
 /* Button base styles */

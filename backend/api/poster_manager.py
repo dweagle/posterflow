@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import Any, Callable, Dict, Optional, List
 from pydantic import BaseModel, Field
@@ -692,6 +692,138 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     except Exception as e:
         log_error(LogTags.RENAMER, f"Error getting poster stats: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting poster stats")
+
+
+@router.get("/drive-image")
+def get_drive_image(path: str, db: Session = Depends(get_db)) -> FileResponse:
+    """Serve a poster/artwork source file for the drive-usage previews. Containment under a
+    known drive folder is the security boundary — the route is auth-exempt so <img src> works."""
+    from models.artwork_drive import ArtworkDrive
+
+    try:
+        target = Path(path).resolve()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    for model in (Drive, ArtworkDrive):
+        for drive in db.query(model).all():
+            root = Path(drive.get_local_path(validate=False)).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                continue
+            return FileResponse(target, headers={"Cache-Control": "private, max-age=600"})
+
+    raise HTTPException(status_code=403, detail="Path outside drive folders")
+
+
+class PosterOverrideInput(BaseModel):
+    media_type: str
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    title: str
+    year: Optional[int] = None
+    domain: str = "poster"  # poster | artwork
+    scope: str = "slot"  # slot (one poster/season/artwork slot) | set (all of them)
+    season: Optional[int] = None  # poster domain only
+    slot: Optional[str] = None  # artwork domain only: logo | background | square
+    drive_id: str
+
+
+def _override_dict(ov) -> Dict[str, Any]:
+    return {
+        "id": ov.id,
+        "media_type": ov.media_type,
+        "tmdb_id": ov.tmdb_id,
+        "tvdb_id": ov.tvdb_id,
+        "imdb_id": ov.imdb_id,
+        "title": ov.title,
+        "year": ov.year,
+        "domain": getattr(ov, "domain", None) or "poster",
+        "scope": ov.scope,
+        "season": ov.season,
+        "slot": ov.slot,
+        "drive_id": ov.drive_id,
+    }
+
+
+@router.get("/overrides")
+def list_poster_overrides(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    from models.poster_override import PosterOverride
+    return [_override_dict(ov) for ov in db.query(PosterOverride).order_by(PosterOverride.id).all()]
+
+
+@router.post("/overrides")
+def upsert_poster_override(payload: PosterOverrideInput, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Create an override, or repoint the existing one for the same target (item + scope +
+    season) at a different drive."""
+    from models.poster_override import PosterOverride
+
+    from models.artwork_drive import ArtworkDrive
+
+    if payload.scope not in ("slot", "set"):
+        raise HTTPException(status_code=400, detail="scope must be 'slot' or 'set'")
+    if payload.media_type not in ("movie", "show", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, show or collection")
+    if payload.domain not in ("poster", "artwork"):
+        raise HTTPException(status_code=400, detail="domain must be 'poster' or 'artwork'")
+    if payload.domain == "artwork":
+        if payload.scope == "slot" and payload.slot not in ("logo", "background", "square"):
+            raise HTTPException(status_code=400, detail="slot must be logo, background or square")
+        if not db.query(ArtworkDrive).filter(ArtworkDrive.drive_id == payload.drive_id).first():
+            raise HTTPException(status_code=404, detail="Unknown artwork drive")
+    elif not db.query(Drive).filter(Drive.drive_id == payload.drive_id).first():
+        raise HTTPException(status_code=404, detail="Unknown drive")
+
+    def _same_item(ov) -> bool:
+        if payload.tmdb_id and ov.tmdb_id:
+            return ov.tmdb_id == payload.tmdb_id
+        return (ov.title or "").strip().lower() == payload.title.strip().lower() and ov.year == payload.year
+
+    season = payload.season if payload.domain == "poster" and payload.scope == "slot" else None
+    slot = payload.slot if payload.domain == "artwork" and payload.scope == "slot" else None
+    existing = next(
+        (ov for ov in db.query(PosterOverride).filter(PosterOverride.media_type == payload.media_type).all()
+         if (getattr(ov, "domain", None) or "poster") == payload.domain
+         and ov.scope == payload.scope and ov.season == season and ov.slot == slot and _same_item(ov)),
+        None,
+    )
+    if existing:
+        existing.drive_id = payload.drive_id
+        ov = existing
+    else:
+        ov = PosterOverride(
+            media_type=payload.media_type,
+            tmdb_id=payload.tmdb_id,
+            tvdb_id=payload.tvdb_id,
+            imdb_id=payload.imdb_id,
+            title=payload.title,
+            year=payload.year,
+            domain=payload.domain,
+            scope=payload.scope,
+            season=season,
+            slot=slot,
+            drive_id=payload.drive_id,
+        )
+        db.add(ov)
+    db.commit()
+    db.refresh(ov)
+    return _override_dict(ov)
+
+
+@router.delete("/overrides/{override_id}")
+def delete_poster_override(override_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    from models.poster_override import PosterOverride
+
+    ov = db.query(PosterOverride).filter(PosterOverride.id == override_id).first()
+    if not ov:
+        raise HTTPException(status_code=404, detail="Override not found")
+    db.delete(ov)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/priority")

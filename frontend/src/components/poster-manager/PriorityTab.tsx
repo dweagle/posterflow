@@ -5,7 +5,7 @@ import { DragEvent, TouchEvent as ReactTouchEvent, useState } from 'react'
 import { Drive } from '../../api/client'
 import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
 import PosterStyleModal from './PosterStyleModal'
-import DriveUsagePanel, { downloadText } from './DriveUsagePanel'
+import { downloadText } from './DriveUsagePanel'
 
 type PriorityTabProps = {
   scope: PriorityScope
@@ -86,11 +86,6 @@ function PriorityTab({
   })
   const fallbackEntries = styleEntries.slice(1).filter(([style, n]) => n > 0 && COMMUNITY_STYLES.includes(style))
   const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks[openFallbackStyle] ?? []) : []
-
-  const driveUsage = styleStats?.drive_usage ?? []
-  const allItems: FallbackItem[] = Object.values(styleFallbacks).flat()
-  const itemsForDrive = (driveId: string) => allItems.filter((it) => it.drive_id === driveId)
-  const outrankedForDrive = (driveId: string) => (styleStats?.drive_outranked ?? {})[driveId] ?? []
 
   const handleDownload = (style: string, items: FallbackItem[]) => {
     downloadText(`missing-${preferredStyle.toLowerCase()}-posters.txt`, [
@@ -209,7 +204,6 @@ function PriorityTab({
             )}
           </div>
         )}
-        <DriveUsagePanel usage={driveUsage} itemsForDrive={itemsForDrive} outrankedForDrive={outrankedForDrive} />
         {openFallbackStyle && preferredStyle && (
           <PosterStyleModal
             preferredStyle={preferredStyle}

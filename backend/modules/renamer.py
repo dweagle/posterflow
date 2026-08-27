@@ -262,6 +262,16 @@ def _run_poster_pass(db, job, config_data, media_dict, artwork_boxes=None, artwo
 
     if result.get("stats") and not config_data.get("dry_run", False):
         stats = result["stats"]
+        if artwork_boxes is None:
+            # Artwork wasn't part of this run — keep the previous artwork usage report.
+            prev_setting = get_setting(db, "poster_renamer_stats")
+            try:
+                prev_stats = json.loads(prev_setting.value) if prev_setting and prev_setting.value else {}
+            except json.JSONDecodeError:
+                prev_stats = {}
+            for key in ("artwork_drive_usage", "artwork_drive_items", "artwork_drive_outranked"):
+                if key in prev_stats:
+                    stats[key] = prev_stats[key]
         style_counts = stats.get("style_counts", {})
         stats_json = json.dumps(stats)
         upsert_setting(db, "poster_renamer_stats", stats_json)
@@ -538,6 +548,9 @@ def _run_artwork_only_pass(db, job, config_data, media_dict, artwork_boxes, artw
         matched = match_assets_to_media(media_dict, index, label="artwork drives", report_near_misses=False)
 
     progress("renaming", 50, 100, "Renaming and organizing artwork...")
+
+    from services.poster_renamer import apply_poster_overrides
+    apply_poster_overrides(db, matched)
 
     def _rename_progress(current: int, total: int, message: str) -> None:
         progress("renaming", 50 + int((current / total) * 50), 100, message)

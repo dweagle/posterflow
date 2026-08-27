@@ -1,9 +1,10 @@
-/** Which drive set the Drive Priority tab is configuring. */
-export type PriorityScope = 'posters' | 'artwork'
+/** Which view the Drive Priority tab shows: a drive set to configure, or the usage report. */
+export type PriorityScope = 'posters' | 'artwork' | 'usage'
 
 const SCOPES: { value: PriorityScope; label: string }[] = [
   { value: 'posters', label: 'Poster Drives' },
   { value: 'artwork', label: 'Artwork Drives' },
+  { value: 'usage', label: 'Drive Usage' },
 ]
 
 type Props = {

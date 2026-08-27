@@ -40,6 +40,7 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/api/artwork-finder/local-image",
     "/api/posterflow/plex-upload/source-image",
     "/api/posterflow/plex-upload/plex-thumb",
+    "/api/posterflow/drive-image",
 )
 
 # (method, path-prefix) pairs that skip the password header check because the endpoint

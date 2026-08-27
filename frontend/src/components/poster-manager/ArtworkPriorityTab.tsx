@@ -3,21 +3,18 @@ import { GripVertical, Minus, Plus, Trash2 } from 'lucide-react'
 import PriorityHeader from './PriorityHeader'
 import { type PriorityScope } from './PriorityScopeSelector'
 import { ArtworkDrive, getArtworkDrives } from '../../api/client'
-import { PosterStyleStats } from '../../api/posterManager'
-import DriveUsagePanel from './DriveUsagePanel'
 import { useArtworkDrivePriority } from '../../hooks/useArtworkDrivePriority'
 import { useToast } from '../Toast'
 
 type ArtworkPriorityTabProps = {
   scope: PriorityScope
   onScopeChange: (scope: PriorityScope) => void
-  styleStats: PosterStyleStats | null
 }
 
 // Artwork-drive priority ordering. Mimics PriorityTab exactly (two-panel drag/drop),
 // minus the poster style scheme: available drives are grouped Preset / Custom, and
 // cards show file counts. Self-contained (fetches its own drives + manages save state).
-function ArtworkPriorityTab({ scope, onScopeChange, styleStats }: ArtworkPriorityTabProps) {
+function ArtworkPriorityTab({ scope, onScopeChange }: ArtworkPriorityTabProps) {
   const { showToast } = useToast()
   const [drives, setDrives] = useState<ArtworkDrive[]>([])
   const [saving, setSaving] = useState(false)
@@ -76,10 +73,6 @@ function ArtworkPriorityTab({ scope, onScopeChange, styleStats }: ArtworkPriorit
   const availablePreset = drives.filter((d) => !d.is_custom && d.subscribed && !priorityList.find((p) => p.id === d.id))
   const availableCustom = drives.filter((d) => d.is_custom && d.subscribed && !priorityList.find((p) => p.id === d.id))
 
-  const artworkUsage = styleStats?.artwork_drive_usage ?? []
-  const artworkItems = styleStats?.artwork_drive_items ?? {}
-  const artworkOutranked = styleStats?.artwork_drive_outranked ?? {}
-
   const renderAvailableCard = (drive: ArtworkDrive, accent: 'artwork' | 'custom') => (
     <div
       key={drive.id}
@@ -108,13 +101,6 @@ function ArtworkPriorityTab({ scope, onScopeChange, styleStats }: ArtworkPriorit
       />
 
       <div className="priority-tab">
-        <DriveUsagePanel
-          usage={artworkUsage}
-          itemsForDrive={(id) => artworkItems[id] ?? []}
-          outrankedForDrive={(id) => artworkOutranked[id] ?? []}
-          noun="artwork file"
-          filePrefix="artwork-usage"
-        />
         <div className="priority-content">
           <div className="available-drives" onDragOver={handleDragOver} onDrop={handleDropInAvailable}>
             <div className="panel-header-row">

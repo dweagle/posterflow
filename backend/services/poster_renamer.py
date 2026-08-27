@@ -148,7 +148,7 @@ def build_artwork_drive_usage(db, artwork_renamed: Dict) -> Dict[str, Any]:
         return None
 
     def _item(entry: tuple) -> Dict:
-        _, title, year, tmdb_type, slot, tmdb_id, tvdb_id, imdb_id, poster_url, available = entry
+        src_file, title, year, tmdb_type, slot, tmdb_id, tvdb_id, imdb_id, poster_url, available = entry
         return {
             "title": title,
             "year": year,
@@ -160,6 +160,7 @@ def build_artwork_drive_usage(db, artwork_renamed: Dict) -> Dict[str, Any]:
             "imdb_id": imdb_id,
             "poster_url": poster_url,
             "available": available,
+            "file": str(src_file),
         }
 
     usage: Dict[str, Dict] = {}
@@ -195,7 +196,8 @@ def build_artwork_drive_usage(db, artwork_renamed: Dict) -> Dict[str, Any]:
         seen.add((dest_path, drive.drive_id))
         _entry(drive)["outranked"] += 1
         if win_entry:
-            outranked_items.setdefault(drive.drive_id, []).append(_item(win_entry))
+            # The LOSER's own file — the preview should show what this drive offers.
+            outranked_items.setdefault(drive.drive_id, []).append({**_item(win_entry), "file": str(src_file)})
 
     return {
         "artwork_drive_usage": sorted(usage.values(), key=lambda u: (-u["count"], -u["outranked"])),
@@ -226,6 +228,150 @@ def subscribed_priority_drives(db: Session) -> List[Any]:
     return drives
 
 
+def apply_poster_overrides(db, matched_assets: MediaDict) -> int:
+    """Swap matched boxes' slots to the user's chosen drive (Drive Usage 'Use' overrides)
+    when that drive has a candidate for the slot — poster/seasons for poster-domain
+    overrides, logo/background/square for artwork-domain ones. The displaced winner joins
+    slot_runners so stats keep counting it as outranked; a drive with no candidate leaves
+    the slot on normal priority. Runs before anything derives from the match."""
+    from models.artwork_drive import ArtworkDrive
+    from models.drive import Drive
+    from models.poster_override import PosterOverride
+
+    overrides = db.query(PosterOverride).all()
+    if not overrides:
+        return 0
+
+    drives_by_prefix: List[tuple] = []
+    names_by_id: Dict[str, str] = {}
+    for drive in db.query(Drive).all():
+        prefix = str(drive.get_local_path(validate=False)).rstrip(os.sep) + os.sep
+        drives_by_prefix.append((prefix, drive.drive_id))
+        names_by_id[drive.drive_id] = drive.display_name or drive.name
+    for drive in db.query(ArtworkDrive).all():
+        prefix = str(drive.get_local_path(validate=False)).rstrip(os.sep) + os.sep
+        drives_by_prefix.append((prefix, drive.drive_id))
+        names_by_id[drive.drive_id] = drive.display_name or drive.name
+    drives_by_prefix.sort(key=lambda entry: (-len(entry[0]), entry[0]))
+
+    def _drive_id_of(path) -> Optional[str]:
+        for prefix, drive_id in drives_by_prefix:
+            if str(path).startswith(prefix):
+                return drive_id
+        return None
+
+    by_tmdb: Dict[tuple, List] = {}
+    by_title: Dict[tuple, List] = {}
+    for ov in overrides:
+        if ov.tmdb_id:
+            by_tmdb.setdefault((ov.media_type, ov.tmdb_id), []).append(ov)
+        by_title.setdefault((ov.media_type, (ov.title or "").strip().lower(), ov.year), []).append(ov)
+
+    def _swap(current, candidates, ov_drive_id):
+        pool = ([current] if current else []) + [c for c in candidates if c]
+        chosen = next((p for p in pool if _drive_id_of(p) == ov_drive_id), None)
+        if not chosen:
+            return ("missing", None, None)
+        if chosen == current:
+            return ("redundant", None, None)
+        return ("swapped", chosen, [p for p in pool if p != chosen])
+
+    _slot_labels = {SLOT_LOGO: "Logo", SLOT_BACKGROUND: "Background", SLOT_SQUARE: "Square"}
+
+    def _log_swap(item, season, ov_drive_id, displaced_path, art_slot=None) -> None:
+        title = item.get("title") or "Unknown"
+        name = f"{title} ({item['year']})" if item.get("year") else title
+        if art_slot is not None:
+            name += f" — {_slot_labels.get(art_slot, art_slot)}"
+        elif season is not None:
+            name += " — Specials" if season == 0 else f" — Season {season}"
+        chosen_name = names_by_id.get(ov_drive_id, ov_drive_id)
+        displaced_id = _drive_id_of(displaced_path) if displaced_path else None
+        displaced_name = (names_by_id.get(displaced_id, displaced_id) if displaced_id else None) or "no prior source"
+        log_info(
+            LogTags.RENAMER,
+            f"  → Override: '{name}' uses [{chosen_name}]'s poster instead of priority winner [{displaced_name}]",
+            media=name, drive=chosen_name, displaced=displaced_name, source="override",
+        )
+
+    type_map = {"movies": "movie", "series": "show", "collections": "collection"}
+    applied = 0
+    outcomes: Dict[int, Dict[str, int]] = {}  # ov.id -> counts per _swap status
+
+    def _mark(ov, status: str) -> None:
+        counts = outcomes.setdefault(ov.id, {"swapped": 0, "redundant": 0, "missing": 0})
+        counts[status] += 1
+
+    for asset_type, items in (matched_assets or {}).items():
+        media_type = type_map.get(asset_type, asset_type)
+        for item in items:
+            box = item.get("asset_ref") or {}
+            slots = box.get("slots")
+            if not slots:
+                continue
+            matches = by_tmdb.get((media_type, item.get("tmdb_id")), []) if item.get("tmdb_id") else []
+            if not matches:
+                matches = by_title.get((media_type, (item.get("title") or "").strip().lower(), item.get("year")), [])
+            if not matches:
+                continue
+            runners = box.setdefault("slot_runners", {})
+            season_runners = runners.setdefault("seasons", {})
+            seasons = slots.get("seasons") or {}
+
+            # set-scope first so a specific slot pick can still win over it.
+            for ov in sorted(matches, key=lambda o: 0 if o.scope == "set" else 1):
+                domain = getattr(ov, "domain", None) or "poster"
+                if domain == "artwork":
+                    art_slots = (SLOT_LOGO, SLOT_BACKGROUND, SLOT_SQUARE)
+                    if ov.scope == "set":
+                        targets = [("art", s) for s in art_slots if slots.get(s)]
+                    else:
+                        targets = [("art", ov.slot)] if ov.slot in art_slots and slots.get(ov.slot) else []
+                elif ov.scope == "set":
+                    targets = [("poster", None)] + [("season", s) for s in seasons]
+                elif ov.season is None:
+                    targets = [("poster", None)]
+                else:
+                    targets = [("season", ov.season)] if ov.season in seasons else []
+                for kind, key in targets:
+                    if kind == "season":
+                        displaced = seasons.get(key)
+                        status, chosen, rest = _swap(displaced, season_runners.get(key) or [], ov.drive_id)
+                        _mark(ov, status)
+                        if status == "swapped":
+                            seasons[key], season_runners[key] = chosen, rest
+                            applied += 1
+                            _log_swap(item, key, ov.drive_id, displaced)
+                    else:
+                        slot_key = SLOT_POSTER if kind == "poster" else key
+                        displaced = slots.get(slot_key)
+                        status, chosen, rest = _swap(displaced, runners.get(slot_key) or [], ov.drive_id)
+                        _mark(ov, status)
+                        if status == "swapped":
+                            slots[slot_key], runners[slot_key] = chosen, rest
+                            applied += 1
+                            _log_swap(item, None, ov.drive_id, displaced, art_slot=None if kind == "poster" else slot_key)
+
+    # Prune pins that changed nothing (kept if any slot swapped or is missing).
+    removed = 0
+    for ov in overrides:
+        counts = outcomes.get(ov.id)
+        if counts and counts["redundant"] > 0 and counts["swapped"] == 0 and counts["missing"] == 0:
+            log_info(
+                LogTags.RENAMER,
+                f"  → Removed redundant override for '{ov.title}': [{names_by_id.get(ov.drive_id, ov.drive_id)}] already wins by priority",
+                media=ov.title, drive=names_by_id.get(ov.drive_id, ov.drive_id), source="override",
+            )
+            db.delete(ov)
+            removed += 1
+    if removed:
+        db.commit()
+
+    if applied:
+        log_info(LogTags.RENAMER, f"Applied {applied} poster override slot swap(s)", count=applied)
+    return applied
+
+
 def sourced_poster_slots_by_media(db: Session, media_dict: MediaDict) -> Dict[int, Dict[Any, set]]:
     """Standalone-cleanup half of the poster sourcing: scan the subscribed priority drives
     and match them to the live media, mirroring artwork's ``sourced_types_by_media``. Raises
@@ -244,6 +390,8 @@ def sourced_poster_slots_by_media(db: Session, media_dict: MediaDict) -> Dict[in
         media_dict, prefix_index, strict_folder_match=False,
         label="poster drive sources", report_near_misses=False,
     )
+    # Same override swaps the rename applies — keeps place/prune extension parity.
+    apply_poster_overrides(db, matched)
     return sourced_poster_slots_from_matched(matched)
 
 
@@ -1496,7 +1644,10 @@ class PosterRenameService:
                     "success": False,
                     "error": f"No assets matched to media. Found {total_assets} assets and {total_media} media items but no matches. Check logs for details."
                 }
-            
+
+            # Apply drive-pin overrides before placement so stats and parity follow the swap.
+            apply_poster_overrides(self.db, matched_assets)
+
             # Phase 4: Rename files (50-100%)
             if progress_callback:
                 progress_callback("renaming", 50, 100, "Renaming and organizing files...")
@@ -1597,6 +1748,7 @@ class PosterRenameService:
                         "poster_url": f_poster_url,
                         "available": f_available,
                         "drive_id": src_drive.drive_id if src_drive else None,
+                        "file": str(src_file),
                     })
                     if src_drive:
                         usage = drive_usage.setdefault(src_drive.drive_id, {
@@ -1643,6 +1795,8 @@ class PosterRenameService:
                         "imdb_id": w_imdb,
                         "poster_url": w_poster,
                         "available": w_avail,
+                        # The LOSER's own file — the preview should show what this drive offers.
+                        "file": str(src_file),
                     })
 
             stats["style_counts"] = style_counts

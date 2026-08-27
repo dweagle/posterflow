@@ -140,13 +140,32 @@ def merge_slots(
     so the renamer's drive-usage stats can count matched-but-outranked files — poster and
     seasons feed the poster report, logo/background/square the artwork report.
     """
+    def _adopt_runners() -> None:
+        # Carry the incoming box's accumulated runner lists through the merge.
+        new_runners = new.get("slot_runners")
+        if not new_runners:
+            return
+        final_runners = final.setdefault("slot_runners", {})
+        for slot, paths in new_runners.items():
+            if slot == "seasons":
+                final_seasons_r = final_runners.setdefault("seasons", {})
+                for season, season_paths in (paths or {}).items():
+                    bucket = final_seasons_r.setdefault(season, [])
+                    bucket.extend(p for p in season_paths if p not in bucket)
+            else:
+                bucket = final_runners.setdefault(slot, [])
+                bucket.extend(p for p in (paths or []) if p not in bucket)
+
     new_slots = new.get("slots")
     if not new_slots:
         return
     final_slots = final.get("slots")
     if not final_slots:
         final["slots"] = {k: (dict(v) if isinstance(v, dict) else v) for k, v in new_slots.items()}
+        _adopt_runners()
         return
+
+    _adopt_runners()
 
     def _slot_runner(slot: str, path: str) -> None:
         final.setdefault("slot_runners", {}).setdefault(slot, []).append(path)

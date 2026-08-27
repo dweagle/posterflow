@@ -1016,36 +1016,37 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   flex-shrink: 0;
 }
 
+/* Same look as the priority cards' .drive-badge (GDrives.css sizes those). */
 .style-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.15rem 0.45rem;
-  border-radius: 3px;
-  min-width: 3.5rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  min-width: 2.6rem;
   text-align: center;
   vertical-align: middle;
 }
 
+/* App-wide style colors (MM2K green, CL2K blue, Custom purple), opaque so they match on any surface. */
 .style-mm2k {
-  background: #1a3a5c;
-  color: #64b5f6;
-  border: 1px solid #2e5f94;
+  background: #364437;
+  color: #e5e7eb;
+  border: 1px solid #3b5b3c;
 }
 
 .style-cl2k {
-  background: #1a3a2e;
-  color: #4caf50;
-  border: 1px solid #2e6641;
+  background: #3c4a56;
+  color: #e5e7eb;
+  border: 1px solid #486a85;
 }
 
 .style-custom {
-  background: #3a2e1a;
-  color: #ffb74d;
-  border: 1px solid #7a5e1a;
+  background: #423145;
+  color: #e5e7eb;
+  border: 1px solid #552f5b;
 }
 
 .style-unknown {
@@ -1062,6 +1063,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   overflow: hidden;
 }
 
+/* Bar fills keep their original colors — the badge next to each bar carries the style. */
 .style-usage-row.style-usage-mm2k .style-usage-bar-fill {
   height: 100%;
   background: #64b5f6;
@@ -1127,9 +1129,96 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   margin: 0;
 }
 
+.drive-usage-hint-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.drive-usage-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+}
+
+.drive-usage-intro-title {
+  color: #64b5f6;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.drive-usage-intro-text {
+  color: #888;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 60rem;
+}
+
+.drive-usage-overrides-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  color: #ddd;
+  font-size: 0.85rem;
+  font-weight: 500;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.drive-usage-overrides-btn:hover {
+  border-color: #64b5f6;
+  color: #fff;
+}
+
+.drive-usage-overrides-count {
+  background: #1a3a5c;
+  color: #64b5f6;
+  border: 1px solid #2e5f94;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.05rem 0.5rem;
+}
+
+/* Poster and artwork reports side by side, stacking when narrow; no internal scrolling. */
+.drive-usage-tab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+/* A single report (e.g. no artwork drives) takes the full width. */
+.drive-usage-tab-grid > :only-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1100px) {
+  .drive-usage-tab-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.drive-usage-hint-row .style-usage-download-btn {
+  flex-shrink: 0;
+}
+
 .drive-usage-row .drive-usage-name {
-  flex: 0 4 11rem;
+  /* --name-col is set inline per panel; the name shrinks first, with ellipsis. */
+  flex: 0 4 var(--name-col, 11rem);
   min-width: 4.5rem;
+  max-width: 16rem;
   color: #ddd;
   font-size: 0.85rem;
   white-space: nowrap;
@@ -1158,6 +1247,22 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   min-width: 4rem;
 }
 
+/* Off-scale (dominant) drive: axis-break slashes near the bar's right end. */
+.drive-usage-row .style-usage-bar-track.drive-usage-bar-capped {
+  position: relative;
+}
+
+.drive-usage-row .style-usage-bar-track.drive-usage-bar-capped::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 9px;
+  width: 10px;
+  background: repeating-linear-gradient(115deg, #1e1e1e 0 3px, transparent 3px 6px);
+}
+
+
 @media (max-width: 768px) {
   .drive-usage-row {
     flex-wrap: wrap;
@@ -1172,8 +1277,10 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   }
 
   .drive-usage-row .drive-usage-name {
-    flex: 1 1 auto;
+    /* Natural width so the badge hugs the name instead of drifting across the line. */
+    flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
   }
 
   .drive-usage-row .style-usage-bar-track {
@@ -1218,10 +1325,654 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   min-width: 2.6rem;
 }
 
+.unmatched-item.drive-usage-item {
+  flex-direction: row;
+  /* Center the text against the thumb so single-line cards read tight, not top-heavy. */
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.drive-usage-modal .unmatched-list {
+  gap: 0.5rem;
+}
+
+.drive-usage-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* Buttons in their own centered column so they sit in the same spot on every card. */
+.drive-usage-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+
+.drive-usage-thumb-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.drive-usage-thumb {
+  width: 36px;
+  height: 54px;
+  object-fit: contain;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.drive-usage-thumb-btn:hover .drive-usage-thumb {
+  transform: scale(1.05);
+  border-color: #64b5f6;
+}
+
+.drive-usage-preview-nav {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid #424242;
+  border-radius: 50%;
+  color: #ddd;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.drive-usage-preview-nav:hover {
+  color: #fff;
+  border-color: #64b5f6;
+}
+
+.drive-usage-preview-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* One centered row under the modal, so width changes never move the arrows sideways. */
+.drive-usage-preview-nav-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Artwork type filter chips between the arrows. */
+.drive-usage-preview-filter {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.drive-usage-preview-filter .drive-usage-view-tab {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+/* Top-anchored: the preview's top edge stays put across slot shapes. */
+.modal-overlay.drive-usage-preview-overlay {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 6vh;
+}
+
+/* Centered in the region above the pinned arrows (bottom padding mirrors them). */
+.modal-overlay.drive-usage-preview-overlay--art {
+  justify-content: center;
+  /* Top padding biases the centering downward. */
+  padding-top: 10vh;
+  padding-bottom: calc(85vh - min(440px, 60vh) - 4.4rem);
+}
+
+/* Arrows pinned just under the tallest preview of each type (lightbox only).
+   Posters: 6vh top + (90vh - 8rem) image + ~4.15rem caption/actions. */
+.drive-usage-preview-overlay .drive-usage-preview-nav-row {
+  position: fixed;
+  top: calc(96vh - 3.6rem);
+  left: 0;
+  right: 0;
+  margin-top: 0;
+  /* Filter chips stack above the arrow pair. */
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.drive-usage-preview-nav-arrows {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+/* Artwork: 15vh top + square cap (the tallest artwork shape) + caption/actions. */
+.drive-usage-preview-overlay--art .drive-usage-preview-nav-row {
+  top: calc(15vh + min(440px, 60vh) + 4.4rem);
+}
+
+/* Cap so a tall poster plus its caption clears the pinned arrows. */
+.drive-usage-preview .tmdb-poster-preview-image {
+  max-height: calc(90vh - 8rem);
+  margin-inline: auto;
+}
+
+/* Artwork previews at standard sizes instead of filling the screen. */
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-logo {
+  max-width: min(600px, calc(100vw - 8rem));
+  max-height: 300px;
+  padding: 1.5rem;
+}
+
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-background {
+  max-width: min(760px, calc(100vw - 8rem));
+  max-height: 55vh;
+}
+
+.drive-usage-preview .tmdb-poster-preview-image.drive-usage-preview-square {
+  max-width: min(440px, calc(100vw - 8rem));
+  max-height: min(440px, 60vh);
+}
+
+/* One line, zero intrinsic width: the image alone sizes the modal; a wider caption
+   spills evenly past both sides. */
+.drive-usage-preview-caption {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 0.75rem;
+  color: #ddd;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  width: 0;
+  min-width: 100%;
+}
+
+.drive-usage-preview-caption > * {
+  flex-shrink: 0;
+}
+
+.drive-usage-preview-pos {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.drive-usage-preview-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Compound so the compact sizing wins regardless of source order. */
+.drive-usage-view-tab.drive-usage-row-use,
+.drive-usage-row-use {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* An active override button hovers red: clicking it REMOVES the override. */
+.drive-usage-override-btn.active:hover {
+  background-color: #ef5350;
+  border-color: #ef5350;
+  color: #fff;
+}
+
+.drive-usage-source-badge {
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #e5e7eb;
+  border: 1px solid #444;
+  max-width: 10rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+/* Source badge tinted by the drive's style. */
+.drive-usage-source-badge--mm2k {
+  background: #364437;
+  border-color: #3b5b3c;
+  color: #a5d6a7;
+}
+
+.drive-usage-source-badge--cl2k {
+  background: #3c4a56;
+  border-color: #486a85;
+  color: #90caf9;
+}
+
+.drive-usage-source-badge--custom {
+  background: #423145;
+  border-color: #552f5b;
+  color: #ce93d8;
+}
+
+.drive-usage-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+}
+
+/* Top-anchored so chip switches only move the bottom edge. Compound: the base
+   .modal-overlay center rule sits later in this file. */
+.modal-overlay.drive-usage-compare-overlay {
+  z-index: 1100;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 7vh;
+}
+
+/* Hugs its content; views are tuned to near-equal heights so chips don't jump. */
+.drive-usage-compare-modal {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  width: fit-content;
+  min-width: min(30rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  height: fit-content;
+  /* 80vh, shrunk when needed so the nav row below still fits on screen. */
+  max-height: min(80vh, calc(93vh - 4.5rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.drive-usage-compare-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  /* Zero intrinsic width: the columns alone size the fit-content modal. */
+  width: 0;
+  min-width: 100%;
+}
+
+/* Shrinks and ellipses but doesn't grow, keeping the type badge next to the title. */
+.drive-usage-compare-title {
+  color: #64b5f6;
+  font-size: 0.95rem;
+  font-weight: 600;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-compare-header .modal-close {
+  margin-left: auto;
+}
+
+.drive-usage-compare-slots {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  /* Sit closer to the title than the modal's 0.75rem flex gap. */
+  margin-top: -0.35rem;
+}
+
+/* Invisible chips row for movies so posters start at the same height as shows. */
+.drive-usage-compare-slots-ghost {
+  visibility: hidden;
+}
+
+.drive-usage-compare-slots .drive-usage-view-tab {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+/* Fixed-width cards that wrap; the modal hugs however many fit. */
+.drive-usage-compare-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-start;
+  gap: 1rem;
+  overflow-y: auto;
+  padding-bottom: 0.25rem;
+  min-height: 0;
+}
+
+/* Fixed dimensions so the modal lays out fully before images load. */
+.drive-usage-compare-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  /* One height-aware width for BOTH views, so every chip keeps the same modal width. */
+  width: min(280px, calc(52vh - 190px), calc(100vw - 4rem));
+}
+
+/* Compare images open the big preview on click; placeholders (divs) stay inert. */
+img.drive-usage-compare-img,
+img.drive-usage-compare-piece-img {
+  cursor: zoom-in;
+}
+
+.modal-overlay.drive-usage-compare-preview-overlay {
+  z-index: 1200;
+}
+
+.drive-usage-compare-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 0.75rem;
+  border-style: dashed;
+}
+
+/* Box aspect matches the slot's shape — no letterbox bars, size known before load. */
+.drive-usage-compare-img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #121212;
+}
+
+.drive-usage-compare-img.compare-img-background {
+  aspect-ratio: 16 / 9;
+}
+
+.drive-usage-compare-img.compare-img-square {
+  aspect-ratio: 1 / 1;
+}
+
+.drive-usage-compare-img.compare-img-logo {
+  aspect-ratio: 5 / 2;
+  padding: 0.5rem;
+}
+
+.drive-usage-compare-label {
+  color: #ddd;
+  font-size: 0.85rem;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drive-usage-compare-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Whole-set compare: one column per drive; height-aware width fits 80vh unscrolled. */
+.drive-usage-compare-setcol {
+  align-items: stretch;
+}
+
+.drive-usage-compare-setcol .drive-usage-compare-label {
+  text-align: center;
+  max-width: none;
+}
+
+.drive-usage-compare-piece {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.drive-usage-compare-piece-label {
+  color: #888;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  /* Same height with or without the per-piece Use button, so columns stay aligned. */
+  min-height: 1.7rem;
+}
+
+/* One size for every Use / Use set button here; placed after .drive-usage-row-use to win the tie. */
+.drive-usage-compare-modal .drive-usage-override-btn {
+  box-sizing: border-box;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.7rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.drive-usage-compare-piece-used {
+  color: #4caf50;
+  text-transform: none;
+}
+
+.drive-usage-compare-piece-img {
+  width: 100%;
+  object-fit: contain;
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+/* Width-driven + known aspect: boxes hug their images and scale with the column. */
+.drive-usage-compare-piece-img.piece-logo {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 5 / 2;
+  padding: 0.5rem;
+}
+
+.drive-usage-compare-piece-img.piece-background {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* Full-width backing like the logo's; the 1/1 image letterboxes to ~62% inside. */
+.drive-usage-compare-piece-img.piece-square {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;
+}
+
+.drive-usage-compare-piece-img.in-use {
+  border-color: #2e6641;
+}
+
+.drive-usage-compare-used {
+  background: #1a3a2e;
+  color: #4caf50;
+  border: 1px solid #2e6641;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.drive-usage-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.drive-usage-modal-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Styled wrapping hover hints, right-anchored; --below flips them inside scroll areas. */
+.drive-usage-tip {
+  position: relative;
+}
+
+.drive-usage-tip[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 240px;
+  padding: 0.35rem 0.55rem;
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+/* Hover-delayed, and only on devices with a real hover (no popup on touch). */
+@media (hover: hover) {
+  .drive-usage-tip[data-tooltip]:hover::after {
+    opacity: 1;
+    transition-delay: 0.6s;
+  }
+}
+
+/* Fixed-position variant for buttons inside scroll containers, where ::after tips clip. */
+.drive-usage-float-tip {
+  position: fixed;
+  z-index: 1200;
+  width: max-content;
+  max-width: 240px;
+  padding: 0.35rem 0.55rem;
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.drive-usage-season-badge {
+  cursor: zoom-in;
+  transition: filter 0.15s ease;
+}
+
+.drive-usage-season-badge:hover {
+  filter: brightness(1.3);
+}
+
+.drive-usage-drive-nav-group {
+  display: inline-flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.drive-usage-drive-nav {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a3a5c;
+  border: 1px solid #2e5f94;
+  border-radius: 4px;
+  color: #64b5f6;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.drive-usage-drive-nav:hover {
+  color: #fff;
+  border-color: #64b5f6;
+  background: #2e5f94;
+}
+
+.drive-usage-drive-nav:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 .drive-usage-view-tabs {
   display: flex;
   gap: 0.5rem;
   margin-bottom: 0.6rem;
+}
+
+.drive-usage-modal .style-badge,
+.drive-usage-modal .drive-usage-source-badge {
+  font-weight: 700;
+}
+
+/* Compact the chrome above the list so short windows still show the cards. */
+.drive-usage-modal .modal-body {
+  padding: 1rem 1.5rem;
+}
+
+.drive-usage-modal .drive-usage-view-tabs {
+  margin-bottom: 0.5rem;
+}
+
+.drive-usage-modal .style-fallback-modal-subtitle {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+}
+
+.drive-usage-modal .unmatched-search-bar {
+  margin-bottom: 0.6rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.drive-usage-modal .unmatched-search-input {
+  font-size: 0.85rem;
+}
+
+.drive-usage-modal .sort-controls {
+  margin-bottom: 0.6rem;
+}
+
+.drive-usage-modal .list-count {
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.5rem;
 }
 
 .drive-usage-view-tab {
@@ -1403,22 +2154,23 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   vertical-align: middle;
 }
 
+/* Opaque drive-badge tints (see .style-mm2k above) — consistent on any background. */
 .style-badge.style-mm2k {
-  background: rgba(76, 175, 80, 0.14);
+  background: #364437;
   color: #e5e7eb;
-  border: 1px solid rgba(76, 175, 80, 0.32);
+  border: 1px solid #3b5b3c;
 }
 
 .style-badge.style-cl2k {
-  background: rgba(100, 181, 246, 0.18);
+  background: #3c4a56;
   color: #e5e7eb;
-  border: 1px solid rgba(100, 181, 246, 0.42);
+  border: 1px solid #486a85;
 }
 
 .style-badge.style-custom {
-  background: rgba(156, 39, 176, 0.14);
+  background: #423145;
   color: #e5e7eb;
-  border: 1px solid rgba(156, 39, 176, 0.32);
+  border: 1px solid #552f5b;
 }
 
 .priority-content {
@@ -2295,7 +3047,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .modal-content {
-  background-color: #2E3440;
+  background-color: #1e1e1e;
   border-radius: 12px;
   max-width: 800px;
   width: 100%;
@@ -2303,7 +3055,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  border: 1px solid #5c6882;
+  border: 1px solid #333;
 }
 
 /* Smaller modal for confirmations */
@@ -2331,8 +3083,10 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 .list-items-modal .unmatched-list {
   flex: 1;
-  min-height: 0;
+  /* Floor so the modal body scrolls instead of crushing the list on short windows. */
+  min-height: 12rem;
   overflow-y: auto;
+  padding-right: 0.5rem;
 }
 /* Keep rows at their natural height and scroll instead of letting the flex
    column squash them down to their borders. */
@@ -2375,7 +3129,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  border-bottom: 1px solid #5c6882;
+  border-bottom: 1px solid #333;
 }
 
 .modal-header h2 {
@@ -2429,7 +3183,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .modal-close:hover {
-  background-color: #3D4556;
+  background-color: #333;
   color: #fff;
 }
 
@@ -2450,7 +3204,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   font-size: 0.875rem;
   margin-bottom: 0.5rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #5c6882;
+  border-bottom: 1px solid #333;
 }
 
 .performance-warning {
@@ -2492,6 +3246,16 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   outline: none;
   color: #fff;
   font-size: 0.9rem;
+}
+
+/* Outranks DriveEditModal.css's leaking .modal-body input rule (double-box search bar). */
+.modal-body .unmatched-search-bar input:not([type='checkbox']) {
+  width: auto;
+  flex: 1;
+  padding: 0.15rem 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .unmatched-search-input::placeholder {
@@ -2620,7 +3384,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   gap: 0;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid #5c6882;
+  border: 1px solid #424242;
 }
 
 .unmatched-item-with-tmdb .unmatched-item {
@@ -2630,7 +3394,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .unmatched-item-with-tmdb.expanded .unmatched-item {
-  border-bottom: 1px solid #5c6882;
+  border-bottom: 1px solid #424242;
 }
 
 .unmatched-item-meta {
@@ -2678,9 +3442,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   flex-direction: column;
   gap: 0.35rem;
   padding: 0.75rem;
-  background-color: #3D4556;
+  background-color: #2a2a2a;
   border-radius: 6px;
-  border: 1px solid #5c6882;
+  border: 1px solid #424242;
   transition: all 0.2s;
 }
 
@@ -2700,15 +3464,15 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 }
 
 .unmatched-item:hover {
-  background-color: #4a5568;
-  border-color: #6c9bd4;
+  background-color: #333;
+  border-color: #64b5f6;
 }
 
 .unmatched-item-group {
   padding: 0.875rem;
-  background-color: #3D4556;
+  background-color: #2a2a2a;
   border-radius: 6px;
-  border: 1px solid #5c6882;
+  border: 1px solid #424242;
 }
 
 .item-title-row {
@@ -2758,9 +3522,9 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   align-items: center;
   gap: 0.3rem;
   padding: 0.3rem 0.6rem;
-  border: 1px solid #5c6882;
+  border: 1px solid #424242;
   border-radius: 4px;
-  background: #2a3347;
+  background: #2a2a2a;
   color: #aaa;
   font-size: 0.78rem;
   font-weight: 500;
@@ -2773,7 +3537,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .tmdb-search-btn:hover {
   border-color: #64b5f6;
   color: #64b5f6;
-  background: #1e2a3d;
+  background: rgba(100, 181, 246, 0.12);
 }
 
 .tmdb-search-btn.active {
@@ -2821,7 +3585,7 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
 .tmdb-candidates-panel {
   display: flex;
   flex-direction: column;
-  background: #252d3d;
+  background: #1a1a1a;
   padding: 0.75rem;
   gap: 0.6rem;
 }
@@ -2852,8 +3616,8 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  background: #2e3a50;
-  border: 1px solid #3d4e66;
+  background: #2a2a2a;
+  border: 1px solid #424242;
   border-radius: 6px;
   padding: 0.75rem;
   min-height: 72px;
@@ -2886,13 +3650,13 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   object-fit: cover;
   border-radius: 4px;
   flex-shrink: 0;
-  background: #1e2a3d;
+  background: #2a2a2a;
   display: block;
 }
 
 .tmdb-candidate-poster--empty {
-  background: #1e2a3d;
-  border: 1px dashed #3d4e66;
+  background: #2a2a2a;
+  border: 1px dashed #424242;
 }
 
 .tmdb-poster-preview-overlay {
@@ -3052,10 +3816,18 @@ body.ui-ready .poster-manager .settings-section .toggle-slider:before {
   border: 1px solid rgba(149, 117, 205, 0.3);
 }
 
+/* Purple, matching the collection color on Community Requests. */
 .unmatched-cat-badge--collection {
-  background: rgba(255, 183, 77, 0.15);
-  color: #ffb74d;
-  border: 1px solid rgba(255, 183, 77, 0.3);
+  background: rgba(186, 104, 200, 0.15);
+  color: #ce93d8;
+  border: 1px solid rgba(186, 104, 200, 0.3);
+}
+
+/* Artwork slot badges (logo/background/square) — the artwork amber used app-wide. */
+.unmatched-cat-badge--artwork {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 
 .tmdb-link-text {
@@ -5471,8 +6243,8 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   gap: 0.5rem;
   height: 2rem;
   padding: 0 0.5rem;
-  background-color: #3D4556;
-  border: 1px solid #5c6882;
+  background-color: #2a2a2a;
+  border: 1px solid #424242;
   border-radius: 4px;
   font-size: 0.85rem;
   color: #e0e0e0;
@@ -5734,7 +6506,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 .creq-candidate:hover {
   border-color: #64b5f6;
-  background: #1e2d3e;
+  background: rgba(100, 181, 246, 0.12);
 }
 
 .creq-candidate.selected {
@@ -5943,7 +6715,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 .create-list-selectall:hover:not(:disabled) {
   border-color: #64b5f6;
-  background: #1e2d3e;
+  background: rgba(100, 181, 246, 0.12);
 }
 .create-list-selectall:disabled {
   opacity: 0.5;
@@ -5985,7 +6757,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 .create-list-row:hover {
   border-color: #64b5f6;
-  background: #1e2d3e;
+  background: rgba(100, 181, 246, 0.12);
 }
 .create-list-row.selected {
   border-color: #64b5f6;

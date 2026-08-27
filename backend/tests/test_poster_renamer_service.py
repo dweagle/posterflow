@@ -293,6 +293,176 @@ def test_build_artwork_drive_usage(test_db, tmp_path):
     assert [i["slot"] for i in result["artwork_drive_items"]["art-a"]] == ["logo"]
     assert [i["slot"] for i in result["artwork_drive_items"]["art-b"]] == ["background"]
     assert [(i["title"], i["slot"]) for i in result["artwork_drive_outranked"]["art-b"]] == [("Movie One", "logo")]
+    assert result["artwork_drive_items"]["art-a"][0]["file"] == win_logo
+    assert result["artwork_drive_outranked"]["art-b"][0]["file"] == lost_logo
+
+
+def _override_fixture(test_db, tmp_path):
+    from models.drive import Drive
+
+    mm_root = tmp_path / "mm"; cl_root = tmp_path / "cl"
+    mm_root.mkdir(); cl_root.mkdir()
+    test_db.add_all([
+        Drive(name="MM Drive", drive_id="mm-1", style_type="MM2K", subscribed=True, custom_path=str(mm_root)),
+        Drive(name="CL Drive", drive_id="cl-1", style_type="CL2K", subscribed=True, custom_path=str(cl_root)),
+    ])
+    test_db.commit()
+    mm = lambda n: str(mm_root / n)  # noqa: E731
+    cl = lambda n: str(cl_root / n)  # noqa: E731
+    box = {
+        "slots": {"poster": mm("Show One (2020).jpg"), "seasons": {1: mm("S1.jpg"), 2: mm("S2.jpg")}},
+        "slot_runners": {"poster": [cl("Show One (2020).jpg")], "seasons": {1: [cl("S1.jpg")]}},  # no CL Season 2
+    }
+    matched = {"collections": [], "movies": [], "series": [{
+        "title": "Show One", "year": 2020, "tmdb_id": 77, "folder": "Show One (2020)",
+        "files": [box["slots"]["poster"]], "asset_ref": box,
+    }]}
+    return box, matched, mm, cl
+
+
+def test_apply_poster_overrides_single_season(test_db, tmp_path):
+    """A season-level pick flips only that season; the displaced winner becomes a runner."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    test_db.add(PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                               scope="slot", season=1, drive_id="cl-1"))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 1
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
+    assert box["slots"]["seasons"][1] == cl("S1.jpg")
+    assert box["slot_runners"]["seasons"][1] == [mm("S1.jpg")]
+
+
+def test_apply_poster_overrides_whole_set_skips_missing_candidates(test_db, tmp_path):
+    """Set scope flips every slot the drive offers; slots it lacks stay on normal priority.
+    Title+year matching works when the override has no tmdb id."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    test_db.add(PosterOverride(media_type="show", tmdb_id=None, title="show one", year=2020,
+                               scope="set", season=None, drive_id="cl-1"))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 2  # poster + season 1
+    assert box["slots"]["poster"] == cl("Show One (2020).jpg")
+    assert box["slots"]["seasons"][1] == cl("S1.jpg")
+    assert box["slots"]["seasons"][2] == mm("S2.jpg")  # CL has no Season 2 -> unchanged
+    assert box["slot_runners"]["poster"] == [mm("Show One (2020).jpg")]
+
+
+def test_apply_poster_overrides_prunes_redundant_pin(test_db, tmp_path):
+    """An override pinning the drive that already wins by priority does nothing and is
+    auto-removed; one that can't find a candidate (drive missing the file) is kept."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    test_db.add(PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                               scope="slot", season=None, drive_id="mm-1"))  # mm already wins
+    test_db.add(PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                               scope="slot", season=2, drive_id="cl-1"))  # cl has no Season 2
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 0
+    remaining = test_db.query(PosterOverride).all()
+    assert [(o.scope, o.season, o.drive_id) for o in remaining] == [("slot", 2, "cl-1")]
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
+
+
+def test_merge_assets_tmdb_year_guard_blocks_cross_namespace_fuse(tmp_path):
+    """A movie and a show can share one tmdb number (separate namespaces). With the guard,
+    a tmdb-only id match with disagreeing years stays two boxes; agreeing years still merge."""
+    from util.posters.assets import merge_assets
+    from util.posters.index import create_new_empty_index
+    from util.data.normalization import normalize_titles
+
+    def art_box(title, year, tmdb_id, drive, tvdb_id=None):
+        logo = str(tmp_path / drive / "logos" / f"{title} ({year}).png")
+        return {"title": title, "year": year, "tmdb_id": tmdb_id, "tvdb_id": tvdb_id, "imdb_id": None,
+                "normalized_title": normalize_titles(title), "type": None,
+                "files": [logo], "slots": {"poster": None, "logo": logo, "seasons": {}}}
+
+    final, index = [], create_new_empty_index()
+    merge_assets([art_box("Adventures of the Gummi Bears", 1985, 77, "a", tvdb_id=5)], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    merge_assets([art_box("Stomp the Yard", 2007, 77, "b")], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    assert len(final) == 2  # different years -> the shared tmdb number doesn't fuse them
+
+    # Same item spelled differently on another drive (same year) still merges by id.
+    merge_assets([art_box("Gummi Bears Adventures", 1985, 77, "c")], final, index,
+                 log_new=False, tmdb_year_guard=True)
+    assert len(final) == 2
+
+
+def test_merge_slots_carries_incoming_runner_lists():
+    """Runners already accumulated on the incoming box (artwork cross-drive merge) survive
+    merging into the poster index box — the combined rename's outranked stats need them."""
+    from util.posters.assets import merge_slots
+
+    poster_box = {"slots": {"poster": "/p/A/x.jpg", "seasons": {}}}
+    artwork_box = {"slots": {"poster": None, "logo": "/a/A/logos/x.png", "seasons": {}},
+                   "slot_runners": {"logo": ["/a/B/logos/x.png"], "seasons": {}}}
+    merge_slots(poster_box, artwork_box, None)
+
+    assert poster_box["slots"]["logo"] == "/a/A/logos/x.png"
+    assert poster_box["slot_runners"]["logo"] == ["/a/B/logos/x.png"]
+
+    # Same when the target box has no slots yet (wholesale copy path).
+    bare = {}
+    merge_slots(bare, artwork_box, None)
+    assert bare["slot_runners"]["logo"] == ["/a/B/logos/x.png"]
+
+
+def test_apply_artwork_overrides_swaps_artwork_slot(test_db, tmp_path):
+    """An artwork-domain override swaps logo/background/square slots to the chosen
+    artwork drive; set scope covers every artwork slot the drive offers."""
+    from models.artwork_drive import ArtworkDrive
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    a_root = tmp_path / "art-a"; b_root = tmp_path / "art-b"
+    a_root.mkdir(); b_root.mkdir()
+    test_db.add_all([
+        ArtworkDrive(name="Art A", drive_id="art-a", subscribed=True, custom_path=str(a_root)),
+        ArtworkDrive(name="Art B", drive_id="art-b", subscribed=True, custom_path=str(b_root)),
+    ])
+    test_db.commit()
+
+    a_logo = str(a_root / "x" / "logos" / "M.png"); b_logo = str(b_root / "x" / "logos" / "M.png")
+    a_bg = str(a_root / "x" / "backgrounds" / "M.jpg")
+    box = {"slots": {"poster": None, "logo": a_logo, "background": a_bg, "seasons": {}},
+           "slot_runners": {"logo": [b_logo]}}
+    matched = {"collections": [], "movies": [{
+        "title": "Movie One", "year": 2024, "tmdb_id": 9, "folder": "Movie One (2024)",
+        "files": [], "asset_ref": box,
+    }], "series": []}
+
+    test_db.add(PosterOverride(media_type="movie", tmdb_id=9, title="Movie One", year=2024,
+                               domain="artwork", scope="slot", slot="logo", drive_id="art-b"))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 1
+    assert box["slots"]["logo"] == b_logo
+    assert box["slot_runners"]["logo"] == [a_logo]
+    assert box["slots"]["background"] == a_bg  # untouched
+
+
+def test_apply_poster_overrides_noop_without_matching_drive_file(test_db, tmp_path):
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    test_db.add(PosterOverride(media_type="show", tmdb_id=999, title="Other Show", year=2021,
+                               scope="set", season=None, drive_id="cl-1"))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 0
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
 
 
 def test_drive_usage_counts_outranked_matches(test_db, tmp_path, monkeypatch):
@@ -344,6 +514,9 @@ def test_drive_usage_counts_outranked_matches(test_db, tmp_path, monkeypatch):
     outranked_items = result["stats"]["drive_outranked"]["cl-1"]
     assert [(i["title"], i["year"], i["type"]) for i in outranked_items] == [("Movie One", 2024, "movie")]
     assert "mm-1" not in result["stats"]["drive_outranked"]
+    # Preview file paths: winners carry their own file, outranked items the loser's file.
+    assert result["stats"]["style_fallbacks"]["MM2K"][0]["file"] == win
+    assert outranked_items[0]["file"] == lost
 
 
 def test_mark_processed_stamps_rows_by_drive_and_name_despite_stale_path(test_db, tmp_path, monkeypatch):
@@ -811,29 +984,3 @@ def test_artwork_stat_counts_files_written_not_matched_slots(test_db, tmp_path):
     # Broken down like the poster counts (by media type) plus by artwork type.
     assert first_written["by_media"] == {"movies": 0, "series": 2, "collections": 0}
     assert first_written["by_type"] == {"logo": 1, "background": 0, "squareart": 1}
-
-
-def test_merge_assets_tmdb_year_guard_blocks_cross_namespace_fuse(tmp_path):
-    """A movie and a show can share one tmdb number (separate namespaces). With the guard,
-    a tmdb-only id match with disagreeing years stays two boxes; agreeing years still merge."""
-    from util.posters.assets import merge_assets
-    from util.posters.index import create_new_empty_index
-    from util.data.normalization import normalize_titles
-
-    def art_box(title, year, tmdb_id, drive, tvdb_id=None):
-        logo = str(tmp_path / drive / "logos" / f"{title} ({year}).png")
-        return {"title": title, "year": year, "tmdb_id": tmdb_id, "tvdb_id": tvdb_id, "imdb_id": None,
-                "normalized_title": normalize_titles(title), "type": None,
-                "files": [logo], "slots": {"poster": None, "logo": logo, "seasons": {}}}
-
-    final, index = [], create_new_empty_index()
-    merge_assets([art_box("Adventures of the Gummi Bears", 1985, 77, "a", tvdb_id=5)], final, index,
-                 log_new=False, tmdb_year_guard=True)
-    merge_assets([art_box("Stomp the Yard", 2007, 77, "b")], final, index,
-                 log_new=False, tmdb_year_guard=True)
-    assert len(final) == 2  # different years -> the shared tmdb number doesn't fuse them
-
-    # Same item spelled differently on another drive (same year) still merges by id.
-    merge_assets([art_box("Gummi Bears Adventures", 1985, 77, "c")], final, index,
-                 log_new=False, tmdb_year_guard=True)
-    assert len(final) == 2

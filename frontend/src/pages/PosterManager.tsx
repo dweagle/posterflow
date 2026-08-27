@@ -14,6 +14,7 @@ import UnmatchedItemsModal, { UnmatchedModalType } from '../components/poster-ma
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import PriorityTab from '../components/poster-manager/PriorityTab'
 import ArtworkPriorityTab from '../components/poster-manager/ArtworkPriorityTab'
+import DriveUsageTab from '../components/poster-manager/DriveUsageTab'
 import { type PriorityScope } from '../components/poster-manager/PriorityScopeSelector'
 import { CommunityClaimStatusProvider } from '../hooks/useCommunityClaimStatus'
 import FlowTab from '../components/poster-manager/FlowTab'
@@ -63,8 +64,10 @@ function PosterManager() {
     }
     return 'flow'
   })
-  const [priorityScope, setPriorityScope] = useState<PriorityScope>(
-    () => (localStorage.getItem('posterflow.posterManager.priorityScope') === 'artwork' ? 'artwork' : 'posters')
+  const [priorityScope, setPriorityScope] = useState<PriorityScope>(() => {
+    const stored = localStorage.getItem('posterflow.posterManager.priorityScope')
+    return stored === 'artwork' || stored === 'usage' ? stored : 'posters'
+  }
   )
   const handlePriorityScopeChange = (scope: PriorityScope) => {
     setPriorityScope(scope)
@@ -539,8 +542,10 @@ function PosterManager() {
 
       {activeTab === 'priority' && (
         <>
-          {priorityScope === 'artwork' ? (
-            <ArtworkPriorityTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} styleStats={styleStats} />
+          {priorityScope === 'usage' ? (
+            <DriveUsageTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} styleStats={styleStats} />
+          ) : priorityScope === 'artwork' ? (
+            <ArtworkPriorityTab scope={priorityScope} onScopeChange={handlePriorityScopeChange} />
           ) : (
             <PriorityTab
               scope={priorityScope}
