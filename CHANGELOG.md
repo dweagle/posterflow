@@ -6,6 +6,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-08-26
+### Added
+- Asset Manager: the drive usage reports is now a tab on the Drive Priority page, with per-item overrides and cross-drive comparison. Populates after a Rename run.  Users can now choose individual posters/artwork to override drive priority.
+- Artwork Drives: added the WenIsInMood logo-only drives (#1 English, #2 original language).
+
+### Fixed
+- Plex Webhoook: locked-database errors now fail the job instead of freezing it.
+- Matching: artwork TMDB-id matches are better guarded against movie/TV namespace collisions.
+- Community Requests: Discord notifications re-fire for recent requests that never got a thread.
+
 ## [0.14.2] - 2026-08-20
 ### Added
 - Drive Priority: last rename drive usage reports for poster and artwork drives. A collapsible per-drive bars showing items used vs. matched but outranked by higher-priority drives. A view modal (Used / Not used) and txt downloads. Data populates on the next rename run.
