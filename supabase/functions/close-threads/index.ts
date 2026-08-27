@@ -6,6 +6,10 @@
  * locks + archives the Discord forum thread, then clears close_at
  * so the record isn't processed again.
  *
+ * Also re-fires notify-discord for recent requests that never got a
+ * forum thread — the INSERT webhook goes through pg_net, which does
+ * not retry, so a transient edge-runtime 503 drops the post.
+ *
  * Required Supabase secrets:
  *   DISCORD_BOT_TOKEN         - Bot token
  *   SUPABASE_URL              - Auto-provided by Supabase
@@ -79,8 +83,43 @@ Deno.serve(async (_req) => {
     }
   }
 
+  // Re-fire dropped INSERT webhooks. Bounded to the last 24h so stale
+  // threadless rows stay untouched, and 2+ minutes old so an in-flight
+  // submission isn't double-posted.
+  const sweepFrom = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const sweepTo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  let notified = 0
+  const missedResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/poster_requests?discord_message_id=is.null&created_at=gte.${encodeURIComponent(sweepFrom)}&created_at=lte.${encodeURIComponent(sweepTo)}&select=id,title&limit=20`,
+    { headers: SUPABASE_HEADERS },
+  )
+  if (!missedResp.ok) {
+    console.error('[close-threads] Failed to fetch threadless requests:', await missedResp.text())
+  } else {
+    const missed: { id: string; title: string }[] = await missedResp.json()
+    if (missed.length > 0) {
+      console.log(`[close-threads] Found ${missed.length} request(s) missing a Discord thread`)
+    }
+    for (const request of missed) {
+      const notifyResp = await fetch(`${SUPABASE_URL}/functions/v1/notify-discord`, {
+        method: 'POST',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ record: { id: request.id } }),
+      })
+      if (notifyResp.ok) {
+        notified++
+        console.log(`[close-threads] Re-fired notify-discord for "${request.title}" (${request.id})`)
+      } else {
+        console.error(
+          `[close-threads] notify-discord re-fire failed for "${request.title}" (${request.id}):`,
+          await notifyResp.text(),
+        )
+      }
+    }
+  }
+
   return new Response(
-    JSON.stringify({ processed: requests.length, closed }),
+    JSON.stringify({ processed: requests.length, closed, notified }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   )
 })
