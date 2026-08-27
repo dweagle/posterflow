@@ -55,6 +55,20 @@
       "drive_id": "18Yr85mO65WpEXMvtM57OXB_umusADWdF",
       "artwork_types": ["logo", "background", "squareart"],
       "description": "Artwork drive containing logos, backgrounds, and squareart."
+    },
+    {
+      "name": "Wenisinmood(#1)",
+      "display_name": "Wenisinmood(#1)",
+      "drive_id": "14Fab3WrcKQAipliY7WNahNEQ8xUvnfkW",
+      "artwork_types": ["logo"],
+      "description": "Artwork drive containing logos only. English-language logos."
+    },
+    {
+      "name": "Wenisinmood(#2)",
+      "display_name": "Wenisinmood(#2)",
+      "drive_id": "18JY2EkF40mjEQYB_UfOFG68Ood2W0fQ9",
+      "artwork_types": ["logo"],
+      "description": "Artwork drive containing logos only. Original-language logos."
     }
   ]
 }

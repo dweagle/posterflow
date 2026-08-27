@@ -185,17 +185,19 @@ def artwork_types_of(drive: dict) -> list[str]:
     return [t for t in ARTWORK_TYPES if t in declared]
 
 
-def artwork_by_owner(artwork_drives: list[dict], notes: dict) -> dict[str, dict]:
-    """owner -> artwork drive, for the Artwork column on the poster tables."""
-    by_owner: dict[str, dict] = {}
+def artwork_by_owner(artwork_drives: list[dict], notes: dict) -> dict[str, list[dict]]:
+    """owner -> artwork drives, for the Artwork column on the poster tables."""
+    by_owner: dict[str, list[dict]] = {}
     for drive in artwork_drives:
         note = notes["artwork"].get(drive["drive_id"], {})
         owner = note.get("owner") or drive["name"]
-        if owner in by_owner:
-            warn(f"two artwork drives claim owner {owner!r}; only the first is cross-referenced")
-            continue
-        by_owner[owner] = drive
+        by_owner.setdefault(owner, []).append(drive)
     return by_owner
+
+
+def owner_artwork_types(drives: list[dict]) -> list[str]:
+    """Union of the owner's artwork types, in ARTWORK_TYPES order."""
+    return [t for t in ARTWORK_TYPES if any(t in artwork_types_of(d) for d in drives)]
 
 
 def poster_table(drives: list[dict], style: str, notes: dict, art_owners: dict) -> str:
@@ -224,7 +226,7 @@ def poster_table(drives: list[dict], style: str, notes: dict, art_owners: dict) 
     rows = []
     for drive, note in entries:
         name = drive.get("display_name") or drive["name"]
-        art = art_owners.get(note.get("owner", ""))
+        art = art_owners.get(note.get("owner", ""), [])
         content = note.get("content") or drive.get("description", "")
         if len(content) > CONTENT_LIMIT:
             warn(f"{style} drive {name!r}: Content is {len(content)} chars (over {CONTENT_LIMIT}) - "
@@ -234,7 +236,7 @@ def poster_table(drives: list[dict], style: str, notes: dict, art_owners: dict) 
             cell(inline(name), cls="col-owner"),
             drive_id_cell(drive["drive_id"]),
             cell(rich(content)),
-            artwork_cell(artwork_types_of(art) if art else []),
+            artwork_cell(owner_artwork_types(art)),
             ack_cell(note),
             cell(rich(note.get("feedback", ""))),
         ])
@@ -321,7 +323,8 @@ def owner_index(poster_drives: list[dict], artwork_drives: list[dict], notes: di
     for drive in artwork_drives:
         note = notes["artwork"].get(drive["drive_id"], {})
         owner = note.get("owner") or drive["name"]
-        slot(owner)["artwork"] = artwork_types_of(drive)
+        got = set(slot(owner)["artwork"]) | set(artwork_types_of(drive))
+        slot(owner)["artwork"] = [t for t in ARTWORK_TYPES if t in got]
 
     dash = '<span class="none">-</span>'
     rows = []
