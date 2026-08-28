@@ -404,9 +404,10 @@ function Dashboard() {
     }
   }
 
-  const getRecentPosterImageUrl = (poster: RecentSyncedPoster) => {
+  const getRecentPosterImageUrl = (poster: RecentSyncedPoster, thumbWidth?: number) => {
     const versionToken = poster.downloaded_at || String((poster as { file_mtime?: number }).file_mtime || poster.id)
-    return `${poster.image_url}?v=${encodeURIComponent(versionToken)}`
+    const thumbParam = thumbWidth ? `&w=${thumbWidth}` : ''
+    return `${poster.image_url}?v=${encodeURIComponent(versionToken)}${thumbParam}`
   }
 
   const getPosterMediaType = (poster: RecentSyncedPoster): 'season' | 'collection' | 'movie' => {
@@ -689,7 +690,7 @@ function Dashboard() {
                 >
                   <div className="poster-carousel-thumb-wrap">
                     <img
-                      src={getRecentPosterImageUrl(poster)}
+                      src={getRecentPosterImageUrl(poster, 320)}
                       alt={poster.file_name}
                       className="poster-carousel-thumb"
                       loading="lazy"

@@ -1,13 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import Float, func, and_
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, time as dt_time
 import html
+import os
 import re
+import threading
 from unidecode import unidecode
+from PIL import Image, UnidentifiedImageError
+from core.config import settings as app_settings
 from database import get_db
 from util.constants import common_words, illegal_chars_regex, remove_special_chars
 from models.job import (
@@ -315,9 +319,48 @@ def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_db)) ->
     }
 
 
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def _thumbnail_for(poster_id: int, poster_path: Path, width: int) -> Path:
+    """Return a cached LANCZOS-downscaled JPEG for the poster, generating it if stale."""
+    cache_dir = app_settings.config_dir / "cache" / "poster_thumbs"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    mtime_ns = poster_path.stat().st_mtime_ns
+    thumb_path = cache_dir / f"{poster_id}_{mtime_ns}_{width}.jpg"
+    if thumb_path.is_file():
+        return thumb_path
+
+    with Image.open(poster_path) as img:
+        img = img.convert("RGB")
+        if img.width > width:
+            height = max(1, round(img.height * width / img.width))
+            img = img.resize((width, height), Image.LANCZOS)
+        # Write-then-rename so concurrent requests never read a half-written thumb
+        tmp_path = thumb_path.with_name(f".{thumb_path.name}.{threading.get_ident()}.tmp")
+        img.save(tmp_path, "JPEG", quality=85)
+    os.replace(tmp_path, thumb_path)
+
+    # Drop variants from older versions of this poster
+    for stale in cache_dir.glob(f"{poster_id}_*_{width}.jpg"):
+        if stale != thumb_path:
+            stale.unlink(missing_ok=True)
+
+    return thumb_path
+
+
 @router.get("/posters/{poster_id}/image")
-def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> FileResponse:
-    """Stream poster image by poster record id."""
+def get_poster_image(
+    poster_id: int,
+    w: Optional[int] = Query(default=None, ge=50, le=1000),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Stream poster image by poster record id; `w` serves a downscaled thumbnail."""
     poster = db.query(Poster).filter(Poster.id == poster_id).first()
     if not poster:
         raise HTTPException(status_code=404, detail="Poster not found")
@@ -338,14 +381,15 @@ def get_poster_image(poster_id: int, db: Session = Depends(get_db)) -> FileRespo
     if not poster_path.exists() or not poster_path.is_file():
         raise HTTPException(status_code=404, detail="Poster file not found")
 
-    return FileResponse(
-        str(poster_path),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    if w is not None:
+        try:
+            thumb_path = _thumbnail_for(poster_id, poster_path, w)
+        except (UnidentifiedImageError, OSError):
+            thumb_path = None
+        if thumb_path is not None:
+            return FileResponse(str(thumb_path), headers=_NO_CACHE_HEADERS)
+
+    return FileResponse(str(poster_path), headers=_NO_CACHE_HEADERS)
 
 
 @router.get("/poster-daily-activity")

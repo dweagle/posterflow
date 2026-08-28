@@ -351,3 +351,51 @@ def test_poster_image_rejects_file_outside_drive_root(client, test_db, tmp_path)
     assert recent_response.status_code == 200
     recent_payload = recent_response.json()
     assert all(item["id"] != poster.id for item in recent_payload["items"])
+
+
+def test_poster_image_thumbnail_downscales_and_caches(client, test_db):
+    import io
+
+    from PIL import Image
+
+    drive = Drive(
+        name="Thumb Drive",
+        drive_id="thumb-drive-1",
+        style_type="CL2K",
+        subscribed=True,
+        is_custom=False,
+    )
+    test_db.add(drive)
+    test_db.flush()
+
+    drive_root = drive.get_local_path(validate=False)
+    drive_root.mkdir(parents=True, exist_ok=True)
+    poster_file = drive_root / "Big Poster (2024).jpg"
+    Image.new("RGB", (640, 960), (120, 40, 200)).save(poster_file, "JPEG")
+
+    poster = Poster(
+        drive_id=drive.drive_id,
+        file_name=poster_file.name,
+        file_path=str(poster_file),
+        downloaded_at=datetime.now(timezone.utc),
+    )
+    test_db.add(poster)
+    test_db.commit()
+
+    thumb_response = client.get(f"/api/stats/posters/{poster.id}/image?w=100")
+    assert thumb_response.status_code == 200
+    with Image.open(io.BytesIO(thumb_response.content)) as thumb:
+        assert thumb.size == (100, 150)
+
+    cache_dir = settings.config_dir / "cache" / "poster_thumbs"
+    cached = list(cache_dir.glob(f"{poster.id}_*_100.jpg"))
+    assert len(cached) == 1
+
+    # Full-size request stays untouched
+    full_response = client.get(f"/api/stats/posters/{poster.id}/image")
+    assert full_response.status_code == 200
+    with Image.open(io.BytesIO(full_response.content)) as full:
+        assert full.size == (640, 960)
+
+    # Width beyond the allowed range is rejected
+    assert client.get(f"/api/stats/posters/{poster.id}/image?w=5000").status_code == 422
