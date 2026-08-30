@@ -1,32 +1,42 @@
 import { useState } from 'react'
 import {
   getApiErrorMessage,
-  getPlexLibraries,
   getPlexLibraryConfigs,
   PlexLibrary,
   PlexLibraryConfig,
   revealSensitiveSetting,
   saveBulkSettings,
   savePlexLibraryConfig,
-  testPlex,
   testRadarr,
   testSonarr,
 } from '../api/client'
+import {
+  MEDIA_SERVER_COPY,
+  fetchMediaServerLibraries,
+  instanceServerType,
+  testMediaServerConnection,
+  type MediaServerType,
+} from '../utils/mediaServer'
 
 type ToastType = 'success' | 'error' | 'info'
 
 type DeleteType = 'sonarr' | 'radarr' | 'plex' | null
 
+export { instanceServerType }
+export type { MediaServerType }
+
 export interface ServerInstance {
   name: string
   url: string
   api_key: string
+  type?: MediaServerType // media server instances only; absent = plex (legacy configs)
 }
 
 export interface MediaSettingsState {
   plex_instances: ServerInstance[]
   sonarr_instances: ServerInstance[]
   radarr_instances: ServerInstance[]
+  media_server_media_source?: string // '' = auto (on when no arrs configured), 'true'/'false' = explicit
 }
 
 export interface DeleteConfirmState {
@@ -60,6 +70,7 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
     plex_instances: [{ name: 'Plex', url: '', api_key: '' }],
     sonarr_instances: [{ name: 'Sonarr', url: '', api_key: '' }],
     radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
+    media_server_media_source: '',
   })
 
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>({
@@ -115,7 +126,7 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   const updatePlexInstance = (index: number, field: keyof ServerInstance, value: string) => {
     setMediaSettings(prev => {
       const updated = [...prev.plex_instances]
-      updated[index] = { ...updated[index], [field]: value }
+      updated[index] = { ...updated[index], [field]: value } as ServerInstance
       return { ...prev, plex_instances: updated }
     })
   }
@@ -132,13 +143,13 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   const testPlexConnection = async (index: number) => {
     const instance = mediaSettings.plex_instances[index]
     if (!instance.url || !instance.api_key) {
-      showToast('Please enter both URL and Token', 'error')
+      showToast(MEDIA_SERVER_COPY[instanceServerType(instance)].missingFieldsToast, 'error')
       return
     }
 
     try {
       setTestingPlex(prev => new Set(prev).add(index))
-      const result = await testPlex(instance.url, instance.api_key)
+      const result = await testMediaServerConnection(instance)
       if (result.success) {
         showToast(result.message || `${instance.name} connection successful!`)
       } else {
@@ -171,7 +182,7 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
     setShowLibraryModal(true)
 
     try {
-      const data = await getPlexLibraries(instance.url, instance.api_key)
+      const data = await fetchMediaServerLibraries(instance)
       const existingConfig = libraryConfigs.find(c => c.instance_name === instance.name)
 
       // Safety guard
@@ -302,7 +313,7 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
     const newIndex = mediaSettings.plex_instances.length
     setMediaSettings(prev => ({
       ...prev,
-      plex_instances: [...prev.plex_instances, { name: `Plex ${prev.plex_instances.length + 1}`, url: '', api_key: '' }],
+      plex_instances: [...prev.plex_instances, { name: `Plex ${prev.plex_instances.length + 1}`, url: '', api_key: '', type: 'plex' as MediaServerType }],
     }))
     setEditingPlex(prev => new Set(prev).add(newIndex))
   }
@@ -381,13 +392,11 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   }
 
   const removeSonarrInstance = (index: number) => {
-    if (mediaSettings.sonarr_instances.length > 1) {
-      setMediaSettings(prev => ({
-        ...prev,
-        sonarr_instances: prev.sonarr_instances.filter((_, i) => i !== index),
-      }))
-      setEditingSonarr(prev => adjustIndexSet(prev, index))
-    }
+    setMediaSettings(prev => ({
+      ...prev,
+      sonarr_instances: prev.sonarr_instances.filter((_, i) => i !== index),
+    }))
+    setEditingSonarr(prev => adjustIndexSet(prev, index))
     setDeleteConfirm({ show: false, type: null, index: null, name: '' })
   }
 
@@ -454,13 +463,11 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   }
 
   const removeRadarrInstance = (index: number) => {
-    if (mediaSettings.radarr_instances.length > 1) {
-      setMediaSettings(prev => ({
-        ...prev,
-        radarr_instances: prev.radarr_instances.filter((_, i) => i !== index),
-      }))
-      setEditingRadarr(prev => adjustIndexSet(prev, index))
-    }
+    setMediaSettings(prev => ({
+      ...prev,
+      radarr_instances: prev.radarr_instances.filter((_, i) => i !== index),
+    }))
+    setEditingRadarr(prev => adjustIndexSet(prev, index))
     setDeleteConfirm({ show: false, type: null, index: null, name: '' })
   }
 
@@ -516,7 +523,7 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
 
         if (!existingConfig) {
           try {
-            const data = await getPlexLibraries(instance.url, instance.api_key)
+            const data = await fetchMediaServerLibraries(instance)
             const allEnabled = data.libraries.map(lib => ({ ...lib, enabled: true }))
             await savePlexLibraryConfig({
               instance_name: instance.name,
@@ -544,7 +551,35 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
     }
   }
 
+  const hasConfiguredArr = [...mediaSettings.sonarr_instances, ...mediaSettings.radarr_instances]
+    .some(i => i.url.trim() !== '' && i.api_key.trim() !== '')
+  const mediaServerMediaSourceAuto = !mediaSettings.media_server_media_source
+  const mediaServerMediaSourceEnabled = mediaServerMediaSourceAuto
+    ? !hasConfiguredArr
+    : mediaSettings.media_server_media_source === 'true'
+
+  const toggleMediaServerMediaSource = async () => {
+    // Store an explicit value only when it differs from auto (on iff no arrs);
+    // toggling back to the auto-equivalent state returns to '' so auto messaging survives
+    const nextEnabled = !mediaServerMediaSourceEnabled
+    const autoWouldEnable = !hasConfiguredArr
+    const next = nextEnabled === autoWouldEnable ? '' : nextEnabled ? 'true' : 'false'
+    try {
+      await saveBulkSettings({ media_server_media_source: next })
+      setMediaSettings(prev => ({ ...prev, media_server_media_source: next }))
+      showToast(nextEnabled
+        ? 'Movies & shows will be sourced from your media server libraries'
+        : 'Media server library sourcing disabled')
+    } catch (error) {
+      console.error('Error saving media source setting:', error)
+      showToast('Failed to save media source setting', 'error')
+    }
+  }
+
   return {
+    mediaServerMediaSourceEnabled,
+    mediaServerMediaSourceAuto,
+    toggleMediaServerMediaSource,
     mediaSettings,
     setMediaSettings,
     deleteConfirm,

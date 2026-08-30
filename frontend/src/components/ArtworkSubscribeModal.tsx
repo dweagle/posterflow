@@ -32,7 +32,7 @@ function ArtworkSubscribeModal({ driveName, askPriority, onCancel, onConfirm }: 
 
         <div className="modal-body">
           <div className="form-group">
-            <label>Artwork to sync</label>
+            <label className="field-label">Artwork to sync</label>
             <ArtworkTypePicker value={types} onChange={setTypes} />
             <small>Only the folders you pick are downloaded. You can change this later in the drive's settings.</small>
           </div>

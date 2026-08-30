@@ -72,7 +72,7 @@ export const useSettingsSchedules = ({
       case 'maker_monitor':
         return 'Maker Monitor'
       case 'plex_upload':
-        return 'Plex Upload'
+        return 'Asset Upload'
       case 'unmatched_assets':
         return 'Unmatched Assets'
       case 'border_replacer':

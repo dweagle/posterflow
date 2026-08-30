@@ -65,7 +65,10 @@
   margin-bottom: 0;
 }
 
-.modal-body label:not(.checkbox-label):not(.delete-files-checkbox):not(.creq-custom-request-label):not(.sort-label):not(.artwork-type-option) {
+/* Stacked-form modal labels OPT IN via field-label. This used to be an opt-out
+   :not() chain on every modal label, which silently flattened each new inline
+   row (toggles/checkboxes) until its class got appended here. */
+.modal-body label.field-label {
   display: block;
   color: #ccc;
   font-weight: 500;

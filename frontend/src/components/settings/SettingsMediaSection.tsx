@@ -1,19 +1,25 @@
 import { Edit2, Eye, EyeOff, List, Lock, Save, Trash2, Zap } from 'lucide-react'
+import { MEDIA_SERVER_COPY, instanceServerType, isJellyfinInstance } from '../../utils/mediaServer'
 
 type ServerInstance = {
   name: string
   url: string
   api_key: string
+  type?: 'plex' | 'jellyfin' // media server instances only; absent = plex
 }
 
 type MediaSettings = {
   plex_instances: ServerInstance[]
   sonarr_instances: ServerInstance[]
   radarr_instances: ServerInstance[]
+  media_server_media_source?: string
 }
 
 type SettingsMediaSectionProps = {
   mediaSettings: MediaSettings
+  mediaServerMediaSourceEnabled: boolean
+  mediaServerMediaSourceAuto: boolean
+  onToggleMediaServerMediaSource: () => void
   editingPlex: Set<number>
   editingSonarr: Set<number>
   editingRadarr: Set<number>
@@ -51,6 +57,9 @@ type SettingsMediaSectionProps = {
 
 function SettingsMediaSection({
   mediaSettings,
+  mediaServerMediaSourceEnabled,
+  mediaServerMediaSourceAuto,
+  onToggleMediaServerMediaSource,
   editingPlex,
   editingSonarr,
   editingRadarr,
@@ -92,7 +101,7 @@ function SettingsMediaSection({
       <div className="media-servers-container">
         <div className="server-section">
           <div className="server-section-header">
-            <h3>Plex Media Servers</h3>
+            <h3>Media Servers</h3>
             <button type="button" className="btn-add-instance" onClick={onAddPlexInstance}>
               + Add Instance
             </button>
@@ -102,6 +111,8 @@ function SettingsMediaSection({
               const isEditing = editingPlex.has(index)
               const hasSettings = !!(instance.url || instance.api_key)
               const hasUnsaved = dirtyPlexInstances.has(index)
+              const isJellyfin = isJellyfinInstance(instance)
+              const copy = MEDIA_SERVER_COPY[instanceServerType(instance)]
               return (
                 <div key={index} className={`server-card plex-card ${!isEditing && hasSettings ? 'locked' : ''}`}>
                   <div className="card-header">
@@ -140,27 +151,38 @@ function SettingsMediaSection({
                   </div>
                   <div className="card-body">
                     <div className="form-group">
+                      <label>Server Type</label>
+                      <select
+                        value={isJellyfin ? 'jellyfin' : 'plex'}
+                        onChange={(e) => onUpdatePlexInstance(index, 'type', e.target.value)}
+                        disabled={!isEditing && hasSettings}
+                      >
+                        <option value="plex">Plex</option>
+                        <option value="jellyfin">Jellyfin</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
                       <label>Name</label>
                       <input
                         type="text"
                         value={instance.name}
                         onChange={(e) => onUpdatePlexInstance(index, 'name', e.target.value)}
-                        placeholder="e.g., Plex Main, Plex 4K"
+                        placeholder={copy.namePlaceholder}
                         readOnly={!isEditing && hasSettings}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Plex URL</label>
+                      <label>{copy.urlLabel}</label>
                       <input
                         type="text"
                         value={instance.url}
                         onChange={(e) => onUpdatePlexInstance(index, 'url', e.target.value)}
-                        placeholder="http://localhost:32400"
+                        placeholder={copy.urlPlaceholder}
                         readOnly={!isEditing && hasSettings}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Plex Token</label>
+                      <label>{copy.keyLabel}</label>
                       <div className="input-with-toggle">
                         <input
                           type={showPlexTokens[index] ? 'text' : 'password'}
@@ -170,19 +192,43 @@ function SettingsMediaSection({
                               : instance.api_key
                           }
                           onChange={(e) => onUpdatePlexInstance(index, 'api_key', e.target.value)}
-                          placeholder="X-Plex-Token"
+                          placeholder={isJellyfin ? 'Jellyfin API Key' : 'X-Plex-Token'}
                           readOnly={!isEditing && hasSettings}
                         />
                         <button type="button" className="toggle-visibility" onClick={() => onTogglePlexTokenVisibility(index)} title={showPlexTokens[index] ? 'Hide' : 'Show'}>
                           {showPlexTokens[index] ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                       </div>
-                      <small>Find your token: <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex Support Article</a></small>
+                      {isJellyfin ? (
+                        <small>Create one in Jellyfin under Dashboard → API Keys</small>
+                      ) : (
+                        <small>Find your token: <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex Support Article</a></small>
+                      )}
                     </div>
                   </div>
                 </div>
               )
             })}
+          </div>
+          <div className="media-source-toggle-row">
+            <label className="toggle-switch" title={mediaServerMediaSourceEnabled ? 'Enabled' : 'Disabled'}>
+              <input
+                type="checkbox"
+                checked={mediaServerMediaSourceEnabled}
+                onChange={onToggleMediaServerMediaSource}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+            <div>
+              <strong>Source movies &amp; shows from media server libraries</strong>
+              {mediaServerMediaSourceAuto && (
+                <span className="media-source-auto-hint"> (auto — {mediaServerMediaSourceEnabled ? 'on because no Radarr/Sonarr is configured' : 'off while Radarr/Sonarr are configured'})</span>
+              )}
+              <small>
+                Lets the renamer, unmatched scan, and cleanup match against your Plex/Jellyfin libraries directly.
+                Works without any Radarr/Sonarr, or alongside them for libraries the arrs don't manage.
+              </small>
+            </div>
           </div>
         </div>
 
@@ -193,6 +239,11 @@ function SettingsMediaSection({
               + Add Instance
             </button>
           </div>
+          {mediaSettings.sonarr_instances.length === 0 && (
+            <p className="empty-instances-note">
+              No Sonarr instances — shows are sourced from your media server libraries when the toggle above is on.
+            </p>
+          )}
           <div className="server-cards-grid">
             {mediaSettings.sonarr_instances.map((instance, index) => {
               const isEditing = editingSonarr.has(index)
@@ -222,11 +273,9 @@ function SettingsMediaSection({
                       >
                         <Save size={16} />
                       </button>
-                      {mediaSettings.sonarr_instances.length > 1 && (
-                        <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveSonarrInstance(index)} title="Remove instance">
-                          <Trash2 size={16} />
-                        </button>
-                      )}
+                      <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveSonarrInstance(index)} title="Remove instance">
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
                   <div className="card-body">
@@ -285,6 +334,11 @@ function SettingsMediaSection({
               + Add Instance
             </button>
           </div>
+          {mediaSettings.radarr_instances.length === 0 && (
+            <p className="empty-instances-note">
+              No Radarr instances — movies are sourced from your media server libraries when the toggle above is on.
+            </p>
+          )}
           <div className="server-cards-grid">
             {mediaSettings.radarr_instances.map((instance, index) => {
               const isEditing = editingRadarr.has(index)
@@ -314,11 +368,9 @@ function SettingsMediaSection({
                       >
                         <Save size={16} />
                       </button>
-                      {mediaSettings.radarr_instances.length > 1 && (
-                        <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveRadarrInstance(index)} title="Remove instance">
-                          <Trash2 size={16} />
-                        </button>
-                      )}
+                      <button type="button" className="btn-remove-instance" onClick={() => onConfirmRemoveRadarrInstance(index)} title="Remove instance">
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
                   <div className="card-body">

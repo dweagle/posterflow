@@ -1080,7 +1080,7 @@ function MakerTools() {
                         <code>- squareart.jpg</code>). Leave a folder blank to hide its button.
                       </InfoTip>
                     </div>
-                    <label>
+                    <label className="field-label">
                       Logo Export Folder
                       <InfoTip>
                         Optional. Where the gallery&apos;s logo save button writes
@@ -1095,7 +1095,7 @@ function MakerTools() {
                         placeholder="(blank = no save button)"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       Background Export Folder
                       <InfoTip>
                         Optional. Where the gallery&apos;s backdrop save button writes
@@ -1109,7 +1109,7 @@ function MakerTools() {
                         placeholder="(blank = no save button)"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       Square Art Export Folder
                       <InfoTip>
                         Optional. Where the gallery&apos;s poster crop tool writes
@@ -1132,7 +1132,7 @@ function MakerTools() {
                         folders below.
                       </InfoTip>
                     </div>
-                    <label>
+                    <label className="field-label">
                       Poster Pull Folder
                       <InfoTip>
                         Optional. Where the panels&apos; <strong>Poster</strong> button saves the SELECTED
@@ -1163,7 +1163,7 @@ function MakerTools() {
                 <div className="psd-style-cols">
                   <div>
                     <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#3fae62' }}>CL2K</div>
-                    <label>
+                    <label className="field-label">
                       PSD Export Folder
                       <InfoTip>
                         Optional. When set, exported CL2K PSD files are saved to this folder instead of
@@ -1179,7 +1179,7 @@ function MakerTools() {
                         placeholder="/config/psd_exports"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       Image Export Folder
                       <InfoTip>
                         Optional. Where CL2K images exported with the panel's in-box <strong>JPG</strong> button
@@ -1197,7 +1197,7 @@ function MakerTools() {
                         placeholder="(blank = download)"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       PSD Template File
                       <InfoTip>
                         Override the bundled CL2K default PSD template with your own. Provide an absolute
@@ -1212,7 +1212,7 @@ function MakerTools() {
                         placeholder="/config/cl2k_template.psd"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       Logo Export Folder
                       <InfoTip>
                         Optional. Where the panel's in-box <strong>Logo</strong> button saves the PSD's
@@ -1232,7 +1232,7 @@ function MakerTools() {
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#5a86f0' }}>MM2K</div>
-                    <label>
+                    <label className="field-label">
                       PSD Export Folder
                       <InfoTip>
                         Optional. When set, exported MM2K PSD files are saved to this folder instead of
@@ -1248,7 +1248,7 @@ function MakerTools() {
                         placeholder="/config/psd_exports_mm2k"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       Image Export Folder
                       <InfoTip>
                         Optional. Where MM2K images exported with the panel's in-box <strong>JPG</strong> button
@@ -1266,7 +1266,7 @@ function MakerTools() {
                         placeholder="(blank = download)"
                       />
                     </label>
-                    <label>
+                    <label className="field-label">
                       PSD Template File
                       <InfoTip>
                         Override the bundled MM2K default PSD template with your own. Provide an absolute
@@ -1321,7 +1321,7 @@ function MakerTools() {
                       Settings → General → API Keys
                     </a>
                   </p>
-                  <label>
+                  <label className="field-label">
                     Lookahead Days
                     <input
                       type="number"
@@ -1345,7 +1345,7 @@ function MakerTools() {
                       }}
                     />
                   </label>
-                  <label>
+                  <label className="field-label">
                     Missing Retention Days
                     <input
                       type="number"
@@ -1425,7 +1425,7 @@ function MakerTools() {
 
                 <div className="maker-card">
                   <h3>Discovery</h3>
-                  <label>
+                  <label className="field-label">
                     Minimum Popularity
                     <input
                       type="number"
@@ -1450,7 +1450,7 @@ function MakerTools() {
                       }}
                     />
                   </label>
-                  <label>
+                  <label className="field-label">
                     Minimum Vote Count
                     <input
                       type="number"
@@ -1474,7 +1474,7 @@ function MakerTools() {
                       }}
                     />
                   </label>
-                  <label>
+                  <label className="field-label">
                     Max Results Per Language
                     <input
                       type="number"
@@ -1498,7 +1498,7 @@ function MakerTools() {
                       }}
                     />
                   </label>
-                  <label>
+                  <label className="field-label">
                     <span className="maker-label-row">
                       Languages (comma-separated)
                       <button

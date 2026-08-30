@@ -272,7 +272,7 @@ function Logs() {
   const connectLogWebSocket = () => {
     // Close existing connection if any
     if (wsRef.current) {
-      wsRef.current.close()
+      teardownSocket(wsRef.current)
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -353,13 +353,28 @@ function Logs() {
     }
   }
 
+  // Closing a socket mid-handshake makes the browser log a connection failure and
+  // fires onerror (StrictMode's dev double-mount does this on every page load), so
+  // detach handlers and let a still-connecting socket close itself once it opens.
+  const teardownSocket = (ws: WebSocket) => {
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    if (ws.readyState === WebSocket.CONNECTING) {
+      ws.onopen = () => ws.close()
+    } else {
+      ws.onopen = null
+      ws.close()
+    }
+  }
+
   const disconnectLogWebSocket = () => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
     }
     if (wsRef.current) {
-      wsRef.current.close()
+      teardownSocket(wsRef.current)
       wsRef.current = null
     }
   }
@@ -1275,7 +1290,7 @@ function Logs() {
 
               <div className="log-section">
                 <h2 onClick={() => toggleSection('plex_upload')}>
-                  <span>Plex Upload</span>
+                  <span>Asset Upload</span>
                   <div className="section-header-actions">
                     <button
                       className={`live-btn ${liveJobType === 'plex_upload' ? 'active' : ''}`}
@@ -1290,7 +1305,7 @@ function Logs() {
                 {!collapsedSections['plex_upload'] && (
                   <div className="log-section-content">
                     {jobLogs.plex_upload.length === 0 ? (
-                      <p className="no-logs">No plex upload logs yet</p>
+                      <p className="no-logs">No asset upload logs yet</p>
                     ) : (
                       <div className="log-list">
                         {jobLogs.plex_upload.map((file) => (

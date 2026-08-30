@@ -72,7 +72,7 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
           </div>
 
           <div className="form-group">
-            <label>{syncEnabled ? 'Drive Name *' : 'Folder Name *'}</label>
+            <label className="field-label">{syncEnabled ? 'Drive Name *' : 'Folder Name *'}</label>
             <input
               type="text"
               value={name}
@@ -83,7 +83,7 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
 
           {syncEnabled && (
             <div className="form-group">
-              <label>Google Drive ID *</label>
+              <label className="field-label">Google Drive ID *</label>
               <input
                 type="text"
                 value={driveId}
@@ -95,7 +95,7 @@ function AddCustomDriveModal({ onClose, onAdd }: AddCustomDriveModalProps) {
           )}
 
           <div className="form-group">
-            <label>{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
+            <label className="field-label">{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
             <input
               type="text"
               value={customPath}

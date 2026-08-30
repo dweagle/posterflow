@@ -29,6 +29,7 @@ interface FlatItem {
   tvdb_id: number | null
   imdb_id: string | null
   poster_url: string | null
+  thumb_url: string | null
   missingSeasons: number[]
   instance: string
 }
@@ -65,6 +66,7 @@ const buildResult = (item: FlatItem, tmdbId: number, posterUrl: string | null, i
   year: item.year ? String(item.year) : '',
   overview,
   poster_url: posterUrl || '',
+  thumb_url: item.thumb_url,
   homepage: tmdbId ? tmdbHomepage(item.mediaType, tmdbId) : '',
   imdb_id: imdbId ?? null,
   tvdb_id: tvdbId ?? null,
@@ -88,6 +90,7 @@ function flatten(stats: UnmatchedStats): FlatItem[] {
       tvdb_id: m.tvdb_id ?? null,
       imdb_id: m.imdb_id ?? null,
       poster_url: m.poster_url ?? null,
+        thumb_url: m.thumb_url ?? null,
       missingSeasons: [],
       instance: m.instance,
     })
@@ -106,6 +109,7 @@ function flatten(stats: UnmatchedStats): FlatItem[] {
         tvdb_id: s.tvdb_id ?? null,
         imdb_id: s.imdb_id ?? null,
         poster_url: s.poster_url ?? null,
+        thumb_url: s.thumb_url ?? null,
         missingSeasons: [],
         instance: s.instance,
       })
@@ -122,6 +126,7 @@ function flatten(stats: UnmatchedStats): FlatItem[] {
         tvdb_id: s.tvdb_id ?? null,
         imdb_id: s.imdb_id ?? null,
         poster_url: s.poster_url ?? null,
+        thumb_url: s.thumb_url ?? null,
         missingSeasons: [...s.missing_seasons].sort((a, b) => a - b),
         instance: s.instance,
       })
@@ -140,6 +145,7 @@ function flatten(stats: UnmatchedStats): FlatItem[] {
       tvdb_id: c.tvdb_id ?? null,
       imdb_id: c.imdb_id ?? null,
       poster_url: c.poster_url ?? null,
+        thumb_url: c.thumb_url ?? null,
       missingSeasons: [],
       instance: c.instance,
     })

@@ -161,7 +161,7 @@ describe('PlexUpload', () => {
     const user = userEvent.setup()
     render(<PlexUpload />)
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Plex Upload' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'Asset Upload' })).toBeTruthy()
 
     const webhook = screen.getByRole('button', { name: 'Webhook' })
     const manual = screen.getByRole('button', { name: 'Uploads / Options' })
@@ -180,7 +180,7 @@ describe('PlexUpload', () => {
     render(<PlexUpload />)
 
     expect(document.querySelector('.plex-upload-page.page-container')).toBeTruthy()
-    expect(screen.getByRole('heading', { level: 1, name: 'Plex Upload' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Asset Upload' })).toBeTruthy()
     expect(document.querySelector('.plex-upload-scope-toggle')).toBeTruthy()
     // The old page-tab bar styling is gone; this is a switch row now.
     expect(document.querySelector('.plex-upload-tabs')).toBeNull()

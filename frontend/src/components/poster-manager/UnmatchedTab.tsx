@@ -9,7 +9,7 @@ import UnmatchedHeader from './UnmatchedHeader'
 import UnmatchedIgnoreList from './UnmatchedIgnoreList'
 import { UnmatchedScope } from './UnmatchedTypeSelector'
 
-type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null }
+type PreviewItem = { title: string; year?: number | null; tmdb_id?: number | null; tvdb_id?: number | null; available?: boolean | null; source?: string | null; instance?: string | null }
 
 type UnmatchedTabProps = {
   unmatchedStats: UnmatchedStats | null
@@ -76,7 +76,7 @@ function UnmatchedTab({
     <CommunityStatusBadge status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: mediaType, title: item.title, year: item.year })} />
   )
   // Red "M" indicator when the item is tracked in *arr but not downloaded.
-  const arrBadge = (item: PreviewItem) => <ArrMissingBadge available={item.available} />
+  const arrBadge = (item: PreviewItem) => <ArrMissingBadge available={item.available} source={item.source} instance={item.instance} />
 
   const hasUnsavedChanges = hasUnsavedLibraryChanges || hasUnsavedUnmatchedSettings
 
@@ -132,12 +132,14 @@ function UnmatchedTab({
                     <div className="list-header">Missing {typeNoun}:</div>
                     {unmatchedStats.unmatched.movies.slice(0, cardPreviewLimit).map((item, idx: number) => (
                       <div key={idx} className="list-item">
-                        <span>{item.title}</span>
-                        {item.year && <span className="item-year">({item.year})</span>}
+                        <span className="list-item-main">
+                          <span>{item.title}</span>
+                          {item.year && <span className="item-year">({item.year})</span>}
+                        </span>
                         <span className="list-item-badges">
                           {claimBadge(item, 'movie')}
                           {arrBadge(item)}
-                          {item.instance && <span className="item-instance">{item.instance}</span>}
+                          {item.instance && <span className="item-instance" title={item.instance}>{item.instance}</span>}
                         </span>
                       </div>
                     ))}
@@ -185,12 +187,14 @@ function UnmatchedTab({
                       .slice(0, cardPreviewLimit)
                       .map((item, idx: number) => (
                         <div key={idx} className="list-item">
-                          <span>{item.title}</span>
-                          {item.year && <span className="item-year">({item.year})</span>}
+                          <span className="list-item-main">
+                            <span>{item.title}</span>
+                            {item.year && <span className="item-year">({item.year})</span>}
+                          </span>
                           <span className="list-item-badges">
                             {claimBadge(item, 'show')}
                             {arrBadge(item)}
-                            {item.instance && <span className="item-instance">{item.instance}</span>}
+                            {item.instance && <span className="item-instance" title={item.instance}>{item.instance}</span>}
                           </span>
                         </div>
                       ))}
@@ -246,7 +250,7 @@ function UnmatchedTab({
                             <span className="list-item-badges">
                               {claimBadge(item, 'show')}
                               {arrBadge(item)}
-                              {item.instance && <span className="item-instance">{item.instance}</span>}
+                              {item.instance && <span className="item-instance" title={item.instance}>{item.instance}</span>}
                             </span>
                           </div>
                           <div className="missing-seasons-list">Missing: {item.missing_seasons.map((s: number) => `S${s}`).join(', ')}</div>
@@ -293,11 +297,13 @@ function UnmatchedTab({
                     <div className="list-header">Missing {typeNoun}:</div>
                     {unmatchedStats.unmatched.collections.slice(0, cardPreviewLimit).map((item, idx: number) => (
                       <div key={idx} className="list-item">
-                        <span>{item.title}</span>
+                        <span className="list-item-main">
+                          <span>{item.title}</span>
+                        </span>
                         <span className="list-item-badges">
                           {claimBadge(item, 'collection')}
                           {arrBadge(item)}
-                          {item.instance && <span className="item-instance">{item.instance}</span>}
+                          {item.instance && <span className="item-instance" title={item.instance}>{item.instance}</span>}
                         </span>
                       </div>
                     ))}
@@ -366,7 +372,7 @@ function UnmatchedTab({
               />
               <span>
                 <strong>Ignore Unmonitored</strong>
-                <small>Exclude unmonitored movies, series, and seasons from detection.</small>
+                <small>Exclude unmonitored movies, series, and seasons from detection. Sonarr/Radarr only — media-server-sourced items are always treated as monitored.</small>
               </span>
             </label>
           </div>
@@ -374,12 +380,12 @@ function UnmatchedTab({
 
         <div className="settings-section renamer-library-card">
           <h2>Library Selection</h2>
-          <p className="section-description">Select which Plex libraries to scan. Shared across all asset types.</p>
+          <p className="section-description">Select which media server libraries to scan. Shared across all asset types.</p>
 
           <div className="field-group">
             {libraryConfigs.length === 0 ? (
               <div className="empty-state">
-                <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No Plex instances configured. Configure in Settings → Media Servers.</p>
+                <p style={{ color: '#888', fontSize: '0.9rem', margin: 0 }}>No media server instances configured. Configure in Settings → Media Servers.</p>
               </div>
             ) : (
               <LibrarySelectGrid

@@ -15,7 +15,7 @@ import {
 
 const RUN_TYPE_LABELS: Record<RuleRunType, string> = {
   workflow: 'Workflow',
-  webhook: 'Webhook (Plex upload)',
+  webhook: 'Webhook (Asset Upload)',
   manual: 'Manual (Border tab)',
   autorun: 'Auto-run (after Renamer)',
   scheduled: 'Scheduled (sync jobs)',
@@ -227,7 +227,7 @@ function PlexRulesSection({
   return (
     <div className="settings-section">
       <div className="section-header-row">
-        <h2>Border Rules (Plex Labels / Genres / Collections)</h2>
+        <h2>Border Rules (Server Labels / Genres / Collections)</h2>
         <div className="rule-header-actions">
           <div className="rule-config-wrap" ref={configRef}>
             <button className="btn-secondary" onClick={() => setConfigOpen((o) => !o)}>
@@ -259,7 +259,7 @@ function PlexRulesSection({
                   </small>
                   {libraryConfigs.length === 0 ? (
                     <div className="empty-config">
-                      <p>No Plex instances configured. Configure in Settings → Media Servers.</p>
+                      <p>No media server instances configured. Configure in Settings → Media Servers.</p>
                     </div>
                   ) : (
                     <LibrarySelectGrid

@@ -287,7 +287,7 @@ function FlowTab({
                   </label>
                   <span className="toolbar-info" tabIndex={0}>
                     <Info size={14} />
-                    <div className="toolbar-tooltip">Removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename/border, before Plex upload.</div>
+                    <div className="toolbar-tooltip">Removes asset folders for media no longer in Radarr/Sonarr/your media servers, plus stale duplicate folders left after a rename. Runs after rename/border, before Asset Upload.</div>
                   </span>
                 </div>
                 {flowConfig.cleanup_assets?.enabled && (
@@ -298,7 +298,7 @@ function FlowTab({
                     </label>
                     <span className="toolbar-info" tabIndex={0}>
                       <Info size={14} />
-                      <div className="toolbar-tooltip">Also deletes folders that match no movie/show/collection and have no usable ID or title (custom or hand-dropped folders). Riskier — leave off unless your assets folder is strictly Radarr/Sonarr/Plex-managed.</div>
+                      <div className="toolbar-tooltip">Also deletes folders that match no movie/show/collection and have no usable ID or title (custom or hand-dropped folders). Riskier — leave off unless your assets folder is strictly managed by Radarr/Sonarr/your media servers.</div>
                     </span>
                   </div>
                 )}
@@ -333,14 +333,14 @@ function FlowTab({
           <div className="job-header">
             <div className="job-header-left">
               <span className="job-number">{stepOffset + 4}</span>
-              <span className="job-title">Upload to Plex</span>
+              <span className="job-title">Asset Upload</span>
             </div>
             <label className="toggle-switch">
               <input type="checkbox" checked={flowConfig.plex_upload.enabled} onChange={(e) => onChangeFlowConfig('plex_upload', 'enabled', e.target.checked)} />
               <span className="toggle-slider"></span>
             </label>
           </div>
-          <p className="job-description">Upload organized posters to your Plex libraries. Automatically re-uploads when a better style poster (e.g. CL2K over MM2K) replaces an existing one.</p>
+          <p className="job-description">Upload organized posters to your media server libraries. Automatically re-uploads when a better style poster (e.g. CL2K over MM2K) replaces an existing one.</p>
           {flowConfig.plex_upload.enabled && (
             <div className="job-options">
               <label className="checkbox-option">

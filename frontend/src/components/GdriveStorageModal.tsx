@@ -72,7 +72,7 @@ function GdriveStorageModal({ onClose, variant = 'posters' }: GdriveStorageModal
               </p>
 
               <div className="form-group">
-                <label htmlFor="gdrive-storage-path">Storage Path</label>
+                <label className="field-label" htmlFor="gdrive-storage-path">Storage Path</label>
                 <input
                   id="gdrive-storage-path"
                   type="text"

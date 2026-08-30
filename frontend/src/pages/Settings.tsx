@@ -53,6 +53,7 @@ type MediaInstanceSnapshot = {
   name: string
   url: string
   api_key: string
+  type?: 'plex' | 'jellyfin' // media server instances only; absent = plex
 }
 
 type MediaSettingsSnapshot = {
@@ -75,6 +76,7 @@ const normalizeMediaInstances = (instances: MediaInstanceSnapshot[]): MediaInsta
     name: instance.name || '',
     url: instance.url || '',
     api_key: instance.api_key || '',
+    type: instance.type === 'jellyfin' ? 'jellyfin' : 'plex',
   }))
 }
 
@@ -96,6 +98,7 @@ const mediaInstanceChanged = (current: MediaInstanceSnapshot | undefined, baseli
   return current.name !== baseline.name
     || current.url !== baseline.url
     || current.api_key !== baseline.api_key
+    || (current.type === 'jellyfin') !== (baseline.type === 'jellyfin')
 }
 
 const calculateDirtyMediaIndices = (
@@ -176,7 +179,7 @@ const DISCORD_NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
   sync: 'Drive Sync Summary (Posters + Artwork)',
   poster_renamer: 'Asset Renamer Results',
   unmatched_assets: 'Unmatched Summary',
-  plex_upload: 'Plex Upload Item',
+  plex_upload: 'Asset Upload Item',
   idarr: 'IDarr Summary',
   maker_monitor: 'Maker Monitor Summary',
   system_errors: 'Major Errors',
@@ -397,6 +400,9 @@ function Settings() {
   const {
     mediaSettings,
     setMediaSettings,
+    mediaServerMediaSourceEnabled,
+    mediaServerMediaSourceAuto,
+    toggleMediaServerMediaSource,
     deleteConfirm,
     setDeleteConfirm,
     editingSonarr,
@@ -1255,6 +1261,9 @@ function Settings() {
       {activeTab === 'media' && (
         <SettingsMediaSection
           mediaSettings={mediaSettings}
+          mediaServerMediaSourceEnabled={mediaServerMediaSourceEnabled}
+          mediaServerMediaSourceAuto={mediaServerMediaSourceAuto}
+          onToggleMediaServerMediaSource={toggleMediaServerMediaSource}
           editingPlex={editingPlex}
           editingSonarr={editingSonarr}
           editingRadarr={editingRadarr}

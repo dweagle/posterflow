@@ -122,7 +122,7 @@ function UnmatchedIgnoreList({ onChanged }: { onChanged?: () => void }) {
         </select>
         <input
           type="text"
-          placeholder="Title (as in Radarr/Sonarr; collections as in Plex)"
+          placeholder="Title (as in Radarr/Sonarr or your media server)"
           value={addTitle}
           onChange={(e) => setAddTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}

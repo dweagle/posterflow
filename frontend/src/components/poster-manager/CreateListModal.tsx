@@ -17,6 +17,7 @@ export interface SelectableListItem {
   // Same supplementary badges the Unmatched rows show.
   claimStatus?: StyleClaimStatus | null
   available?: boolean | null
+  source?: string | null
 }
 
 const BADGE_LABEL: Record<'movie' | 'series' | 'season' | 'collection', string> = {
@@ -160,7 +161,7 @@ export default function CreateListModal({ items, submitting, onAdd, onClose, sty
                       </span>
                     )}
                     <CommunityStatusBadge status={item.claimStatus ?? null} />
-                    <ArrMissingBadge available={item.available} />
+                    <ArrMissingBadge available={item.available} source={item.source} />
                   </div>
                   <span className="create-list-check">{checked && <Check size={16} />}</span>
                 </button>

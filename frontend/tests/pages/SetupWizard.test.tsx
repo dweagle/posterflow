@@ -145,7 +145,7 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
 
-    await user.click(screen.getByRole('checkbox', { name: /I don't have Plex/i }))
+    await user.click(screen.getByRole('checkbox', { name: /I don't have a media server/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Sonarr/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 
@@ -173,6 +173,8 @@ describe('SetupWizard', () => {
         plex_instances: '[]',
         sonarr_instances: '[]',
         radarr_instances: '[]',
+        // Skipping both arrs turns on media-server library sourcing
+        media_server_media_source: 'true',
       })
       expect(mockSaveSettings).toHaveBeenNthCalledWith(3, {
         poster_destination: '/kometa/config/assets',
@@ -226,7 +228,7 @@ describe('SetupWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
 
-    await user.click(screen.getByRole('checkbox', { name: /I don't have Plex/i }))
+    await user.click(screen.getByRole('checkbox', { name: /I don't have a media server/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Sonarr/i }))
     await user.click(screen.getByRole('checkbox', { name: /I don't have Radarr/i }))
 

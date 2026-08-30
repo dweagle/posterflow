@@ -180,7 +180,7 @@ function RenamerTab({
               )}
             </div>
             <small>Runs Border Replacer automatically after a standalone rename (uses the incremental/full mode set on the Border Replacer page).</small>
-            <small className="standalone-warning">⚠️ Plex Upload also uses this setting — enable it if you want borders applied during Plex Upload runs.</small>
+            <small className="standalone-warning">⚠️ Asset Upload also uses this setting — enable it if you want borders applied during Asset Upload runs.</small>
           </div>
 
           <div className="field-group">
@@ -196,7 +196,7 @@ function RenamerTab({
                 </>
               )}
             </div>
-            <small>Removes asset folders for media no longer in Radarr/Sonarr/Plex, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
+            <small>Removes asset folders for media no longer in Radarr/Sonarr/your media servers, plus stale duplicate folders left after a rename. Runs after rename (and border, if on).</small>
             {autoRunCleanup && (
               <label className="checkbox-option" style={{ marginTop: '0.4rem' }}>
                 <input type="checkbox" checked={cleanupDeleteUnknown} onChange={(e) => onSetCleanupDeleteUnknown(e.target.checked)} />
@@ -231,7 +231,7 @@ function RenamerTab({
       <div className="settings-section manual-media-section">
         <h2>Manual Media</h2>
         <p className="section-description">
-          Add movies or shows that are in Plex but not managed by Radarr/Sonarr. These will be included in poster renaming, border replacement, unmatched detection, and Plex upload.
+          Add movies or shows that are in your media server but not managed by Radarr/Sonarr. These will be included in poster renaming, border replacement, unmatched detection, and Asset Upload.
         </p>
 
         <details className="manual-media-help">

@@ -23,7 +23,7 @@ type Props = {
 const SOURCES: { value: ArtworkPullSource; label: string; hint: string }[] = [
   { value: 'scope', label: 'Scope backfill', hint: "Look at items already in this scope and fill in the types they're missing." },
   { value: 'poster_drives', label: 'Poster drives', hint: 'Scan your subscribed poster drives for items and fetch what each is missing.' },
-  { value: 'libraries', label: 'Arr & Plex', hint: 'Everything your arrs manage plus Plex collections — movies from Radarr, series from Sonarr (including upcoming/unreleased), collections from Plex.' },
+  { value: 'libraries', label: 'Arr & Media Server', hint: 'Everything in your configured sources — movies/series from Radarr/Sonarr (including upcoming/unreleased) or your media server libraries, plus collections from Plex/Jellyfin.' },
   { value: 'list', label: 'Paste a list', hint: 'Fetch for the titles you paste, one per line — see the accepted formats below.' },
 ]
 
@@ -166,8 +166,8 @@ export default function BatchPullPanel({ syncTargetIndex, scopeLabel, runRef, on
             <>
               <div style={label}>Items</div>
               <small className="muted">
-                The same media set the Asset Renamer works from: movies from your Radarr instance(s), series from Sonarr
-                — both include upcoming/unreleased items the arrs are tracking — plus collections from Plex (filtered by the
+                The same media set the Asset Renamer works from: movies and series from your Radarr/Sonarr instance(s) or media-server libraries
+                — both include upcoming/unreleased items the arrs are tracking — plus collections from Plex/Jellyfin (filtered by the
                 Asset Renamer's library selection). Pair with a Dry Run first if you want to preview the item count.
               </small>
             </>
@@ -200,9 +200,9 @@ export default function BatchPullPanel({ syncTargetIndex, scopeLabel, runRef, on
               Recolor non-white logos to white
             </label>
             {source === 'libraries' && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer', alignSelf: 'flex-start' }} title="Skip arr items whose status is announced/upcoming/tba — TMDB rarely has art for them yet">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer', alignSelf: 'flex-start' }} title="Skip arr items whose status is announced/upcoming/tba — TMDB rarely has art for them yet. Applies to Sonarr/Radarr items only; media-server items are already in your library.">
                 <input type="checkbox" checked={skipUnreleased} onChange={(e) => setSkipUnreleased(e.target.checked)} />
-                Skip unreleased items
+                Skip unreleased items (arr only)
               </label>
             )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer', alignSelf: 'flex-start' }} title="Ignore what the scope already has: re-download every selected type for every item, archiving replaced files to the IDarr duplicates folder. Off = only fetch what's missing.">

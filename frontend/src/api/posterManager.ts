@@ -45,9 +45,9 @@ export interface UnmatchedStats {
     }
   }
   unmatched: {
-    movies: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null; added?: string | null; release_date?: string | null }>
-    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null; added?: string | null; release_date?: string | null }>
-    collections: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null; added?: string | null; release_date?: string | null }>
+    movies: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
+    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
+    collections: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
   }
   last_run: string | null
 }
@@ -294,21 +294,40 @@ export interface MatchReportLibraryRecord {
   status: string | null
   // Movies: has_file; series: has_episodes; collections: null.
   available: boolean | null
+  // "plex"/"jellyfin" for media-server-sourced records, "manual" for manual
+  // entries; absent for arr records (whose monitored/status/available are real)
+  source?: string | null
   alternate_titles: string[]
   seasons_with_episodes: number[]
 }
 
 // A resolved reference carries ids + title/year; otherwise `skipped`, `error`, or
 // `missing` (Plex: reachable but the item isn't in any library) says why.
+export interface MatchReportServerEntry {
+  instance?: string | null
+  type?: string | null
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  title?: string | null
+  year?: number | null
+  library?: string | null
+  missing?: boolean
+  error?: string
+}
+
 export interface MatchReportReference {
   tmdb_id?: number | null
   tvdb_id?: number | null
   imdb_id?: string | null
   title?: string
   year?: number | null
-  // Plex only: which library/instance the item was found in.
+  // Media server only: which library/instance the item was found in.
   library?: string | null
   instance?: string | null
+  type?: string | null
+  // Media server only: one outcome per configured server (found/missing/error).
+  servers?: MatchReportServerEntry[]
   // TMDB/TVDB only: the source's alias list (capped; total says how many exist).
   alternate_titles?: string[]
   alternate_titles_total?: number
@@ -552,6 +571,7 @@ export interface FallbackItem {
   imdb_id?: string | null
   poster_url?: string | null
   available?: boolean | null
+  source?: string | null
   drive_id?: string | null
   slot?: string | null
   file?: string | null

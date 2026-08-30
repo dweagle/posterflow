@@ -9,6 +9,7 @@ import { useToast } from '../Toast'
 import CommunityStatusBadge from './CommunityStatusBadge'
 import ArrMissingBadge from './ArrMissingBadge'
 import CommunityRequestModal from './CommunityRequestModal'
+import { matchedByIdTooltip } from '../../utils/mediaServer'
 
 type PosterStyleTmdbSearchProps = {
   item: FallbackItem
@@ -147,7 +148,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
               {item.type === 'movie' ? 'Movie' : item.type === 'collection' ? 'Collection' : 'Show'}
             </span>
             <CommunityStatusBadge status={claimStatus ?? null} />
-            <ArrMissingBadge available={item.available} />
+            <ArrMissingBadge available={item.available} source={item.source} />
           </div>
           <div className="unmatched-item-actions">
             <button
@@ -270,7 +271,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                         {candidate.media_type}
                       </span>
                       {candidate.auto_matched && (
-                        <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                        <span className="tmdb-matched-badge" title={matchedByIdTooltip(item.source)}>
                           <Check size={11} /> Matched
                         </span>
                       )}

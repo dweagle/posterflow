@@ -103,7 +103,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB only
   // once its tab is clicked.
   const tvdbEnabled = useTvdbEnabled()
-  const overview = useCardOverview(item)
+  const { overview } = useCardOverview(item)
   // TVDB-only items (no TMDB id) open straight on the TVDB tab — TMDB has nothing for them.
   const [source, setSource] = useState<ImageSource>((item.tmdb_id ?? 0) > 0 ? 'tmdb' : 'tvdb')
   const [language, setLanguage] = useState('en+textless')   // TMDB image language preference

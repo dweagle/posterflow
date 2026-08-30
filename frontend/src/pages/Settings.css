@@ -810,7 +810,8 @@ details[open] .feature-events-summary::before {
   font-weight: 500;
 }
 
-.server-card input {
+.server-card input,
+.server-card select {
   width: 100%;
   padding: 0.35rem 0.5rem;
   border: 1px solid #333;
@@ -842,7 +843,8 @@ details[open] .feature-events-summary::before {
   border-color: #5B89C4;
 }
 
-.server-card input:read-only {
+.server-card input:read-only,
+.server-card select:disabled {
   background-color: #1a1a1a;
   color: #999;
   cursor: not-allowed;
@@ -2282,4 +2284,35 @@ details[open] .feature-events-summary::before {
 
 .settings .setting-item {
   padding: 0.65rem 0;
+}
+.media-source-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  background-color: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+}
+
+.media-source-toggle-row strong {
+  color: #fff;
+}
+
+.media-source-toggle-row small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #888;
+}
+
+.media-source-auto-hint {
+  color: #aaa;
+  font-weight: normal;
+}
+
+.empty-instances-note {
+  margin: 0.25rem 0 0;
+  color: #888;
+  font-style: italic;
 }

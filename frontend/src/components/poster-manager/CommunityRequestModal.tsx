@@ -5,6 +5,7 @@ import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning } from '../community/posterStyles'
+import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -277,7 +278,7 @@ export default function CommunityRequestModal({
                         {c.title}
                         {c.year && <span className="creq-candidate-year"> ({c.year})</span>}
                         {c.auto_matched && (
-                          <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                          <span className="tmdb-matched-badge" title={MATCHED_BY_ID_GENERIC}>
                             <Check size={11} /> Matched
                           </span>
                         )}

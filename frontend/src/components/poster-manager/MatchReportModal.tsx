@@ -151,7 +151,7 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                 <h4>Library record</h4>
                 {report.library.records.length === 0 ? (
                   <div className="match-report-muted">
-                    {report.library.manual_entry ? 'Manual media entry' : 'Not found in the configured Sonarr/Radarr/Plex instances'}
+                    {report.library.manual_entry ? 'Manual media entry' : 'Not found in the configured Sonarr/Radarr/media server instances'}
                   </div>
                 ) : (
                   report.library.records.map((record, idx) => (
@@ -168,16 +168,18 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                               </td>
                             </tr>
                           )}
-                          <tr>
-                            <td>state</td>
-                            <td className="match-report-muted">
-                              {[
-                                record.monitored != null && (record.monitored ? 'monitored' : 'unmonitored'),
-                                record.status,
-                                record.available != null && (record.available ? 'downloaded' : 'not downloaded'),
-                              ].filter(Boolean).join(' · ')}
-                            </td>
-                          </tr>
+                          {!record.source && (
+                            <tr>
+                              <td>state</td>
+                              <td className="match-report-muted">
+                                {[
+                                  record.monitored != null && (record.monitored ? 'monitored' : 'unmonitored'),
+                                  record.status,
+                                  record.available != null && (record.available ? 'downloaded' : 'not downloaded'),
+                                ].filter(Boolean).join(' · ')}
+                              </td>
+                            </tr>
+                          )}
                           {report.item.media_type === 'series' && (
                             <tr>
                               <td>seasons</td>
@@ -199,10 +201,9 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                 <h4>ID cross-check</h4>
                 <table className="match-report-table">
                   <tbody>
-                    <tr><td>{report.library.ids_source || 'library'}</td><td className="match-report-mono"><IdTags ids={report.library.effective_ids} /></td></tr>
-                    {(['tvdb', 'tmdb', 'plex'] as const).map((source) => {
+                    <tr><td><span className="mr-source-label">{report.library.ids_source || 'library'}</span></td><td className="match-report-mono"><IdTags ids={report.library.effective_ids} /></td></tr>
+                    {(['tvdb', 'tmdb'] as const).map((source) => {
                       const reference = report.reference[source]
-                      const where = reference.library ? ` in ${reference.library} [${reference.instance}]` : ''
                       return (
                         <tr key={source}>
                           <td>{source.toUpperCase()}</td>
@@ -210,11 +211,22 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                             {reference.skipped ? <span className="match-report-muted">skipped: {reference.skipped}</span>
                               : reference.error ? <span className="mr-problem">{reference.error}</span>
                               : reference.missing ? <span className="match-report-muted">{reference.missing}</span>
-                              : <><IdTags ids={reference} /> → {reference.title}{reference.year ? ` (${reference.year})` : ''}{where}</>}
+                              : <><IdTags ids={reference} /> → {reference.title}{reference.year ? ` (${reference.year})` : ''}</>}
                           </td>
                         </tr>
                       )
                     })}
+                    {(report.reference.plex.servers ?? [report.reference.plex]).map((entry, index) => (
+                      <tr key={`server-${index}`}>
+                        <td>{entry.type === 'jellyfin' ? 'JELLYFIN' : entry.type === 'plex' ? 'PLEX' : 'SERVER'}</td>
+                        <td className="match-report-mono">
+                          {'skipped' in entry && entry.skipped ? <span className="match-report-muted">skipped: {entry.skipped}</span>
+                            : entry.error ? <span className="mr-problem">{entry.instance ? `${entry.instance}: ` : ''}{entry.error}</span>
+                            : entry.missing ? <span className="match-report-muted">{typeof entry.missing === 'string' ? entry.missing : `not found on ${entry.instance}`}</span>
+                            : <><IdTags ids={entry} /> → {entry.title}{entry.year ? ` (${entry.year})` : ''}{entry.library ? ` in ${entry.library} [${entry.instance}]` : ''}</>}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -239,7 +251,7 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                       <tbody>
                         {aliasRows.map((row) => (
                           <tr key={row.label}>
-                            <td>{row.label}</td>
+                            <td><span className="mr-source-label">{row.label}</span></td>
                             <td className="match-report-muted">
                               {row.names.join(', ')}
                               {row.total && row.total > row.names.length ? ` (+${row.total - row.names.length} more)` : ''}

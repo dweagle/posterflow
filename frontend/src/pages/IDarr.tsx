@@ -2227,7 +2227,7 @@ const {
               <li>If multiple fields are entered, all must match the same row.</li>
             </ul>
             <div className="form-group">
-              <label>Title (Exact)</label>
+              <label className="field-label">Title (Exact)</label>
               <input
                 type="text"
                 value={pruneTitleValue}
@@ -2236,7 +2236,7 @@ const {
               />
             </div>
             <div className="form-group">
-              <label>Asset Key (Exact)</label>
+              <label className="field-label">Asset Key (Exact)</label>
               <input
                 type="text"
                 value={pruneAssetKeyValue}
@@ -2246,7 +2246,7 @@ const {
             </div>
             <div className="resolver-id-row">
               <div className="form-group">
-                <label>TMDB ID</label>
+                <label className="field-label">TMDB ID</label>
                 <input
                   type="text"
                   value={pruneTmdbValue}
@@ -2255,7 +2255,7 @@ const {
                 />
               </div>
               <div className="form-group">
-                <label>TVDB ID</label>
+                <label className="field-label">TVDB ID</label>
                 <input
                   type="text"
                   value={pruneTvdbValue}
@@ -2264,7 +2264,7 @@ const {
                 />
               </div>
               <div className="form-group">
-                <label>IMDB ID</label>
+                <label className="field-label">IMDB ID</label>
                 <input
                   type="text"
                   value={pruneImdbValue}
@@ -2363,7 +2363,7 @@ const {
           </div>
           <div className="modal-body" ref={resolverModalBodyRef}>
             <div className="form-group">
-              <label>Asset</label>
+              <label className="field-label">Asset</label>
               <div className="resolver-asset-header">
                 <div className="resolver-candidate-poster-wrap">
                   {sourceIsPsd ? (
@@ -2452,7 +2452,7 @@ const {
               {manualSectionOpen && (
               <div className="resolver-manual-content">
               <div className="form-group">
-                <label>Media Type</label>
+                <label className="field-label">Media Type</label>
                 <small className="resolver-type-hint">Required when entering a TMDB ID manually — movie and TV IDs share the same number space.</small>
                 <div className="resolver-type-buttons">
                   {(['movie', 'tv_series', 'collection'] as const).map((t) => (
@@ -2469,15 +2469,15 @@ const {
               </div>
               <div className="resolver-id-row">
                 <div className="form-group">
-                  <label>TMDB ID</label>
+                  <label className="field-label">TMDB ID</label>
                   <input type="text" value={resolverTmdbId} onChange={(e) => setResolverTmdbId(e.target.value)} placeholder="12345" />
                 </div>
                 <div className="form-group">
-                  <label>TVDB ID</label>
+                  <label className="field-label">TVDB ID</label>
                   <input type="text" value={resolverTvdbId} onChange={(e) => setResolverTvdbId(e.target.value)} placeholder="98765" />
                 </div>
                 <div className="form-group">
-                  <label>IMDB ID</label>
+                  <label className="field-label">IMDB ID</label>
                   <input type="text" value={resolverImdbId} onChange={(e) => setResolverImdbId(e.target.value)} placeholder="tt1234567" />
                 </div>
               </div>
@@ -2513,7 +2513,7 @@ const {
               </div>)}
             </div>
             <div className="form-group">
-              <label>TMDB Candidates</label>
+              <label className="field-label">TMDB Candidates</label>
               <div className="resolver-candidates-list">
                 {resolverCandidatesLoading ? (
                   <div>Searching TMDB candidates...</div>
@@ -2583,7 +2583,7 @@ const {
                               )}
                             </div>
                             <div className="resolver-candidate-header-text">
-                              <label>{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
+                              <label className="field-label">{candidate.title}{candidate.year ? ` (${candidate.year})` : ''}</label>
                               <div className="resolver-candidate-meta-row">
                                 <span>TMDB {candidate.tmdb_id}</span>
                                 {(() => {
@@ -2626,7 +2626,7 @@ const {
                 <div className="settings-grid">
                   {resolverHistory.slice(0, 3).map((entry, index) => (
                     <div key={`${entry.resolved_at || 'unknown'}-${index}`} className="field-group">
-                      <label>{entry.source === 'candidate' ? 'Candidate Resolution' : 'Manual Resolution'}</label>
+                      <label className="field-label">{entry.source === 'candidate' ? 'Candidate Resolution' : 'Manual Resolution'}</label>
                       <div>
                         {entry.resolved_at || 'unknown time'}
                       </div>

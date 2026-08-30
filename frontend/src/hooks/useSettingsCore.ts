@@ -38,14 +38,18 @@ const defaultRcloneSettings: RcloneSettings = {
 
 const parseInstances = (
   value: string | undefined,
-  fallbackName: string
+  fallbackName: string,
+  seedBlankCard = true
 ): ServerInstance[] => {
-  const fallback: ServerInstance[] = [{ name: fallbackName, url: '', api_key: '' }]
+  const fallback: ServerInstance[] = seedBlankCard
+    ? [{ name: fallbackName, url: '', api_key: '' }]
+    : []
   if (!value) return fallback
 
   try {
     const parsed = JSON.parse(value)
-    if (Array.isArray(parsed) && parsed.length > 0) {
+    // A saved empty array means the user removed every instance — don't reseed a blank card
+    if (Array.isArray(parsed)) {
       return parsed
     }
   } catch (error) {
@@ -94,13 +98,15 @@ export const useSettingsCore = ({
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
 
       const plexInstances = parseInstances(settings.plex_instances, 'Plex')
-      const sonarrInstances = parseInstances(settings.sonarr_instances, 'Sonarr')
-      const radarrInstances = parseInstances(settings.radarr_instances, 'Radarr')
+      // Arrs are optional (media-server sourcing) — no blank starter card
+      const sonarrInstances = parseInstances(settings.sonarr_instances, 'Sonarr', false)
+      const radarrInstances = parseInstances(settings.radarr_instances, 'Radarr', false)
 
       const nextMediaSettings = {
         plex_instances: plexInstances,
         sonarr_instances: sonarrInstances,
         radarr_instances: radarrInstances,
+        media_server_media_source: (settings.media_server_media_source || '').trim(),
       }
 
       setMediaSettings(nextMediaSettings)

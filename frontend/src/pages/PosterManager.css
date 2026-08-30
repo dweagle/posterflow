@@ -4186,8 +4186,10 @@ img.drive-usage-compare-piece-img {
 
 .unmatched-card .list-item {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem 0.5rem;
   padding: 0.5rem;
   background-color: #2A2F3C;
   border-radius: 4px;
@@ -4195,17 +4197,18 @@ img.drive-usage-compare-piece-img {
   font-size: 0.9rem;
 }
 
-.unmatched-card .list-item > span:first-child {
-  color: #E8ECEF;
-  /* Direct child only — must not bleed into the first badge inside
-     .list-item-badges (that was recoloring the M white when no checkmark
-     preceded it). Take only the title's width (truncating if long) so the
-     year sits right next to it rather than being pushed across the row. */
+.unmatched-card .list-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.unmatched-card .list-item-main > span:first-child {
+  color: #E8ECEF;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .unmatched-card .item-year {
@@ -4220,16 +4223,22 @@ img.drive-usage-compare-piece-img {
   padding: 0.125rem 0.5rem;
   background-color: rgba(91, 137, 196, 0.15);
   border-radius: 6px;
-  flex-shrink: 0;
+  min-width: 2.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Badge cluster (M, claim, instance) pinned to the right of a row. */
+/* Badge cluster (M, claim, instance) */
 .unmatched-card .list-item-badges {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
+}
+
+.unmatched-card .list-item-badges > :not(.item-instance) {
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .unmatched-card .list-item-group {
@@ -4241,6 +4250,7 @@ img.drive-usage-compare-piece-img {
 
 .unmatched-card .list-item-title {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 0.35rem;
@@ -4251,6 +4261,7 @@ img.drive-usage-compare-piece-img {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -4258,6 +4269,7 @@ img.drive-usage-compare-piece-img {
   color: #E8ECEF;
   font-weight: 500;
   font-size: 0.85rem;
+  min-width: 0;
 }
 
 .unmatched-card .missing-seasons-list {
@@ -6123,6 +6135,14 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   white-space: nowrap;
 }
 
+/* Source labels can be long merged instance names ("plex (Movies) &
+   jellyfin (Movies)") — cap and wrap them so the value column keeps room */
+.match-report-table .mr-source-label {
+  display: block;
+  max-width: 13rem;
+  white-space: normal;
+}
+
 .match-report-candidate {
   margin-bottom: 0.6rem;
 }
@@ -6425,6 +6445,7 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 
 .creq-section-label {
+  display: block;
   font-size: 0.8rem;
   font-weight: 600;
   color: #aaa;

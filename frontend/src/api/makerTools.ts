@@ -115,6 +115,8 @@ export interface TmdbSearchResult {
   year: string
   overview: string
   poster_url: string
+  // Media-server thumb proxy, display fallback only when no public poster URL exists
+  thumb_url?: string | null
   homepage: string
   imdb_id: string | null
   tvdb_id: number | null
@@ -197,11 +199,16 @@ export interface TmdbTvDetails {
 }
 
 /** A title's description on its own — for cards built from data that carries ids but no text. */
-export const getTmdbOverview = async (tmdb_id: number, media_type: string): Promise<string> => {
-  const data = await getData<{ overview: string }>(
+export interface TmdbCardMeta {
+  overview: string
+  poster_url: string | null
+}
+
+export const getTmdbOverview = async (tmdb_id: number, media_type: string): Promise<TmdbCardMeta> => {
+  const data = await getData<{ overview: string; poster_url?: string | null }>(
     `/api/maker-tools/tmdb/overview?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
   )
-  return data.overview ?? ''
+  return { overview: data.overview ?? '', poster_url: data.poster_url ?? null }
 }
 
 /**

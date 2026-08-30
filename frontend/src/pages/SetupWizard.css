@@ -187,7 +187,8 @@
   cursor: pointer;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   width: 100%;
   padding: 0.75rem;
   background-color: #2a2a2a;
@@ -197,7 +198,8 @@
   transition: border-color 0.2s;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group select:focus {
   border-color: #64b5f6;
 }
 
@@ -421,7 +423,8 @@
   margin-bottom: 0.35rem;
 }
 
-.instance-group .form-group input {
+.instance-group .form-group input,
+.instance-group .form-group select {
   padding: 0.6rem;
 }
 

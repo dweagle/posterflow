@@ -24,7 +24,7 @@ export interface PlexSingleUploadPayload {
   tmdb_id?: number | null
   tvdb_id?: number | null
   imdb_id?: string | null
-  plex_rating_key?: number | null
+  plex_rating_key?: string | number | null
   dry_run?: boolean
   reapply?: boolean
   remove_overlay_label?: boolean
@@ -38,7 +38,7 @@ export interface PlexSearchItem {
   tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
-  plex_rating_key: number | null
+  plex_rating_key: string | number | null
   plex_instance: string
   library_name: string
   thumb_url: string | null
@@ -107,6 +107,8 @@ export interface PlexWebhookStats {
   queued: number
   duplicates: number
   skipped_test: number
+  // Non-actionable media-server events (play/pause/scrobble/…) — separate from arr test pings
+  skipped_ignored?: number
   skipped_cached: number
   skipped_no_asset: number
   rejected_disabled: number
@@ -206,6 +208,9 @@ export interface PlexUploadCacheEntry {
   uploaded_to_library_keys: string[]
   uploaded_editions: string[]
   uploaded_media_types: string[]
+  // Per-server library labels the keys resolve to (e.g. "Movies (Plex 'main')");
+  // absent for entries older than the server-id map
+  server_libraries?: string[]
 }
 
 export interface PlexUploadCacheSummary {

@@ -103,13 +103,13 @@ function DriveEditModal({ drive, artworkTypeCounts, onClose, onSave }: DriveEdit
           </div>
 
           <div className="form-group">
-            <label>Drive Name</label>
+            <label className="field-label">Drive Name</label>
             <input type="text" value={drive.name} disabled />
           </div>
 
           {isArtwork && (
             <div className="form-group">
-              <label>Artwork to sync</label>
+              <label className="field-label">Artwork to sync</label>
               <ArtworkTypePicker value={syncedTypes} onChange={setSyncedTypes} counts={artworkTypeCounts} />
               <small>Only the folders you pick are downloaded on the next sync.</small>
               <small style={{ color: '#ffb74d' }}>
@@ -120,7 +120,7 @@ function DriveEditModal({ drive, artworkTypeCounts, onClose, onSave }: DriveEdit
 
           {drive.is_custom && syncEnabled && (
             <div className="form-group">
-              <label>Google Drive ID *</label>
+              <label className="field-label">Google Drive ID *</label>
               <input
                 type="text"
                 value={driveId}
@@ -132,7 +132,7 @@ function DriveEditModal({ drive, artworkTypeCounts, onClose, onSave }: DriveEdit
           )}
 
           <div className="form-group">
-            <label>{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
+            <label className="field-label">{syncEnabled ? 'Custom Sync Path (optional)' : 'Custom Folder Path (optional)'}</label>
             <input
               type="text"
               value={customPath}

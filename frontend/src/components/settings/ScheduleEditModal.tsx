@@ -184,7 +184,7 @@ function ScheduleEditModal({
         </div>
         <div className="modal-body">
           <div className="form-group">
-            <label>Schedule Name</label>
+            <label className="field-label">Schedule Name</label>
             <input
               type="text"
               value={editingSchedule.schedule.name}
@@ -194,7 +194,7 @@ function ScheduleEditModal({
           </div>
 
           <div className="form-group">
-            <label>Scheduled Task</label>
+            <label className="field-label">Scheduled Task</label>
             <select
               value={editingSchedule.schedule.job_type}
               onChange={(e) => {
@@ -221,7 +221,7 @@ function ScheduleEditModal({
 
           {isPosterWorkflowSchedule && (
             <div className="form-group">
-              <label>Workflow</label>
+              <label className="field-label">Workflow</label>
               <select
                 value={selectedWorkflowId}
                 onChange={(e) => updateWorkflowSelection(Number(e.target.value))}
@@ -242,7 +242,7 @@ function ScheduleEditModal({
 
           {isIdarrSchedule && (
             <div className="form-group">
-              <label>IDarr Scope</label>
+              <label className="field-label">IDarr Scope</label>
               <select
                 value={selectedIdarrScope}
                 onChange={(e) => {
@@ -271,7 +271,7 @@ function ScheduleEditModal({
 
           {isIdarrSchedule && (
             <div className="form-group">
-              <label>Sync Personal Drive After Run</label>
+              <label className="field-label">Sync Personal Drive After Run</label>
               <div className="schedule-toggle">
                 <label className="toggle-switch">
                   <input
@@ -291,7 +291,7 @@ function ScheduleEditModal({
 
           {isIdarrSchedule && idarrSyncAfterRun && (
             <div className="form-group">
-              <label>Force Sync Even With No Changes</label>
+              <label className="field-label">Force Sync Even With No Changes</label>
               <div className="schedule-toggle">
                 <label className="toggle-switch">
                   <input
@@ -311,7 +311,7 @@ function ScheduleEditModal({
 
           {isSyncSchedule && (
             <div className="form-group">
-              <label>Drive Selection</label>
+              <label className="field-label">Drive Selection</label>
               <select
                 value={
                   editingSchedule.schedule.drive_id
@@ -352,7 +352,7 @@ function ScheduleEditModal({
           )}
 
           <div className="form-group">
-            <label>Status</label>
+            <label className="field-label">Status</label>
             <div className="schedule-toggle">
               <label className="toggle-switch">
                 <input
@@ -369,7 +369,7 @@ function ScheduleEditModal({
           </div>
 
           <div className="form-group">
-            <label>Schedule Type</label>
+            <label className="field-label">Schedule Type</label>
             <div className="schedule-type-buttons">
               <button type="button" className={`schedule-type-btn ${editingSchedule.schedule.schedule_type === 'hourly' ? 'active' : ''}`} onClick={() => updateScheduleField('schedule_type', 'hourly')}>
                 Hourly
@@ -397,7 +397,7 @@ function ScheduleEditModal({
 
           {editingSchedule.schedule.schedule_type === 'hourly' && (
             <div className="form-group">
-              <label>Minute Offset</label>
+              <label className="field-label">Minute Offset</label>
               <input
                 type="text"
                 value={editingSchedule.schedule.schedule_value || ''}
@@ -411,7 +411,7 @@ function ScheduleEditModal({
 
           {editingSchedule.schedule.schedule_type === 'daily' && (
             <div className="form-group">
-              <label>Time (24-hour format)</label>
+              <label className="field-label">Time (24-hour format)</label>
               <input
                 type="text"
                 value={editingSchedule.schedule.schedule_value || ''}
@@ -425,7 +425,7 @@ function ScheduleEditModal({
 
           {editingSchedule.schedule.schedule_type === 'multiple_daily' && (
             <div className="form-group">
-              <label>Times (24-hour format)</label>
+              <label className="field-label">Times (24-hour format)</label>
               <input
                 type="text"
                 value={editingSchedule.schedule.schedule_value || ''}
@@ -440,7 +440,7 @@ function ScheduleEditModal({
           {editingSchedule.schedule.schedule_type === 'weekly' && (
             <>
               <div className="form-group">
-                <label>Select Day</label>
+                <label className="field-label">Select Day</label>
                 <div className="day-toggle-buttons">
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, dayIndex) => {
                     const currentDay = editingSchedule.schedule.schedule_value?.split(':')[0]
@@ -462,7 +462,7 @@ function ScheduleEditModal({
                 </div>
               </div>
               <div className="form-group">
-                <label>Time (24-hour format)</label>
+                <label className="field-label">Time (24-hour format)</label>
                 <input
                   type="text"
                   value={editingSchedule.schedule.schedule_value?.split(':').slice(1).join(':') || ''}
@@ -481,7 +481,7 @@ function ScheduleEditModal({
           {editingSchedule.schedule.schedule_type === 'monthly' && (
             <>
               <div className="form-group">
-                <label>Day of Month</label>
+                <label className="field-label">Day of Month</label>
                 <input
                   type="text"
                   value={editingSchedule.schedule.schedule_value?.split(':')[0] || ''}
@@ -494,7 +494,7 @@ function ScheduleEditModal({
                 <p className="field-hint">Day 1-31 (will use last day if month has fewer days)</p>
               </div>
               <div className="form-group">
-                <label>Time (24-hour format)</label>
+                <label className="field-label">Time (24-hour format)</label>
                 <input
                   type="text"
                   value={editingSchedule.schedule.schedule_value?.split(':').slice(1).join(':') || ''}
@@ -513,7 +513,7 @@ function ScheduleEditModal({
           {editingSchedule.schedule.schedule_type === 'multiple_days' && (
             <>
               <div className="form-group">
-                <label>Select Days</label>
+                <label className="field-label">Select Days</label>
                 <div className="day-toggle-buttons">
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, dayIndex) => {
                     const schedules = editingSchedule.schedule.schedule_value?.split('|') || []
@@ -543,7 +543,7 @@ function ScheduleEditModal({
 
               {editingSchedule.schedule.schedule_value && editingSchedule.schedule.schedule_value.split('|').filter((s) => s).length > 0 && (
                 <div className="form-group">
-                  <label>Times for Each Day (24-hour format)</label>
+                  <label className="field-label">Times for Each Day (24-hour format)</label>
                   <p className="field-hint">Enter comma-separated times for each day (e.g., 07:00,19:00)</p>
                   <div className="day-time-list">
                     {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((dayName, dayIndex) => {
@@ -579,7 +579,7 @@ function ScheduleEditModal({
 
           {editingSchedule.schedule.schedule_type === 'cron' && (
             <div className="form-group">
-              <label>Cron Expression</label>
+              <label className="field-label">Cron Expression</label>
               <input
                 type="text"
                 value={editingSchedule.schedule.schedule_value || ''}

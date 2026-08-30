@@ -17,6 +17,7 @@ import PublishStyleToggle from './PublishStyleToggle'
 import { usePersistedPosterStyle } from '../community/posterStyles'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
+import { matchedByIdTooltip } from '../../utils/mediaServer'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -38,7 +39,9 @@ interface NormalizedItem {
   tvdb_id?: number | null
   imdb_id?: string | null
   poster_url?: string | null
+  thumb_url?: string | null
   available?: boolean | null
+  source?: string | null
   added?: string | null
   releaseDate?: string | null
 }
@@ -84,13 +87,15 @@ function getModalTitle(modalType: UnmatchedModalType, typeNoun: string, hasSeaso
 }
 
 // Authoritative refs (IDs + poster + dates) carried from Plex/*arr, normalized to null.
-function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; available?: boolean | null; added?: string | null; release_date?: string | null }) {
+function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }) {
   return {
     tmdb_id: item.tmdb_id ?? null,
     tvdb_id: item.tvdb_id ?? null,
     imdb_id: item.imdb_id ?? null,
     poster_url: item.poster_url ?? null,
+    thumb_url: item.thumb_url ?? null,
     available: item.available ?? null,
+    source: item.source ?? null,
     added: item.added ?? null,
     releaseDate: item.release_date ?? null,
   }
@@ -475,9 +480,11 @@ function UnmatchedItemsModal({
       : item.type === 'show' ? 'series'
       : item.type === 'collection' ? 'collection'
       : 'movie',
-    posterUrl: item.poster_url,
+    // Display-only fallback: media-server thumb proxy when no TMDB poster (arr-less)
+    posterUrl: item.poster_url ?? item.thumb_url,
     claimStatus: getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: item.type, title: item.title, year: item.year }),
     available: item.available,
+    source: item.source,
   }))
 
   const handleCreateListAdd = (keys: string[]) => {
@@ -521,7 +528,7 @@ function UnmatchedItemsModal({
               </span>
             )}
             <CommunityStatusBadge status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: item.type, title: item.title, year: item.year })} />
-            <ArrMissingBadge available={item.available} />
+            <ArrMissingBadge available={item.available} source={item.source} />
           </div>
           <div className="unmatched-item-actions">
           <button
@@ -650,7 +657,7 @@ function UnmatchedItemsModal({
                           {candidate.media_type}
                         </span>
                         {candidate.auto_matched && (
-                          <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                          <span className="tmdb-matched-badge" title={matchedByIdTooltip(item.source)}>
                             <Check size={11} /> Matched
                           </span>
                         )}

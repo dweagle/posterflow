@@ -107,6 +107,10 @@ export const testPlex = async (url: string, token: string): Promise<TestResult> 
   return postData('/api/test/plex', { url, token })
 }
 
+export const testJellyfin = async (url: string, token: string): Promise<TestResult> => {
+  return postData('/api/test/jellyfin', { url, token })
+}
+
 export const testSonarr = async (url: string, api_key: string): Promise<TestResult> => {
   return postData('/api/test/sonarr', { url, api_key })
 }
@@ -124,6 +128,10 @@ export interface PlexLibrary {
 
 export const getPlexLibraries = async (url: string, token: string): Promise<{ success: boolean; libraries: PlexLibrary[] }> => {
   return postData('/api/test/plex/libraries', { url, token })
+}
+
+export const getJellyfinLibraries = async (url: string, token: string): Promise<{ success: boolean; libraries: PlexLibrary[] }> => {
+  return postData('/api/test/jellyfin/libraries', { url, token })
 }
 
 // Plex Library Config

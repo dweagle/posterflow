@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DEFAULT_POSTER_DESTINATION, saveSettings, testPlex, testSonarr, testRadarr, getSettings, getPosterConfig, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraries, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
+import { DEFAULT_POSTER_DESTINATION, saveSettings, testSonarr, testRadarr, getSettings, getPosterConfig, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
+import { MEDIA_SERVER_COPY, fetchMediaServerLibraries, instanceServerType, isJellyfinInstance, testMediaServerConnection } from '../utils/mediaServer'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -15,7 +16,9 @@ interface ServerInstance {
   name: string
   url: string
   api_key: string
+  type?: 'plex' | 'jellyfin' // media server instances only; absent = plex
 }
+
 
 // Order-independent fingerprint of an instance's library selection, used to skip re-saving a
 // config the wizard only loaded and never changed. Keys are coerced to strings — the backend
@@ -249,7 +252,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             const instance = updatedFormData.plex_instances[i]
             if (instance.url && instance.api_key && !librariesMap[i]) {
               try {
-                const libData = await getPlexLibraries(instance.url, instance.api_key)
+                const libData = await fetchMediaServerLibraries(instance)
                 librariesMap[i] = libData.libraries.map(lib => ({ ...lib, enabled: true }))
               } catch (e) {
                 // Silent fail — instance may be unreachable at wizard load time
@@ -279,7 +282,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const updatePlexInstance = (index: number, field: keyof ServerInstance, value: string) => {
     setFormData(prev => {
       const updated = [...prev.plex_instances]
-      updated[index] = { ...updated[index], [field]: value }
+      updated[index] = { ...updated[index], [field]: value } as ServerInstance
       return { ...prev, plex_instances: updated }
     })
   }
@@ -351,24 +354,24 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleTestPlex = async (index: number) => {
     const instance = formData.plex_instances[index]
     if (!instance.url || !instance.api_key) {
-      showToast('Please enter both URL and Token', 'error')
+      showToast(MEDIA_SERVER_COPY[instanceServerType(instance)].missingFieldsToast, 'error')
       return
     }
 
     const key = `plex_${index}`
     setTestStatus(prev => ({ ...prev, [key]: { loading: true } }))
-    
+
     try {
-      const result = await testPlex(instance.url, instance.api_key)
-      setTestStatus(prev => ({ 
-        ...prev, 
+      const result = await testMediaServerConnection(instance)
+      setTestStatus(prev => ({
+        ...prev,
         [key]: { loading: false, success: true, message: result.message }
       }))
 
       // Auto-fetch libraries after successful connection
       setPlexLibraryLoading(prev => ({ ...prev, [index]: true }))
       try {
-        const libData = await getPlexLibraries(instance.url, instance.api_key)
+        const libData = await fetchMediaServerLibraries(instance)
         setPlexLibraries(prev => {
           // Merge with existing saved state: preserve enabled/disabled for known libraries,
           // default new libraries to enabled
@@ -493,7 +496,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const handleSaveStep3 = async () => {
     const missing: string[] = []
-    if (!skipPlex && !formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')) missing.push('Plex (or check "I don\'t have Plex")')
+    if (!skipPlex && !formData.plex_instances.some(p => p.url.trim() !== '' && p.api_key.trim() !== '')) missing.push('Media server (or check "I don\'t have a media server")')
     if (!skipSonarr && !formData.sonarr_instances.some(s => s.url.trim() !== '' && s.api_key.trim() !== '')) missing.push('Sonarr (or check "I don\'t have Sonarr")')
     if (!skipRadarr && !formData.radarr_instances.some(r => r.url.trim() !== '' && r.api_key.trim() !== '')) missing.push('Radarr (or check "I don\'t have Radarr")')
     if (missing.length > 0) {
@@ -506,6 +509,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         plex_instances: JSON.stringify(formData.plex_instances.filter(p => p.url)),
         sonarr_instances: JSON.stringify(formData.sonarr_instances.filter(s => s.url)),
         radarr_instances: JSON.stringify(formData.radarr_instances.filter(r => r.url)),
+        // Arr-less installs source movies/shows from media server libraries
+        ...(skipSonarr && skipRadarr ? { media_server_media_source: 'true' } : {}),
       })
 
       // Save library configs for instances where libraries were fetched
@@ -546,7 +551,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           if (!instance.url || !instance.api_key || instance.api_key === MASKED_VALUE) continue
           if (freshConfigs.some(c => c.instance_name === instance.name)) continue
           try {
-            const data = await getPlexLibraries(instance.url, instance.api_key)
+            const data = await fetchMediaServerLibraries(instance)
             const allEnabled = data.libraries.map(lib => ({ ...lib, enabled: true }))
             if (allEnabled.length === 0) continue
             await savePlexLibraryConfig({ instance_name: instance.name, libraries: allEnabled })
@@ -1041,7 +1046,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
               <div className="server-section">
                 <div className="server-header">
-                  <h3>Plex Instances <span className="required">*</span></h3>
+                  <h3>Media Server Instances <span className="required">*</span></h3>
                   <button type="button" className="btn-add" onClick={addPlexInstance}>
                     + Add Instance
                   </button>
@@ -1054,13 +1059,15 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                       checked={skipPlex}
                       onChange={(e) => setSkipPlex(e.target.checked)}
                     />
-                    I don't have Plex
+                    I don't have a media server
                   </label>
                 </div>
 
                 {!skipPlex && formData.plex_instances.map((instance, index) => {
                   const statusKey = `plex_${index}`
                   const status = testStatus[statusKey]
+                  const isJellyfin = isJellyfinInstance(instance)
+                  const copy = MEDIA_SERVER_COPY[instanceServerType(instance)]
 
                   return (
                     <div key={index} className="instance-group">
@@ -1078,36 +1085,47 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                       </div>
 
                       <div className="form-group">
+                        <label>Server Type</label>
+                        <select
+                          value={isJellyfin ? 'jellyfin' : 'plex'}
+                          onChange={(e) => updatePlexInstance(index, 'type', e.target.value)}
+                        >
+                          <option value="plex">Plex</option>
+                          <option value="jellyfin">Jellyfin</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group">
                         <label>Name</label>
                         <input
                           type="text"
                           autoComplete="off"
                           value={instance.name}
                           onChange={(e) => updatePlexInstance(index, 'name', e.target.value)}
-                          placeholder="e.g., Plex Main, Plex 4K"
+                          placeholder={copy.namePlaceholder}
                         />
                       </div>
 
                       <div className="form-group">
-                        <label>Plex URL</label>
+                        <label>{copy.urlLabel}</label>
                         <input
                           type="text"
                           autoComplete="off"
                           value={instance.url}
                           onChange={(e) => updatePlexInstance(index, 'url', e.target.value)}
-                          placeholder="http://localhost:32400"
+                          placeholder={copy.urlPlaceholder}
                         />
                       </div>
 
                       <div className="form-group">
-                        <label>Plex Token</label>
+                        <label>{copy.keyLabel}</label>
                         <div className="input-with-toggle">
                           <input
                             type={showPlexTokens[index] ? "text" : "password"}
                             autoComplete="new-password"
                             value={instance.api_key}
                             onChange={(e) => updatePlexInstance(index, 'api_key', e.target.value)}
-                            placeholder="Your Plex Token"
+                            placeholder={isJellyfin ? 'Your Jellyfin API Key' : 'Your Plex Token'}
                           />
                           <button
                             type="button"
@@ -1118,7 +1136,11 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                             {showPlexTokens[index] ? <EyeOff size={18} /> : <Eye size={18} />}
                           </button>
                         </div>
-                        <small>Find your token: <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex Support</a></small>
+                        {isJellyfin ? (
+                          <small>Create one in Jellyfin under Dashboard → API Keys</small>
+                        ) : (
+                          <small>Find your token: <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex Support</a></small>
+                        )}
                       </div>
 
                       <button 
@@ -1167,7 +1189,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
               <div className="server-section">
                 <div className="server-header">
-                  <h3>Sonarr Instances <span className="required">*</span></h3>
+                  <h3>Sonarr Instances</h3>
                   <button type="button" className="btn-add" onClick={addSonarrInstance}>
                     + Add Instance
                   </button>
@@ -1269,7 +1291,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
               <div className="server-section">
                 <div className="server-header">
-                  <h3>Radarr Instances <span className="required">*</span></h3>
+                  <h3>Radarr Instances</h3>
                   <button type="button" className="btn-add" onClick={addRadarrInstance}>
                     + Add Instance
                   </button>

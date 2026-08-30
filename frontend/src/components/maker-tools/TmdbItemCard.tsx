@@ -52,6 +52,7 @@ import ServiceLinks from './ServiceLinks'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
+import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -195,6 +196,9 @@ const APPLE_TV_STOREFRONTS = [
 // ISO 3166-1 alpha-2 → Apple storefront id, for auto-selecting the region from origin country.
 const STOREFRONT_BY_ISO = new Map(APPLE_TV_STOREFRONTS.map((s) => [s.iso, s.value]))
 
+// TV details shared across cards; keyed "tmdb:tvdb", failed fetches evicted
+const tvDetailsCache = new Map<string, Promise<TmdbTvDetails>>()
+
 export const TMDB_IMAGE_LANGUAGES = [
   { value: 'all', label: 'All Languages' },
   { value: 'en+textless', label: 'English + Textless' },
@@ -311,7 +315,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (gallery, id chip) but
   // still let the user export a blank/existing PSD, named by title + year.
   const hasTmdb = (item.tmdb_id ?? 0) > 0
-  const overview = useCardOverview(item)
+  const { overview, posterUrl: tmdbPosterUrl } = useCardOverview(item)
+  // Display-only fallback chain; the thumb proxy is never published
+  const posterUrl = item.poster_url || tmdbPosterUrl || item.thumb_url || ''
 
   // Gallery state. Images are cached per source, so TMDB stays the default load and TheTVDB is
   // only ever called once the user actually clicks its tab — after that, switching is instant.
@@ -504,8 +510,16 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     if (tvDetails || tvDetailsLoading) return
     setTvDetailsLoading(true)
     try {
-      const details = await getTvDetails(item.tmdb_id, item.tvdb_id)
-      setTvDetails(details)
+      // Shared in-flight/result cache: many cards mount at once (and StrictMode
+      // double-mounts in dev), so identical ids collapse to one request
+      const key = `${item.tmdb_id}:${item.tvdb_id ?? 0}`
+      let pending = tvDetailsCache.get(key)
+      if (!pending) {
+        pending = getTvDetails(item.tmdb_id, item.tvdb_id)
+        tvDetailsCache.set(key, pending)
+        pending.catch(() => tvDetailsCache.delete(key))
+      }
+      setTvDetails(await pending)
     } catch {
       // non-blocking
     } finally {
@@ -905,11 +919,11 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       <div className="tmdb-result-card">
         {!hidePoster && (
           <div
-            className={`tmdb-poster${item.poster_url ? ' tmdb-poster--clickable' : ''}`}
-            onClick={() => { if (item.poster_url) setPreviewPoster(item.poster_url) }}
+            className={`tmdb-poster${posterUrl ? ' tmdb-poster--clickable' : ''}`}
+            onClick={() => { if (posterUrl) setPreviewPoster(posterUrl) }}
           >
-            {item.poster_url
-              ? <img src={item.poster_url} alt={item.title} loading="lazy" />
+            {posterUrl
+              ? <img src={posterUrl} alt={item.title} loading="lazy" />
               : (
                 <div className="tmdb-poster-placeholder">
                   {item.media_type === 'movie' ? <MovieIcon size={32} /> : item.media_type === 'tv' ? <Tv size={32} /> : <FolderOpen size={32} />}
@@ -927,7 +941,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
               {!hideTitle && item.year && <span className="tmdb-result-year">{item.year}</span>}
               {!hideTitle && item.auto_matched && (
-                <span className="tmdb-matched-badge" title="Matched from your *arr metadata by id">
+                <span className="tmdb-matched-badge" title={MATCHED_BY_ID_GENERIC}>
                   <Check size={11} /> Matched
                 </span>
               )}

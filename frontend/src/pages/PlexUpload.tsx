@@ -128,7 +128,7 @@ const createAutomationSnapshot = (
   override_configs: normalizeOverrideConfigs(overrideConfigs),
 })
 
-// Rendered only as the Asset Manager's Plex Upload tab, inside that page's container.
+// Rendered only as the Asset Manager's Asset Upload tab, inside that page's container.
 function PlexUpload() {
   const SEARCH_DEBOUNCE_MS = 250
   const CACHE_BROWSER_PAGE_SIZE = 25
@@ -288,6 +288,13 @@ function PlexUpload() {
     return `${window.location.origin}${webhookPath}`
   }, [])
 
+  // URLs are built from the browser's origin; a localhost origin produces URLs
+  // other machines/containers can't dial (a container calls itself).
+  const webhookUrlIsLocalhost = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  }, [])
+
   // When an app password is set, inbound webhooks must carry the token in the
   // URL (the password's Bearer header can't be sent by Radarr/Sonarr).
   const tokenizedWebhookUrl = useMemo(() => {
@@ -300,6 +307,25 @@ function PlexUpload() {
   // The URL the user should paste into Radarr/Sonarr: tokenized when a password
   // is set, plain otherwise.
   const effectiveWebhookUrl = passwordSet ? tokenizedWebhookUrl : webhookUrl
+
+  // Plex webhooks (Plex Pass) post multipart payloads to their own route; Plex
+  // URLs can only carry the token as a query param.
+  const plexWebhookUrl = useMemo(() => {
+    const base = `${webhookUrl}/plex`
+    if (passwordSet && webhookToken) {
+      return `${base}?token=${encodeURIComponent(webhookToken)}`
+    }
+    return base
+  }, [webhookUrl, webhookToken, passwordSet])
+
+  // Jellyfin's Webhook plugin (Generic destination) posts our JSON to its own route
+  const jellyfinWebhookUrl = useMemo(() => {
+    const base = `${webhookUrl}/jellyfin`
+    if (passwordSet && webhookToken) {
+      return `${base}?token=${encodeURIComponent(webhookToken)}`
+    }
+    return base
+  }, [webhookUrl, webhookToken, passwordSet])
 
   const copyWebhookUrl = async (url: string) => {
     try {
@@ -329,7 +355,7 @@ function PlexUpload() {
 
   const handleRegenerateToken = async () => {
     const confirmed = window.confirm(
-      'Generate a new webhook token? Any Radarr/Sonarr webhook URLs using the current token will stop working until you update them with the new URL.',
+      'Generate a new webhook token? Any webhook URLs using the current token — Radarr/Sonarr, Plex, and Jellyfin alike — will stop working until you update them with the new URL.',
     )
     if (!confirmed) {
       return
@@ -339,7 +365,7 @@ function PlexUpload() {
       const res = await regeneratePlexWebhookToken()
       setWebhookToken(res.token)
       setPasswordSet(res.password_set)
-      showToast('Webhook token regenerated — update your Radarr/Sonarr URLs')
+      showToast('Webhook token regenerated — update your Radarr/Sonarr and media server webhook URLs')
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to regenerate webhook token'), 'error')
     } finally {
@@ -358,7 +384,7 @@ function PlexUpload() {
       setLastJob(latest)
     } catch (error) {
       console.error('Failed to fetch plex upload job status:', error)
-      showToast(getApiErrorMessage(error, 'Failed to load Plex upload status'), 'error')
+      showToast(getApiErrorMessage(error, 'Failed to load Asset Upload status'), 'error')
     } finally {
       if (showLoading) {
         setRefreshing(false)
@@ -377,13 +403,13 @@ function PlexUpload() {
         rename_before_upload: renameBeforeUpload,
         border_before_upload: borderBeforeUpload,
       })
-      showToast(response.message || 'Plex upload job queued', 'success')
+      showToast(response.message || 'Asset upload job queued', 'success')
 
       const job = await getJob(response.job_id)
       setLastJob(job)
     } catch (error) {
-      console.error('Failed to start Plex upload:', error)
-      showToast(getApiErrorMessage(error, 'Failed to start Plex upload'), 'error')
+      console.error('Failed to start asset upload:', error)
+      showToast(getApiErrorMessage(error, 'Failed to start asset upload'), 'error')
     } finally {
       setLoading(false)
     }
@@ -412,8 +438,8 @@ function PlexUpload() {
       setSourceResults(response.items || [])
       setSelectedSourcePoster(null)
     } catch (error) {
-      console.error('Failed to search Plex:', error)
-      showToast(getApiErrorMessage(error, 'Failed to search Plex'), 'error')
+      console.error('Failed to search media servers:', error)
+      showToast(getApiErrorMessage(error, 'Failed to search media servers'), 'error')
     } finally {
       setSourceSearching(false)
       if (shouldPreserveInputFocus) {
@@ -426,7 +452,7 @@ function PlexUpload() {
 
   const runSingleUpload = async () => {
     if (!selectedSourcePoster) {
-      showToast('Select a Plex item first', 'error')
+      showToast('Select an item first', 'error')
       return
     }
 
@@ -446,13 +472,13 @@ function PlexUpload() {
         remove_overlay_label: removeOverlayLabel,
         rename_before_upload: renameBeforeUpload,
       })
-      showToast(response.message || 'Single Plex upload job queued', 'success')
+      showToast(response.message || 'Single upload job queued', 'success')
 
       const job = await getJob(response.job_id)
       setLastJob(job)
     } catch (error) {
-      console.error('Failed to start single Plex upload:', error)
-      showToast(getApiErrorMessage(error, 'Failed to start single Plex upload'), 'error')
+      console.error('Failed to start single upload:', error)
+      showToast(getApiErrorMessage(error, 'Failed to start single upload'), 'error')
     } finally {
       setSingleUploadLoading(false)
     }
@@ -525,7 +551,7 @@ function PlexUpload() {
       setUploadArtwork(nextSnapshot.upload_artwork)
       manualBaselineRef.current = nextSnapshot
     } catch (error) {
-      console.error('Failed to load manual Plex Upload settings:', error)
+      console.error('Failed to load manual Asset Upload settings:', error)
       showToast(getApiErrorMessage(error, 'Failed to load manual settings'), 'error')
     } finally {
       setManualSettingsLoading(false)
@@ -570,7 +596,7 @@ function PlexUpload() {
       setHasUnsavedManualSettings(false)
       showToast('Manual run settings saved', 'success')
     } catch (error) {
-      console.error('Failed to save manual Plex Upload settings:', error)
+      console.error('Failed to save manual Asset Upload settings:', error)
       showToast(getApiErrorMessage(error, 'Failed to save manual settings'), 'error')
     } finally {
       setManualSettingsSaving(false)
@@ -718,8 +744,8 @@ function PlexUpload() {
         nextOverrideConfigs,
       )
     } catch (error) {
-      console.error('Failed to load Plex Upload library override settings:', error)
-      showToast(getApiErrorMessage(error, 'Failed to load Plex Upload library override settings'), 'error')
+      console.error('Failed to load Asset Upload library override settings:', error)
+      showToast(getApiErrorMessage(error, 'Failed to load Asset Upload library override settings'), 'error')
     } finally {
       setOverrideLoading(false)
     }
@@ -792,10 +818,10 @@ function PlexUpload() {
         nextOverrideConfigs,
       )
       setHasUnsavedAutomationSettings(false)
-      showToast('Plex Upload library override settings saved', 'success')
+      showToast('Asset Upload library override settings saved', 'success')
     } catch (error) {
-      console.error('Failed to save Plex Upload library override settings:', error)
-      showToast(getApiErrorMessage(error, 'Failed to save Plex Upload library override settings'), 'error')
+      console.error('Failed to save Asset Upload library override settings:', error)
+      showToast(getApiErrorMessage(error, 'Failed to save Asset Upload library override settings'), 'error')
     } finally {
       setOverrideSaving(false)
     }
@@ -834,7 +860,7 @@ function PlexUpload() {
       // upload_artwork now arrives with the rest of the manual settings, so it isn't read
       // here — a second writer would race that load and clobber an unsaved edit.
     } catch (error) {
-      console.error('Failed to load Plex Upload instance routing map:', error)
+      console.error('Failed to load Asset Upload instance routing map:', error)
       showToast(getApiErrorMessage(error, 'Failed to load instance routing map'), 'error')
     } finally {
       setInstanceMapLoading(false)
@@ -876,7 +902,7 @@ function PlexUpload() {
       setInstanceMap(response.map || {})
       showToast('Instance → library routing saved', 'success')
     } catch (error) {
-      console.error('Failed to save Plex Upload instance routing map:', error)
+      console.error('Failed to save Asset Upload instance routing map:', error)
       showToast(getApiErrorMessage(error, 'Failed to save instance routing map'), 'error')
     } finally {
       setInstanceMapSaving(false)
@@ -951,8 +977,8 @@ function PlexUpload() {
       const data = await getPlexUploadCache()
       setUploadCache(data)
     } catch (error) {
-      console.error('Failed to load Plex upload cache:', error)
-      showToast(getApiErrorMessage(error, 'Failed to load Plex upload cache'), 'error')
+      console.error('Failed to load upload cache:', error)
+      showToast(getApiErrorMessage(error, 'Failed to load upload cache'), 'error')
     } finally {
       if (showLoading) {
         setCacheLoading(false)
@@ -988,7 +1014,7 @@ function PlexUpload() {
         setCacheBrowserEntries((current) => [...current, ...data.entries])
       }
     } catch (error) {
-      console.error('Failed to load paginated Plex upload cache entries:', error)
+      console.error('Failed to load paginated upload cache entries:', error)
       showToast(getApiErrorMessage(error, 'Failed to load cache entries'), 'error')
     } finally {
       setCacheBrowserLoading(false)
@@ -1004,10 +1030,10 @@ function PlexUpload() {
         fetchUploadCacheEntries(true)
       }
       const actionLabel = filePath ? 'cache entry' : 'cache'
-      showToast(`Plex upload ${actionLabel} cleared (${response.removed} removed)`, 'success')
+      showToast(`Upload ${actionLabel} cleared (${response.removed} removed)`, 'success')
     } catch (error) {
-      console.error('Failed to clear Plex upload cache:', error)
-      showToast(getApiErrorMessage(error, 'Failed to clear Plex upload cache'), 'error')
+      console.error('Failed to clear upload cache:', error)
+      showToast(getApiErrorMessage(error, 'Failed to clear upload cache'), 'error')
     } finally {
       setCacheClearing(false)
     }
@@ -1335,13 +1361,13 @@ function PlexUpload() {
   return (
     <div className="page-container plex-upload-page">
       <div className="plex-upload-header">
-        <h1>Plex Upload</h1>
-        <p>Upload posters and artwork to Plex — automatically via webhooks, or manually on demand.</p>
+        <h1>Asset Upload</h1>
+        <p>Upload posters and artwork to your media servers — automatically via webhooks, or manually on demand.</p>
       </div>
 
       <Toolbar
-        title="Plex Upload"
-        description="Upload posters and artwork to Plex — automatically via webhooks, or manually on demand"
+        title="Asset Upload"
+        description="Upload posters and artwork to your media servers — automatically via webhooks, or manually on demand"
         titleControl={
           activeTab === 'webhook' ? (
             <button
@@ -1388,10 +1414,18 @@ function PlexUpload() {
           <div className="walkthrough-content">
                 <ol>
                   <li>
-                    Open <strong>Settings → Media Servers</strong> and confirm Plex, Radarr, and Sonarr instances are configured.
+                    Open <strong>Settings → Media Servers</strong> and confirm your media server and (if you use them) Radarr/Sonarr instances are configured.
                   </li>
                   <li>
-                    Enable webhook processing below, then use this webhook URL in both Radarr and Sonarr:
+                    Enable webhook processing below. Using Radarr/Sonarr? Point their webhook connectors at this URL:
+                    {webhookUrlIsLocalhost && (
+                      <div className="webhook-token-warning">
+                        <strong>You're browsing PosterFlow via {typeof window !== 'undefined' ? window.location.hostname : 'localhost'}.</strong>{' '}
+                        The URLs below are built from this address, and <code>localhost</code> only works
+                        from this machine — a Dockerized arr or media server calling it reaches itself, not
+                        PosterFlow. Replace the host with your machine's LAN IP before pasting.
+                      </div>
+                    )}
                     <div className="walkthrough-endpoint webhook-url-block">
                       <code className="webhook-url-value">{effectiveWebhookUrl}</code>
                       <button
@@ -1406,9 +1440,9 @@ function PlexUpload() {
                       <div className="webhook-token-warning">
                         <strong>App password is enabled.</strong> You must use the URL above — it
                         includes a <code>?token=</code> that authenticates the webhook. Without it,
-                        Radarr/Sonarr requests are rejected with <code>401 Unauthorized</code> and no
-                        posters upload. If you remove the app password later, the plain URL (without
-                        the token) works again.
+                        webhook requests (Radarr/Sonarr, Plex, and Jellyfin alike) are rejected with
+                        <code> 401 Unauthorized</code> and no posters upload. If you remove the app
+                        password later, the plain URL (without the token) works again.
                         <div className="webhook-token-actions">
                           <button
                             type="button"
@@ -1419,7 +1453,7 @@ function PlexUpload() {
                             {regeneratingToken ? 'Regenerating…' : 'Regenerate token'}
                           </button>
                           <span className="webhook-token-hint">
-                            Rotating the token invalidates the old URL — update Radarr/Sonarr afterwards.
+                            Rotating the token invalidates the old URL — update Radarr/Sonarr and your media server webhooks afterwards.
                           </span>
                         </div>
                       </div>
@@ -1466,10 +1500,69 @@ function PlexUpload() {
                     </ul>
                   </li>
                   <li>
+                    <strong>No Radarr/Sonarr?</strong> Your media server can fire the webhook itself.
+                    New library items trigger a targeted rename + upload; playback and other events are
+                    ignored automatically. Both options work alongside the Radarr/Sonarr connectors.
+                    <ul className="walkthrough-substeps">
+                      <li>
+                        <strong>Plex</strong> (requires <strong>Plex Pass</strong>): open
+                        <strong> Account → Webhooks → Add Webhook</strong> and paste:
+                        <div className="walkthrough-endpoint webhook-url-block">
+                          <code className="webhook-url-value">{plexWebhookUrl}</code>
+                          <button
+                            type="button"
+                            className="plex-refresh-btn webhook-copy-btn"
+                            onClick={() => copyWebhookUrl(plexWebhookUrl)}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </li>
+                      <li>
+                        <strong>Jellyfin:</strong> open <strong>Dashboard → Plugins</strong>, search for the
+                        official <strong>Webhook</strong> plugin, open its card and install it (older Jellyfin
+                        versions list it under a <strong>Catalog</strong> tab), then restart Jellyfin.
+                        Back on the Plugins page, open <strong>Webhook → Add Generic Destination</strong> and paste:
+                        <div className="walkthrough-endpoint webhook-url-block">
+                          <code className="webhook-url-value">{jellyfinWebhookUrl}</code>
+                          <button
+                            type="button"
+                            className="plex-refresh-btn webhook-copy-btn"
+                            onClick={() => copyWebhookUrl(jellyfinWebhookUrl)}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <p className="card-description webhook-token-hint">
+                          In the destination, check <strong>Item Added</strong> under Notification Types, the
+                          <strong> Movies / Series / Seasons / Episodes</strong> item types, and
+                          <strong> Send All Properties</strong> (skips the template), then save.
+                        </p>
+                        <p className="card-description webhook-token-hint">
+                          Jellyfin fires <strong>Item Added</strong> when its library scan finds the file — enable
+                          <strong> real time monitoring</strong> on the library (Manage library) for near-instant
+                          events, or expect them when the scheduled or a manual scan runs. Real-time monitoring
+                          doesn't work on network mounts (SMB/NFS/rclone).
+                        </p>
+                      </li>
+                    </ul>
+                    <p className="card-description webhook-token-hint">
+                      Repeats from the same source are deduped — a burst of episode adds collapses to one
+                      upload — and if an arr and your media server both report one item, the second upload
+                      is skipped by the upload cache.
+                    </p>
+                    <p className="card-description webhook-token-hint">
+                      <strong>Media server in Docker?</strong> If the URL above says <code>localhost</code>,
+                      the container will call itself and the webhook never arrives. Replace
+                      <code> localhost</code> with the host's LAN IP (or the Docker gateway IP) so the
+                      container can reach PosterFlow.
+                    </p>
+                  </li>
+                  <li>
                     Verify activity with <strong>Webhook Stats</strong> on this page and <strong>logs</strong>:
                     <ul className="walkthrough-substeps">
                       <li><strong>Test on a small library or test library.</strong></li>
-                      <li><strong>Real downloads/imports:</strong> Add new shows/movies through Sonarr/Radarr to test auto upload.</li>
+                      <li><strong>Real additions:</strong> Add new shows/movies through Sonarr/Radarr — or straight into a media-server library if you use the Plex or Jellyfin webhook — to test auto upload.</li>
                       <li><strong>Kometa 'Overlay':</strong> if the 'Remove Overlay label' setting is off, and you run Kometa overlays, new overlays will not be readded'.</li>
                     </ul>
                   </li>
@@ -1545,11 +1638,11 @@ function PlexUpload() {
             ) : (
               <div className="upload-options-groups">
                 {/* These describe how PosterFlow uploads, so every run honours them — the
-                    Workflow's Plex Upload step reads them straight from these settings. */}
+                    Workflow's Asset Upload step reads them straight from these settings. */}
                 <div className="upload-options-group">
                 <div className="config-subgroup-heading">
                   Upload Behaviour
-                  <span className="config-subgroup-hint">Also used by the Workflow's Plex Upload step and scheduled runs</span>
+                  <span className="config-subgroup-hint">Also used by the Workflow's Asset Upload step and scheduled runs</span>
                 </div>
 
                 <label className="plex-checkbox-row">
@@ -1574,7 +1667,7 @@ function PlexUpload() {
 
                 <div className="webhook-retry-row">
                   <label className="plex-input-row">
-                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload. Lower is faster; increase if Plex returns errors. 0 = no delay. The webhook has its own delay — it uploads one item per event, so it can afford to be gentler.</span></span></span>
+                    <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload. Lower is faster; increase if the server returns errors. 0 = no delay. The webhook has its own delay — it uploads one item per event, so it can afford to be gentler.</span></span></span>
                     <input
                       type="number"
                       className="no-spinner"
@@ -1655,7 +1748,7 @@ function PlexUpload() {
           <div className="plex-upload-grid">
             <section className="plex-upload-card upload-cache-card">
               <h2>Manual Upload (All Posters)</h2>
-              <p className="card-description">Queue a background Plex upload job for all posters from the current poster destination.</p>
+              <p className="card-description">Queue a background upload job for all posters from the current poster destination.</p>
 
               {!manualSettingsReady && <p className="card-description">Loading run options…</p>}
 
@@ -1675,7 +1768,7 @@ function PlexUpload() {
               </div>
 
               {!lastJob ? (
-                <p className="card-description">No Plex upload job has run yet.</p>
+                <p className="card-description">No upload job has run yet.</p>
               ) : (
                 <div className="plex-job-details">
                   <div><span>Job ID:</span> <strong>{lastJob.id}</strong></div>
@@ -1702,7 +1795,7 @@ function PlexUpload() {
                   type="text"
                   value={sourceQuery}
                   onChange={(event) => setSourceQuery(event.target.value)}
-                  placeholder="Search Plex library..."
+                  placeholder="Search media server libraries..."
                   disabled={singleUploadLoading || isJobActive}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
@@ -1758,7 +1851,7 @@ function PlexUpload() {
                 </ul>
               ) : (
                 <div className="poster-search-empty">
-                  {sourceHasSearched ? 'No Plex results found for this query.' : 'Search your Plex library to find poster targets.'}
+                  {sourceHasSearched ? 'No results found for this query.' : 'Search your media server libraries to find poster targets.'}
                 </div>
               )}
             </div>
@@ -1776,7 +1869,7 @@ function PlexUpload() {
               disabled={!manualSettingsReady || !selectedSourcePoster || singleUploadLoading || isJobActive}
             >
               <UploadCloud size={18} />
-              {singleUploadLoading ? 'Starting Single Upload…' : 'Upload Selected to Plex'}
+              {singleUploadLoading ? 'Starting Single Upload…' : 'Upload Selected'}
             </button>
           </section>
         </section>
@@ -1787,7 +1880,7 @@ function PlexUpload() {
           <section className="plex-upload-section">
             <div className="plex-upload-section-header">
               <h2>Webhook Automation</h2>
-              <p>Uploads triggered by Radarr/Sonarr events. Stats and cache live under Activity.</p>
+              <p>Uploads triggered by Radarr/Sonarr or media-server webhook events. Stats and cache live under Activity.</p>
             </div>
 
             <div className="plex-upload-grid webhook-automation-grid">
@@ -1893,7 +1986,7 @@ function PlexUpload() {
                           </label>
 
                           <label className="plex-input-row">
-                            <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload for a single webhook event. Lower is faster; increase if Plex returns errors. 0 = no delay. Manual runs have their own delay, since they upload in bulk.</span></span></span>
+                            <span>Upload delay (ms) <span className="info-tooltip">ⓘ<span className="info-tooltip-text">Pause between each upload for a single webhook event. Lower is faster; increase if the server returns errors. 0 = no delay. Manual runs have their own delay, since they upload in bulk.</span></span></span>
                             <input
                               type="number"
                               className="no-spinner"
@@ -1927,7 +2020,7 @@ function PlexUpload() {
                   </button>
                 </div>
                 <p className="card-description">
-                  Choose which Plex libraries Plex Upload targets — globally (override) and per Radarr/Sonarr
+                  Choose which media server libraries Asset Upload targets — globally (override) and per Radarr/Sonarr
                   instance. Opens a focused editor so the selection boxes don't crowd this page.
                 </p>
 
@@ -1947,7 +2040,7 @@ function PlexUpload() {
                     </div>
                     {arrInstanceNames.length === 0 ? (
                       <p className="card-description library-targeting-summary-empty">
-                        No Radarr/Sonarr instances configured — add them in Settings → Media to route per instance.
+                        No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks.
                       </p>
                     ) : (
                       arrInstanceNames.map((instanceName) => (
@@ -2007,6 +2100,7 @@ function PlexUpload() {
                 <div className="webhook-stat-chip chip-queued"><span>Queued</span><strong>{webhookStats.queued}</strong></div>
                 <div className="webhook-stat-chip chip-duplicates"><span>Duplicates</span><strong>{webhookStats.duplicates}</strong></div>
                 <div className="webhook-stat-chip chip-test"><span>Test events</span><strong>{webhookStats.skipped_test}</strong></div>
+                <div className="webhook-stat-chip chip-test"><span>Ignored events</span><strong>{webhookStats.skipped_ignored ?? 0}</strong></div>
                 <div className="webhook-stat-chip chip-duplicates"><span>Skipped (cached)</span><strong>{webhookStats.skipped_cached}</strong></div>
                 <div className="webhook-stat-chip chip-parse"><span>Skipped (no asset)</span><strong>{webhookStats.skipped_no_asset ?? 0}</strong></div>
                 <div className="webhook-stat-chip chip-disabled"><span>Disabled rejects</span><strong>{webhookStats.rejected_disabled}</strong></div>
@@ -2168,8 +2262,12 @@ function PlexUpload() {
                       <div className="upload-cache-item-main">
                         <strong>{entry.file_path}</strong>
                         <span className="upload-cache-meta-row">
-                          <span className="upload-cache-meta-label">Libraries ({entry.uploaded_to_libraries.length}):</span>
-                          <span className="upload-cache-meta-value">{entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}</span>
+                          <span className="upload-cache-meta-label">Libraries ({(entry.server_libraries?.length || entry.uploaded_to_libraries.length)}):</span>
+                          <span className="upload-cache-meta-value">
+                            {(entry.server_libraries?.length ?? 0) > 0
+                              ? entry.server_libraries!.join(', ')
+                              : entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}
+                          </span>
                           <span className="upload-cache-meta-sep">•</span>
                           <span className="upload-cache-meta-label">Editions:</span>
                           <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
@@ -2222,7 +2320,7 @@ function PlexUpload() {
                   <h3>Library Override</h3>
                 </div>
                 <p className="card-description">
-                  Override the Media-tab Plex library selection for Plex Upload only — handy for testing on a
+                  Override the Media-tab library selection for Asset Upload only — handy for testing on a
                   smaller or separate library. Applies to all uploads unless an instance below routes elsewhere.
                 </p>
 
@@ -2233,7 +2331,7 @@ function PlexUpload() {
                     onChange={(event) => setOverrideEnabled(event.target.checked)}
                     disabled={overrideLoading || overrideSaving}
                   />
-                  <span>Enable Plex Upload-only library override</span>
+                  <span>Enable Asset Upload-only library override</span>
                 </label>
 
                 <p className="card-description override-count">
@@ -2243,7 +2341,7 @@ function PlexUpload() {
                 {overrideLoading ? (
                   <p className="card-description">Loading library selections…</p>
                 ) : globalLibraryConfigs.length === 0 ? (
-                  <p className="card-description">No global Plex library configuration found. Configure libraries in Settings → Media first.</p>
+                  <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
                 ) : (
                   <div className="override-library-groups">
                     {globalLibraryConfigs.map((instanceConfig) => (
@@ -2274,7 +2372,7 @@ function PlexUpload() {
                   <h3>Instance → Library Routing</h3>
                 </div>
                 <p className="card-description">
-                  Send each Radarr/Sonarr instance's imports to specific Plex libraries. Instances left unmapped
+                  If you use Radarr/Sonarr: send each arr instance's imports to specific media server libraries. Instances left unmapped
                   upload to <strong>all</strong> selected libraries. Paste each instance's dedicated webhook URL
                   (below) into its connector so events are attributed even when the payload's instance name
                   doesn't match.
@@ -2283,9 +2381,9 @@ function PlexUpload() {
                 {instanceMapLoading ? (
                   <p className="card-description">Loading instance routing…</p>
                 ) : arrInstanceNames.length === 0 ? (
-                  <p className="card-description">No Radarr/Sonarr instances configured. Add them in Settings → Media first.</p>
+                  <p className="card-description">No Radarr/Sonarr instances configured — per-instance routing only applies to arr webhooks. Plex and Jellyfin webhook uploads use the Media-tab library selection.</p>
                 ) : globalLibraryConfigs.length === 0 ? (
-                  <p className="card-description">No global Plex library configuration found. Configure libraries in Settings → Media first.</p>
+                  <p className="card-description">No global media server library configuration found. Configure libraries in Settings → Media first.</p>
                 ) : (
                   <div className="instance-routing-groups">
                     {arrInstanceNames.map((instanceName) => (
@@ -2392,8 +2490,12 @@ function PlexUpload() {
                       <div className="upload-cache-item-main">
                         <strong>{entry.file_path}</strong>
                         <span className="upload-cache-meta-row">
-                          <span className="upload-cache-meta-label">Libraries ({entry.uploaded_to_libraries.length}):</span>
-                          <span className="upload-cache-meta-value">{entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}</span>
+                          <span className="upload-cache-meta-label">Libraries ({(entry.server_libraries?.length || entry.uploaded_to_libraries.length)}):</span>
+                          <span className="upload-cache-meta-value">
+                            {(entry.server_libraries?.length ?? 0) > 0
+                              ? entry.server_libraries!.join(', ')
+                              : entry.uploaded_to_libraries.length > 0 ? entry.uploaded_to_libraries.join(', ') : <em>none</em>}
+                          </span>
                           <span className="upload-cache-meta-sep">•</span>
                           <span className="upload-cache-meta-label">Editions:</span>
                           <span className="upload-cache-meta-value">{entry.uploaded_editions.length > 0 ? entry.uploaded_editions.join(', ') : <em>none</em>}</span>
