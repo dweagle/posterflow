@@ -326,8 +326,12 @@ def get_plex_token(db) -> Optional[str]:
         return None
     if not isinstance(instances, list):
         return None
+    from util.media_server.instances import is_plex_instance
+
     for inst in instances:
-        token = str((inst or {}).get("api_key", "")).strip()
+        if not isinstance(inst, dict) or not is_plex_instance(inst):
+            continue  # Gracenote needs a PLEX token; a Jellyfin api_key is useless there
+        token = str(inst.get("api_key", "")).strip()
         if token:
             return token
     return None

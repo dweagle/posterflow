@@ -156,7 +156,7 @@ class TestVerdicts:
                                        "title": "RIPLEY", "year": 2024, "library": "TV Shows", "instance": "Plex"}
         verdicts = _build_verdicts(report)
         conflict = next(v for v in verdicts if v["code"] == "library_id_conflict")
-        assert "Plex's metadata agent" in conflict["message"]
+        assert "the media server's metadata agent" in conflict["message"]
 
     def test_plex_missing_is_not_a_conflict(self):
         report = _base_report()
@@ -383,13 +383,32 @@ class TestRendering:
         report["reference"]["plex"] = {"tvdb_id": 372727, "tmdb_id": None, "imdb_id": None,
                                        "title": "RIPLEY", "year": 2024, "library": "TV Shows", "instance": "Plex"}
         cross_check = render_match_report_text(report).split("ID CROSS-CHECK")[1].split("DRIVE CANDIDATES")[0]
-        assert "plex" in cross_check
+        assert "server" in cross_check
         assert "in TV Shows [Plex]" in cross_check
         # Reachable-but-absent renders as a plain note, not an error.
         report["reference"]["plex"] = {"missing": "not found in any Plex library"}
         cross_check = render_match_report_text(report).split("ID CROSS-CHECK")[1].split("DRIVE CANDIDATES")[0]
         assert "not found in any Plex library" in cross_check
         assert "✗ not found" not in cross_check
+
+    def test_cross_check_renders_one_row_per_server(self):
+        report = _base_report()
+        report["verdicts"] = []
+        report["reference"]["plex"] = {
+            "tvdb_id": 372727, "tmdb_id": None, "imdb_id": None,
+            "title": "RIPLEY", "year": 2024, "library": "TV Shows", "instance": "Plex 'main'",
+            "servers": [
+                {"instance": "Plex 'main'", "tvdb_id": 372727, "tmdb_id": None, "imdb_id": None,
+                 "title": "RIPLEY", "year": 2024, "library": "TV Shows"},
+                {"instance": "Jellyfin 'jelly'", "missing": True},
+                {"instance": "Plex 'backup'", "error": "connection failed"},
+            ],
+        }
+        cross_check = render_match_report_text(report).split("ID CROSS-CHECK")[1].split("DRIVE CANDIDATES")[0]
+        assert "in TV Shows [Plex 'main']" in cross_check
+        assert "not found on Jellyfin 'jelly'" in cross_check
+        assert "✗ Plex 'backup': connection failed" in cross_check
+        assert cross_check.count("server") == 3
 
     def test_alternate_titles_section(self):
         report = _base_report()

@@ -32,7 +32,7 @@ from core.logging import (
 from models.plex_upload import PlexUploadRecord
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
-from util.constants import season_pattern
+from util.constants import folder_year_regex, season_pattern
 from util.posters.assets import get_assets_files
 from util.posters.index import search_matches
 from util.posters.match import collection_title_variants, is_match
@@ -125,6 +125,14 @@ class AssetCleanupService:
             name = sanitize_filename(name)
         return name
 
+    @classmethod
+    def _canonical_names(cls, media: Dict[str, Any]) -> List[str]:
+        """Every folder name the renamer currently creates for this item: the primary
+        plus duplicate-copy folders (extra_folders from split versions / multi-instance arrs)."""
+        names = [cls._canonical_name(media)]
+        names += [str(n) for n in (media.get("extra_folders") or []) if n]
+        return list(dict.fromkeys(n for n in names if n))
+
     @staticmethod
     def _has_id_tag(asset: Dict[str, Any]) -> bool:
         """True if the asset carries an explicit tmdb/tvdb/imdb id."""
@@ -180,9 +188,23 @@ class AssetCleanupService:
                 else:
                     titles_to_try = [title]
                 titles_to_try += media.get("alternate_titles", []) or []
+
+                # Destination folder titles can differ from the server's display title
+                # (folder "Se7en", Plex "Seven") — search by folder titles too
+                for folder_source in [media.get("folder"), *(media.get("extra_folders") or [])]:
+                    folder_base = os.path.basename(str(folder_source or "").rstrip("/"))
+                    if not folder_base:
+                        continue
+                    year_match = re.search(folder_year_regex, folder_base)
+                    folder_title = (year_match.group(1) if year_match else folder_base).strip()
+                    if folder_title and folder_title not in titles_to_try:
+                        titles_to_try.append(folder_title)
+
                 for candidate_title in titles_to_try:
                     if candidate_title:
                         candidates += search_matches(prefix_index, candidate_title)
+
+                canonical_names = {n.lower() for n in self._canonical_names(media)}
 
                 seen: set[int] = set()
                 matched_assets: List[Dict[str, Any]] = []
@@ -191,6 +213,10 @@ class AssetCleanupService:
                         continue
                     seen.add(id(candidate))
                     if is_match(candidate, media)[0]:
+                        matched_assets.append(candidate)
+                    elif (self._asset_folder_name(candidate) or "").lower() in canonical_names:
+                        # The renamer creates exactly these folder names for this item, so a
+                        # same-named folder is its asset folder even without a shared id
                         matched_assets.append(candidate)
 
                 if matched_assets:
@@ -210,6 +236,7 @@ class AssetCleanupService:
         dry_run: bool = True,
         delete_unknown: bool = False,
         media_dict: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        fetch_failed_types: Optional[set] = None,
         library_setting_key: str = "asset_renamer_libraries",
         progress_callback: Optional[ProgressCallback] = None,
         artwork_boxes: Optional[List[Dict[str, Any]]] = None,
@@ -245,9 +272,11 @@ class AssetCleanupService:
             # Same library selection the Asset Renamer uses, so cleanup reconciles against the
             # SAME set of items it placed — otherwise items in one selection but not the other
             # get their artwork pruned as "source removed" and re-placed next run (a loop).
-            media_dict = PosterRenameService(self.db).get_media_from_instances(
+            rename_service = PosterRenameService(self.db)
+            media_dict = rename_service.get_media_from_instances(
                 log_tag=LogTags.CLEANUP, setting_key=library_setting_key
             )
+            fetch_failed_types = rename_service.media_fetch_failed_types
 
         total_media = sum(len(media_dict.get(t, [])) for t in MEDIA_TYPES)
 
@@ -256,7 +285,8 @@ class AssetCleanupService:
             log_warning(
                 LogTags.CLEANUP,
                 "Aborting cleanup — no media returned from any source (safety guard). "
-                "Nothing was deleted.",
+                "Nothing was deleted. Check media sources in Settings → Media tab and "
+                "this feature's library selection.",
             )
             result["skipped_for_safety"] = True
             log_section_end(LogTags.CLEANUP, "Asset Cleanup Skipped (safety)")
@@ -264,13 +294,22 @@ class AssetCleanupService:
 
         # Per-type guard: a type whose media list is empty is treated as unhealthy,
         # so we never remove that type's folders (e.g. Radarr down but Sonarr/Plex up).
-        unsafe_types = {t for t in MEDIA_TYPES if not media_dict.get(t)}
+        # A partial media-server fetch (hybrid mode, server down) is just as unsafe.
+        unsafe_types = {t for t in MEDIA_TYPES if not media_dict.get(t)} | set(fetch_failed_types or ())
         if unsafe_types:
-            log_warning(
-                LogTags.CLEANUP,
-                f"Skipping removals for types with no media (source down/empty): {sorted(unsafe_types)}",
-                unsafe_types=sorted(unsafe_types),
-            )
+            if unsafe_types == {"collections"} and not fetch_failed_types:
+                # Common and benign: the sources are healthy, there just are no collections
+                log_info(
+                    LogTags.CLEANUP,
+                    "No collections found from any source — collection folder removals skipped (nothing to compare against)",
+                    unsafe_types=sorted(unsafe_types),
+                )
+            else:
+                log_warning(
+                    LogTags.CLEANUP,
+                    f"Skipping removals for types that returned no media (source unreachable, or none exist): {sorted(unsafe_types)} — their folders are kept",
+                    unsafe_types=sorted(unsafe_types),
+                )
             result["skipped_types"] = sorted(unsafe_types)
 
         ignore_set = {self._normalize_for_ignore(name) for name in self._get_list_setting("asset_cleanup_ignore")}
@@ -411,8 +450,8 @@ class AssetCleanupService:
                 for asset in assets:
                     keepers.add(id(asset))
                 continue
-            canonical_name = self._canonical_name(media).lower()
-            canonical = [a for a in nested if self._asset_folder_name(a).lower() == canonical_name]
+            canonical_names = {n.lower() for n in self._canonical_names(media)}
+            canonical = [a for a in nested if self._asset_folder_name(a).lower() in canonical_names]
             if not canonical:
                 # No folder matches the current name — keep all, report, never guess.
                 for asset in assets:
@@ -540,7 +579,8 @@ class AssetCleanupService:
         provided_by_base: Dict[str, Dict[str, set]] = {}    # flat: canonical name -> type -> exts
         for group in groups:
             provided = artwork_sourced.get(id(group["media"]), {})
-            _merge(provided_by_base.setdefault(self._canonical_name(group["media"]), {}), provided)
+            for canonical in self._canonical_names(group["media"]):
+                _merge(provided_by_base.setdefault(canonical, {}), provided)
             for asset in group["assets"]:
                 _merge(provided_by_asset.setdefault(id(asset), {}), provided)
                 assets_by_id[id(asset)] = asset

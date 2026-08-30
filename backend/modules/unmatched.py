@@ -235,12 +235,12 @@ def run_unmatched_detection_background_job(
 
         update_job_state(db, job, message="Fetching media from instances...", progress=8)
 
-        log_info(LogTags.UNMATCHED, "Fetching media library data from Plex/Radarr/Sonarr instances...")
+        log_info(LogTags.UNMATCHED, "Fetching media library data from media server/Radarr/Sonarr instances...")
         rename_service = PosterRenameService(db)
         media_dict = rename_service.get_media_from_instances(log_tag=LogTags.UNMATCHED, setting_key="unmatched_assets_libraries")
 
         if not any(media_dict.values()):
-            raise Exception("No media found. Configure media sources in Settings → Media tab.")
+            raise Exception("No media found. Configure media sources in Settings → Media tab — and if media-server sourcing is on, check the Unmatched library selection (an empty selection excludes every library).")
 
         total_media = sum(len(v) for v in media_dict.values())
         log_info(

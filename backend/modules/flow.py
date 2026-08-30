@@ -707,6 +707,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     # Reuse the rename's media fetch + artwork scan + match verdicts
                     # (see rename_scan above) — one library match per run.
                     media_dict=rename_scan.get("media_dict"),
+                    fetch_failed_types=rename_scan.get("fetch_failed_types"),
                     artwork_boxes=rename_scan.get("artwork_boxes"),
                     artwork_sourced=rename_scan.get("artwork_sourced"),
                     poster_sourced=rename_scan.get("poster_sourced"),
@@ -731,10 +732,10 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         # ── Plex Upload ───────────────────────────────────────────────────────
         if flow_config.get("plex_upload", {}).get("enabled", False):
             step += 1
-            log_step(LogTags.WORKFLOW, step, total_steps, "Uploading posters to Plex")
-            update_job_state(db, job, progress=78, message=format_workflow_step(step, total_steps, "Uploading posters to Plex..."))
+            log_step(LogTags.WORKFLOW, step, total_steps, "Uploading posters to media servers")
+            update_job_state(db, job, progress=78, message=format_workflow_step(step, total_steps, "Uploading posters to media servers..."))
 
-            plex_child = _create_child_job(db, JOB_TYPE_PLEX_UPLOAD, "Workflow requested Plex upload")
+            plex_child = _create_child_job(db, JOB_TYPE_PLEX_UPLOAD, "Workflow requested asset upload")
             try:
                 remove_overlay_label_setting = get_setting(db, "plex_upload_manual_remove_overlay_label")
                 remove_overlay_label = (
@@ -749,7 +750,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     plex_child.id,
                     78,
                     90,
-                    format_workflow_step(step, total_steps, "Uploading posters to Plex..."),
+                    format_workflow_step(step, total_steps, "Uploading posters to media servers..."),
                     run_plex_upload_background_job,
                     False,   # dry_run
                     False,   # reapply
@@ -760,7 +761,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
 
                 # Same embed the standalone job posts
                 _pu_embed = {
-                    "description": child_message or "Plex upload completed",
+                    "description": child_message or "Asset upload completed",
                     "fields": [],
                     "color": 0x4CAF50,
                 }
@@ -781,20 +782,20 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     "child_job_id": plex_child.id,
                     "embed_spec": {
                         "event_type": "success",
-                        "title": "Plex Upload",
+                        "title": "Asset Upload",
                         **_pu_embed,
                     },
                 })
 
                 if child_ok:
-                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: Plex upload finished", child_job_id=plex_child.id)
-                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(step, total_steps, "Plex upload finished"))
+                    log_success(LogTags.WORKFLOW, f"Step {step}/{total_steps} complete: asset upload finished", child_job_id=plex_child.id)
+                    update_job_state(db, job, progress=90, message=format_workflow_step_complete(step, total_steps, "Asset upload finished"))
                 else:
-                    raise Exception(child_message or "Plex upload step failed")
+                    raise Exception(child_message or "Asset upload step failed")
 
             except Exception as e:
                 error_msg = str(e)
-                log_error(LogTags.WORKFLOW, f"Plex upload failed: {error_msg}\n{traceback.format_exc()}")
+                log_error(LogTags.WORKFLOW, f"Asset upload failed: {error_msg}\n{traceback.format_exc()}")
                 results["jobs_failed"].append({"job": "plex_upload", "error": error_msg, "child_job_id": plex_child.id})
 
                 if flow_config.get("plex_upload", {}).get("stop_on_error", False):
@@ -805,10 +806,10 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                         feature_key="workflow",
                         event_type="error",
                         title="Workflow Failed",
-                        description=f"Plex upload step failed: {error_msg}",
+                        description=f"Asset upload step failed: {error_msg}",
                         fields=[
                             {"name": "Job ID", "value": str(job_id), "inline": True},
-                            {"name": "Step", "value": "Plex Upload", "inline": True},
+                            {"name": "Step", "value": "Asset Upload", "inline": True},
                         ],
                         color=0xF44336,
                     )
@@ -820,9 +821,9 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     )
                     return results
         else:
-            log_info(LogTags.WORKFLOW, "Plex upload disabled - skipping")
+            log_info(LogTags.WORKFLOW, "Asset upload disabled - skipping")
             results["jobs_skipped"].append({"job": "plex_upload", "reason": "Disabled in configuration"})
-            update_job_state(db, job, progress=90, message="Plex upload skipped")
+            update_job_state(db, job, progress=90, message="Asset upload skipped")
 
         # ── Detect Unmatched ────────────────────────────────────────────────
         # One slot-aware pass covers posters AND artwork (no separate artwork detection).
@@ -935,7 +936,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             "rename_artwork": "Rename Artwork",
             "border_replacer": "Border Replacer",
             "detect_unmatched": "Detect Unmatched",
-            "plex_upload": "Plex Upload",
+            "plex_upload": "Asset Upload",
             "cleanup_assets": "Asset Cleanup",
         }
 

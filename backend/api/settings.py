@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import requests
 from database import get_db
 from models.setting import Setting, get_setting, upsert_setting
+from util.library_configs import media_libraries_only
 from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
 
@@ -70,6 +71,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "plex_instances",
     "sonarr_instances",
     "radarr_instances",
+    "media_server_media_source",
     # Asset Renamer / Unmatched — one library selection + one set of ignore
     # rules shared across posters and every artwork type.
     "poster_renamer_libraries",
@@ -366,7 +368,7 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
     for old_name, new_name in renames.items():
         log_info(
             LogTags.API,
-            f"Plex instance renamed '{old_name}' -> '{new_name}'; migrating library selections",
+            f"Media server instance renamed '{old_name}' -> '{new_name}'; migrating library selections",
         )
 
     # plex_library_config: [{instance_name, libraries}]
@@ -376,7 +378,7 @@ def _sync_plex_name_keyed_settings(db: Session, new_instances_json: str) -> None
         if rekeyed != configs:
             dropped = len(configs) - len(rekeyed)
             if dropped:
-                log_info(LogTags.API, f"Pruned {dropped} stale Plex library config entr{'y' if dropped == 1 else 'ies'}")
+                log_info(LogTags.API, f"Pruned {dropped} stale media server library config entr{'y' if dropped == 1 else 'ies'}")
             upsert_setting(db, "plex_library_config", json.dumps(rekeyed))
 
     # plex_upload_library_override: {"enabled": bool, "configs": [{instance_name, ...}]}
@@ -464,7 +466,7 @@ def _sync_arr_name_keyed_settings(db: Session, setting_key: str, new_instances_j
         else:
             log_info(
                 LogTags.API,
-                f"Arr instance renamed '{arr_name}' -> '{target}'; migrating Plex Upload routing",
+                f"Arr instance renamed '{arr_name}' -> '{target}'; migrating Asset Upload routing",
             )
             new_routing[target] = entries
     if new_routing != routing:
@@ -960,11 +962,11 @@ def get_plex_library_config(db: Session = Depends(get_db)) -> Dict[str, List[Dic
     config = get_setting(db, "plex_library_config")
     
     if not config or not config.value:
-        log_warning(LogTags.API, "No Plex library configurations found")
+        log_warning(LogTags.API, "No media server library configurations found")
         return {"configs": []}
     
     try:
-        configs = json.loads(config.value)
+        configs = media_libraries_only(json.loads(config.value))
         return {"configs": configs}
     except json.JSONDecodeError as e:
         log_error(LogTags.API, f"Invalid JSON in plex_library_config: {e}\n{traceback.format_exc()}")
@@ -976,7 +978,7 @@ def get_plex_library_config(db: Session = Depends(get_db)) -> Dict[str, List[Dic
 @router.post("/plex-libraries")
 def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depends(get_db)) -> Dict[str, str]:
     """Save library configuration for a Plex instance"""
-    log_user_action(f"Saving Plex library config for instance: {config.instance_name}")
+    log_user_action(f"Saving library config for instance: {config.instance_name}")
     
     # Get existing configs
     existing_setting = get_setting(db, "plex_library_config")
@@ -997,7 +999,7 @@ def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depends(ge
     found = False
     for i, cfg in enumerate(configs):
         if cfg.get("instance_name") == config.instance_name:
-            log_warning(LogTags.API, f"Overwriting existing Plex library config for instance: {config.instance_name}", instance=config.instance_name)
+            log_warning(LogTags.API, f"Overwriting existing library config for instance: {config.instance_name}", instance=config.instance_name)
             configs[i] = config.dict()
             found = True
             break
@@ -1011,10 +1013,10 @@ def save_plex_library_config(config: PlexLibraryConfig, db: Session = Depends(ge
     
     try:
         db.commit()
-        log_info(LogTags.API, f"Successfully saved Plex library config for instance: {config.instance_name}", instance=config.instance_name, library_count=len(config.libraries))
+        log_info(LogTags.API, f"Successfully saved library config for instance: {config.instance_name}", instance=config.instance_name, library_count=len(config.libraries))
     except Exception as e:
         db.rollback()
-        log_error(LogTags.API, f"Database error saving Plex library config: {e}\n{traceback.format_exc()}", instance=config.instance_name)
+        log_error(LogTags.API, f"Database error saving library config: {e}\n{traceback.format_exc()}", instance=config.instance_name)
         raise HTTPException(status_code=500, detail="Failed to save library configuration")
     
     return {"message": "Library configuration saved", "instance": config.instance_name}
@@ -1076,7 +1078,7 @@ def save_plex_upload_instance_map(
     upsert_setting(db, PLEX_UPLOAD_INSTANCE_MAP_KEY, json.dumps(cleaned))
     try:
         db.commit()
-        log_info(LogTags.API, "Saved Plex Upload instance->library map", instances=len(cleaned))
+        log_info(LogTags.API, "Saved Asset Upload instance->library map", instances=len(cleaned))
     except Exception as e:
         db.rollback()
         log_error(LogTags.API, f"Database error saving {PLEX_UPLOAD_INSTANCE_MAP_KEY}: {e}\n{traceback.format_exc()}")

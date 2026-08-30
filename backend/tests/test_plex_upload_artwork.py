@@ -4,6 +4,7 @@ from pathlib import Path
 
 from models.setting import Setting
 from services.plex_upload import PlexUploadService
+from plex_upload_fakes import wrap_item
 
 
 class _FakeArtItem:
@@ -102,9 +103,9 @@ def test_artwork_upload_toggle(test_db):
 
 # ── upload + dedupe ──────────────────────────────────────────────────────────
 
-def _prep_matching(svc, idx, item, monkeypatch):
+def _prep_matching(svc, idx, wrapped, monkeypatch):
     def fake_resolve(index_map, media_key, id_keys, folder_year):
-        return [item] if index_map is idx["movies"] else []
+        return [wrapped] if index_map is idx["movies"] else []
     monkeypatch.setattr(svc, "_resolve_index_candidates", fake_resolve)
     monkeypatch.setattr(svc, "_dedupe_plex_items", lambda items: list(items))
 
@@ -112,8 +113,9 @@ def _prep_matching(svc, idx, item, monkeypatch):
 def test_upload_artwork_logo_and_dedupes(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
     item = _FakeArtItem()
+    wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
-    _prep_matching(svc, idx, item, monkeypatch)
+    _prep_matching(svc, idx, wrapped, monkeypatch)
 
     d = _item_folder(tmp_path, logo=True)
     asset = {
@@ -135,8 +137,9 @@ def test_upload_artwork_logo_and_dedupes(test_db, tmp_path, monkeypatch):
 def test_upload_artwork_background_uses_uploadart(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
     item = _FakeArtItem()
+    wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
-    _prep_matching(svc, idx, item, monkeypatch)
+    _prep_matching(svc, idx, wrapped, monkeypatch)
 
     d = _item_folder(tmp_path, background=True)
     asset = {
@@ -219,8 +222,9 @@ def test_cache_gate_cached_when_artwork_present(test_db, tmp_path, monkeypatch):
 def test_upload_artwork_dry_run_does_not_call_plex(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
     item = _FakeArtItem()
+    wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
-    _prep_matching(svc, idx, item, monkeypatch)
+    _prep_matching(svc, idx, wrapped, monkeypatch)
 
     d = _item_folder(tmp_path, squareart=True)
     asset = {
@@ -340,7 +344,7 @@ def test_log_artwork_summary_emits_the_shared_block(test_db, logged):
     )
     block = "\n".join(logged)
     assert "Outcome per artwork file (final): 6 scanned" in block
-    assert "- 6 uploaded — pushed to Plex this run" in block
+    assert "- 6 uploaded — pushed to your media servers this run" in block
     assert "3 logos, 2 backgrounds, 1 squareart" in block
 
     logged.clear()
@@ -470,7 +474,7 @@ def test_artwork_type_split_sits_under_the_uploaded_line():
 
     assert "uploaded" in lines[1]
     assert lines[2] == "  - 3 logos, 2 backgrounds, 1 squareart"
-    assert "unmatched" in lines[-2] and "no Plex match" in lines[-1]
+    assert "unmatched" in lines[-2] and "no server match" in lines[-1]
 
 
 def _art_asset(tmp_path, media_key="inception", year=2010):
@@ -580,8 +584,8 @@ def test_artwork_uses_arr_to_disambiguate_movie_vs_show_like_posters_do(test_db,
     """Movie-vs-show ties need *arr; artwork passed None and was dropped while the
     poster beside it uploaded."""
     svc = _svc(test_db)
-    movie = _FakeArtItem(item_type="movie", title="Galaxy Quest", year=1999)
-    show = _FakeArtItem(item_type="show", title="Galaxy Quest", year=1999, rating_key="999")
+    movie = wrap_item(_FakeArtItem(item_type="movie", title="Galaxy Quest", year=1999))
+    show = wrap_item(_FakeArtItem(item_type="show", title="Galaxy Quest", year=1999, rating_key="999"))
     idx = {"movies": {"galaxyquest": [movie]}, "shows": {"galaxyquest": [show]}, "collections": {}}
     monkeypatch.setattr(
         svc, "_resolve_index_candidates",
@@ -658,7 +662,7 @@ def test_arr_answer_never_overrides_a_real_plex_match(test_db, tmp_path, monkeyp
     """Regression: the question spans both *arr namespaces, so asking before matching
     let a stale Radarr record veto artwork whose Plex item exists."""
     svc = _svc(test_db)
-    item = _FakeArtItem(item_type="movie", title="Snorks Bubbles of Fun", year=1987)
+    item = wrap_item(_FakeArtItem(item_type="movie", title="Snorks Bubbles of Fun", year=1987))
     idx = {"movies": {}, "shows": {}, "collections": {}}
     _prep_matching(svc, idx, item, monkeypatch)
 

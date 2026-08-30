@@ -3,7 +3,7 @@ media type, stale-item guards, show folder keys, and unmatched-reason diagnosis.
 
 from models.setting import Setting
 from services.plex_upload import AssetOutcome, PlexUploadService, format_unmatched_reasons
-from plex_upload_fakes import _FakePlexItem
+from plex_upload_fakes import _FakePlexItem, wrap_item
 
 
 def test_service_selected_libraries_invalid_json_returns_configuration_error(test_db):
@@ -41,7 +41,7 @@ def test_service_library_override_invalid_json_returns_error_tuple(test_db):
     assert enabled is False
     assert configs == []
     assert error is not None
-    assert "Invalid Plex Upload library override configuration" in error
+    assert "Invalid Asset Upload library override configuration" in error
 
 
 def test_service_get_arr_instances_invalid_json_returns_empty_list(test_db):
@@ -279,7 +279,7 @@ def test_missing_show_match_logged_once_per_run(test_db, monkeypatch):
     missing_lines = [m for m in messages if "can't be applied yet" in m]
     assert len(missing_lines) == 1
     assert "Chicago Fire" in missing_lines[0]
-    assert "no Plex show match" in missing_lines[0]  # no *arr index, so no availability claim
+    assert "no server show match" in missing_lines[0]  # no *arr index, so no availability claim
 
 
 def test_no_match_log_level_depends_on_run_type(test_db, monkeypatch):
@@ -300,15 +300,15 @@ def test_no_match_log_level_depends_on_run_type(test_db, monkeypatch):
 
     service._quiet_unmatched_logging = False  # full run
     service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
-    assert any("No Plex match for asset" in m for m in info_msgs)
-    assert not any("No Plex match for asset" in m for m in debug_msgs)
+    assert any("No server match for asset" in m for m in info_msgs)
+    assert not any("No server match for asset" in m for m in debug_msgs)
 
     info_msgs.clear()
     debug_msgs.clear()
     service._quiet_unmatched_logging = True  # single/webhook upload
     service._upload_asset(asset, index, dry_run=True, media_type_filter="movie")
-    assert any("No Plex match for asset" in m for m in debug_msgs)
-    assert not any("No Plex match for asset" in m for m in info_msgs)
+    assert any("No server match for asset" in m for m in debug_msgs)
+    assert not any("No server match for asset" in m for m in info_msgs)
 
 
 def test_run_single_upload_series_season_only_processes_season_asset(test_db, monkeypatch):
@@ -610,7 +610,7 @@ def test_format_year_discrepancy_text_empty_single_and_multiple():
         [{"title": "Michael (2025)", "folder_year": 2025, "plex_year": 2026}]
     )
     assert "Michael (2025)" in single
-    assert "Plex year 2026" in single
+    assert "server year 2026" in single
     assert "folder year 2025" in single
 
     many = upload_module._format_year_discrepancy_text(
@@ -806,17 +806,17 @@ class _RaisingAttr:
 
 
 def test_item_library_name_returns_empty_string_on_404(test_db):
-    """_item_library_name must return '' rather than propagating a 404."""
+    """A 404-raising item parses to empty fields; _item_library_name returns ''."""
     service = PlexUploadService(test_db)
-    stale_item = _RaisingAttr()
+    stale_item = wrap_item(_RaisingAttr())
     result = service._item_library_name(stale_item)
     assert result == ""
 
 
 def test_item_library_key_returns_empty_string_on_404(test_db):
-    """_item_library_key must return '' rather than propagating a 404."""
+    """A 404-raising item parses to empty fields; _item_library_key returns ''."""
     service = PlexUploadService(test_db)
-    stale_item = _RaisingAttr()
+    stale_item = wrap_item(_RaisingAttr())
     result = service._item_library_key(stale_item)
     assert result == ""
 
@@ -842,7 +842,7 @@ def test_is_asset_fully_cached_skips_stale_item_gracefully(test_db):
     return False (treat as not cached) rather than crashing."""
     service = PlexUploadService(test_db)
 
-    stale_item = _RaisingAttr()
+    stale_item = wrap_item(_RaisingAttr())
     index = {
         "movies": {"davinci2006": [stale_item]},
         "shows": {},
@@ -882,7 +882,7 @@ def test_show_folder_key_uses_locations_when_available(test_db):
         year = 2006
 
     # normalize_titles strips the year, so (2006) is not in the result
-    assert service._show_folder_key(_FakeShow()) == "fridaynightlights"
+    assert service._show_folder_key(wrap_item(_FakeShow())) == "fridaynightlights"
 
 
 def test_show_folder_key_episode_traversal_with_season_subfolder(test_db):
@@ -910,7 +910,7 @@ def test_show_folder_key_episode_traversal_with_season_subfolder(test_db):
         def seasons(self):
             return [_FakeSeason()]
 
-    assert service._show_folder_key(_FakeShow()) == "fridaynightlights"
+    assert service._show_folder_key(wrap_item(_FakeShow())) == "fridaynightlights"
 
 
 def test_show_folder_key_episode_traversal_flat_layout(test_db):
@@ -940,7 +940,7 @@ def test_show_folder_key_episode_traversal_flat_layout(test_db):
             return [_FakeSeason()]
 
     # Must be the show folder name, not the parent "tv" directory
-    key = service._show_folder_key(_FakeShow())
+    key = service._show_folder_key(wrap_item(_FakeShow()))
     assert key == "fridaynightlights"
     assert key != "tv"
 
@@ -960,7 +960,7 @@ def test_show_folder_key_locations_takes_priority_over_episode_traversal(test_db
             traversal_called["value"] = True
             return []
 
-    key = service._show_folder_key(_FakeShow())
+    key = service._show_folder_key(wrap_item(_FakeShow()))
     assert key == "ghosts"
     assert traversal_called["value"] is False
 
@@ -1052,7 +1052,7 @@ def test_process_assets_accumulates_reasons_and_plex_targets(test_db, monkeypatc
 
 def test_format_unmatched_reasons_lists_only_non_zero_reasons():
     assert format_unmatched_reasons({"no_plex_match": 40, "year_mismatch": 0, "not_downloaded": 15}) == (
-        "40 no Plex match, 15 not downloaded"
+        "40 no server match, 15 not downloaded"
     )
     assert format_unmatched_reasons({"no_plex_match": 0}) == ""
     assert format_unmatched_reasons(None) == ""
@@ -1071,8 +1071,8 @@ def test_format_match_detail_buckets_account_for_every_scanned_file():
     })
 
     assert detail == (
-        "5,715 file(s): 4 uploaded, 5,648 already current, 2 awaiting Plex scan, "
-        "61 unmatched (48 no Plex match, 9 year differs, 4 not downloaded)"
+        "5,715 file(s): 4 uploaded, 5,648 already current, 2 awaiting library scan, "
+        "61 unmatched (48 no server match, 9 year differs, 4 not downloaded)"
     )
 
     clean = _format_match_detail({"scanned": 12, "uploaded_files": 0, "already_current": 12})

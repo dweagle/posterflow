@@ -559,7 +559,7 @@ class TestYearMismatch(TestNoSharedId):
         assert "no year lined up" in logged
         assert "poster  year=None" in logged
         assert "library year=2024" in logged
-        assert "*arr path has no (year): RIPLEY" in logged
+        assert "library path has no (year): RIPLEY" in logged
 
     def test_id_match_still_wins_over_year_gap(self):
         # Regression: an id-tagged poster must match regardless of the year gap.
@@ -607,3 +607,38 @@ class TestIdConflict(TestNoSharedId):
         assert "{tvdb-111}" in logged                 # poster side
         assert "{tvdb-222}" in logged                 # library side
         assert "RIPLEY (2024) {tvdb-111}.jpg" in logged
+
+    def test_all_shared_ids_disagreeing_is_silent_different_release(self):
+        """Two films sharing a title (and year) but disagreeing on EVERY shared id
+        namespace are different releases, not a mistag — e.g. the two 'The Damned'
+        (tmdb-1059010/tt29296048 vs tmdb-850439/tt15010692). A real mistag on one
+        side leaves another id agreeing, which is a match, so a multi-id total
+        disagreement must reject silently instead of warning every run."""
+        asset = self._series(tmdb_id=1059010, imdb_id="tt29296048")
+        media = self._series(tmdb_id=850439, imdb_id="tt15010692")
+        matched, reason = is_match(asset, media)
+        assert matched is False
+        assert reason == ""
+
+    def test_multi_id_disagreement_not_reported(self):
+        asset = self._series(
+            tmdb_id=1059010, imdb_id="tt29296048",
+            files=["/p/RIPLEY (2024) {tmdb-1059010} {imdb-tt29296048}.jpg"],
+        )
+        media = self._series(tmdb_id=850439, imdb_id="tt15010692")
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert result["series"] == []
+        assert "DIFFERENT id" not in logged
+
+    def test_single_shared_id_conflict_still_reported(self):
+        # One comparable namespace disagreeing while title+year agree must still warn
+        asset = self._series(tvdb_id=111, imdb_id="tt29296048",
+                             files=["/p/RIPLEY (2024) {tvdb-111}.jpg"])
+        media = self._series(tvdb_id=222)
+
+        result, logged = self._run_capturing_logs(asset, media)
+
+        assert result["series"] == []
+        assert "DIFFERENT id" in logged

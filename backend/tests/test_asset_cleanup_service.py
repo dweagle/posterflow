@@ -27,6 +27,54 @@ def test_keeps_live_removes_orphans(test_db, tmp_path):
     assert result["counts"]["removed_orphans"] == 2
 
 
+def test_folder_title_differs_from_media_title_is_kept_not_looped(test_db, tmp_path):
+    """Regression: media-server titles can differ from the on-disk folder title (Plex
+    calls tmdb-807 "Seven" while the folder is "Se7en (1995) {imdb-tt0114369}"). The
+    renamer places into the folder name, but cleanup's candidate search only knew the
+    display title — "seven" and "se7en" land in different index buckets and the folder
+    has no tmdb tag, so the placed folder was orphaned every run while the renamer
+    re-created it — a loop. Cleanup must also search by the folder title.
+    """
+    dest = tmp_path / "assets"
+    _make_folder(dest, "Se7en (1995) {imdb-tt0114369}", ["poster.jpg"])
+
+    seven = _movie("Seven", 1995, "/media/movies/Se7en (1995) {imdb-tt0114369}", tmdb_id=807)
+    seven["imdb_id"] = "tt0114369"
+    media = {
+        "movies": [seven],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "Se7en (1995) {imdb-tt0114369}").exists()
+    assert result["counts"]["removed_orphans"] == 0
+
+
+def test_extra_folders_kept_not_stale_pruned(test_db, tmp_path):
+    """A movie duplicated across differently named folders (extra_folders) keeps BOTH
+    asset folders — the second must be neither an orphan nor a 'stale duplicate'."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "Gladiator (2000) {imdb-tt0172495}", ["poster.jpg"])
+    _make_folder(dest, "Gladiator (2000) {tmdb-98}", ["poster.jpg"])
+
+    gladiator = _movie("Gladiator", 2000, "/media/movies/Gladiator (2000) {imdb-tt0172495}", tmdb_id=98)
+    gladiator["extra_folders"] = ["Gladiator (2000) {tmdb-98}"]
+    media = {
+        "movies": [gladiator],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("Marvel")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=True)
+
+    assert (dest / "Gladiator (2000) {imdb-tt0172495}").exists()
+    assert (dest / "Gladiator (2000) {tmdb-98}").exists()
+    assert result["counts"]["removed_orphans"] == 0
+    assert result["counts"]["removed_stale"] == 0
+
+
 def test_year_zero_series_folder_is_kept_not_looped(test_db, tmp_path):
     """Regression: 'The Savant' has no year in Sonarr (year=0), so the renamer copies
     its poster into a yearless 'The Savant' folder. On re-scan that folder has no year

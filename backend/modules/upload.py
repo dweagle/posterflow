@@ -7,7 +7,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -53,6 +53,7 @@ from services.plex_upload import (
 )
 from util.constants import POSTER_ID_PATTERN
 from util.data.normalization import normalize_titles
+from util.media_server.instances import server_label as media_server_label
 
 # Regex to extract edition title from a Radarr-style folder token like {edition-Extended Cut}
 _RADARR_EDITION_TOKEN_RE = re.compile(r"\{edition-([^}]+)\}", re.IGNORECASE)
@@ -799,6 +800,7 @@ def _default_webhook_stats() -> Dict[str, Any]:
         "queued": 0,
         "duplicates": 0,
         "skipped_test": 0,
+        "skipped_ignored": 0,
         "skipped_cached": 0,
         "skipped_no_asset": 0,
         "rejected_disabled": 0,
@@ -868,6 +870,37 @@ def _load_plex_upload_file_cache(db: Session) -> Dict[str, Dict[str, Any]]:
     from models.plex_upload import PlexUploadRecord
     records = db.query(PlexUploadRecord).all()
     return {record.file_path: record.to_dict() for record in records}
+
+
+def _attach_server_labels(db: Session, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add a display-only `servers` list ("Plex 'name'", "Jellyfin 'name'") to cache
+    entries, derived from the server-id prefixes of uploaded_to_library_keys via the
+    media_server_id_map recorded at connect time. Unknown prefixes are skipped, so
+    entries predating the map (or legacy identity-only keys) just omit the line."""
+    setting = get_setting(db, "media_server_id_map")
+    try:
+        id_map = json.loads(setting.value) if setting and setting.value else {}
+    except (ValueError, TypeError):
+        id_map = {}
+    if not isinstance(id_map, dict) or not id_map:
+        return entries
+    for entry in entries:
+        labels: List[str] = []
+        for key in entry.get("uploaded_to_library_keys") or []:
+            prefix, _, local = str(key).partition(":")
+            info = id_map.get(prefix)
+            if not isinstance(info, dict):
+                continue
+            server = media_server_label(str(info.get("type") or ""), info.get("name"))
+            # Plex cache keys carry the "/library/sections/<id>" form; titles are keyed by id
+            local = local.removeprefix("/library/sections/")
+            libraries = info.get("libraries") if isinstance(info.get("libraries"), dict) else {}
+            title = str(libraries.get(local) or "").strip()
+            label = f"{title} ({server})" if title else server
+            if label not in labels:
+                labels.append(label)
+        entry["server_libraries"] = labels
+    return entries
 
 
 def _cache_summary(cache: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -941,13 +974,16 @@ def _fast_cache_summary(db: Session) -> Dict[str, Any]:
     # Reverse back to ascending order so the frontend's .slice(-10).reverse() works correctly
     recent_records = list(reversed(recent_records_desc))
 
-    entries = [
-        {
-            "file_path": record.file_path,
-            **record.to_dict(),
-        }
-        for record in recent_records
-    ]
+    entries = _attach_server_labels(
+        db,
+        [
+            {
+                "file_path": record.file_path,
+                **record.to_dict(),
+            }
+            for record in recent_records
+        ],
+    )
 
     return {
         "entries_count": entries_count,
@@ -1325,6 +1361,312 @@ def _parse_arr_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError("Unsupported webhook payload: expected Radarr movie or Sonarr series object")
 
 
+def _parse_plex_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse a Plex webhook payload (the JSON from the multipart ``payload`` field).
+
+    Only ``library.new`` queues work; every other event (media.play etc. — users often
+    enable them all) is skipped. Season/episode adds resolve to their show so a batch
+    of episode webhooks collapses to one targeted run via the dedupe cache.
+    """
+    event_type = str(payload.get("event") or "unknown").strip().lower()
+    if event_type != "library.new":
+        return {
+            "skip": True,
+            "reason": f"Ignored Plex event '{event_type}'",
+            "event_type": event_type,
+        }
+
+    metadata = payload.get("Metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("Unsupported Plex webhook payload: missing Metadata object")
+
+    server = payload.get("Server") if isinstance(payload.get("Server"), dict) else {}
+    item_type = str(metadata.get("type") or "").strip().lower()
+
+    if item_type == "movie":
+        media_type = "movie"
+        rating_key = metadata.get("ratingKey")
+        title = str(metadata.get("title") or "").strip()
+        year = _to_int(metadata.get("year"))
+        season_number = None
+    elif item_type == "show":
+        media_type = "series"
+        rating_key = metadata.get("ratingKey")
+        title = str(metadata.get("title") or "").strip()
+        year = _to_int(metadata.get("year"))
+        season_number = None
+    elif item_type == "season":
+        media_type = "series"
+        rating_key = metadata.get("parentRatingKey")
+        title = str(metadata.get("parentTitle") or "").strip()
+        year = None
+        season_number = _to_int(metadata.get("index"))
+    elif item_type == "episode":
+        media_type = "series"
+        rating_key = metadata.get("grandparentRatingKey")
+        title = str(metadata.get("grandparentTitle") or "").strip()
+        year = None
+        season_number = _to_int(metadata.get("parentIndex"))
+    else:
+        return {
+            "skip": True,
+            "reason": f"Ignored Plex item type '{item_type or 'unknown'}'",
+            "event_type": event_type,
+        }
+
+    if not title:
+        raise ValueError("Missing title in Plex webhook payload")
+    rating_key = str(rating_key or "").strip()
+    if not rating_key:
+        raise ValueError("Missing ratingKey in Plex webhook payload")
+
+    return {
+        "event_type": event_type,
+        "media_type": media_type,
+        "title": title,
+        "year": year,
+        "season_number": season_number,
+        "source": "plex",
+        "tmdb_id": None,
+        "imdb_id": None,
+        "tvdb_id": None,
+        "plex_rating_key": rating_key,
+        "plex_server_uuid": str(server.get("uuid") or "").strip() or None,
+        "instance_name": str(server.get("title") or "").strip() or None,
+        "application_url": None,
+    }
+
+
+def _resolve_plex_webhook_ids(db: Session, parsed_payload: Dict[str, Any]) -> Optional[str]:
+    """Fill external ids on a Plex-sourced webhook payload by fetching the item from the
+    originating server (Plex webhooks carry only plex:// guids). Returns an error string
+    when the item can't be found on any configured Plex server."""
+    from util.media_server import create_media_server_client
+    from util.media_server.instances import is_plex_instance
+
+    rating_key = str(parsed_payload.get("plex_rating_key") or "")
+    server_uuid = str(parsed_payload.get("plex_server_uuid") or "")
+
+    instances_setting = get_setting(db, "plex_instances")
+    try:
+        instances = json.loads(instances_setting.value) if instances_setting and instances_setting.value else []
+    except json.JSONDecodeError:
+        instances = []
+
+    candidates = [i for i in instances if isinstance(i, dict) and is_plex_instance(i)]
+    if not candidates:
+        return "No Plex instances configured to resolve the webhook item against"
+
+    uuid_matched_any = False
+    for instance in candidates:
+        try:
+            client = create_media_server_client(instance)
+            if client is None:
+                continue
+            if server_uuid:
+                info = client.get_server_info()
+                if info and info.server_id and info.server_id != server_uuid:
+                    continue
+            uuid_matched_any = True
+            item = client.get_item(rating_key)
+            if item is None:
+                continue
+            ids = item.provider_ids or {}
+            tmdb = str(ids.get("tmdb") or "").strip()
+            tvdb = str(ids.get("tvdb") or "").strip()
+            if parsed_payload.get("media_type") == "movie":
+                parsed_payload["tmdb_id"] = int(tmdb) if tmdb.isdigit() else None
+            else:
+                # Series stay keyed on tvdb, same as Sonarr payloads
+                parsed_payload["tvdb_id"] = int(tvdb) if tvdb.isdigit() else None
+            parsed_payload["imdb_id"] = str(ids.get("imdb") or "").strip() or None
+            if parsed_payload.get("year") is None:
+                parsed_payload["year"] = item.year
+            log_info(
+                LogTags.UPLOADER,
+                f"Plex webhook item resolved on '{instance.get('name')}': "
+                f"tmdb={parsed_payload.get('tmdb_id')} tvdb={parsed_payload.get('tvdb_id')} imdb={parsed_payload.get('imdb_id')}",
+                title=parsed_payload.get("title"),
+                rating_key=rating_key,
+            )
+            return None
+        except Exception as exc:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Plex webhook id resolution failed on '{instance.get('name')}': {exc}",
+            )
+
+    if server_uuid and not uuid_matched_any:
+        # Account-level Plex webhooks fire from every server the account owns;
+        # an event from a server not configured here is benign, not an error
+        parsed_payload["_unconfigured_server"] = True
+        return None
+
+    return f"Webhook item (ratingKey {rating_key}) was not found on any configured Plex server"
+
+
+def _parse_jellyfin_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse a Jellyfin Webhook-plugin payload (Generic destination, Item Added).
+
+    Works with "Send All Properties" or a template using the plugin's canonical key
+    names. Only ItemAdded queues work; other notification types are skipped. Season
+    and episode adds resolve to their series so a batch of episode webhooks collapses
+    to one targeted run via the dedupe cache.
+    """
+    event_type = str(payload.get("NotificationType") or "unknown").strip()
+    if event_type.lower() != "itemadded":
+        return {
+            "skip": True,
+            "reason": f"Ignored Jellyfin event '{event_type}'",
+            "event_type": event_type,
+        }
+
+    item_type = str(payload.get("ItemType") or "").strip().lower()
+    item_id = str(payload.get("ItemId") or "").strip()
+    series_id = str(payload.get("SeriesId") or "").strip()
+
+    if item_type == "movie":
+        media_type = "movie"
+        rating_key = item_id
+        title = str(payload.get("Name") or "").strip()
+        year = _to_int(payload.get("Year"))
+        season_number = None
+    elif item_type == "series":
+        media_type = "series"
+        rating_key = item_id
+        title = str(payload.get("Name") or "").strip()
+        year = _to_int(payload.get("Year"))
+        season_number = None
+    elif item_type in ("season", "episode"):
+        media_type = "series"
+        # SeriesId when the template carries it; otherwise the item's own id and the
+        # resolver walks up to the series
+        rating_key = series_id or item_id
+        title = str(payload.get("SeriesName") or "").strip()
+        year = None
+        season_number = _to_int(payload.get("SeasonNumber"))
+    else:
+        return {
+            "skip": True,
+            "reason": f"Ignored Jellyfin item type '{item_type or 'unknown'}'",
+            "event_type": event_type,
+        }
+
+    if not title:
+        raise ValueError("Missing title in Jellyfin webhook payload")
+    if not rating_key:
+        raise ValueError("Missing ItemId in Jellyfin webhook payload")
+
+    # Movie/series payloads carry their own provider ids. Season/episode payloads
+    # carry the SEASON'S/EPISODE'S ids (different namespaces) — never use those for
+    # series matching; the resolver fetches the series' ids instead.
+    def pid(key: str) -> str:
+        return str(payload.get(key) or "").strip()
+
+    tmdb_id: Optional[int] = None
+    tvdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    if item_type == "movie":
+        tmdb_id = _to_int(pid("Provider_tmdb"))
+        imdb_id = pid("Provider_imdb") or None
+    elif item_type == "series":
+        tvdb_id = _to_int(pid("Provider_tvdb"))
+        imdb_id = pid("Provider_imdb") or None
+
+    return {
+        "event_type": "itemadded",
+        "media_type": media_type,
+        "title": title,
+        "year": year,
+        "season_number": season_number,
+        "source": "jellyfin",
+        "tmdb_id": tmdb_id,
+        "imdb_id": imdb_id,
+        "tvdb_id": tvdb_id,
+        "plex_rating_key": rating_key,
+        "plex_server_uuid": str(payload.get("ServerId") or "").strip() or None,
+        "jellyfin_item_id": item_id or None,
+        "instance_name": str(payload.get("ServerName") or "").strip() or None,
+        "application_url": None,
+    }
+
+
+def _resolve_jellyfin_webhook_ids(db: Session, parsed_payload: Dict[str, Any]) -> Optional[str]:
+    """Fill external ids on a Jellyfin-sourced webhook payload when the payload didn't
+    carry usable ones (season/episode adds, or movies the server hasn't identified).
+    Returns an error string when the item can't be found on any configured Jellyfin
+    server."""
+    if parsed_payload.get("tmdb_id") or parsed_payload.get("tvdb_id") or parsed_payload.get("imdb_id"):
+        return None
+
+    from util.media_server import create_media_server_client
+    from util.media_server.instances import is_jellyfin_instance
+
+    rating_key = str(parsed_payload.get("plex_rating_key") or "")
+    server_id = str(parsed_payload.get("plex_server_uuid") or "")
+
+    instances_setting = get_setting(db, "plex_instances")
+    try:
+        instances = json.loads(instances_setting.value) if instances_setting and instances_setting.value else []
+    except json.JSONDecodeError:
+        instances = []
+
+    candidates = [i for i in instances if isinstance(i, dict) and is_jellyfin_instance(i)]
+    if not candidates:
+        return "No Jellyfin instances configured to resolve the webhook item against"
+
+    uuid_matched_any = False
+    for instance in candidates:
+        try:
+            client = create_media_server_client(instance)
+            if client is None:
+                continue
+            if server_id and client.server_id and client.server_id != server_id:
+                continue
+            uuid_matched_any = True
+            item = client.get_item(rating_key)
+            # Season/episode keys walk up to the series (episodes carry SeriesId directly)
+            hops = 0
+            while item is not None and item.item_type in ("season", "episode") and item.parent_id and hops < 2:
+                item = client.get_item(item.parent_id)
+                hops += 1
+            if item is None:
+                continue
+            ids = item.provider_ids or {}
+            tmdb = str(ids.get("tmdb") or "").strip()
+            tvdb = str(ids.get("tvdb") or "").strip()
+            if parsed_payload.get("media_type") == "movie":
+                parsed_payload["tmdb_id"] = int(tmdb) if tmdb.isdigit() else None
+            else:
+                # Series stay keyed on tvdb, same as Sonarr payloads
+                parsed_payload["tvdb_id"] = int(tvdb) if tvdb.isdigit() else None
+            parsed_payload["imdb_id"] = str(ids.get("imdb") or "").strip() or None
+            if parsed_payload.get("year") is None:
+                parsed_payload["year"] = item.year
+            if item.item_id:
+                parsed_payload["plex_rating_key"] = str(item.item_id)
+            log_info(
+                LogTags.UPLOADER,
+                f"Jellyfin webhook item resolved on '{instance.get('name')}': "
+                f"tmdb={parsed_payload.get('tmdb_id')} tvdb={parsed_payload.get('tvdb_id')} imdb={parsed_payload.get('imdb_id')}",
+                title=parsed_payload.get("title"),
+                rating_key=rating_key,
+            )
+            return None
+        except Exception as exc:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Jellyfin webhook id resolution failed on '{instance.get('name')}': {exc}",
+            )
+
+    if server_id and not uuid_matched_any:
+        # Event from a Jellyfin server not configured here — benign, not an error
+        parsed_payload["_unconfigured_server"] = True
+        return None
+
+    return f"Webhook item (id {rating_key}) was not found on any configured Jellyfin server"
+
+
 def _load_webhook_dedupe_cache(db: Session) -> Dict[str, Any]:
     cache_setting = get_setting(db, SETTING_PLEX_WEBHOOK_DEDUPE_CACHE)
     try:
@@ -1388,6 +1730,10 @@ def _media_id_token(parsed_payload: Dict[str, Any]) -> Optional[str]:
         return f"tvdb-{tvdb_id}"
     if isinstance(imdb_id, str) and imdb_id.strip():
         return f"imdb-{imdb_id.strip()}"
+    rating_key = parsed_payload.get("plex_rating_key")
+    if rating_key:
+        # Plex payloads carry no external ids; the server-scoped rating key is just as unique
+        return f"plexkey-{parsed_payload.get('plex_server_uuid') or '_'}-{rating_key}"
     return None
 
 
@@ -1640,7 +1986,7 @@ def _format_match_detail(stats: Dict[str, Any], *, dry_run: bool = False) -> str
     if already_current:
         parts.append(f"{already_current:,} already current")
     if awaiting:
-        parts.append(f"{awaiting:,} awaiting Plex scan")
+        parts.append(f"{awaiting:,} awaiting library scan")
     if unmatched:
         reasons_text = format_unmatched_reasons(stats.get("unmatched_reasons"))
         parts.append(f"{unmatched:,} unmatched ({reasons_text})" if reasons_text else f"{unmatched:,} unmatched")
@@ -1686,8 +2032,8 @@ def _discord_outcome_fields(
         _pad(fields)
     if awaiting:
         fields.append({
-            "name": f"{kind} awaiting Plex scan",
-            "value": f"{awaiting:,} — the show matched, Plex has not scanned the season yet",
+            "name": f"{kind} awaiting library scan",
+            "value": f"{awaiting:,} — the show matched, the server has not scanned the season yet",
             "inline": False,
         })
     return fields
@@ -1782,13 +2128,13 @@ def run_plex_upload_background_job(
     skip_discord: bool = False,
 ) -> None:
     db = SessionLocal()
-    handler_id = add_job_log_handler("plex_upload", job_id, "Plex Upload")
+    handler_id = add_job_log_handler("plex_upload", job_id, "Asset Upload")
     success = False
 
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
-            log_error(LogTags.UPLOADER, f"Plex upload job {job_id} not found in database")
+            log_error(LogTags.UPLOADER, f"Asset upload job {job_id} not found in database")
             return
 
         update_job_state(
@@ -1796,18 +2142,18 @@ def run_plex_upload_background_job(
             job,
             status=JOB_STATUS_RUNNING,
             message=format_start_message(
-                "Plex upload",
+                "Asset upload",
                 dry_run=dry_run,
                 qualifier="(reapply)" if reapply else None,
             ),
             progress=5,
         )
 
-        log_section_start(LogTags.UPLOADER, f"Plex Upload Job {job_id}")
+        log_section_start(LogTags.UPLOADER, f"Asset Upload Job {job_id}")
 
         service = PlexUploadService(db, upload_delay_ms=_get_manual_upload_delay_ms(db))
 
-        callback_label = "Plex dry run" if dry_run else "Plex upload"
+        callback_label = "Asset upload dry run" if dry_run else "Asset upload"
         callback_start = 10
         callback_end = 95
         last_progress = int(job.progress or 0)
@@ -1861,7 +2207,7 @@ def run_plex_upload_background_job(
         )
 
         if not result.get("success", False):
-            raise Exception(result.get("error", "Plex upload failed"))
+            raise Exception(result.get("error", "Asset upload failed"))
 
         stats = result.get("stats", {})
         # Artwork uploads are counted separately from posters (stats["artwork"]); surface
@@ -1890,7 +2236,7 @@ def run_plex_upload_background_job(
             status=JOB_STATUS_COMPLETED,
             progress=100,
             message=format_complete_message(
-                "Plex upload",
+                "Asset upload",
                 (
                     f"({'dry run' if dry_run else 'live'}): poster {match_detail}"
                     + (
@@ -1905,7 +2251,7 @@ def run_plex_upload_background_job(
 
         log_success(
             LogTags.UPLOADER,
-            "Plex upload completed",
+            "Asset upload completed",
             dry_run=dry_run,
             reapply=reapply,
             remove_overlay_label=remove_overlay_label,
@@ -1990,35 +2336,35 @@ def run_plex_upload_background_job(
             db.commit()  # upsert_setting only stages
         except Exception as e:
             db.rollback()
-            log_warning(LogTags.UPLOADER, f"Could not persist Plex upload stats for workflow reporting: {e}")
+            log_warning(LogTags.UPLOADER, f"Could not persist upload stats for workflow reporting: {e}")
 
         if not skip_discord:
             send_discord_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
-                title="Plex Upload Completed",
+                title="Asset Upload Completed",
                 description=embed["description"],
                 fields=embed["fields"],
                 color=embed["color"],
             )
 
-        log_section_end(LogTags.UPLOADER, "Plex Upload Complete")
+        log_section_end(LogTags.UPLOADER, "Asset Upload Complete")
         success = True
 
     except JobCancelled:
         db.rollback()
         finalize_job_cancelled(db, job_id)
-        log_section_end(LogTags.UPLOADER, "Plex Upload Stopped")
+        log_section_end(LogTags.UPLOADER, "Asset Upload Stopped")
         raise
     except Exception as e:
-        log_error(LogTags.UPLOADER, f"Plex upload job failed: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.UPLOADER, f"Asset upload job failed: {e}\n{traceback.format_exc()}")
         if not skip_discord:
             send_discord_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="error",
-                title="Plex Upload Failed",
+                title="Asset Upload Failed",
                 description=str(e),
                 fields=[{"name": "Job ID", "value": str(job_id), "inline": True}],
                 color=0xF44336,
@@ -2032,9 +2378,9 @@ def run_plex_upload_background_job(
         _mark_job_failed(
             db,
             job_id=job_id,
-            completion_label="Plex upload failed",
+            completion_label="Asset upload failed",
             error_message=str(e),
-            failure_context="plex upload",
+            failure_context="asset upload",
         )
     finally:
         try:
@@ -2073,20 +2419,20 @@ def _has_destination_assets_for_target(
 
 
 def _format_year_discrepancy_text(year_discrepancies: list) -> str:
-    """Human-readable summary of ID-matched uploads whose folder year (Radarr/Sonarr)
-    disagrees with the Plex item year. Returns '' when there are none."""
+    """Human-readable summary of ID-matched uploads whose on-disk asset folder year
+    disagrees with the server item year. Returns '' when there are none."""
     if not year_discrepancies:
         return ""
     if len(year_discrepancies) == 1:
         disc = year_discrepancies[0]
         return (
-            f"{disc.get('title')}: Plex year {disc.get('plex_year')} differs from "
-            f"Radarr/Sonarr folder year {disc.get('folder_year')}; matched by ID and uploaded anyway"
+            f"{disc.get('title')}: server year {disc.get('plex_year')} differs from "
+            f"asset folder year {disc.get('folder_year')}; matched by ID and uploaded anyway"
         )
     titles = ", ".join(str(d.get("title")) for d in year_discrepancies[:3])
     more = f" (+{len(year_discrepancies) - 3} more)" if len(year_discrepancies) > 3 else ""
     return (
-        f"{len(year_discrepancies)} item(s) matched by ID despite a Plex vs Radarr/Sonarr "
+        f"{len(year_discrepancies)} item(s) matched by ID despite a server vs asset folder "
         f"year mismatch: {titles}{more}"
     )
 
@@ -2151,7 +2497,7 @@ def _complete_no_local_assets_warning(
         db,
         feature_key="plex_upload",
         event_type="info",
-        title="Plex Upload Warning",
+        title="Asset Upload Warning",
         description=warning_message,
         fields=[
             {"name": "Media", "value": str(media_type or "unknown"), "inline": True},
@@ -2161,7 +2507,7 @@ def _complete_no_local_assets_warning(
         color=0xFFB74D,
     )
 
-    log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Complete")
+    log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
 
 
 def _build_destination_presence_checks(
@@ -2311,7 +2657,7 @@ def run_plex_webhook_background_job(
     retry_delay_seconds: int = PLEX_WEBHOOK_RETRY_DELAY_SECONDS,
 ) -> None:
     db = SessionLocal()
-    handler_id = add_job_log_handler("plex_upload", job_id, "Plex Upload Webhook")
+    handler_id = add_job_log_handler("plex_upload", job_id, "Asset Upload Webhook")
     success = False
     title: str | None = None
     media_type: str | None = None
@@ -2320,7 +2666,7 @@ def run_plex_webhook_background_job(
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
-            log_error(LogTags.UPLOADER, f"Plex webhook job {job_id} not found in database")
+            log_error(LogTags.UPLOADER, f"Webhook job {job_id} not found in database")
             return
 
         title = parsed_payload.get("title")
@@ -2337,7 +2683,7 @@ def run_plex_webhook_background_job(
             progress=5,
         )
 
-        log_section_start(LogTags.UPLOADER, f"Plex Webhook Upload Job {job_id}")
+        log_section_start(LogTags.UPLOADER, f"Webhook Upload Job {job_id}")
         log_info(
             LogTags.UPLOADER,
             f"Webhook target received: {str(media_type or 'item').upper()} - {title}{year_label}{season_label}",
@@ -2356,6 +2702,38 @@ def run_plex_webhook_background_job(
         service.set_arr_instance_scope(parsed_payload.get("arr_instance"))
         webhook_include_artwork = _is_webhook_artwork_enabled(db)
 
+        # Media-server events may carry only a rating key; resolve external ids first
+        if parsed_payload.get("source") == "plex":
+            resolve_error = _resolve_plex_webhook_ids(db, parsed_payload)
+        elif parsed_payload.get("source") == "jellyfin":
+            resolve_error = _resolve_jellyfin_webhook_ids(db, parsed_payload)
+        else:
+            resolve_error = None
+        if parsed_payload.pop("_unconfigured_server", False):
+            server_label = parsed_payload.get("instance_name") or "an unconfigured media server"
+            update_job_state(
+                db,
+                job,
+                status=JOB_STATUS_COMPLETED,
+                progress=100,
+                message=format_complete_message(
+                    "Webhook skipped (unconfigured server)",
+                    f"{title} was added on '{server_label}', which is not a configured instance here",
+                ),
+                completed_at=datetime.now(timezone.utc),
+            )
+            log_info(
+                LogTags.UPLOADER,
+                f"Webhook event came from '{server_label}', which is not a configured instance — skipping",
+                media_type=media_type,
+                title=title,
+            )
+            log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
+            success = True
+            return
+        if resolve_error:
+            raise Exception(resolve_error)
+
         # For Radarr upgrade events, use the movieFile path to detect edition changes without
         # relying on Plex scan state (which may lag behind the actual file import).
         if parsed_payload.get("source") == "radarr" and parsed_payload.get("is_upgrade"):
@@ -2365,7 +2743,7 @@ def run_plex_webhook_background_job(
         # scanning the full library.
         log_info(
             LogTags.UPLOADER,
-            f"Webhook index build: searching Plex for '{title}{year_label}' by GUID",
+            f"Webhook index build: searching media servers for '{title}{year_label}' by GUID",
             media_type=media_type,
             title=title,
             tmdb_id=parsed_payload.get("tmdb_id"),
@@ -2413,7 +2791,7 @@ def run_plex_webhook_background_job(
                 ]
                 show_poster_status = getattr(service, "_series_show_poster_status", None)
                 strategy_detail = {
-                    "re_added": "show was removed and re-added in Plex (new rating key) — re-applying show poster plus seasons",
+                    "re_added": "show was removed and re-added on the server (new rating key) — re-applying show poster plus seasons",
                     "not_uploaded": "show poster not yet uploaded — uploading show poster plus seasons",
                     "needs_apply": "show poster needs re-applying — uploading show poster plus seasons",
                 }.get(show_poster_status, "show poster needs applying — uploading show poster plus seasons")
@@ -2469,7 +2847,7 @@ def run_plex_webhook_background_job(
                 progress=100,
                 message=format_complete_message(
                     "Webhook skipped (already uploaded)",
-                    f"{title} already uploaded for matched Plex libraries",
+                    f"{title} already uploaded for matched libraries",
                 ),
                 completed_at=datetime.now(timezone.utc),
             )
@@ -2482,7 +2860,7 @@ def run_plex_webhook_background_job(
                 season_number=season_number,
                 targets_checked=len(target_cache_checks),
             )
-            log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Complete")
+            log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
             success = True
             return
 
@@ -2577,6 +2955,7 @@ def run_plex_webhook_background_job(
             return (
                 normalized == str(PlexUploadService.ERROR_INDEX_BUILD_FAILED).strip().lower()
                 or "failed to connect to plex instance" in normalized
+                or "failed to connect to jellyfin instance" in normalized
             )
 
         for attempt in range(1, attempts + 1):
@@ -2599,7 +2978,7 @@ def run_plex_webhook_background_job(
 
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook retry {attempt}/{attempts}: rebuilding Plex index for '{title}{year_label}'",
+                    f"Webhook retry {attempt}/{attempts}: rebuilding index for '{title}{year_label}'",
                     attempt=attempt,
                     max_attempts=attempts,
                     media_type=media_type,
@@ -2618,7 +2997,7 @@ def run_plex_webhook_background_job(
                 if retry_context_error:
                     log_warning(
                         LogTags.UPLOADER,
-                        f"Webhook retry {attempt}/{attempts}: Plex index rebuild failed — '{retry_context_error}'; upload will attempt with empty index",
+                        f"Webhook retry {attempt}/{attempts}: index rebuild failed — '{retry_context_error}'; upload will attempt with empty index",
                         attempt=attempt,
                         max_attempts=attempts,
                         title=title,
@@ -2700,7 +3079,7 @@ def run_plex_webhook_background_job(
                 )
 
                 if not target_result.get("success", False):
-                    target_error = str(target_result.get("error", "Plex webhook upload failed"))
+                    target_error = str(target_result.get("error", "Webhook upload failed"))
                     if _is_retryable_preflight_error(target_error) and attempt < attempts:
                         saw_retryable_preflight_failure = True
                         log_warning(
@@ -2716,7 +3095,7 @@ def run_plex_webhook_background_job(
                         )
                         log_info(
                             LogTags.UPLOADER,
-                            "Webhook attempt skipped matching/upload due to Plex connectivity preflight failure",
+                            "Webhook attempt skipped matching/upload due to server connectivity preflight failure",
                             attempt=attempt,
                             max_attempts=attempts,
                             title=title,
@@ -2747,7 +3126,7 @@ def run_plex_webhook_background_job(
                 if uploaded_n > 0:
                     pass_outcome = f"uploaded {uploaded_n}"
                 elif matched_n > 0 and seasons_missing_n > 0:
-                    pass_outcome = "show found, season not scanned in Plex yet"
+                    pass_outcome = "show found, season not scanned on the server yet"
                 elif matched_n > 0:
                     pass_outcome = "already up to date, nothing to upload"
                 else:
@@ -2789,7 +3168,7 @@ def run_plex_webhook_background_job(
             }
 
             if not result.get("success", False):
-                raise Exception(result.get("error", "Plex webhook upload failed"))
+                raise Exception(result.get("error", "Webhook upload failed"))
 
             stats = result.get("stats", {})
             scanned_count = int(stats.get("scanned", 0))
@@ -2819,7 +3198,7 @@ def run_plex_webhook_background_job(
             if matched_count > 0 and plex_seasons_missing > 0 and attempt < attempts:
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook found show in Plex but season not yet scanned; retrying in {delay_seconds}s",
+                    f"Webhook found show but season not yet scanned; retrying in {delay_seconds}s",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -2834,7 +3213,7 @@ def run_plex_webhook_background_job(
             if matched_count > 0:
                 log_info(
                     LogTags.UPLOADER,
-                    "Webhook matched Plex target with no upload; treating as already up-to-date",
+                    "Webhook matched a target with no upload; treating as already up-to-date",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -2849,7 +3228,7 @@ def run_plex_webhook_background_job(
                 no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook upload had no Plex match yet for '{title}{year_label}'"
+                    f"Webhook upload had no server match yet for '{title}{year_label}'"
                     + (f" ({no_match_reasons})" if no_match_reasons else "")
                     + f", retrying in {delay_seconds}s",
                     attempt=attempt,
@@ -2860,7 +3239,7 @@ def run_plex_webhook_background_job(
                 time.sleep(delay_seconds)
 
         if not result.get("success", False):
-            raise Exception(result.get("error", "Plex webhook upload failed"))
+            raise Exception(result.get("error", "Webhook upload failed"))
 
         stats = result.get("stats", {})
         uploaded_count = int(stats.get("uploaded", 0))
@@ -2877,7 +3256,7 @@ def run_plex_webhook_background_job(
             if saw_retryable_preflight_failure and not saw_non_preflight_processing:
                 log_error(
                     LogTags.UPLOADER,
-                    "Webhook failed after retries: Plex connectivity preflight failed on all attempts; matching never ran",
+                    "Webhook failed after retries: server connectivity preflight failed on all attempts; matching never ran",
                     attempts=attempts,
                     media_type=media_type,
                     title=title,
@@ -2889,7 +3268,7 @@ def run_plex_webhook_background_job(
                 no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_warning(
                     LogTags.UPLOADER,
-                    "Webhook failed after retries: Plex reachable but no matches were found"
+                    "Webhook failed after retries: servers reachable but no matches were found"
                     + (f" ({no_match_reasons})" if no_match_reasons else ""),
                     attempts=attempts,
                     media_type=media_type,
@@ -2901,7 +3280,7 @@ def run_plex_webhook_background_job(
                     uploaded=uploaded_count,
                 )
             raise Exception(
-                f"No Plex match found after {attempts} attempt(s) for {media_type}: {title}"
+                f"No server match found after {attempts} attempt(s) for {media_type}: {title}"
             )
 
         update_job_state(
@@ -2911,12 +3290,12 @@ def run_plex_webhook_background_job(
             progress=100,
             message=(
                 format_complete_message(
-                    "Webhook Plex upload",
+                    "Webhook upload",
                     f"{title} — {match_detail}",
                 )
                 if uploaded_count > 0
                 else format_complete_message(
-                    "Webhook matched Plex item but performed no upload",
+                    "Webhook matched an item but performed no upload",
                     f"{title} — {match_detail}",
                 )
             ),
@@ -2926,7 +3305,7 @@ def run_plex_webhook_background_job(
         if matched_count > 0 and uploaded_count == 0:
             log_warning(
                 LogTags.UPLOADER,
-                "Webhook matched Plex item but performed no upload",
+                "Webhook matched an item but performed no upload",
                 media_type=media_type,
                 title=title,
                 season_number=season_number,
@@ -2936,7 +3315,7 @@ def run_plex_webhook_background_job(
 
         log_success(
             LogTags.UPLOADER,
-            f"Webhook Plex upload completed for {str(media_type or 'item').upper()} - {title}",
+            f"Webhook upload completed for {str(media_type or 'item').upper()} - {title}",
             media_type=media_type,
             title=title,
             season_number=season_number,
@@ -2993,27 +3372,27 @@ def run_plex_webhook_background_job(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
-                title="Plex Upload",
+                title="Asset Upload",
                 description=f"Uploaded {pretty_media}: {title}{season_text}",
                 fields=discord_fields,
                 color=0xFFB74D if year_discrepancy_text else 0x4CAF50,
             )
 
-        log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Complete")
+        log_section_end(LogTags.UPLOADER, "Webhook Upload Complete")
         success = True
 
     except JobCancelled:
         db.rollback()
         finalize_job_cancelled(db, job_id)
-        log_section_end(LogTags.UPLOADER, "Plex Webhook Upload Stopped")
+        log_section_end(LogTags.UPLOADER, "Webhook Upload Stopped")
         raise
     except Exception as e:
-        log_error(LogTags.UPLOADER, f"Plex webhook upload failed: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.UPLOADER, f"Webhook upload failed: {e}\n{traceback.format_exc()}")
         send_discord_notification(
             db,
             feature_key="plex_upload",
             event_type="error",
-            title="Plex Upload Failed",
+            title="Asset Upload Failed",
             description=str(e),
             fields=[
                 {"name": "Media", "value": str(media_type or "unknown"), "inline": True},
@@ -3031,9 +3410,9 @@ def run_plex_webhook_background_job(
         _mark_job_failed(
             db,
             job_id=job_id,
-            completion_label="Plex webhook upload failed",
+            completion_label="Webhook upload failed",
             error_message=str(e),
-            failure_context="plex webhook",
+            failure_context="webhook upload",
         )
     finally:
         try:
@@ -3052,13 +3431,13 @@ def run_plex_single_manual_background_job(
     payload: Dict[str, Any],
 ) -> None:
     db = SessionLocal()
-    handler_id = add_job_log_handler("plex_upload", job_id, "Plex Upload Single")
+    handler_id = add_job_log_handler("plex_upload", job_id, "Asset Upload Single")
     success = False
 
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
-            log_error(LogTags.UPLOADER, f"Plex single upload job {job_id} not found in database")
+            log_error(LogTags.UPLOADER, f"Single upload job {job_id} not found in database")
             return
 
         title = str(payload.get("title") or "").strip()
@@ -3077,7 +3456,7 @@ def run_plex_single_manual_background_job(
             progress=8,
         )
 
-        log_section_start(LogTags.UPLOADER, f"Plex Single Upload Job {job_id}")
+        log_section_start(LogTags.UPLOADER, f"Single Upload Job {job_id}")
 
         preupload_payload = {
             "media_type": media_type,
@@ -3111,7 +3490,7 @@ def run_plex_single_manual_background_job(
         if targeted_context_error:
             log_warning(
                 LogTags.UPLOADER,
-                f"Manual single upload: targeted Plex index build failed — '{targeted_context_error}'; "
+                f"Manual single upload: targeted index build failed — '{targeted_context_error}'; "
                 "run_single_upload will rebuild context",
                 title=title,
                 media_type=media_type,
@@ -3165,7 +3544,7 @@ def run_plex_single_manual_background_job(
         )
 
         if not result.get("success", False):
-            raise Exception(result.get("error", "Plex single upload failed"))
+            raise Exception(result.get("error", "Single upload failed"))
 
         stats = result.get("stats", {})
         uploaded_label = "would_upload" if dry_run else "uploaded"
@@ -3191,7 +3570,7 @@ def run_plex_single_manual_background_job(
             status=JOB_STATUS_COMPLETED,
             progress=100,
             message=format_complete_message(
-                "Manual single Plex upload",
+                "Manual single upload",
                 f"{title} — {match_detail}{preupload_details}",
             ),
             completed_at=datetime.now(timezone.utc),
@@ -3199,7 +3578,7 @@ def run_plex_single_manual_background_job(
 
         log_success(
             LogTags.UPLOADER,
-            "Manual single Plex upload completed",
+            "Manual single upload completed",
             media_type=media_type,
             title=title,
             season_number=season_number,
@@ -3217,22 +3596,22 @@ def run_plex_single_manual_background_job(
             preupload_border_changed=int(preupload_border.get("changed", 0)),
             preupload_border_enabled=bool(preupload_border.get("enabled", False)),
         )
-        log_section_end(LogTags.UPLOADER, "Plex Single Upload Complete")
+        log_section_end(LogTags.UPLOADER, "Single Upload Complete")
         success = True
 
     except JobCancelled:
         db.rollback()
         finalize_job_cancelled(db, job_id)
-        log_section_end(LogTags.UPLOADER, "Plex Single Upload Stopped")
+        log_section_end(LogTags.UPLOADER, "Single Upload Stopped")
         raise
     except Exception as e:
-        log_error(LogTags.UPLOADER, f"Plex single upload failed: {e}\n{traceback.format_exc()}")
+        log_error(LogTags.UPLOADER, f"Single upload failed: {e}\n{traceback.format_exc()}")
         _mark_job_failed(
             db,
             job_id=job_id,
-            completion_label="Plex single upload failed",
+            completion_label="Single upload failed",
             error_message=str(e),
-            failure_context="plex single upload",
+            failure_context="single upload",
         )
     finally:
         try:

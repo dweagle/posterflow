@@ -185,3 +185,31 @@ def test_delete_nonexistent_entry_returns_404(client):
     """Deleting an ID that doesn't exist returns 404."""
     response = client.delete("/api/posterflow/manual-media/99999")
     assert response.status_code == 404
+
+
+def test_inject_manual_media_skips_entries_covered_by_other_sources(test_db):
+    """A manual entry matching an existing sourced entry (shared id, or same
+    title+year when id-less) must not inject — with the media-server source it
+    would double-place posters under a second folder name."""
+    from models.manual_media import ManualMediaEntry
+    from services.poster_renamer import PosterRenameService
+
+    test_db.add(ManualMediaEntry(title="Heat", year=1995, media_type="movie", tmdb_id=949))
+    test_db.add(ManualMediaEntry(title="Solo Show", year=2020, media_type="series"))
+    test_db.add(ManualMediaEntry(title="Uncovered", year=2001, media_type="movie", tmdb_id=777))
+    test_db.commit()
+
+    service = PosterRenameService(test_db)
+    media_dict = {
+        "movies": [{"title": "Heat", "year": 1995, "tmdb_id": 949,
+                    "normalized_title": "heat", "instance": "jf (Movies)"}],
+        "series": [{"title": "Solo Show", "year": 2020, "tmdb_id": None, "tvdb_id": None, "imdb_id": None,
+                    "normalized_title": "soloshow", "instance": "jf (TV)"}],
+        "collections": [],
+    }
+    service._inject_manual_media(media_dict)
+
+    assert [m["title"] for m in media_dict["movies"]] == ["Heat", "Uncovered"]
+    assert [s["title"] for s in media_dict["series"]] == ["Solo Show"]
+    manual = [m for m in media_dict["movies"] if m.get("source") == "manual"]
+    assert [m["title"] for m in manual] == ["Uncovered"]

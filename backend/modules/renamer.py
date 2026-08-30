@@ -658,7 +658,7 @@ def run_rename_background_job(
         update_job_state(db, job, message="Fetching media from configured instances...")
         media_dict = service.get_media_from_instances(setting_key=library_setting_key)
         if not any(media_dict.values()):
-            raise Exception("No media found. Check Settings -> Media tab to configure Plex/Radarr/Sonarr.")
+            raise Exception("No media found. Check Settings -> Media tab (media server/Radarr/Sonarr) — and if media-server sourcing is on, this feature's library selection (an empty selection excludes every library).")
         update_job_state(db, job, progress=10)
 
         # Artwork boxes (logo/background/square) — matched and placed by the SAME engine
@@ -703,6 +703,7 @@ def run_rename_background_job(
         # itself (this job skips its own); without this it re-fetched media and re-matched.
         if scan_out is not None:
             scan_out["media_dict"] = media_dict
+            scan_out["fetch_failed_types"] = service.media_fetch_failed_types
             scan_out["artwork_boxes"] = scanned_artwork
             scan_out["artwork_sourced"] = artwork_sourced
             scan_out["poster_sourced"] = poster_sourced
@@ -719,6 +720,7 @@ def run_rename_background_job(
                 triggered_by=triggered_by,
                 job=job,
                 media_dict=media_dict,  # same media (+ library selection) the rename just used
+                fetch_failed_types=service.media_fetch_failed_types,
                 artwork_boxes=scanned_artwork,  # unfiltered scan from above; don't re-walk the drives
                 artwork_sourced=artwork_sourced,  # this run's match verdicts; don't re-match
                 poster_sourced=poster_sourced,

@@ -210,12 +210,11 @@ def _fetch_library_records(db: Session, item: Dict[str, Any]) -> List[Dict[str, 
         if instances_setting and instances_setting.value:
             try:
                 for instance in json.loads(instances_setting.value):
-                    service._fetch_plex_collections(
-                        instance["url"], instance["api_key"], media_dict,
-                        instance.get("name", "Plex"), LogTags.UNMATCHED,
+                    service._fetch_media_server_collections(
+                        instance, media_dict, LogTags.UNMATCHED,
                     )
             except Exception as exc:
-                log_error(LogTags.UNMATCHED, f"Match report: Plex fetch failed: {exc}", error=str(exc))
+                log_error(LogTags.UNMATCHED, f"Match report: media server fetch failed: {exc}", error=str(exc))
     else:
         from util.arr.client import create_arr_client
 
@@ -236,6 +235,39 @@ def _fetch_library_records(db: Session, item: Dict[str, Any]) -> List[Dict[str, 
                             media_dict[media_type].append(record)
                 except Exception as exc:
                     log_error(LogTags.UNMATCHED, f"Match report: {instance_type} fetch failed: {exc}", error=str(exc))
+
+        # Arr-less (or hybrid) installs: media-server libraries are the item source, so
+        # their records count as library records too. Appended after the arrs so an arr
+        # record stays the primary one when both exist.
+        from util.poster_settings import media_server_media_source_enabled
+
+        if media_server_media_source_enabled(db):
+            # Mirror the unmatched job's library scope so the report sees the same data
+            selected_libraries = None
+            selection_setting = get_setting(db, "unmatched_assets_libraries")
+            if selection_setting and selection_setting.value:
+                try:
+                    selected_libraries = json.loads(selection_setting.value)
+                except Exception:
+                    selected_libraries = None
+            instances_setting = get_setting(db, "plex_instances")
+            if instances_setting and instances_setting.value:
+                try:
+                    for instance in json.loads(instances_setting.value):
+                        service._fetch_media_server_media(
+                            instance, media_dict, LogTags.UNMATCHED,
+                            selected_libraries=selected_libraries,
+                        )
+                except Exception as exc:
+                    log_error(LogTags.UNMATCHED, f"Match report: media server media fetch failed: {exc}", error=str(exc))
+
+    # Merge duplicates the same way the pipeline does before diagnosing
+    if media_type == "movies":
+        media_dict["movies"] = service._merge_duplicate_movies(media_dict["movies"], LogTags.UNMATCHED)
+    elif media_type == "series":
+        media_dict["series"] = service._merge_duplicate_series(media_dict["series"], LogTags.UNMATCHED)
+    else:
+        media_dict["collections"] = service._merge_duplicate_collections(media_dict["collections"], LogTags.UNMATCHED)
 
     return [r for r in media_dict[media_type] if _record_matches_item(r, item)]
 
@@ -578,17 +610,16 @@ def _plex_instances(db: Session) -> List[Dict[str, str]]:
 
 
 def _plex_guid_ids(item: Any) -> Dict[str, Any]:
-    """tmdb/tvdb/imdb ids from a Plex item's metadata-agent guids (plex_upload's parsing)."""
+    """tmdb/tvdb/imdb ids a Plex item's metadata agent mapped it to (from the parsed wrapper)."""
     ids: Dict[str, Any] = {"tmdb_id": None, "tvdb_id": None, "imdb_id": None}
-    for guid in getattr(item, "guids", None) or []:
-        value = str(getattr(guid, "id", guid)).strip().lower()
-        if "://" not in value:
-            continue
-        source, raw = value.split("://", 1)
-        if source in ("tmdb", "tvdb") and raw.isdigit():
+    provider_ids = item.provider_ids or {}
+    for source in ("tmdb", "tvdb"):
+        raw = str(provider_ids.get(source) or "")
+        if raw.isdigit():
             ids[f"{source}_id"] = int(raw)
-        elif source == "imdb" and raw.startswith("tt"):
-            ids["imdb_id"] = raw
+    imdb_raw = str(provider_ids.get("imdb") or "")
+    if imdb_raw.startswith("tt"):
+        ids["imdb_id"] = imdb_raw
     return ids
 
 
@@ -600,21 +631,17 @@ def _plex_reference(db: Session, item: Dict[str, Any], ids: Dict[str, Any]) -> D
     """
     instances = _plex_instances(db)
     if not instances:
-        return {"skipped": "no Plex instance configured"}
-    try:
-        from plexapi.server import PlexServer
-    except ImportError:
-        return {"skipped": "plexapi not installed"}
+        return {"skipped": "no media server instance configured"}
 
     media_type = item["media_type"]
     section_types = {"movies": {"movie"}, "series": {"show"}, "collections": {"movie", "show"}}[media_type]
-    guid_searches = []
+    provider_ids: Dict[str, str] = {}
     if ids.get("tmdb_id"):
-        guid_searches.append(f"tmdb://{ids['tmdb_id']}")
+        provider_ids["tmdb"] = str(ids["tmdb_id"])
     if ids.get("tvdb_id"):
-        guid_searches.append(f"tvdb://{ids['tvdb_id']}")
+        provider_ids["tvdb"] = str(ids["tvdb_id"])
     if ids.get("imdb_id"):
-        guid_searches.append(f"imdb://{ids['imdb_id']}")
+        provider_ids["imdb"] = str(ids["imdb_id"])
 
     wanted_titles = {
         _norm_title(t)
@@ -622,58 +649,74 @@ def _plex_reference(db: Session, item: Dict[str, Any], ids: Dict[str, Any]) -> D
         if t
     }
     errors: List[str] = []
+    servers: List[Dict[str, Any]] = []
+    from util.media_server.client import create_media_server_client
+    from util.media_server.instances import instance_label, instance_type
+
     for instance in instances:
-        name = instance.get("name", "Plex")
+        name = instance_label(instance)
+        server_type = instance_type(instance)
         try:
-            plex = PlexServer(instance["url"], instance["api_key"], timeout=15)
+            # raise_on_error so the per-instance error text lands in the report
+            client = create_media_server_client(instance, timeout=15, raise_on_error=True)
         except Exception as exc:
             errors.append(f"{name}: {exc}")
+            servers.append({"instance": name, "type": server_type, "error": str(exc)})
             continue
         try:
-            sections = [s for s in plex.library.sections() if s.type in section_types]
+            libraries = [l for l in client.get_libraries() if l.type in section_types]
         except Exception as exc:
             errors.append(f"{name}: {exc}")
+            servers.append({"instance": name, "type": server_type, "error": str(exc)})
             continue
-        for section in sections:
-            hit = None
+        hit = None
+        hit_library = None
+        for library in libraries:
             if media_type == "collections":
                 try:
-                    for collection in section.search(title=item.get("title"), libtype="collection"):
-                        if _norm_title(getattr(collection, "title", "")) in wanted_titles:
+                    for collection in client.get_collections(library.key):
+                        if _norm_title(collection.title or "") in wanted_titles:
                             hit = collection
                             break
                 except Exception:
                     pass
             else:
-                for guid in guid_searches:
-                    try:
-                        results = section.search(guid=guid)
-                    except Exception:
-                        results = []
-                    if results:
-                        hit = results[0]
-                        break
+                matches = client.find_by_provider_ids(provider_ids, library.type, library_keys=[library.key])
+                if matches:
+                    hit = matches[0]
                 if hit is None and item.get("title"):
                     try:
-                        for result in section.search(title=item["title"]):
-                            if _norm_title(getattr(result, "title", "")) in wanted_titles and (
-                                not item.get("year") or getattr(result, "year", None) in (None, item["year"])
+                        for result in client.find_by_title(item["title"], library.type, library_keys=[library.key]):
+                            if _norm_title(result.title or "") in wanted_titles and (
+                                not item.get("year") or result.year in (None, item["year"])
                             ):
                                 hit = result
                                 break
                     except Exception:
                         pass
             if hit is not None:
-                return {
-                    "title": getattr(hit, "title", None),
-                    "year": getattr(hit, "year", None),
-                    "instance": name,
-                    "library": getattr(section, "title", None),
-                    **_plex_guid_ids(hit),
-                }
+                hit_library = library.title
+                break
+        if hit is not None:
+            servers.append({
+                "instance": name,
+                "type": server_type,
+                "title": hit.title or None,
+                "year": hit.year,
+                "library": hit_library,
+                **_plex_guid_ids(hit),
+            })
+        else:
+            servers.append({"instance": name, "type": server_type, "missing": True})
+
+    # Top-level keys keep the single-hit shape (first server that has the item) for
+    # existing consumers; "servers" carries every instance's outcome for display
+    found = [s for s in servers if not s.get("missing") and not s.get("error")]
+    if found:
+        return {**found[0], "servers": servers}
     if errors:
-        return {"error": f"Plex lookup failed: {errors[0]}"}
-    return {"missing": "not found in any Plex library"}
+        return {"error": f"Media server lookup failed: {errors[0]}", "servers": servers}
+    return {"missing": "not found in any media server library", "servers": servers}
 
 
 def _is_on_ignore_list(db: Session, item: Dict[str, Any]) -> bool:
@@ -933,20 +976,34 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
 
     if not library["found"] and not library["manual_entry"]:
         add("problem", "not_in_sources",
-            "No Sonarr/Radarr/Plex record was found for this item in the configured instances — "
+            "No Sonarr/Radarr/media server record was found for this item in the configured instances — "
             "the unmatched entry may be stale; re-run unmatched detection.")
 
     # Library ids vs the neutral TMDB/TVDB references.
     record_ids = library.get("effective_ids") or {k: item.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id")}
     for source in ("tvdb", "tmdb", "plex"):
         reference = report["reference"].get(source) or {}
+        if source == "plex" and reference.get("servers"):
+            # One check per configured media server
+            for entry in reference["servers"]:
+                if entry.get("error"):
+                    add("problem", "plex_unresolved", f"{entry.get('instance')}: {entry['error']}")
+                    continue
+                if entry.get("missing"):
+                    continue
+                for key in _reference_conflicts(record_ids, entry):
+                    add("problem", "library_id_conflict",
+                        f"The library record's {key.replace('_id', '').upper()} ({record_ids[key]}) disagrees with "
+                        f"{entry.get('instance')}'s metadata ({entry[key]}) — one side is stale or remapped. "
+                        "Refresh the item's metadata, or remove and re-add it.")
+            continue
         if reference.get("error"):
             add("problem", f"{source}_unresolved", f"{source.upper()}: {reference['error']}")
             continue
         if reference.get("skipped") or reference.get("missing"):
             continue
         for key in _reference_conflicts(record_ids, reference):
-            origin = "Plex's metadata agent" if source == "plex" else f"{source.upper()}'s mapping"
+            origin = "the media server's metadata agent" if source == "plex" else f"{source.upper()}'s mapping"
             add("problem", "library_id_conflict",
                 f"The library record's {key.replace('_id', '').upper()} ({record_ids[key]}) disagrees with "
                 f"{origin} ({reference[key]}) — one side is stale or remapped. "
@@ -1236,18 +1293,34 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
     label_width = max(10, len(ids_label))
     lines.append(f"  {ids_label:<{label_width}}  {_id_tags(_first_record_ids(report))}")
     for source in ("tvdb", "tmdb", "plex"):
+        # The reference key stays "plex" for structure compat; the rows cover every
+        # configured media server (Plex and Jellyfin), one line per instance
+        row_label = "server" if source == "plex" else source
         reference = report.get("reference", {}).get(source) or {}
+        if source == "plex" and reference.get("servers"):
+            for entry in reference["servers"]:
+                entry_label = entry.get("type") or row_label
+                if entry.get("error"):
+                    lines.append(f"  {entry_label:<{label_width}}  ✗ {entry.get('instance')}: {entry['error']}")
+                elif entry.get("missing"):
+                    lines.append(f"  {entry_label:<{label_width}}  not found on {entry.get('instance')}")
+                else:
+                    extra = f"  → {entry.get('title')}" + (f" ({entry.get('year')})" if entry.get("year") else "")
+                    if entry.get("library"):
+                        extra += f" in {entry['library']} [{entry.get('instance')}]"
+                    lines.append(f"  {entry_label:<{label_width}}  {_id_tags(entry)}{extra}")
+            continue
         if reference.get("skipped"):
-            lines.append(f"  {source:<{label_width}}  (skipped: {reference['skipped']})")
+            lines.append(f"  {row_label:<{label_width}}  (skipped: {reference['skipped']})")
         elif reference.get("error"):
-            lines.append(f"  {source:<{label_width}}  ✗ {reference['error']}")
+            lines.append(f"  {row_label:<{label_width}}  ✗ {reference['error']}")
         elif reference.get("missing"):
-            lines.append(f"  {source:<{label_width}}  {reference['missing']}")
+            lines.append(f"  {row_label:<{label_width}}  {reference['missing']}")
         else:
             extra = f"  → {reference.get('title')}" + (f" ({reference.get('year')})" if reference.get("year") else "")
             if reference.get("library"):
                 extra += f" in {reference['library']} [{reference.get('instance')}]"
-            lines.append(f"  {source:<{label_width}}  {_id_tags(reference)}{extra}")
+            lines.append(f"  {row_label:<{label_width}}  {_id_tags(reference)}{extra}")
     lines.append("")
 
     # What each source knows this title as — the names the title-fallback matcher can use.

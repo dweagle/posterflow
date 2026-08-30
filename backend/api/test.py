@@ -31,7 +31,7 @@ def _resolve_masked_plex_token(db: Session, url: str, token: str) -> str:
 
     setting = get_setting(db, "plex_instances")
     if not setting or not setting.value:
-        raise HTTPException(status_code=400, detail="Plex token is masked and no saved Plex instance was found. Re-enter token.")
+        raise HTTPException(status_code=400, detail="API key is masked and no saved media server instance was found. Re-enter it.")
 
     try:
         instances = json.loads(setting.value)
@@ -68,7 +68,7 @@ def _resolve_masked_plex_token(db: Session, url: str, token: str) -> str:
     if matched_instance is None:
         raise HTTPException(
             status_code=400,
-            detail="Plex token is masked and could not be resolved for this URL. Re-enter token and save settings.",
+            detail="API key is masked and could not be resolved for this URL. Re-enter it and save settings.",
         )
 
     return str(matched_instance.get("api_key") or "").strip()
@@ -118,6 +118,91 @@ async def test_plex(config: PlexTestRequest, db: Session = Depends(get_db)) -> D
         log_error(LogTags.API, f"Plex test error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/jellyfin")
+async def test_jellyfin(config: PlexTestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Test Jellyfin connection"""
+    try:
+        from util.media_server.jellyfin import build_auth_header
+
+        resolved_token = _resolve_masked_plex_token(db, config.url, config.token)
+        log_info(LogTags.API, f"Testing Jellyfin connection to {config.url}")
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{config.url.rstrip('/')}/System/Info",
+                headers={"Authorization": build_auth_header(resolved_token), "Accept": "application/json"},
+            )
+
+        if response.status_code == 200:
+            data = response.json()
+            server_name = data.get("ServerName") or "Jellyfin Server"
+            return {
+                "success": True,
+                "message": f"Connected to Jellyfin: {server_name}",
+                "version": data.get("Version", "Unknown"),
+            }
+        elif response.status_code in (401, 403):
+            raise HTTPException(status_code=400, detail="Invalid Jellyfin API key - create one under Dashboard → API Keys")
+        elif response.status_code == 404:
+            raise HTTPException(status_code=400, detail="URL not found - ensure the Jellyfin URL is correct (e.g. http://localhost:8096)")
+        else:
+            raise HTTPException(status_code=400, detail=f"Jellyfin returned unexpected status {response.status_code} - check URL and API key")
+
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="Connection timed out - check that the URL is reachable")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to Jellyfin - check the URL and that Jellyfin is running")
+    except httpx.RequestError as e:
+        log_error(LogTags.API, f"Jellyfin request error: {str(e)}")
+        raise HTTPException(status_code=503, detail="Cannot connect to Jellyfin - check the URL and that Jellyfin is running")
+    except ValueError as e:
+        log_error(LogTags.API, f"Jellyfin response parsing error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Invalid response from Jellyfin server")
+    except Exception as e:
+        log_error(LogTags.API, f"Jellyfin test error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/jellyfin/libraries")
+async def get_jellyfin_libraries(config: PlexTestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Get available libraries from a Jellyfin server"""
+    try:
+        resolved_token = _resolve_masked_plex_token(db, config.url, config.token)
+        log_user_action(f"Fetching Jellyfin libraries from {config.url}")
+
+        def fetch_libraries() -> List[Dict[str, Any]]:
+            from util.media_server.jellyfin import JellyfinClient
+
+            client = JellyfinClient(config.url, resolved_token)
+            if not client.connect_status:
+                raise RuntimeError("Cannot connect to Jellyfin - check the URL and API key")
+            # Only movie/show libraries are selectable — box sets ("Collections"),
+            # music, and mixed folders aren't consumed by any library-scoped feature
+            return [
+                {
+                    "title": library.title,
+                    "key": library.key,  # Jellyfin virtual-folder item id (GUID string)
+                    "type": library.type,
+                    "enabled": True,
+                }
+                for library in client.get_libraries()
+                if library.type in ("movie", "show")
+            ]
+
+        libraries = await asyncio.to_thread(fetch_libraries)
+
+        log_info(LogTags.API, f"Found {len(libraries)} libraries on Jellyfin server")
+        return {
+            "success": True,
+            "libraries": libraries,
+        }
+
+    except Exception as e:
+        log_error(LogTags.API, f"Error fetching Jellyfin libraries: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching libraries: {str(e)}")
+
+
 @router.post("/plex/libraries")
 async def get_plex_libraries(config: PlexTestRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get available libraries from a Plex server"""
@@ -126,15 +211,19 @@ async def get_plex_libraries(config: PlexTestRequest, db: Session = Depends(get_
         log_user_action(f"Fetching Plex libraries from {config.url}")
 
         def fetch_libraries() -> List[Dict[str, Any]]:
-            from plexapi.server import PlexServer
+            from util.media_server.plex import PlexClient
 
-            plex = PlexServer(config.url, resolved_token)
+            client = PlexClient(config.url, resolved_token)
             libraries: List[Dict[str, Any]] = []
-            for section in plex.library.sections():
+            for library in client.get_libraries():
+                # Only movie/show sections are selectable (photo/music aren't consumed)
+                if library.type not in ("movie", "show"):
+                    continue
                 libraries.append({
-                    "title": section.title,
-                    "key": section.key,
-                    "type": section.type,  # 'movie', 'show', etc.
+                    "title": library.title,
+                    # plexapi section keys are ints; keep the historical response shape
+                    "key": int(library.key) if library.key.isdigit() else library.key,
+                    "type": library.type,
                     "enabled": True  # Default to enabled
                 })
             return libraries

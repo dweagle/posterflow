@@ -81,20 +81,19 @@ def _item_match_keys(item: Any, is_movie: bool) -> Set[str]:
     media='movie' for it. Keying a TV-library collection as 'show' would never match its own
     poster."""
     keys: Set[str] = set()
-    is_collection = getattr(item, "type", "") == "collection"
+    is_collection = item.item_type == "collection"
     media = "movie" if (is_movie or is_collection) else "show"
-    year = None if is_collection else getattr(item, "year", None)
-    title_key = _title_key(getattr(item, "title", "") or "", str(year) if year else "", media)
+    year = None if is_collection else item.year
+    title_key = _title_key(item.title or "", str(year) if year else "", media)
     if title_key:
         keys.add(title_key)
-    for guid in (getattr(item, "guids", None) or []):
-        gid = str(getattr(guid, "id", "") or "")
-        for kind in ("tmdb", "imdb", "tvdb"):
-            prefix = f"{kind}://"
-            if gid.startswith(prefix):
-                if kind == "tmdb" and not (is_movie or is_collection):
-                    continue  # tmdb ids collide across movie/TV namespaces
-                keys.add(f"{kind}:{gid[len(prefix):].lower()}")
+    for kind in ("tmdb", "imdb", "tvdb"):
+        value = (item.provider_ids or {}).get(kind)
+        if not value:
+            continue
+        if kind == "tmdb" and not (is_movie or is_collection):
+            continue  # tmdb ids collide across movie/TV namespaces
+        keys.add(f"{kind}:{value}")
     return keys
 
 
@@ -204,28 +203,23 @@ def _selected_library_keys(db: Session) -> Set[str]:
     return set()
 
 
-def _search_section(section: Any, match: str, value: str) -> List[Any]:
-    """Server-side query for the items in a section matching one rule.
+def _search_section(client: Any, library: Any, match: str, value: str) -> List[Any]:
+    """Server-side query for the items in a library matching one rule.
 
     A label/genre rule also matches COLLECTIONS carrying that label/genre, so a label put on
     a collection borders the collection's OWN poster (member items are bordered only if they
     individually carry the label). Plex stores collection labels in a namespace separate from
-    item labels, so section.search(label=..) alone never returns them."""
+    item labels, so a plain label search alone never returns them."""
     if match == "collection":
         # Match a collection by title → border its member items.
         matched: List[Any] = []
-        for coll in section.search(libtype="collection"):
-            if str(getattr(coll, "title", "")).strip().lower() == value.strip().lower():
-                matched.extend(coll.items())
+        for coll in client.get_collections(library.key):
+            if str(coll.title or "").strip().lower() == value.strip().lower():
+                matched.extend(client.get_collection_items(coll))
         return matched
-    # label / genre → items carrying the field (server-side)...
-    matched = list(section.search(**{match: value}))
-    # ...plus any collection carrying it, keyed to its own poster.
-    try:
-        matched.extend(section.search(libtype="collection", **{match: value}))
-    except Exception:
-        pass  # some fields aren't filterable on collections; skip if unsupported
-    return matched
+    # label / genre → items carrying the field (server-side), plus any collection
+    # carrying it, keyed to its own poster.
+    return client.find_by_field(match, value, library.key, include_collections=True)
 
 
 def _query_plex_matches(db: Session, rules: List[PlexBorderRule]) -> tuple[int, bool]:
@@ -236,7 +230,7 @@ def _query_plex_matches(db: Session, rules: List[PlexBorderRule]) -> tuple[int, 
     reached, and whether any connection or per-rule query raised. The caller uses these to
     fail closed — an empty match set from a query FAILURE must not be mistaken for "nothing
     matched" (which would make an 'except' rule paint the whole library)."""
-    from plexapi.server import PlexServer
+    from util.media_server.client import create_media_server_client
 
     raw = get_setting_value(db, "plex_instances", "[]") or "[]"
     try:
@@ -245,36 +239,41 @@ def _query_plex_matches(db: Session, rules: List[PlexBorderRule]) -> tuple[int, 
         instances = []
     instances = [i for i in instances if isinstance(i, dict) and i.get("url") and i.get("api_key")]
     if not instances:
-        log_warning(LogTags.BORDER_REPLACER, "Plex border rules: no Plex instances configured; rules skipped")
+        log_warning(LogTags.BORDER_REPLACER, "Border rules: no media server instances configured; rules skipped")
         return 0, True
 
     lib_scope = _selected_library_keys(db)
     scanned = 0
     had_errors = False
 
+    from util.media_server.instances import instance_label
+
     for instance in instances:
         name = str(instance.get("name", "")).strip()
+        label = instance_label(instance)
         try:
-            plex = PlexServer(str(instance["url"]), str(instance["api_key"]))
-            sections = [s for s in plex.library.sections() if s.type in ("movie", "show")]
+            client = create_media_server_client(instance)
+            if client is None:
+                raise RuntimeError("connection failed")
+            libraries = [l for l in client.get_libraries() if l.type in ("movie", "show")]
         except Exception as e:
-            log_warning(LogTags.BORDER_REPLACER, f"Plex border rules: cannot reach '{name}': {e}")
+            log_warning(LogTags.BORDER_REPLACER, f"Border rules: cannot reach {label}: {e}")
             had_errors = True
             continue
-        for section in sections:
+        for library in libraries:
             # Only scan libraries the user explicitly checked.
-            if f"{name}:{section.key}" not in lib_scope:
+            if f"{name}:{library.key}" not in lib_scope:
                 continue
-            is_movie = getattr(section, "type", "") == "movie"
+            is_movie = library.type == "movie"
             scanned += 1
             for rule in rules:
                 try:
-                    for it in _search_section(section, rule.match, rule.value):
+                    for it in _search_section(client, library, rule.match, rule.value):
                         rule.match_keys |= _item_match_keys(it, is_movie)
                 except Exception as e:
                     log_warning(
                         LogTags.BORDER_REPLACER,
-                        f"Plex border rules: query failed ({rule.match}={rule.value}) on {section.title}: {e}",
+                        f"Border rules: query failed ({rule.match}={rule.value}) on {label} library {library.title}: {e}",
                     )
                     had_errors = True
     return scanned, had_errors
@@ -290,19 +289,19 @@ def build_plex_matcher(db: Session, run_type: str) -> Optional[PlexRuleMatcher]:
     if not rules:
         return None
     if not _selected_library_keys(db):
-        log_info(LogTags.BORDER_REPLACER, "Plex border rules: no libraries selected; rules skipped")
+        log_info(LogTags.BORDER_REPLACER, "Border rules: no libraries selected; rules skipped")
         return None
     try:
         scanned, had_errors = _query_plex_matches(db, rules)
     except Exception as e:
-        log_error(LogTags.BORDER_REPLACER, f"Plex border rules: matcher build failed: {e}")
+        log_error(LogTags.BORDER_REPLACER, f"Border rules: matcher build failed: {e}")
         return None
 
     # Fail closed: if we couldn't actually scan any selected library, don't return a
     # matcher — its empty match sets would make every 'except' rule match everything and
     # (via per-item tracking) revert rule-styled posters to default borders.
     if scanned == 0:
-        log_warning(LogTags.BORDER_REPLACER, "Plex border rules: no selected library could be scanned; rules skipped this run")
+        log_warning(LogTags.BORDER_REPLACER, "Border rules: no selected library could be scanned; rules skipped this run")
         return None
     # A partial query failure is only dangerous for 'except' rules (missing matches → too
     # many items painted). Include/skip rules degrade safely (an item just misses its border
@@ -310,7 +309,7 @@ def build_plex_matcher(db: Session, run_type: str) -> Optional[PlexRuleMatcher]:
     if had_errors and any(r.mode == "except" for r in rules):
         log_warning(
             LogTags.BORDER_REPLACER,
-            "Plex border rules: Plex query incomplete and an 'except' rule is present; rules skipped this run to avoid over-applying borders",
+            "Border rules: server query incomplete and an 'except' rule is present; rules skipped this run to avoid over-applying borders",
         )
         return None
 

@@ -2,7 +2,7 @@
 context, id-key lookups, and availability index construction."""
 
 from services.plex_upload import PlexUploadService
-from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex
+from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex, wrap_item
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +474,7 @@ def test_upload_asset_supplements_arr_ids_when_path_has_no_tokens(test_db):
     # Plex index has the show under the GUID-based key (set by includeGuids=1)
     index = {
         "movies": {},
-        "shows": {"id:tvdb:79337": [fake_show]},
+        "shows": {"id:tvdb:79337": [wrap_item(fake_show)]},
         "collections": {},
     }
 
@@ -541,7 +541,7 @@ def test_upload_asset_no_match_when_arr_empty_and_no_path_tokens(test_db):
 
     index = {
         "movies": {},
-        "shows": {"id:tvdb:79337": [_FakeShow()]},  # only GUID key, no title key
+        "shows": {"id:tvdb:79337": [wrap_item(_FakeShow())]},  # only GUID key, no title key
         "collections": {},
     }
 

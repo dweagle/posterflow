@@ -50,8 +50,12 @@ def media_source_refs(media: Dict[str, Any]) -> Dict[str, Any]:
         "tvdb_id": media.get("tvdb_id"),
         "imdb_id": media.get("imdb_id"),
         "poster_url": media.get("poster_url"),
-        # False = tracked in Sonarr/Radarr but not downloaded ("Missing in Arr").
+        # Media-server thumb via the local proxy — display fallback only, never published
+        "thumb_url": media.get("thumb_url"),
+        # False = tracked but not downloaded; source says WHO tracks it
+        # ("plex"/"jellyfin"/"manual"; absent = Sonarr/Radarr) for specific UI text.
         "available": available,
+        "source": media.get("source"),
         # ISO dates for modal sorting: arr added date + digital/physical (or firstAired) release
         "added": media.get("added"),
         "release_date": media.get("release_date"),
@@ -275,21 +279,25 @@ def is_match(
             return title_matches()
         # Rejected. Distinguish the causes, because the id lock skips the title fallback
         # below and two of them deserve a report instead of silence:
-        #   - a shared id type disagrees but title AND year agree -> one side is mistagged.
-        #     (Title-only agreement stays silent — that's the remake-with-new-id case.)
+        #   - ONE shared id type disagrees but title AND year agree -> one side is likely
+        #     mistagged. (Title-only agreement stays silent — the remake-with-new-id case.)
         #   - no id type on both sides -> nothing could be compared, so an agreeing title
         #     is almost certainly a tagging gap (e.g. imdb-only poster vs tvdb-only item).
-        shares_an_id_type = any(
-            media_value and asset.get(key)
+        # Two or more shared id types ALL disagreeing means two different releases that
+        # happen to share a name (and maybe a year) — a real non-match, kept silent; a
+        # genuine mistag on one side leaves some other id agreeing, which matches above.
+        shared_id_types = sum(
+            1
             for key, media_value in (
                 ("tvdb_id", media.get("tvdb_id")),
                 ("tmdb_id", _media_tmdb),
                 ("imdb_id", media.get("imdb_id")),
             )
+            if media_value and asset.get(key)
         )
         title_ok, title_reason = title_matches()
-        if shares_an_id_type:
-            if title_ok:
+        if shared_id_types:
+            if title_ok and shared_id_types == 1:
                 return False, ID_CONFLICT
             return False, ""
         if title_ok:
@@ -524,6 +532,8 @@ def match_assets_to_media(
                             "title": media["title"],
                             "year": media.get("year"),
                             "folder": media.get("folder"),
+                            # Duplicate copies' folder names — placement writes to each
+                            "extra_folders": media.get("extra_folders") or [],
                             # Existence-check assets (destination artwork) carry no files.
                             "files": search_asset.get("files") or [],
                             "seasons_numbers": (
@@ -579,10 +589,11 @@ def _year_detail(media: Dict[str, Any], asset: Dict[str, Any]) -> str:
         f"        poster  year={asset.get('year')}\n"
         f"        library {', '.join(library_years) or 'no year'}"
     )
-    # The common cause: Sonarr/Radarr path lacks " (YYYY)", so no folder_year corroborates.
+    # The common cause: the source's path lacks " (YYYY)", so no folder_year corroborates.
     if media.get("folder") and media.get("folder_year") is None:
+        source_label = str(media.get("instance") or "").strip() or "library"
         line += (
-            f"\n        note    *arr path has no (year): "
+            f"\n        note    {source_label} path has no (year): "
             f"{os.path.basename(media['folder'])}"
         )
     return line
@@ -603,7 +614,7 @@ def _log_near_misses(
         (
             ID_CONFLICT,
             "carry a DIFFERENT id (title and year agree), so they were treated as "
-            "separate items. One side is mistagged — fix the poster tag or the *arr mapping:",
+            "separate items. One side is mistagged — fix the poster tag or the id in the source named on each line:",
         ),
         (
             NO_SHARED_ID,
@@ -613,7 +624,7 @@ def _log_near_misses(
         (
             YEAR_MISMATCH,
             "matched by title but no year lined up, so they were skipped. "
-            "Add the year to the *arr folder path or the poster filename:",
+            "Add the year to the folder path in the source named on each line, or to the poster filename:",
         ),
     )
 
@@ -639,7 +650,11 @@ def _log_near_misses(
                 )
             else:
                 body = f"{_year_detail(media, asset)}\n        file    {source}"
-            detail = f"    {media.get('title')} ({media.get('year')})\n{body}"
+            media_source_name = str(media.get("instance") or "").strip()
+            header = f"    {media.get('title')} ({media.get('year')})"
+            if media_source_name:
+                header += f" — {media_source_name}"
+            detail = f"{header}\n{body}"
             if index < _NEAR_MISS_DETAIL_LIMIT:
                 log_warning(LogTags.MATCH, detail, media_title=media.get("title"))
             else:

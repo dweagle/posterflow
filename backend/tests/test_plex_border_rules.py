@@ -278,8 +278,9 @@ def test_item_match_keys_collection_is_yearless_movie():
     """A collection keys as a yearless movie regardless of its library, matching the
     token-less collection poster folder that folder_match_keys infers."""
     from services.plex_border_rules import _item_match_keys
+    from plex_upload_fakes import wrap_item
 
-    tv_coll = _FakeCollection("Disney+ Top 10", [])
+    tv_coll = wrap_item(_FakeCollection("Disney+ Top 10", []))
     # is_movie=False (a TV library) but the collection still keys as a movie.
     keys = _item_match_keys(tv_coll, is_movie=False)
     assert keys == folder_match_keys("Disney+ Top 10") == {"title:disneytop10::movie"}

@@ -15,10 +15,10 @@ Community drive recommendations — poster drives, artwork drives and the priori
 ## Features
 
 - **Drive Syncing** — Subscribe to community preset drives (MM2K, CL2K, etc.) or add your own custom Google Drive sources
-- **Poster Renamer** — Automatically renames downloaded posters to match your Plex/Radarr/Sonarr library
+- **Poster Renamer** — Automatically renames downloaded posters to match your Plex/Jellyfin/Radarr/Sonarr library
 - **Border Replacer** — Replaces poster borders in bulk
 - **Unmatched Assets** — Detects and reports assets in your library that are missing posters. TMDB links for missing items
-- **Plex Upload** — Upload posters directly to Plex libraries
+- **Asset Upload** — Upload posters and artwork directly to your Plex and Jellyfin libraries
 - **IDarr** — Metadata enrichment pipeline for poster-maker assets (TMDB/TVDB/IMDB ID assignment and rename normalization)
 - **Community Requests** — Shared request board where users submit missing posters for makers to claim and fulfill. Discord integration auto-fills your username and unlocks an upload button for verified poster makers
 - **Maker Tools** — Poster-makers can monitor upcoming movie and TV releases to track missing posters

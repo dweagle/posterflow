@@ -1,4 +1,5 @@
 import filecmp
+import html
 import json
 import os
 import re
@@ -6,6 +7,7 @@ import shutil
 import traceback
 
 import requests
+from unidecode import unidecode
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pathvalidate import is_valid_filename, sanitize_filename
@@ -26,6 +28,9 @@ from util.data.construct import (
     SLOT_SQUARE,
 )
 from util.data.normalization import normalize_titles
+from util.media_server.instances import instance_label, instance_type, thumb_proxy_url
+from util.media_server.types import CAP_PER_LIBRARY_COLLECTIONS
+from util.poster_settings import media_server_media_source_enabled
 from util.posters.assets import get_assets_files, merge_assets
 from util.posters.index import build_search_index, create_new_empty_index
 from util.posters.match import match_assets_to_media, match_tmdb_collection
@@ -401,6 +406,13 @@ class PosterRenameService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.logger = logger
+        self._media_fetch_failed_types: set[str] = set()
+
+    @property
+    def media_fetch_failed_types(self) -> set[str]:
+        """Media types ("movies"/"series") whose media-server fetch failed in the last
+        get_media_from_instances call; cleanup treats them as unsafe to prune."""
+        return set(self._media_fetch_failed_types)
 
     def _asset_matches_target(
         self,
@@ -516,84 +528,294 @@ class PosterRenameService:
 
         return filtered_assets, filtered_index
 
-    def _fetch_plex_collections(
-        self, 
-        url: str, 
-        token: str, 
+    def _connect_media_server(self, instance: Dict[str, Any], log_tag: str, purpose: str) -> Optional[Any]:
+        """Connect to a media server instance, logging the attempt; None (logged) on failure."""
+        # Resolved at call time so tests can monkeypatch util.media_server's factory
+        from util.media_server import create_media_server_client
+
+        server_label = instance_label(instance)
+        log_info(log_tag, f"Connecting to {server_label} at {instance.get('url')} to fetch {purpose}...")
+        client = create_media_server_client(instance)
+        if client is None:
+            log_error(log_tag, f"Error connecting to {server_label}: connection failed")
+        return client
+
+    def _fetch_media_server_collections(
+        self,
+        instance: Dict[str, Any],
         media_dict: MediaDict,
-        instance_name: str = "Plex",
         log_tag: str = LogTags.RENAMER,
-        selected_libraries: Optional[List[str]] = None
+        selected_libraries: Optional[List[str]] = None,
+        client: Optional[Any] = None,
     ) -> None:
         """
-        Fetch collections from a Plex server.
-        
+        Fetch collections from a media server instance (Plex sections or Jellyfin box sets).
+
         Args:
-            url: Plex server URL
-            token: Plex authentication token
+            instance: Instance config dict (name, url, api_key, optional type)
             media_dict: Dictionary to append collections to
-            instance_name: Name of this Plex instance
             log_tag: Tag to use for logging (LogTags constant)
             selected_libraries: List of library keys to include (format: "instance_name:library_key")
+            client: Already-connected client to reuse (None = connect here)
         """
+        instance_name = str(instance.get("name") or "Plex")
         try:
-            from plexapi.server import PlexServer
-            from util.data.normalization import normalize_titles
-            import html
-            from unidecode import unidecode
-            
-            log_info(log_tag, f"Connecting to {instance_name} at {url} to fetch collections...")
-            plex = PlexServer(url, token)
-            
-            # Get all library sections
-            for section in plex.library.sections():
-                if section.type in ['movie', 'show']:
-                    # Check if this library is selected
-                    library_key = f"{instance_name}:{section.key}"
-                    if selected_libraries is not None and library_key not in selected_libraries:
-                        log_debug(log_tag, f"Skipping library '{section.title}' (not selected)")
-                        continue
-                    
-                    log_info(log_tag, f"Fetching collections from {instance_name} library: {section.title}")
-                    collections = section.search(libtype='collection')
-                    
-                    for collection in collections:
-                        if getattr(collection, "smart", False):
-                            log_debug(log_tag, f"Including smart collection: {collection.title}")
-                        
-                        title = unidecode(html.unescape(collection.title))
-                        normalized_title = normalize_titles(title)
-                        
-                        # Generate alternate title variants (like DAPS does)
-                        title_variants = generate_title_variants(title)
-                        
-                        # Pre-sanitize folder name to remove illegal chars (matches DAPS behavior)
-                        folder = illegal_chars_regex.sub("", title)
+            server_label = instance_label(instance)
+            if client is None:
+                client = self._connect_media_server(instance, log_tag, "collections")
+                if client is None:
+                    return
 
-                        added_at = getattr(collection, "addedAt", None)
-                        media_dict["collections"].append({
-                            "type": "collections",
-                            "title": title,
-                            "year": None,
-                            "added": added_at.isoformat() if added_at else None,
-                            "folder": folder,  # Use pre-sanitized folder name
-                            "normalized_title": normalized_title,
-                            "alternate_titles": title_variants["alternate_titles"],
-                            "normalized_alternate_titles": title_variants["normalized_alternate_titles"],
-                            "instance": f"{instance_name} ({section.title})",  # Track which library this is from
-                            "library_type": section.type,  # Store the actual library type ('movie' or 'show')
-                        })
-                    
-                    log_info(log_tag, f"Found {len(collections)} collections in '{section.title}' ({instance_name})")
-                    
-        except ImportError:
-            log_error(log_tag, "plexapi not installed. Install with: pip install plexapi")
+            def add_collection(collection, library_title: Optional[str], library_type: str) -> None:
+                if collection.smart:
+                    log_debug(log_tag, f"Including smart collection: {collection.title}")
+
+                title = unidecode(html.unescape(collection.title))
+                normalized_title = normalize_titles(title)
+
+                # Generate alternate title variants (like DAPS does)
+                title_variants = generate_title_variants(title)
+
+                # Pre-sanitize folder name to remove illegal chars (matches DAPS behavior)
+                folder = illegal_chars_regex.sub("", title)
+
+                media_dict["collections"].append({
+                    "type": "collections",
+                    "title": title,
+                    "year": None,
+                    "added": collection.added_at,
+                    "folder": folder,  # Use pre-sanitized folder name
+                    "normalized_title": normalized_title,
+                    "alternate_titles": title_variants["alternate_titles"],
+                    "normalized_alternate_titles": title_variants["normalized_alternate_titles"],
+                    "instance": f"{instance_name} ({library_title})" if library_title else instance_name,
+                    "library_type": library_type,  # 'movie' or 'show'
+                })
+
+            if client.supports(CAP_PER_LIBRARY_COLLECTIONS):
+                for library in client.get_libraries():
+                    if library.type in ['movie', 'show']:
+                        # Check if this library is selected
+                        library_key = f"{instance_name}:{library.key}"
+                        if selected_libraries is not None and library_key not in selected_libraries:
+                            log_debug(log_tag, f"Skipping library '{library.title}' (not selected)")
+                            continue
+
+                        log_info(log_tag, f"Fetching collections from {server_label} library: {library.title}")
+                        collections = client.get_collections(library.key)
+                        for collection in collections:
+                            add_collection(collection, library.title, library.type)
+
+                        log_info(log_tag, f"Found {len(collections)} collections in '{library.title}' ({server_label})")
+            else:
+                # Server-global collections (Jellyfin box sets): fetch once per instance.
+                # Included when any of the instance's libraries is selected for this run.
+                if selected_libraries is not None and not any(
+                    str(key).startswith(f"{instance_name}:") for key in selected_libraries
+                ):
+                    log_debug(log_tag, f"Skipping collections for {server_label} (no libraries selected)")
+                    return
+
+                collections = client.get_collections()
+                for collection in collections:
+                    # Box sets aren't library-scoped; keyed as movie to match the
+                    # yearless/token-less collection poster folder convention
+                    add_collection(collection, None, "movie")
+
+                log_info(log_tag, f"Found {len(collections)} collections on {server_label}")
+
         except Exception as e:
             log_error(log_tag, f"Error connecting to {instance_name}: {e}")
 
+    @staticmethod
+    def _media_server_folder_candidates(item: Any, media_type: str) -> List[Tuple[str, str, Optional[str]]]:
+        """Ordered distinct (folder basename, parent path, root path) per item path.
+        Movies carry media file paths, shows directory paths; splits on / and \\ (server
+        may be Windows). A multi-version item can span several folders — all are kept."""
+        depth = 2 if media_type == "movies" else 1
+        candidates: List[Tuple[str, str, Optional[str]]] = []
+        seen: set = set()
+        for raw in (item.paths or []):
+            raw = str(raw)
+            parts = [p for p in re.split(r"[\\/]+", raw) if p]
+            if len(parts) < depth:
+                continue
+            folder = parts[-depth]
+            sep = "\\" if "\\" in raw else "/"
+            parent = sep.join(parts[:-(depth - 1)]) if depth > 1 else raw
+            root = sep.join(parts[:-depth])
+            if raw.startswith("/"):
+                parent = "/" + parent if not parent.startswith("/") else parent
+                root = "/" + root if root else ""
+            key = parent.replace("\\", "/").rstrip("/").casefold()
+            if not parent or key in seen:
+                continue
+            seen.add(key)
+            candidates.append((folder, parent, root or None))
+        return candidates
+
+    def _fetch_media_server_media(
+        self,
+        instance: Dict[str, Any],
+        media_dict: MediaDict,
+        log_tag: str = LogTags.RENAMER,
+        selected_libraries: Optional[List[str]] = None,
+        client: Optional[Any] = None,
+    ) -> None:
+        """
+        Fetch movies/shows from a media server instance (Plex or Jellyfin) as arr-shaped
+        items, so users without Radarr/Sonarr can run the matching pipeline.
+
+        Args:
+            instance: Instance config dict (name, url, api_key, optional type)
+            media_dict: Dictionary to append movies/series to
+            log_tag: Tag to use for logging (LogTags constant)
+            selected_libraries: List of library keys to include (format: "instance_name:library_key")
+            client: Already-connected client to reuse (None = connect here)
+        """
+        instance_name = str(instance.get("name") or "Plex")
+        try:
+            server_label = instance_label(instance)
+            source = instance_type(instance)
+            if client is None:
+                client = self._connect_media_server(instance, log_tag, "movies/shows")
+                if client is None:
+                    self._media_fetch_failed_types.update(("movies", "series"))
+                    return
+
+            for library in client.get_libraries():
+                if library.type not in ("movie", "show"):
+                    continue
+                library_key = f"{instance_name}:{library.key}"
+                if selected_libraries is not None and library_key not in selected_libraries:
+                    log_debug(log_tag, f"Skipping library '{library.title}' (not selected)")
+                    continue
+                media_type = "movies" if library.type == "movie" else "series"
+                try:
+                    count = self._add_media_server_library(
+                        client, library, media_type, media_dict, instance_name, source, log_tag
+                    )
+                    log_info(log_tag, f"Found {count} {media_type} in '{library.title}' ({server_label})")
+                except Exception as e:
+                    self._media_fetch_failed_types.add(media_type)
+                    log_error(log_tag, f"Error fetching {media_type} from {server_label} library '{library.title}': {e}")
+
+        except Exception as e:
+            self._media_fetch_failed_types.update(("movies", "series"))
+            log_error(log_tag, f"Error connecting to {instance_name}: {e}")
+
+    def _add_media_server_library(
+        self,
+        client: Any,
+        library: Any,
+        media_type: str,
+        media_dict: MediaDict,
+        instance_name: str,
+        source: str,
+        log_tag: str,
+    ) -> int:
+        def pid_int(ids: Dict[str, str], key: str) -> Optional[int]:
+            v = str(ids.get(key) or "").strip()
+            return int(v) if v.isdigit() else None
+
+        items = client.get_library_items(
+            library.key, item_types=["Movie"] if media_type == "movies" else ["Series"]
+        )
+        items = [i for i in items if i.item_type in ("movie", "show")]
+
+        seasons_by_show: Dict[str, List[Dict[str, Any]]] = {}
+        if media_type == "series":
+            for season in client.get_library_seasons(library.key):
+                if season.parent_id is None or season.index is None:
+                    continue
+                if season.child_count is not None and season.child_count <= 0:
+                    continue
+                seasons_by_show.setdefault(season.parent_id, []).append(
+                    {"season_number": season.index, "season_has_episodes": True, "monitored": True}
+                )
+
+        # Flat movie layouts: the parent dir is the library root, never a folder name.
+        # Items sharing a proper movie folder (split editions) keep the real name.
+        def norm_path(p: str) -> str:
+            return re.sub(r"[\\/]+$", "", str(p)).replace("\\", "/").casefold()
+
+        library_roots = {norm_path(loc) for loc in (getattr(library, "locations", None) or []) if loc}
+
+        count = 0
+        for item in items:
+            title = unidecode(html.unescape(item.title))
+            if not title:
+                continue
+            title_variants = generate_title_variants(title)
+            candidates = self._media_server_folder_candidates(item, media_type)
+            flat_roots = [c for c in candidates if media_type == "movies" and norm_path(c[1]) in library_roots]
+            candidates = [c for c in candidates if c not in flat_roots]
+            folder, parent, root = candidates[0] if candidates else (None, None, None)
+            if not folder and flat_roots:
+                root = flat_roots[0][1]
+            extra_folders = list(dict.fromkeys(c[0] for c in candidates[1:] if c[0] and c[0] != folder))
+            if not folder:
+                base = f"{title} ({item.year})" if item.year else title
+                folder = illegal_chars_regex.sub("", base)
+
+            ids = item.provider_ids or {}
+            entry: MediaItem = {
+                "type": media_type,
+                "title": title,
+                "year": item.year,
+                "folder": folder,
+                "root_folder": root,
+                "imdb_id": str(ids.get("imdb") or "").strip() or None,
+                "added": item.added_at,
+                "release_date": item.release_date,
+                "poster_url": None,
+                "monitored": True,
+                "normalized_title": normalize_titles(title),
+                "alternate_titles": title_variants["alternate_titles"],
+                "normalized_alternate_titles": title_variants["normalized_alternate_titles"],
+                "instance": f"{instance_name} ({library.title})",
+                "source": source,
+            }
+            if item.thumb_path:
+                # Local proxy preview only (poster_url stays None — nothing publishable)
+                entry["thumb_url"] = thumb_proxy_url(instance_name, item.thumb_path)
+            if extra_folders:
+                entry["extra_folders"] = extra_folders
+            if media_type == "movies":
+                entry["tmdb_id"] = pid_int(ids, "tmdb")
+                entry["status"] = "released"
+                entry["has_file"] = True
+            else:
+                seasons = sorted(
+                    seasons_by_show.get(item.item_id, []), key=lambda s: s["season_number"]
+                )
+                entry["tvdb_id"] = pid_int(ids, "tvdb")
+                # Same convention as Sonarr items: the matcher stays on TVDB for series
+                entry["tmdb_id_ref"] = pid_int(ids, "tmdb")
+                entry["seasons"] = seasons
+                entry["status"] = "continuing"
+                entry["has_episodes"] = bool(seasons)
+            media_dict[media_type].append(entry)
+            count += 1
+        return count
+
+    @staticmethod
+    def _merge_folder_names(existing: MediaItem, duplicate: MediaItem) -> None:
+        """Union duplicate copies' destination folder names into extra_folders, so each
+        copy's on-disk folder gets its own asset folder (Kometa matches by folder name)."""
+        def names(d: MediaItem) -> List[str]:
+            base = os.path.basename(str(d.get("folder") or "").rstrip("/"))
+            return [n for n in [base, *(d.get("extra_folders") or [])] if n]
+
+        known = set(names(existing))
+        for name in names(duplicate):
+            if name not in known:
+                existing.setdefault("extra_folders", []).append(name)
+                known.add(name)
+
     def _merge_duplicate_series(self, series_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
-        Merge duplicate series entries from multiple Sonarr instances.
+        Merge duplicate series entries from multiple sources (Sonarr instances and media server libraries).
         Combines season lists to include all seasons across all instances (DAPS behavior).
         
         Args:
@@ -608,6 +830,7 @@ class PosterRenameService:
         
         # Group series by unique identifier (tvdb_id preferred, fallback to title+year)
         series_map: Dict[str, Dict[str, Any]] = {}
+        merged_sources: set = set()
         
         for series in series_list:
             # Create unique key - prefer TVDB ID, fallback to title+year
@@ -635,10 +858,13 @@ class PosterRenameService:
                         season_dict[season_num] = season
                 
                 existing["seasons"] = sorted(season_dict.values(), key=lambda s: s["season_number"])
-                
+
+                self._merge_folder_names(existing, series)
+
                 # Combine instance names
                 existing_instance = existing.get("instance", "")
                 new_instance = series.get("instance", "")
+                merged_sources.update(part for part in existing_instance.split(" & ") + [new_instance] if part)
                 if new_instance and new_instance not in existing_instance:
                     existing["instance"] = f"{existing_instance} & {new_instance}"
                 
@@ -654,17 +880,18 @@ class PosterRenameService:
         merged_list = list(series_map.values())
         
         if len(merged_list) < len(series_list):
+            sources_text = ", ".join(sorted(merged_sources)) or "multiple sources"
             log_info(
                 log_tag,
                 f"Deduplicated series: {len(series_list)} entries → {len(merged_list)} unique series "
-                f"(merged {len(series_list) - len(merged_list)} duplicates from multiple Sonarr instances)"
+                f"(merged {len(series_list) - len(merged_list)} duplicates from {sources_text})"
             )
         
         return merged_list
 
     def _merge_duplicate_movies(self, movies_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
-        Merge duplicate movie entries from multiple Radarr instances.
+        Merge duplicate movie entries from multiple sources (Radarr instances and media server libraries).
         
         Args:
             movies_list: List of movies from all Radarr instances
@@ -678,7 +905,8 @@ class PosterRenameService:
         
         # Group movies by unique identifier (tmdb_id preferred, fallback to title+year)
         movies_map: Dict[str, Dict[str, Any]] = {}
-        
+        merged_sources: set = set()
+
         for movie in movies_list:
             # Create unique key - prefer TMDB ID, fallback to title+year
             tmdb_id = movie.get("tmdb_id")
@@ -690,10 +918,12 @@ class PosterRenameService:
                 key = f"{title}_{year}"
             
             if key in movies_map:
-                # Already exists - combine instance names
+                # Already exists - combine instance names and folder names
                 existing = movies_map[key]
+                self._merge_folder_names(existing, movie)
                 existing_instance = existing.get("instance", "")
                 new_instance = movie.get("instance", "")
+                merged_sources.update(part for part in existing_instance.split(" & ") + [new_instance] if part)
                 if new_instance and new_instance not in existing_instance:
                     existing["instance"] = f"{existing_instance} & {new_instance}"
                 
@@ -708,10 +938,11 @@ class PosterRenameService:
         merged_list = list(movies_map.values())
         
         if len(merged_list) < len(movies_list):
+            sources_text = ", ".join(sorted(merged_sources)) or "multiple sources"
             log_info(
                 log_tag,
                 f"Deduplicated movies: {len(movies_list)} entries → {len(merged_list)} unique movies "
-                f"(merged {len(movies_list) - len(merged_list)} duplicates from multiple Radarr instances)"
+                f"(merged {len(movies_list) - len(merged_list)} duplicates from {sources_text})"
             )
         
         return merged_list
@@ -754,7 +985,7 @@ class PosterRenameService:
             log_info(
                 log_tag,
                 f"Deduplicated collections: {len(collections_list)} entries → {len(merged_list)} unique "
-                f"(removed {len(collections_list) - len(merged_list)} duplicates across Plex libraries)"
+                f"(removed {len(collections_list) - len(merged_list)} duplicates across media server libraries)"
             )
 
         return merged_list
@@ -877,20 +1108,16 @@ class PosterRenameService:
                     if asset_type == "collections":
                         if not is_valid_filename(folder):
                             folder = sanitize_filename(folder)
-                    
-                    # Construct destination folder
-                    if asset_folders:
-                        dest_dir = os.path.join(destination_dir, folder)
-                        if not os.path.exists(dest_dir):
-                            if not dry_run:
-                                os.makedirs(dest_dir)
-                    else:
-                        dest_dir = destination_dir
+
+                    # Each duplicate copy's folder name gets its own asset folder
+                    # (Kometa matches by folder name)
+                    folder_names = [folder] + [
+                        n for n in (item.get("extra_folders") or []) if n and n != folder
+                    ]
 
                     # Artwork goes straight to the real destination (never the tmp/ staging), so
                     # the border replacer — which only processes tmp/ — never touches it.
                     art_base = artwork_destination or destination_dir
-                    artwork_dest_dir = os.path.join(art_base, folder) if asset_folders else art_base
 
                     # Artwork (logo/background/square) rides the same box as the poster — one
                     # match filled both — so it needs no separate lookup here.
@@ -912,10 +1139,23 @@ class PosterRenameService:
                     if artwork_slots:
                         item["_artwork_slots"] = artwork_slots  # let the caller tally artwork placed
 
-                    # Rename each asset file — walk the item's slots (poster/seasons + artwork).
-                    for file, new_file_name, _season_num, _slot in _placements_from_files(
-                        files, folder, asset_folders, artwork_slots, box_slots
-                    ):
+                    # Rename each asset file — walk the item's slots (poster/seasons + artwork),
+                    # once per destination folder name.
+                    placements: List[tuple] = []
+                    for folder_variant in folder_names:
+                        if asset_folders:
+                            variant_dest_dir = os.path.join(destination_dir, folder_variant)
+                            if not os.path.exists(variant_dest_dir) and not dry_run:
+                                os.makedirs(variant_dest_dir)
+                        else:
+                            variant_dest_dir = destination_dir
+                        variant_art_dir = os.path.join(art_base, folder_variant) if asset_folders else art_base
+                        for placement in _placements_from_files(
+                            files, folder_variant, asset_folders, artwork_slots, box_slots
+                        ):
+                            placements.append((*placement, variant_dest_dir, variant_art_dir))
+
+                    for file, new_file_name, _season_num, _slot, dest_dir, artwork_dest_dir in placements:
                         file_name = os.path.basename(file)
                         # Artwork (logo/background/square) is placed straight to the real dest and
                         # kept out of poster-only tracking (rename messages / style stats); it's
@@ -1068,15 +1308,12 @@ class PosterRenameService:
         Load manually added media entries from the database and inject them into
         *media_dict* so they participate in the normal poster-renaming pipeline.
 
-        Manual entries represent shows/movies that live in Plex but are not
-        managed by Sonarr or Radarr.  They are never deduplicated against
-        arr-sourced entries; if the same title appears in both sources the
-        arr-sourced entry takes precedence because it arrives first and the
-        deduplication step has already run.
+        Manual entries represent shows/movies in the library that no other source
+        manages. An entry already covered by another source (shared id, or same
+        title+year when the entry has no ids) is skipped.
         """
         try:
             from models.manual_media import ManualMediaEntry
-            from util.data.construct import generate_title_variants
 
             entries = self.db.query(ManualMediaEntry).all()
             if not entries:
@@ -1084,6 +1321,22 @@ class PosterRenameService:
 
             injected_movies = 0
             injected_series = 0
+            skipped_covered = 0
+
+            def _covering_entry(existing_entries, entry, normalized):
+                for existing in existing_entries:
+                    if entry.tmdb_id and existing.get("tmdb_id") == entry.tmdb_id:
+                        return existing
+                    if entry.tvdb_id and existing.get("tvdb_id") == entry.tvdb_id:
+                        return existing
+                    if entry.imdb_id and existing.get("imdb_id") and str(existing.get("imdb_id")).lower() == str(entry.imdb_id).lower():
+                        return existing
+                    if not (entry.tmdb_id or entry.tvdb_id or entry.imdb_id):
+                        if existing.get("normalized_title") == normalized and (
+                            entry.year is None or existing.get("year") in (None, entry.year)
+                        ):
+                            return existing
+                return None
 
             for entry in entries:
                 title = entry.title or ""
@@ -1104,6 +1357,11 @@ class PosterRenameService:
                 folder = f"{base_folder} {' '.join(id_parts)}" if id_parts else base_folder
 
                 if entry.media_type == "movie":
+                    covered = _covering_entry(media_dict["movies"], entry, normalized)
+                    if covered is not None:
+                        skipped_covered += 1
+                        log_debug(log_tag, f"Manual entry '{title}' already sourced from {covered.get('instance')} — skipped duplicate")
+                        continue
                     media_dict["movies"].append({
                         "type": "movies",
                         "title": title,
@@ -1125,6 +1383,11 @@ class PosterRenameService:
                     injected_movies += 1
 
                 elif entry.media_type == "series":
+                    covered = _covering_entry(media_dict["series"], entry, normalized)
+                    if covered is not None:
+                        skipped_covered += 1
+                        log_debug(log_tag, f"Manual entry '{title}' already sourced from {covered.get('instance')} — skipped duplicate")
+                        continue
                     season_numbers: List[int] = []
                     if entry.seasons_json:
                         try:
@@ -1158,11 +1421,12 @@ class PosterRenameService:
                     })
                     injected_series += 1
 
-            if injected_movies or injected_series:
+            if injected_movies or injected_series or skipped_covered:
+                skipped_text = f" ({skipped_covered} already covered by other sources)" if skipped_covered else ""
                 log_info(
                     log_tag,
-                    f"Injected manual media: {injected_movies} movies, {injected_series} series",
-                    movies=injected_movies, series=injected_series,
+                    f"Injected manual media: {injected_movies} movies, {injected_series} series{skipped_text}",
+                    movies=injected_movies, series=injected_series, skipped=skipped_covered,
                 )
 
         except Exception as exc:
@@ -1184,6 +1448,7 @@ class PosterRenameService:
             "series": [],
             "collections": [],
         }
+        self._media_fetch_failed_types = set()
 
         # Load selected libraries setting
         selected_libraries_setting = get_setting(self.db, setting_key)
@@ -1193,42 +1458,51 @@ class PosterRenameService:
                 selected_libraries = json.loads(selected_libraries_setting.value)
                 if selected_libraries:
                     log_info(log_tag, f"Using library filter: {len(selected_libraries)} libraries selected ({setting_key})")
+                elif selected_libraries == []:
+                    log_warning(log_tag, f"{setting_key} has an EMPTY library selection — no media-server libraries will be sourced for this run")
             except Exception as e:
                 log_error(log_tag, f"Error parsing {setting_key}: {e}")
 
-        # Get Plex collections (supports both formats for backward compatibility)
+        # Media server instances (supports both formats for backward compatibility)
+        media_server_instances: List[Dict[str, Any]] = []
         plex_instances = get_setting(self.db, "plex_instances")
-        
+
         if plex_instances and plex_instances.value:
-            # New format: instances array (supports multiple Plex servers)
+            # New format: instances array (supports multiple Plex/Jellyfin servers)
             try:
-                instances = json.loads(plex_instances.value)
-                for instance in instances:
-                    self._fetch_plex_collections(
-                        instance["url"], 
-                        instance["api_key"], 
-                        media_dict, 
-                        instance.get("name", "Plex"),
-                        log_tag,
-                        selected_libraries
-                    )
+                media_server_instances = json.loads(plex_instances.value)
             except Exception as e:
                 log_error(LogTags.RENAMER, f"Error parsing plex_instances: {e}")
         else:
             # Old format: separate url/token fields (single Plex server)
             plex_url_setting = get_setting(self.db, "plex_url")
             plex_token_setting = get_setting(self.db, "plex_token")
-            
+
             if plex_url_setting and plex_token_setting and plex_url_setting.value and plex_token_setting.value:
-                self._fetch_plex_collections(
-                    plex_url_setting.value, 
-                    plex_token_setting.value, 
-                    media_dict,
-                    "Plex",
-                    log_tag,
-                    selected_libraries
-                )
-        
+                media_server_instances = [
+                    {"name": "Plex", "url": plex_url_setting.value, "api_key": plex_token_setting.value}
+                ]
+
+        # One connect per instance: collections (before the arrs) and movies/shows
+        # (after them, so arr entries win the first-wins merge) reuse the same client.
+        fetch_media_from_servers = bool(media_server_instances) and media_server_media_source_enabled(self.db)
+        media_server_clients: List[Tuple[Dict[str, Any], Any]] = []
+        for instance in media_server_instances:
+            purpose = "collections and movies/shows" if fetch_media_from_servers else "collections"
+            client = self._connect_media_server(instance, log_tag, purpose)
+            if client is None:
+                if fetch_media_from_servers:
+                    self._media_fetch_failed_types.update(("movies", "series"))
+                continue
+            media_server_clients.append((instance, client))
+            self._fetch_media_server_collections(
+                instance,
+                media_dict,
+                log_tag,
+                selected_libraries,
+                client=client,
+            )
+
         # Get Radarr instances
         radarr_instances = get_setting(self.db, "radarr_instances")
         if radarr_instances and radarr_instances.value:
@@ -1279,6 +1553,19 @@ class PosterRenameService:
                             log_error(log_tag, f"No Sonarr data found from {instance['url']}")
                 except Exception as e:
                     log_error(log_tag, f"Error getting Sonarr data: {e}")
+
+        # Media-server movies/shows (arr-less installs, or hybrid via the toggle).
+        # Fetched after the arrs so arr entries win the first-wins duplicate merge.
+        if fetch_media_from_servers:
+            log_info(log_tag, "Media-server media source is enabled; fetching movies/shows from media server libraries")
+            for instance, client in media_server_clients:
+                self._fetch_media_server_media(
+                    instance,
+                    media_dict,
+                    log_tag,
+                    selected_libraries,
+                    client=client,
+                )
 
         # Deduplicate and merge media from multiple instances
         # This matches DAPS behavior: combine season lists from multiple Sonarr instances
@@ -1581,7 +1868,7 @@ class PosterRenameService:
             if not any(media_dict.values()):
                 return {
                     "success": False,
-                    "error": "No media found. Check Settings → Media tab to configure Plex/Radarr/Sonarr."
+                    "error": "No media found. Check Settings → Media tab to configure your media server/Radarr/Sonarr."
                 }
             
             # Phase 3: Match assets to media (40-50%)

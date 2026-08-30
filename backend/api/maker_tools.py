@@ -9,11 +9,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from urllib.parse import quote
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -1004,6 +1004,7 @@ def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
 # overview each, so a 50-card list is ~100 calls — and revisiting the page repeated every one.
 # Opt-in per call site (cache_ttl): scan paths that must see fresh data don't pass one.
 _TMDB_DETAIL_TTL = 10 * 60      # details/overviews/artwork lists
+_TMDB_OVERVIEW_TTL = 24 * 60 * 60   # description text rarely changes; unmatched tabs fetch it in bulk
 _TMDB_STATIC_TTL = 12 * 60 * 60  # facts that don't change (country of origin)
 _TMDB_CACHE_MAX = 512
 _tmdb_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -1632,10 +1633,12 @@ def _tvdb_season_list(tvdb_id: int, db: Session) -> list[TmdbSeasonInfo] | None:
 
 class TmdbOverview(BaseModel):
     overview: str = ""
+    # Public CDN poster from the same details response
+    poster_url: Optional[str] = None
 
 
 @router.get("/tmdb/overview", response_model=TmdbOverview)
-def tmdb_overview(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) -> TmdbOverview:
+def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session = Depends(get_db)) -> TmdbOverview:
     """A title's description on its own.
 
     Unmatched detection builds its items from the *arr library, which carries ids and an *arr
@@ -1652,8 +1655,13 @@ def tmdb_overview(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) 
 
     data = _tmdb_get_json(f"https://api.themoviedb.org/3/{mt}/{tmdb_id}",
                           {"api_key": api_key, "language": "en-US"}, "overview",
-                          cache_ttl=_TMDB_DETAIL_TTL)
-    return TmdbOverview(overview=str(data.get("overview") or ""))
+                          cache_ttl=_TMDB_OVERVIEW_TTL)
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    poster_path = str(data.get("poster_path") or "").strip()
+    return TmdbOverview(
+        overview=str(data.get("overview") or ""),
+        poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path.startswith("/") else None,
+    )
 
 
 @router.get("/tv-details", response_model=TmdbTvDetails)

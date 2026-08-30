@@ -3,10 +3,11 @@ from pathlib import Path
 import re
 import traceback
 from typing import Any, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -37,6 +38,8 @@ from modules.flow import run_flow_background_job
 from models.drive import Drive
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
+from util.library_configs import media_libraries_only
+from util.media_server.instances import is_jellyfin_instance, thumb_proxy_url
 from modules.upload import (
     PLEX_WEBHOOK_RETRY_ATTEMPTS,
     PLEX_WEBHOOK_RETRY_ATTEMPTS_MAX,
@@ -60,6 +63,7 @@ from modules.upload import (
     SETTING_PLEX_WEBHOOK_ADOPT_EXISTING_PROCESSED,
     SETTING_PLEX_WEBHOOK_RETRY_ATTEMPTS,
     SETTING_PLEX_WEBHOOK_RETRY_DELAY_SECONDS,
+    _attach_server_labels as attach_server_labels,
     _build_cache_clear_response as build_cache_clear_response,
     _build_cache_export_payload as build_cache_export_payload,
     _cache_summary as cache_summary,
@@ -80,6 +84,8 @@ from modules.upload import (
     _load_priority_source_dirs as load_priority_source_dirs,
     _load_webhook_stats as load_webhook_stats,
     _parse_arr_webhook_payload as parse_arr_webhook_payload,
+    _parse_jellyfin_webhook_payload as parse_jellyfin_webhook_payload,
+    _parse_plex_webhook_payload as parse_plex_webhook_payload,
     _record_unknown_instance_token as record_unknown_instance_token,
     _reset_webhook_stats as reset_webhook_stats,
     _search_webhook_dedupe_entries as search_webhook_dedupe_entries,
@@ -155,10 +161,10 @@ def build_webhook_settings_response(db: Session) -> Dict[str, Any]:
 
 
 def build_library_override_response(db: Session, override: Dict[str, Any]) -> Dict[str, Any]:
-    global_configs = load_library_configs_setting(db, SETTING_PLEX_LIBRARY_CONFIG)
+    global_configs = media_libraries_only(load_library_configs_setting(db, SETTING_PLEX_LIBRARY_CONFIG))
     return {
         "enabled": bool(override.get("enabled", False)),
-        "configs": override.get("configs", []),
+        "configs": media_libraries_only(override.get("configs", [])),
         "global_configs": global_configs,
     }
 
@@ -306,7 +312,7 @@ class PlexWebhookSettingsRequest(BaseModel):
 
 
 class PlexManualSettingsRequest(BaseModel):
-    """Payload for persisted manual run options on the Plex Upload page."""
+    """Payload for persisted manual run options on the Asset Upload page."""
     dry_run: bool = True
     reapply: bool = False
     remove_overlay_label: bool = False
@@ -314,7 +320,7 @@ class PlexManualSettingsRequest(BaseModel):
     rename_before_upload: bool = True
     border_before_upload: bool = False
     upload_delay_ms: int = 50
-    # Also governs the workflow's Plex Upload step; the webhook has its own toggle.
+    # Also governs the workflow's Asset Upload step; the webhook has its own toggle.
     upload_artwork: bool = False
 
 
@@ -325,7 +331,7 @@ class PlexLibraryConfigItem(BaseModel):
 
 
 class PlexLibraryOverrideSettingsRequest(BaseModel):
-    """Payload for Plex Upload page-specific library override settings."""
+    """Payload for Asset Upload page-specific library override settings."""
     enabled: bool
     configs: list[PlexLibraryConfigItem] = []
 
@@ -356,7 +362,7 @@ class PlexUploadSingleManualRequest(BaseModel):
     tmdb_id: Optional[int] = None
     tvdb_id: Optional[int] = None
     imdb_id: Optional[str] = None
-    plex_rating_key: Optional[int] = None
+    plex_rating_key: Optional[str] = None
     dry_run: bool = False
     reapply: bool = False
     remove_overlay_label: bool = False
@@ -392,9 +398,9 @@ def run_plex_upload(
             workflow_job = create_job(
                 db,
                 job_type=JOB_TYPE_POSTER_WORKFLOW,
-                message="Plex pre-upload workflow queued…",
+                message="Pre-upload workflow queued…",
             )
-            log_job_queued(LogTags.UPLOADER, "Plex pre-upload workflow", workflow_job.id)
+            log_job_queued(LogTags.UPLOADER, "Pre-upload workflow", workflow_job.id)
             job_queue.submit(
                 run_flow_background_job,
                 workflow_job.id,
@@ -409,14 +415,14 @@ def run_plex_upload(
             db,
             job_type=JOB_TYPE_PLEX_UPLOAD,
             message=format_start_message(
-                "Plex upload",
+                "asset upload",
                 dry_run=dry_run,
                 qualifier="(reapply)" if reapply else None,
             ),
         )
         job_id = job.id
 
-        log_job_queued(LogTags.UPLOADER, "Plex upload", job_id)
+        log_job_queued(LogTags.UPLOADER, "Asset upload", job_id)
 
         job_queue.submit(
             run_plex_upload_background_job_module,
@@ -429,7 +435,7 @@ def run_plex_upload(
 
         return job_started_response(
             job_id,
-            "Plex upload queued in background. Monitor progress via job status.",
+            "Asset upload queued in background. Monitor progress via job status.",
         )
 
     except HTTPException:
@@ -609,9 +615,9 @@ def search_plex_items(
     limit: int = 25,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Search Plex directly for movies, shows, and collections matching the query."""
+    """Search configured media servers directly for movies, shows, and collections matching the query."""
     try:
-        from plexapi.server import PlexServer
+        from util.media_server.client import create_media_server_client
 
         query = q.strip()
         if not query:
@@ -621,12 +627,12 @@ def search_plex_items(
 
         plex_instances_setting = get_setting(db, 'plex_instances')
         if not plex_instances_setting or not plex_instances_setting.value:
-            return {"query": query, "count": 0, "items": [], "error": "No Plex instances configured."}
+            return {"query": query, "count": 0, "items": [], "error": "No media server instances configured."}
 
         try:
             plex_instances = json.loads(plex_instances_setting.value)
         except Exception:
-            return {"query": query, "count": 0, "items": [], "error": "Invalid Plex instances configuration."}
+            return {"query": query, "count": 0, "items": [], "error": "Invalid media server instances configuration."}
 
         # Plex libtype codes: 1=movie, 2=show, 18=collection
         mt = (media_type or "").strip().lower()
@@ -651,78 +657,54 @@ def search_plex_items(
             if not url or not api_key:
                 continue
 
-            try:
-                plex = PlexServer(url, api_key)
-            except Exception as e:
-                log_error(LogTags.UPLOADER, f"Plex search: failed to connect to '{instance_name}': {e}")
+            client = create_media_server_client(instance)
+            if client is None:
+                log_error(LogTags.UPLOADER, f"Media server search: failed to connect to '{instance_name}'")
                 continue
 
-            for libtype in libtypes:
-                try:
-                    results = plex.search(query, mediatype=libtype, limit=safe_limit)
-                except Exception as e:
-                    log_error(LogTags.UPLOADER, f"Plex search: error searching '{libtype}' on '{instance_name}': {e}")
+            try:
+                results = client.search(query, media_types=libtypes, limit=safe_limit)
+            except Exception as e:
+                log_error(LogTags.UPLOADER, f"Media server search: error searching on '{instance_name}': {e}")
+                continue
+
+            for result in results:
+                rating_key = result.item_id or None
+                item_key = f"{instance_name}:{rating_key}"
+                if item_key in seen_keys:
                     continue
+                seen_keys.add(item_key)
 
-                for result in results:
-                    rating_key = getattr(result, "ratingKey", None)
-                    item_key = f"{instance_name}:{rating_key}"
-                    if item_key in seen_keys:
-                        continue
-                    seen_keys.add(item_key)
+                item_type = str(result.item_type or "").lower()
+                if item_type == "show":
+                    mapped_type = "series"
+                else:
+                    mapped_type = item_type
 
-                    item_type = str(getattr(result, "type", libtype)).lower()
-                    if item_type == "movie":
-                        mapped_type = "movie"
-                    elif item_type == "show":
-                        mapped_type = "series"
-                    elif item_type == "collection":
-                        mapped_type = "collection"
-                    else:
-                        mapped_type = item_type
+                # Provider ids for ID-based matching
+                tmdb_id: Optional[int] = None
+                tvdb_id: Optional[int] = None
+                provider_ids = result.provider_ids or {}
+                if str(provider_ids.get("tmdb") or "").isdigit():
+                    tmdb_id = int(provider_ids["tmdb"])
+                if str(provider_ids.get("tvdb") or "").isdigit():
+                    tvdb_id = int(provider_ids["tvdb"])
+                imdb_id: Optional[str] = provider_ids.get("imdb")
 
-                    title = str(getattr(result, "title", ""))
-                    year = getattr(result, "year", None)
-                    library_name = str(getattr(result, "librarySectionTitle", ""))
+                thumb_url = thumb_proxy_url(instance_name, result.thumb_path)
 
-                    # Extract guids for ID-based matching
-                    tmdb_id: Optional[int] = None
-                    tvdb_id: Optional[int] = None
-                    imdb_id: Optional[str] = None
-                    raw_guids = getattr(result, "guids", None) or []
-                    for guid in raw_guids:
-                        guid_str = str(getattr(guid, "id", guid)).strip().lower()
-                        if "://" in guid_str:
-                            src, val = guid_str.split("://", 1)
-                        elif ":" in guid_str:
-                            src, val = guid_str.split(":", 1)
-                        else:
-                            continue
-                        if src == "tmdb" and val.isdigit():
-                            tmdb_id = int(val)
-                        elif src == "tvdb" and val.isdigit():
-                            tvdb_id = int(val)
-                        elif src == "imdb":
-                            imdb_id = val
-
-                    thumb = getattr(result, "thumb", None)
-                    thumb_url = f"/api/posterflow/plex-upload/plex-thumb?instance={instance_name}&key={quote(str(thumb), safe='')}" if thumb else None
-
-                    items.append({
-                        "media_type": mapped_type,
-                        "title": title,
-                        "year": year,
-                        "tmdb_id": tmdb_id,
-                        "tvdb_id": tvdb_id,
-                        "imdb_id": imdb_id,
-                        "plex_rating_key": rating_key,
-                        "plex_instance": instance_name,
-                        "library_name": library_name,
-                        "thumb_url": thumb_url,
-                    })
-
-                    if len(items) >= safe_limit:
-                        break
+                items.append({
+                    "media_type": mapped_type,
+                    "title": str(result.title or ""),
+                    "year": result.year,
+                    "tmdb_id": tmdb_id,
+                    "tvdb_id": tvdb_id,
+                    "imdb_id": imdb_id,
+                    "plex_rating_key": rating_key,
+                    "plex_instance": instance_name,
+                    "library_name": str(result.library_name or ""),
+                    "thumb_url": thumb_url,
+                })
 
                 if len(items) >= safe_limit:
                     break
@@ -732,7 +714,7 @@ def search_plex_items(
     except HTTPException:
         raise
     except Exception as e:
-        raise_internal_error("Failed to search Plex", e)
+        raise_internal_error("Failed to search media servers", e)
 
 
 @router.get("/plex-upload/plex-thumb")
@@ -747,14 +729,17 @@ def get_plex_thumb(
 
         plex_instances_setting = get_setting(db, 'plex_instances')
         if not plex_instances_setting or not plex_instances_setting.value:
-            raise HTTPException(status_code=404, detail="No Plex instances configured.")
+            raise HTTPException(status_code=404, detail="No media server instances configured.")
 
         plex_cfg = next(
-            (i for i in json.loads(plex_instances_setting.value) if i.get("name") == instance),
+            (
+                i for i in json.loads(plex_instances_setting.value)
+                if isinstance(i, dict) and i.get("name") == instance
+            ),
             None,
         )
         if not plex_cfg:
-            raise HTTPException(status_code=404, detail="Plex instance not found.")
+            raise HTTPException(status_code=404, detail="Media server instance not found.")
 
         url = str(plex_cfg["url"]).rstrip("/")
         token = str(plex_cfg["api_key"])
@@ -764,20 +749,33 @@ def get_plex_thumb(
         if not key.startswith("/") or any(c in key for c in ("@", "://", "\n", "\r", "\x00")):
             raise HTTPException(status_code=400, detail="Invalid thumbnail key.")
 
-        thumb_url = f"{url}{key}?X-Plex-Token={token}"
+        # Downscaled thumb — the raw path serves the full-size original
+        if is_jellyfin_instance(plex_cfg):
+            from util.media_server.jellyfin import build_auth_header
 
-        resp = _requests.get(thumb_url, timeout=10)
+            sep = "&" if "?" in key else "?"
+            resp = _requests.get(
+                f"{url}{key}{sep}maxWidth=240&quality=90",
+                timeout=10,
+                headers={"Authorization": build_auth_header(token)},
+            )
+        else:
+            transcode = urlencode({"width": 240, "height": 360, "minSize": 1, "upscale": 1, "url": key, "X-Plex-Token": token})
+            resp = _requests.get(f"{url}/photo/:/transcode?{transcode}", timeout=10)
+            if resp.status_code != 200:
+                resp = _requests.get(f"{url}{key}?X-Plex-Token={token}", timeout=10)
         if resp.status_code != 200:
             raise HTTPException(status_code=404, detail="Thumbnail not found.")
 
         return Response(
             content=resp.content,
             media_type=resp.headers.get("content-type", "image/jpeg"),
+            headers={"Cache-Control": "public, max-age=3600"},
         )
     except HTTPException:
         raise
     except Exception as e:
-        raise_internal_error("Failed to fetch Plex thumbnail", e)
+        raise_internal_error("Failed to fetch thumbnail", e)
 
 
 @router.post("/plex-upload/run-single")
@@ -797,7 +795,7 @@ def run_plex_single_manual_upload(
         )
         job_id = job.id
 
-        log_job_queued(LogTags.UPLOADER, "Plex single upload", job_id)
+        log_job_queued(LogTags.UPLOADER, "Single upload", job_id)
         job_queue.submit(
             run_plex_single_manual_background_job_module,
             job_id,
@@ -868,7 +866,7 @@ def resolve_arr_instance(db: Session, request: Request, parsed: Dict[str, Any]) 
         log_warning(
             LogTags.UPLOADER,
             f"Webhook ?instance= token '{token}' matches no configured {source} instance — "
-            f"update that app's webhook URL from the Plex Upload page (falling back to payload attribution)",
+            f"update that app's webhook URL from the Asset Upload page (falling back to payload attribution)",
         )
 
     payload_name = str(parsed.get("instance_name") or "").strip()
@@ -909,20 +907,20 @@ def handle_plex_upload_webhook(
                     db,
                     "received",
                     "auth_rejected",
-                    last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Plex Upload page.",
+                    last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Asset Upload page.",
                 )
                 log_warning(
                     LogTags.UPLOADER,
-                    "Rejected Plex webhook: missing/invalid token while app password is set",
+                    "Rejected upload webhook: missing/invalid token while app password is set",
                 )
                 raise HTTPException(
                     status_code=401,
-                    detail="Invalid or missing webhook token. An app password is set — use the tokenized webhook URL from the Plex Upload page.",
+                    detail="Invalid or missing webhook token. An app password is set — use the tokenized webhook URL from the Asset Upload page.",
                 )
 
         if not is_webhook_enabled(db):
             increment_webhook_stat(db, "received", "rejected_disabled", last_error="Webhook disabled")
-            raise HTTPException(status_code=403, detail="Plex webhook is disabled. Enable it in Plex Upload settings.")
+            raise HTTPException(status_code=403, detail="Upload webhook is disabled. Enable it in Asset Upload settings.")
 
         parsed = parse_arr_webhook_payload(payload)
 
@@ -962,7 +960,7 @@ def handle_plex_upload_webhook(
         )
         job_id = job.id
 
-        log_job_queued(LogTags.UPLOADER, "Plex webhook upload", job_id)
+        log_job_queued(LogTags.UPLOADER, "Webhook upload", job_id)
         job_queue.submit(
             run_plex_webhook_background_job_module,
             job_id,
@@ -990,6 +988,243 @@ def handle_plex_upload_webhook(
         db.rollback()  # discard any deferred bookkeeping before counting the error
         increment_webhook_stat(db, "received", "internal_errors", last_error=str(e))
         raise_internal_error("Failed processing plex upload webhook", e)
+
+
+@router.post("/plex-upload/webhook/plex")
+def handle_plex_media_server_webhook(
+    request: Request,
+    payload: str = Form(...),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Handle a Plex webhook (Plex Pass) and queue a single-item upload, so arr-less
+    installs get event-driven uploads on library.new. Plex POSTs multipart/form-data
+    with the JSON in a ``payload`` field — hence the separate route from the ARR one.
+
+    The path is exempt from the app-password middleware (Plex can't send the Bearer
+    token). When a password IS set, the caller must instead supply the webhook token
+    via ``?token=`` (Plex webhook URLs can only carry query params).
+    """
+    try:
+        # Same batched stats convention as the arr route: each terminal path counts
+        # "received" plus its outcome in a single write
+        if is_password_set(db):
+            provided_token = request.query_params.get("token") or request.headers.get("X-Webhook-Token", "")
+            if not verify_webhook_token(db, provided_token):
+                increment_webhook_stat(
+                    db,
+                    "received",
+                    "auth_rejected",
+                    last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Asset Upload page.",
+                )
+                log_warning(
+                    LogTags.UPLOADER,
+                    "Rejected Plex webhook: missing/invalid token while app password is set",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or missing webhook token. An app password is set — use the tokenized webhook URL from the Asset Upload page.",
+                )
+
+        if not is_webhook_enabled(db):
+            increment_webhook_stat(db, "received", "rejected_disabled", last_error="Webhook disabled")
+            raise HTTPException(status_code=403, detail="Upload webhook is disabled. Enable it in Asset Upload settings.")
+
+        try:
+            payload_data = json.loads(payload)
+        except json.JSONDecodeError:
+            raise ValueError("Invalid Plex webhook payload: the 'payload' field is not valid JSON")
+        if not isinstance(payload_data, dict):
+            raise ValueError("Invalid Plex webhook payload: expected a JSON object")
+
+        parsed = parse_plex_webhook_payload(payload_data)
+
+        if parsed.get("skip"):
+            # Non-actionable media-server events (play/pause/scrobble/…), not test pings
+            increment_webhook_stat(db, "received", "skipped_ignored")
+            return {
+                "success": True,
+                "queued": False,
+                "message": parsed.get("reason", "Webhook ignored"),
+            }
+
+        if is_duplicate_webhook_event(db, parsed, commit=False):
+            log_info(
+                LogTags.UPLOADER,
+                f"Skipping duplicate webhook event for {parsed.get('media_type')}: {parsed.get('title')}",
+                event_type=parsed.get("event_type"),
+                source=parsed.get("source"),
+            )
+            increment_webhook_stat(db, "received", "duplicates")
+            return {
+                "success": True,
+                "queued": False,
+                "duplicate": True,
+                "message": "Duplicate webhook event ignored.",
+            }
+
+        media_label = f"{parsed.get('media_type')}: {parsed.get('title')}"
+        # Stats and the dedupe record land in create_job's commit, before the job
+        # thread starts writing with its own session.
+        increment_webhook_stat(db, "received", "queued", queued=True, commit=False)
+        job = create_job(
+            db,
+            job_type=JOB_TYPE_PLEX_UPLOAD_WEBHOOK,
+            message=f"Queued webhook upload for {media_label}",
+        )
+        job_id = job.id
+
+        log_job_queued(LogTags.UPLOADER, "Webhook upload", job_id)
+        job_queue.submit(
+            run_plex_webhook_background_job_module,
+            job_id,
+            job_id,
+            parsed,
+            is_webhook_remove_overlay_label_enabled(db),
+            is_webhook_rename_then_upload_enabled(db),
+            get_webhook_retry_attempts(db),
+            get_webhook_retry_delay_seconds(db),
+        )
+
+        return {
+            "success": True,
+            "queued": True,
+            "job_id": job_id,
+            "message": f"Webhook upload queued for {media_label}.",
+        }
+
+    except ValueError as e:
+        increment_webhook_stat(db, "received", "parse_errors", last_error=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()  # discard any deferred bookkeeping before counting the error
+        increment_webhook_stat(db, "received", "internal_errors", last_error=str(e))
+        raise_internal_error("Failed processing plex media server webhook", e)
+
+
+@router.post("/plex-upload/webhook/jellyfin")
+async def handle_jellyfin_media_server_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Handle a Jellyfin Webhook-plugin event (Generic destination, Item Added) and
+    queue a single-item upload, so arr-less installs get event-driven uploads.
+    The body is read raw and parsed as JSON here — the plugin's content-type
+    header varies with destination configuration.
+
+    The path is exempt from the app-password middleware. When a password IS set,
+    the caller must supply the webhook token via ``?token=`` or an
+    ``X-Webhook-Token`` request header on the destination.
+    """
+    raw = await request.body()
+    return await run_in_threadpool(_handle_jellyfin_webhook, db, request, raw)
+
+
+def _handle_jellyfin_webhook(db: Session, request: Request, raw: bytes) -> Dict[str, Any]:
+    try:
+        # Same batched stats convention as the arr route: each terminal path counts
+        # "received" plus its outcome in a single write
+        if is_password_set(db):
+            provided_token = request.query_params.get("token") or request.headers.get("X-Webhook-Token", "")
+            if not verify_webhook_token(db, provided_token):
+                increment_webhook_stat(
+                    db,
+                    "received",
+                    "auth_rejected",
+                    last_error="Rejected webhook: app password is set but the request token is missing or invalid. Use the tokenized webhook URL from the Asset Upload page.",
+                )
+                log_warning(
+                    LogTags.UPLOADER,
+                    "Rejected Jellyfin webhook: missing/invalid token while app password is set",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or missing webhook token. An app password is set — use the tokenized webhook URL from the Asset Upload page.",
+                )
+
+        if not is_webhook_enabled(db):
+            increment_webhook_stat(db, "received", "rejected_disabled", last_error="Webhook disabled")
+            raise HTTPException(status_code=403, detail="Upload webhook is disabled. Enable it in Asset Upload settings.")
+
+        try:
+            payload_data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            log_warning(
+                LogTags.UPLOADER,
+                f"Jellyfin webhook body failed JSON parse; first 300 bytes: {raw[:300]!r}",
+            )
+            raise ValueError("Invalid Jellyfin webhook payload: the request body is not valid JSON — enable 'Send All Properties' on the Webhook plugin destination")
+        if not isinstance(payload_data, dict):
+            raise ValueError("Invalid Jellyfin webhook payload: expected a JSON object")
+
+        parsed = parse_jellyfin_webhook_payload(payload_data)
+
+        if parsed.get("skip"):
+            # Non-actionable notification types the user left enabled, not test pings
+            increment_webhook_stat(db, "received", "skipped_ignored")
+            return {
+                "success": True,
+                "queued": False,
+                "message": parsed.get("reason", "Webhook ignored"),
+            }
+
+        if is_duplicate_webhook_event(db, parsed, commit=False):
+            log_info(
+                LogTags.UPLOADER,
+                f"Skipping duplicate webhook event for {parsed.get('media_type')}: {parsed.get('title')}",
+                event_type=parsed.get("event_type"),
+                source=parsed.get("source"),
+            )
+            increment_webhook_stat(db, "received", "duplicates")
+            return {
+                "success": True,
+                "queued": False,
+                "duplicate": True,
+                "message": "Duplicate webhook event ignored.",
+            }
+
+        media_label = f"{parsed.get('media_type')}: {parsed.get('title')}"
+        # Stats and the dedupe record land in create_job's commit, before the job
+        # thread starts writing with its own session.
+        increment_webhook_stat(db, "received", "queued", queued=True, commit=False)
+        job = create_job(
+            db,
+            job_type=JOB_TYPE_PLEX_UPLOAD_WEBHOOK,
+            message=f"Queued webhook upload for {media_label}",
+        )
+        job_id = job.id
+
+        log_job_queued(LogTags.UPLOADER, "Webhook upload", job_id)
+        job_queue.submit(
+            run_plex_webhook_background_job_module,
+            job_id,
+            job_id,
+            parsed,
+            is_webhook_remove_overlay_label_enabled(db),
+            is_webhook_rename_then_upload_enabled(db),
+            get_webhook_retry_attempts(db),
+            get_webhook_retry_delay_seconds(db),
+        )
+
+        return {
+            "success": True,
+            "queued": True,
+            "job_id": job_id,
+            "message": f"Webhook upload queued for {media_label}.",
+        }
+
+    except ValueError as e:
+        increment_webhook_stat(db, "received", "parse_errors", last_error=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()  # discard any deferred bookkeeping before counting the error
+        increment_webhook_stat(db, "received", "internal_errors", last_error=str(e))
+        raise_internal_error("Failed processing jellyfin media server webhook", e)
 
 
 @router.get("/plex-upload/webhook-token")
@@ -1032,7 +1267,7 @@ def get_plex_webhook_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 @router.get("/plex-upload/manual-settings")
 def get_plex_manual_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get persisted manual run options for the Plex Upload page."""
+    """Get persisted manual run options for the Asset Upload page."""
     try:
         return build_manual_settings_response(db)
     except Exception as e:
@@ -1044,7 +1279,7 @@ def save_plex_manual_settings(
     payload: PlexManualSettingsRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Save persisted manual run options for the Plex Upload page."""
+    """Save persisted manual run options for the Asset Upload page."""
     try:
         upsert_setting(db, SETTING_PLEX_UPLOAD_MANUAL_DRY_RUN, bool_to_setting(payload.dry_run))
         upsert_setting(db, SETTING_PLEX_UPLOAD_MANUAL_REAPPLY, bool_to_setting(payload.reapply))
@@ -1235,7 +1470,7 @@ def get_plex_webhook_dedupe_entries(
 
 @router.get("/plex-upload/library-override")
 def get_plex_upload_library_override_settings(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get Plex Upload page-specific library override settings and global library config."""
+    """Get Asset Upload page-specific library override settings and global library config."""
     try:
         override = load_plex_upload_library_override(db)
         return build_library_override_response(db, override)
@@ -1248,7 +1483,7 @@ def save_plex_upload_library_override_settings(
     payload: PlexLibraryOverrideSettingsRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Save Plex Upload page-specific library override settings."""
+    """Save Asset Upload page-specific library override settings."""
     try:
         normalized_payload = {
             "enabled": payload.enabled,
@@ -1306,7 +1541,7 @@ def get_plex_upload_cache_entries(
             filtered_entries = entries
 
         total = len(filtered_entries)
-        page_entries = filtered_entries[safe_offset:safe_offset + safe_limit]
+        page_entries = attach_server_labels(db, filtered_entries[safe_offset:safe_offset + safe_limit])
 
         return {
             "query": q,

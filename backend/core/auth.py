@@ -29,6 +29,8 @@ _EXEMPT_PATHS: frozenset[str] = frozenset({
     "/api/auth/status",
     "/api/auth/verify",
     "/api/posterflow/plex-upload/webhook",
+    "/api/posterflow/plex-upload/webhook/plex",
+    "/api/posterflow/plex-upload/webhook/jellyfin",
 })
 
 # Path prefixes that are always exempt (static frontend assets, WebSocket, etc.)
@@ -136,7 +138,7 @@ def get_or_create_webhook_token(db: Session) -> str:
         return existing
     token = secrets.token_urlsafe(32)
     upsert_setting(db, WEBHOOK_TOKEN_KEY, token)
-    log_info(LogTags.API, "Generated Plex webhook token")
+    log_info(LogTags.API, "Generated upload webhook token")
     return token
 
 
@@ -144,7 +146,7 @@ def regenerate_webhook_token(db: Session) -> str:
     """Generate a fresh webhook token, replacing any existing one."""
     token = secrets.token_urlsafe(32)
     upsert_setting(db, WEBHOOK_TOKEN_KEY, token)
-    log_info(LogTags.API, "Regenerated Plex webhook token")
+    log_info(LogTags.API, "Regenerated upload webhook token")
     return token
 
 

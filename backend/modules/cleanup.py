@@ -39,6 +39,7 @@ def maybe_run_asset_cleanup(
     triggered_by: str = "manual",
     job: Optional[Job] = None,
     media_dict: Optional[Dict[str, Any]] = None,
+    fetch_failed_types: Optional[set] = None,
     artwork_boxes: Optional[List[Dict[str, Any]]] = None,
     artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
     poster_sourced: Optional[Dict[int, Dict[Any, set]]] = None,
@@ -80,6 +81,7 @@ def maybe_run_asset_cleanup(
             dry_run=dry_run,
             delete_unknown=delete_unknown,
             media_dict=media_dict,  # reconcile against the SAME media the rename used (same library selection)
+            fetch_failed_types=fetch_failed_types,
             library_setting_key=config_data.get("library_setting_key") or "asset_renamer_libraries",
             artwork_boxes=artwork_boxes,  # reuse the rename's drive scan instead of re-walking
             artwork_sourced=artwork_sourced,  # reuse the rename's match verdicts instead of re-matching
