@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DEFAULT_POSTER_DESTINATION, saveSettings, testSonarr, testRadarr, getSettings, getPosterConfig, uploadBackup, uploadServiceAccountJson, getApiErrorMessage, revealSensitiveSetting, saveGdriveStoragePath, saveArtworkGdriveStoragePath, getPlexLibraryConfigs, savePlexLibraryConfig, type PlexLibrary, type PlexLibraryConfig } from '../api/client'
-import { MEDIA_SERVER_COPY, fetchMediaServerLibraries, instanceServerType, isJellyfinInstance, testMediaServerConnection } from '../utils/mediaServer'
+import { MEDIA_SERVER_COPY, defaultNameForType, fetchMediaServerLibraries, instanceServerType, isJellyfinInstance, testMediaServerConnection } from '../utils/mediaServer'
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
@@ -282,7 +282,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const updatePlexInstance = (index: number, field: keyof ServerInstance, value: string) => {
     setFormData(prev => {
       const updated = [...prev.plex_instances]
-      updated[index] = { ...updated[index], [field]: value } as ServerInstance
+      let next = { ...updated[index], [field]: value } as ServerInstance
+      if (field === 'type') {
+        const siblingNames = updated.filter((_, i) => i !== index).map(other => other.name)
+        next = { ...next, name: defaultNameForType(next.name, instanceServerType(next), siblingNames) }
+      }
+      updated[index] = next
       return { ...prev, plex_instances: updated }
     })
   }

@@ -736,6 +736,10 @@ details[open] .feature-events-summary::before {
   height: 300px;
 }
 
+.server-card.plex-card {
+  height: 320px;
+}
+
 .server-card:hover {
   border-color: #64b5f6;
   transform: translateY(-2px);
@@ -822,6 +826,14 @@ details[open] .feature-events-summary::before {
   transition: all 0.2s;
 }
 
+.server-card .input-with-toggle input {
+  padding: 0.35rem 0.5rem;
+  padding-right: 2rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
 .server-card .form-group small {
   display: block;
   margin-top: 0.25rem;
@@ -857,10 +869,6 @@ details[open] .feature-events-summary::before {
 
 .server-card.locked .card-header {
   background-color: #1e1e1e;
-}
-
-.server-card.plex-card {
-  height: 255px;
 }
 
 .btn-add-instance {
@@ -2289,11 +2297,8 @@ details[open] .feature-events-summary::before {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  margin-top: 1rem;
-  padding: 0.85rem 1rem;
-  background-color: #1e1e1e;
-  border: 1px solid #333;
-  border-radius: 8px;
+  margin-top: 1.25rem;
+  width: fit-content;
 }
 
 .media-source-toggle-row strong {

@@ -12,6 +12,7 @@ import {
 } from '../api/client'
 import {
   MEDIA_SERVER_COPY,
+  defaultNameForType,
   fetchMediaServerLibraries,
   instanceServerType,
   testMediaServerConnection,
@@ -130,7 +131,12 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey, onInsta
   const updatePlexInstance = (index: number, field: keyof ServerInstance, value: string) => {
     setMediaSettings(prev => {
       const updated = [...prev.plex_instances]
-      updated[index] = { ...updated[index], [field]: value } as ServerInstance
+      let next = { ...updated[index], [field]: value } as ServerInstance
+      if (field === 'type') {
+        const siblingNames = updated.filter((_, i) => i !== index).map(other => other.name)
+        next = { ...next, name: defaultNameForType(next.name, instanceServerType(next), siblingNames) }
+      }
+      updated[index] = next
       return { ...prev, plex_instances: updated }
     })
   }

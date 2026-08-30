@@ -25,6 +25,20 @@ export const fetchMediaServerLibraries = (instance: MediaServerInstanceLike) =>
     ? getJellyfinLibraries(instance.url, instance.api_key)
     : getPlexLibraries(instance.url, instance.api_key)
 
+// Swap a default-looking instance name ("Plex", "Jellyfin 2") to the newly selected
+// type's default, numbered against the sibling names ("Jellyfin", then "Jellyfin 2", ...);
+// user-entered names are left alone
+export const defaultNameForType = (currentName: string, nextType: MediaServerType, takenNames: string[] = []): string => {
+  const match = currentName.trim().match(/^(Plex|Jellyfin)( \d+)?$/i)
+  if (!match) return currentName
+  const label = nextType === 'jellyfin' ? 'Jellyfin' : 'Plex'
+  const taken = new Set(takenNames.map(name => name.trim().toLowerCase()))
+  if (!taken.has(label.toLowerCase())) return label
+  let n = 2
+  while (taken.has(`${label.toLowerCase()} ${n}`)) n += 1
+  return `${label} ${n}`
+}
+
 // "Matched" badge tooltips: the dynamic form when the item carries its source
 // ('plex'/'jellyfin'; absent = arr), the generic form where no source is plumbed
 export const matchedByIdTooltip = (source: string | null | undefined): string =>

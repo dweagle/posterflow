@@ -87,6 +87,41 @@ describe('useSettingsMedia arr-less support', () => {
     expect(result.current.mediaSettings.sonarr_instances).toHaveLength(1)
   })
 
+  it('swaps a default name when the server type changes, but keeps custom names', () => {
+    const { result } = renderMediaHook()
+    // Default card is named "Plex" — switching type renames it
+    act(() => result.current.updatePlexInstance(0, 'type', 'jellyfin'))
+    expect(result.current.mediaSettings.plex_instances[0].name).toBe('Jellyfin')
+    act(() => result.current.updatePlexInstance(0, 'type', 'plex'))
+    expect(result.current.mediaSettings.plex_instances[0].name).toBe('Plex')
+
+    // A user-entered name is never clobbered
+    act(() => result.current.updatePlexInstance(0, 'name', 'Living Room'))
+    act(() => result.current.updatePlexInstance(0, 'type', 'jellyfin'))
+    expect(result.current.mediaSettings.plex_instances[0].name).toBe('Living Room')
+  })
+
+  it('numbers a swapped default name against siblings, not card position', () => {
+    const { result } = renderMediaHook()
+    act(() => {
+      result.current.setMediaSettings({
+        plex_instances: [
+          { name: 'Plex', url: 'http://p', api_key: 't' },
+          { name: 'Plex 2', url: '', api_key: '' },
+        ],
+        sonarr_instances: [],
+        radarr_instances: [],
+        media_server_media_source: '',
+      })
+    })
+    // First Jellyfin gets the bare default even from the "Plex 2" card
+    act(() => result.current.updatePlexInstance(1, 'type', 'jellyfin'))
+    expect(result.current.mediaSettings.plex_instances[1].name).toBe('Jellyfin')
+    // Switching back numbers against the existing "Plex"
+    act(() => result.current.updatePlexInstance(1, 'type', 'plex'))
+    expect(result.current.mediaSettings.plex_instances[1].name).toBe('Plex 2')
+  })
+
   it('auto-enables the media source when no arr is configured', () => {
     const { result } = renderMediaHook()
     // Default blank cards have no url/api_key, so nothing is "configured"
