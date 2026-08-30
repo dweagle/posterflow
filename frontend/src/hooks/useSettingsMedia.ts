@@ -46,10 +46,14 @@ export interface DeleteConfirmState {
   name: string
 }
 
+type InstanceSettingsKey = 'plex_instances' | 'sonarr_instances' | 'radarr_instances'
+
 interface UseSettingsMediaParams {
   showToast: (message: string, type?: ToastType) => void
   setSaving: (value: boolean) => void
-  onRevealApiKey?: (settingsKey: 'plex_instances' | 'sonarr_instances' | 'radarr_instances', index: number, value: string) => void
+  onRevealApiKey?: (settingsKey: InstanceSettingsKey, index: number, value: string) => void
+  // Called after a removal is persisted, so the page can drop the entry from its dirty-tracking baseline
+  onInstanceRemoved?: (settingsKey: InstanceSettingsKey, index: number) => void
 }
 
 const adjustIndexSet = (source: Set<number>, removedIndex: number): Set<number> => {
@@ -63,7 +67,7 @@ const adjustIndexSet = (source: Set<number>, removedIndex: number): Set<number> 
   return adjusted
 }
 
-export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSettingsMediaParams) => {
+export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey, onInstanceRemoved }: UseSettingsMediaParams) => {
   const MASKED_VALUE = '***masked***'
 
   const [mediaSettings, setMediaSettings] = useState<MediaSettingsState>({
@@ -318,13 +322,36 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
     setEditingPlex(prev => new Set(prev).add(newIndex))
   }
 
+  // Deletion has no card left to host a Save button, so persist it immediately;
+  // on failure the list is restored so state never silently diverges from disk
+  const persistInstanceRemoval = async (
+    settingsKey: InstanceSettingsKey,
+    index: number,
+    nextList: ServerInstance[],
+    revert: () => void,
+  ) => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ [settingsKey]: JSON.stringify(nextList.filter(i => i.url)) })
+      onInstanceRemoved?.(settingsKey, index)
+      showToast('Instance removed')
+    } catch (error) {
+      console.error('Error saving instance removal:', error)
+      revert()
+      showToast('Failed to remove instance — change reverted', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const removePlexInstance = (index: number) => {
     if (mediaSettings.plex_instances.length > 1) {
-      setMediaSettings(prev => ({
-        ...prev,
-        plex_instances: prev.plex_instances.filter((_, i) => i !== index),
-      }))
+      const prevList = mediaSettings.plex_instances
+      const nextList = prevList.filter((_, i) => i !== index)
+      setMediaSettings(prev => ({ ...prev, plex_instances: nextList }))
       setEditingPlex(prev => adjustIndexSet(prev, index))
+      void persistInstanceRemoval('plex_instances', index, nextList, () =>
+        setMediaSettings(prev => ({ ...prev, plex_instances: prevList })))
     }
     setDeleteConfirm({ show: false, type: null, index: null, name: '' })
   }
@@ -392,12 +419,13 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   }
 
   const removeSonarrInstance = (index: number) => {
-    setMediaSettings(prev => ({
-      ...prev,
-      sonarr_instances: prev.sonarr_instances.filter((_, i) => i !== index),
-    }))
+    const prevList = mediaSettings.sonarr_instances
+    const nextList = prevList.filter((_, i) => i !== index)
+    setMediaSettings(prev => ({ ...prev, sonarr_instances: nextList }))
     setEditingSonarr(prev => adjustIndexSet(prev, index))
     setDeleteConfirm({ show: false, type: null, index: null, name: '' })
+    void persistInstanceRemoval('sonarr_instances', index, nextList, () =>
+      setMediaSettings(prev => ({ ...prev, sonarr_instances: prevList })))
   }
 
   const confirmRemoveSonarrInstance = (index: number) => {
@@ -463,12 +491,13 @@ export const useSettingsMedia = ({ showToast, setSaving, onRevealApiKey }: UseSe
   }
 
   const removeRadarrInstance = (index: number) => {
-    setMediaSettings(prev => ({
-      ...prev,
-      radarr_instances: prev.radarr_instances.filter((_, i) => i !== index),
-    }))
+    const prevList = mediaSettings.radarr_instances
+    const nextList = prevList.filter((_, i) => i !== index)
+    setMediaSettings(prev => ({ ...prev, radarr_instances: nextList }))
     setEditingRadarr(prev => adjustIndexSet(prev, index))
     setDeleteConfirm({ show: false, type: null, index: null, name: '' })
+    void persistInstanceRemoval('radarr_instances', index, nextList, () =>
+      setMediaSettings(prev => ({ ...prev, radarr_instances: prevList })))
   }
 
   const confirmRemoveRadarrInstance = (index: number) => {

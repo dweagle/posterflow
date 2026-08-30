@@ -465,6 +465,20 @@ function Settings() {
       }
       setMediaBaselineVersion((previous) => previous + 1)
     },
+    onInstanceRemoved: (settingsKey, index) => {
+      // The removal is already persisted; drop the entry from the dirty-tracking
+      // baseline so the page doesn't warn about unsaved changes with no Save button
+      const baseline = normalizeMediaSettings(mediaBaselineRef.current)
+      const updatedInstances = [...baseline[settingsKey]]
+      if (index < updatedInstances.length) {
+        updatedInstances.splice(index, 1)
+        mediaBaselineRef.current = {
+          ...baseline,
+          [settingsKey]: updatedInstances,
+        }
+      }
+      setMediaBaselineVersion((previous) => previous + 1)
+    },
   })
 
   const dirtyMediaIndices = useMemo(() => {
@@ -604,7 +618,9 @@ function Settings() {
     const baseline = normalizeMediaSettings(mediaBaselineRef.current)
     const current = normalizeMediaSettings(mediaSettings)
     setHasUnsavedMedia(JSON.stringify(current) !== JSON.stringify(baseline))
-  }, [mediaSettings])
+    // mediaBaselineVersion: the baseline ref can change without mediaSettings changing
+    // (api-key reveal, persisted instance removal)
+  }, [mediaSettings, mediaBaselineVersion])
 
   useEffect(() => {
     const baseline = normalizeDiscordConfig(discordBaselineRef.current)
