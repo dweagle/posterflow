@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-30
+### Added
+- Jellyfin: full support alongside Plex — add Jellyfin instances in Settings, and library browsing, matching, and poster/artwork uploads all work through a new provider media server layer.
+- Arr-less mode: Sonarr/Radarr are now optional - libraries can be sourced directly from Plex or Jellyfin, and renaming, unmatched detection, cleanup, match reports, and uploads can all work without the arrs.  Using arrs is still recommended.
+- Webhooks: new Plex and Jellyfin webhook receivers, so uploads can be triggered by media-server events as well as Sonarr/Radarr imports.
+
+### Changed
+- Plex Upload is now Asset Upload — pages, settings, and logs renamed to reflect uploads to any media server.
+- Setup Wizard & Settings: media-server instance management covers both Plex and Jellyfin, with arr-less configuration available.
+
+### Fixed
+- Dashboard: the recently synced posters preview now uses resized thumbnails instead of full-size images.
+
 ## [0.14.3] - 2026-08-26
 ### Added
 - Asset Manager: the drive usage reports is now a tab on the Drive Priority page, with per-item overrides and cross-drive comparison. Populates after a Rename run.  Users can now choose individual posters/artwork to override drive priority.
