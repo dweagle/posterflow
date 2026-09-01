@@ -6,6 +6,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-01
+### Fixed
+- Settings: media server and arr instance removals correctly save upon deletion.
+- Settings: media server card sizing fixed, and new instances get type-aware default names (Plex vs. Jellyfin).
+- Maker Tools: Apple Art searches now include the China (CN) storefront in the filter for U.S search.
+
 ## [0.15.0] - 2026-08-30
 ### Added
 - Jellyfin: full support alongside Plex — add Jellyfin instances in Settings, and library browsing, matching, and poster/artwork uploads all work through a new provider media server layer.
