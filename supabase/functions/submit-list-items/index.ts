@@ -388,6 +388,24 @@ Deno.serve(async (req: Request) => {
   // is the race backstop: if a concurrent publisher created the same poster, the
   // insert fails and we re-read so we can still attach this user as a wanter.
   const toCreate = normalized.filter((it) => !rowByKey.has(dedupKey(it)))
+
+  // Abuse cap on total posters wanted. Checked before any row is created: a
+  // 429 after the insert would leave rows with no wanter, which nothing cleans up.
+  const existingIds = new Set(
+    normalized.map((it) => rowByKey.get(dedupKey(it))?.id).filter((id): id is string => typeof id === 'string'),
+  )
+  const { count: wanterCount } = await supabase
+    .from('poster_list_wanters')
+    .select('id', { count: 'exact', head: true })
+    .eq('discord_id', user.discord_user_id)
+  if ((wanterCount ?? 0) + existingIds.size + toCreate.length > MAX_OPEN_ITEMS) {
+    return json(
+      { error: `That would exceed your ${MAX_OPEN_ITEMS}-item list limit. Remove some items first.` },
+      429,
+    )
+  }
+
+  let createdIds: string[] = []
   if (toCreate.length) {
     const newRows = toCreate.map((it) => ({ ...it, status: 'open', submitted_via: submittedVia }))
     const { data: created, error: createErr } = await supabase
@@ -408,10 +426,11 @@ Deno.serve(async (req: Request) => {
       // (custom-title races are rare; any still-unresolved items are skipped.)
     } else {
       indexRows(created)
+      createdIds = (created ?? []).map((r) => r.id)
     }
   }
 
-  // Resolve every batch item to a poster id; abuse cap on total posters wanted.
+  // Resolve every batch item to a poster id.
   const itemIds = [...new Set(
     normalized.map((it) => rowByKey.get(dedupKey(it))?.id).filter((id): id is string => typeof id === 'string'),
   )]
@@ -425,17 +444,6 @@ Deno.serve(async (req: Request) => {
   for (const it of normalized) {
     const id = rowByKey.get(dedupKey(it))?.id
     if (id && !sourceByItemId.has(id)) sourceByItemId.set(id, it.source)
-  }
-
-  const { count: wanterCount } = await supabase
-    .from('poster_list_wanters')
-    .select('id', { count: 'exact', head: true })
-    .eq('discord_id', user.discord_user_id)
-  if ((wanterCount ?? 0) + itemIds.length > MAX_OPEN_ITEMS) {
-    return json(
-      { error: `That would exceed your ${MAX_OPEN_ITEMS}-item list limit. Remove some items first.` },
-      429,
-    )
   }
 
   // Which posters does this user already want? (for an accurate inserted/skipped)
@@ -456,6 +464,19 @@ Deno.serve(async (req: Request) => {
       )
     if (wanterErr) {
       console.error('[submit-list-items] wanter upsert failed:', wanterErr)
+      // Drop the rows this call created, unless someone else attached to them meanwhile.
+      if (createdIds.length) {
+        const { data: taken } = await supabase
+          .from('poster_list_wanters')
+          .select('item_id')
+          .in('item_id', createdIds)
+        const takenIds = new Set((taken ?? []).map((r) => r.item_id as string))
+        const orphanIds = createdIds.filter((id) => !takenIds.has(id))
+        if (orphanIds.length) {
+          const { error: cleanupErr } = await supabase.from('poster_list_items').delete().in('id', orphanIds)
+          if (cleanupErr) console.error('[submit-list-items] orphan cleanup failed:', cleanupErr)
+        }
+      }
       return json({ error: 'Failed to add items' }, 500)
     }
   }
