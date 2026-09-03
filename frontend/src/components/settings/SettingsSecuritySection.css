@@ -93,11 +93,11 @@
 
 .security-input-row input {
   flex: 1;
-  padding: 0.65rem 0.9rem;
+  padding: 0.5rem 0.9rem;
   background: transparent;
   border: none;
   color: #fff;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   outline: none;
 }
 
@@ -121,13 +121,13 @@
 }
 
 .settings .btn-danger {
-  padding: 0.65rem 1.25rem;
+  padding: 0.5rem 1rem;
   background: transparent;
   color: #ff6b6b;
   border: 1px solid rgba(244, 67, 54, 0.5);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   transition: all 0.2s;
   align-self: flex-start;
 }
