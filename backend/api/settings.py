@@ -30,6 +30,7 @@ SENSITIVE_PLAIN_KEYS: set[str] = {
     "tmdb_api_key",
     "tvdb_api_key",
     "tvdb_pin",
+    "fanart_api_key",
     # App password – hash and salt must never leave the backend
     "app_password_hash",
     "app_password_salt",
@@ -84,6 +85,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # TheTVDB v4 — pin is only needed for user-supported (subscriber) keys
     "tvdb_api_key",
     "tvdb_pin",
+    "fanart_api_key",
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",

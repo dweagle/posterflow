@@ -72,6 +72,7 @@ export const useSettingsCore = ({
   const [tmdbApiKey, setTmdbApiKey] = useState('')
   const [tvdbApiKey, setTvdbApiKey] = useState('')
   const [tvdbPin, setTvdbPin] = useState('')
+  const [fanartApiKey, setFanartApiKey] = useState('')
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
@@ -93,6 +94,7 @@ export const useSettingsCore = ({
       // Also sensitive, so the same masked-means-configured treatment applies.
       setTvdbApiKey((settings.tvdb_api_key || '').trim())
       setTvdbPin((settings.tvdb_pin || '').trim())
+      setFanartApiKey((settings.fanart_api_key || '').trim())
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
@@ -235,6 +237,25 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSaveFanartApiKey = async (): Promise<boolean> => {
+    const valueToSave = fanartApiKey.trim()
+    if (!valueToSave || valueToSave === '***masked***') {
+      return false
+    }
+    try {
+      setSaving(true)
+      await saveBulkSettings({ fanart_api_key: valueToSave })
+      showToast('fanart.tv API key saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving fanart.tv API key:', error)
+      showToast('Failed to save fanart.tv API key', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSavePsdExportFolder = async (): Promise<boolean> => {
     try {
       setSaving(true)
@@ -317,6 +338,9 @@ export const useSettingsCore = ({
     tvdbPin,
     setTvdbPin,
     handleSaveTvdbApiKey,
+    fanartApiKey,
+    setFanartApiKey,
+    handleSaveFanartApiKey,
     psdExportFolder,
     setPsdExportFolder,
     handleSavePsdExportFolder,

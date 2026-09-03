@@ -219,3 +219,70 @@ def test_plex_provider_parses_images(monkeypatch):
     imgs = provider.images(item)
     assert imgs["backgroundSquare"].endswith("sq.jpg")
     assert imgs["clearLogo"].endswith("logo.png")
+
+
+# ---------------------------------------------------------------- fanart.tv source
+
+def _fanart_movie_record():
+    return {
+        "hdmovielogo": [{"url": "https://assets.fanart.tv/fanart/movies/1/hdmovielogo/l.png", "lang": "en", "likes": "2"}],
+        "moviebackground": [
+            {"url": "https://assets.fanart.tv/fanart/movies/1/moviebackground/bg.jpg", "lang": "00", "likes": "1"},
+            {"url": "https://assets.fanart.tv/fanart/movies/1/moviebackground/text.jpg", "lang": "en", "likes": "5"},
+        ],
+        "movieposter": [{"url": "https://assets.fanart.tv/fanart/movies/1/movieposter/p.jpg", "lang": "en", "likes": "1"}],
+    }
+
+
+def _never(*a, **k):
+    raise AssertionError("must not be consulted under the fanart.tv tab")
+
+
+class _NeverPlex:
+    def images(self, item):
+        _never()
+
+
+def test_list_candidates_fanart_source_skips_tmdb_and_plex(monkeypatch):
+    monkeypatch.setattr(af.fanart_service, "fetch_artwork", lambda **k: _fanart_movie_record())
+    monkeypatch.setattr(af, "tmdb_images", _never)
+
+    item = af.FinderItem(title="X", year=2020, tmdb_id=1, media_type="movie")
+    out = af.list_candidates(item, ["logo", "background", "squareart", "poster"], tmdb_api_key="",
+                             plex=_NeverPlex(), session=None, source="fanart", fanart_api_key="k",
+                             textless_backgrounds=False)
+    assert [c["source"] for c in out["logos"]] == ["fanart"]
+    assert (out["logos"][0]["width"], out["logos"][0]["height"]) == (800, 310)
+    assert [c["language"] for c in out["backgrounds"]] == [None, "en"]   # textless first
+    assert out["squareart"] == []
+    assert out["posters"][0]["ref"].endswith("/p.jpg")
+
+
+def test_list_candidates_fanart_strict_backgrounds_keep_textless_only(monkeypatch):
+    monkeypatch.setattr(af.fanart_service, "fetch_artwork", lambda **k: _fanart_movie_record())
+    item = af.FinderItem(title="X", year=2020, tmdb_id=1, media_type="movie")
+    out = af.list_candidates(item, ["background"], tmdb_api_key="", plex=None, session=None,
+                             source="fanart", fanart_api_key="k")
+    assert [c["ref"].rsplit("/", 1)[1] for c in out["backgrounds"]] == ["bg.jpg"]
+
+
+def test_fanart_candidate_groups_are_empty_for_collections(monkeypatch):
+    monkeypatch.setattr(af.fanart_service, "fetch_artwork", _never)
+    item = af.FinderItem(title="X Collection", year=None, tmdb_id=10, media_type="collection")
+    assert af.fanart_candidate_groups(item, "k", 1920) == {"logos": [], "backgrounds": [], "posters": [], "squareart": []}
+
+
+def test_list_candidates_fanart_lists_only_textless_square_art(monkeypatch):
+    record = _fanart_movie_record()
+    record["moviesquare"] = [
+        {"url": "https://assets.fanart.tv/fanart/movies/1/moviesquare/titled.jpg", "lang": "en", "likes": "9"},
+        {"url": "https://assets.fanart.tv/fanart/movies/1/moviesquare/clean.jpg", "lang": "00", "likes": "1"},
+    ]
+    monkeypatch.setattr(af.fanart_service, "fetch_artwork", lambda **k: record)
+    monkeypatch.setattr(af, "_probe_size", _never)
+    item = af.FinderItem(title="X", year=2020, tmdb_id=1, media_type="movie")
+    out = af.list_candidates(item, ["squareart"], tmdb_api_key="", plex=_NeverPlex(), session=None,
+                             source="fanart", fanart_api_key="k")
+    assert [c["ref"].rsplit("/", 1)[1] for c in out["squareart"]] == ["clean.jpg"]
+    assert out["squareart"][0]["language"] is None
+    assert (out["squareart"][0]["width"], out["squareart"][0]["height"]) == (1000, 1000)

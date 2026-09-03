@@ -1,16 +1,18 @@
 import type { CSSProperties } from 'react'
 import tmdbLogo from '../assets/service-icons/tmdb.png'
 import tvdbLogo from '../assets/service-icons/tvdb.png'
+import fanartLogo from '../assets/service-icons/fanart.png'
 
 type Props = {
-  source: 'tmdb' | 'tvdb'
+  source: 'tmdb' | 'tvdb' | 'fanart'
   className?: string
   style?: CSSProperties
 }
 
 // Each provider's own published attribution wording. TMDB's notice is mandatory under their API
 // terms; TheTVDB's is the sample text from their API information page, which pairs the sentence
-// with a linked logo. The logo itself is the required direct link in both cases.
+// with a linked logo. The logo itself is the required direct link in both cases. fanart.tv asks
+// for a credit and a link back.
 const SOURCES = {
   tmdb: {
     logo: tmdbLogo,
@@ -23,6 +25,12 @@ const SOURCES = {
     name: 'TheTVDB',
     href: 'https://www.thetvdb.com',
     notice: 'Metadata provided by TheTVDB. Please consider subscribing.',
+  },
+  fanart: {
+    logo: fanartLogo,
+    name: 'fanart.tv',
+    href: 'https://fanart.tv',
+    notice: 'Artwork provided by fanart.tv.',
   },
 } as const
 

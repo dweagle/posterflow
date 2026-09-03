@@ -37,6 +37,8 @@ import {
   type ImageSource,
   getTvdbImages,
   getTvdbSeasonImages,
+  getFanartImages,
+  getFanartSeasonImages,
   getArtworkTaggedDownloadUrl, // canonical download names
   saveGalleryArtworkToFolder,
   type ArtworkSubtype,
@@ -52,6 +54,7 @@ import ServiceLinks from './ServiceLinks'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
+import fanartIcon from '../../assets/service-icons/fanart.png'
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 // ---------------------------------------------------------------------------
@@ -235,6 +238,7 @@ export const TMDB_IMAGE_LANGUAGES = [
 
 // Season image caches are per source — the same season number has different artwork on each.
 const seasonKey = (source: ImageSource, seasonNumber: number) => `${source}:s${seasonNumber}`
+const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv' }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -258,8 +262,9 @@ export type PsdConfig = {
   backgroundFolderSet: boolean
   squareartFolderSet: boolean
   // Not PSD-related, but this is the settings-derived config every card already receives:
-  // gates the gallery's TheTVDB source tab on a configured API key.
+  // gates the gallery's TheTVDB and fanart.tv source tabs on a configured API key.
   tvdbEnabled: boolean
+  fanartEnabled: boolean
 }
 
 /** Empty config used before settings load (shared by every consumer). */
@@ -267,7 +272,7 @@ export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
   openPhotopea: false, sameTab: false, defaultEditor: 'photopea',
-  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false,
+  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false, fanartEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -285,8 +290,9 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     logoFolderSet: !!(s.artwork_logo_export_folder || '').trim(),
     backgroundFolderSet: !!(s.background_export_folder || '').trim(),
     squareartFolderSet: !!(s.squareart_export_folder || '').trim(),
-    // tvdb_api_key is sensitive, so it comes back masked when set — presence is all we need.
+    // The keys are sensitive, so they come back masked when set — presence is all we need.
     tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
+    fanartEnabled: !!(s.fanart_api_key || '').trim(),
   }
 }
 
@@ -319,8 +325,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // Display-only fallback chain; the thumb proxy is never published
   const posterUrl = item.poster_url || tmdbPosterUrl || item.thumb_url || ''
 
-  // Gallery state. Images are cached per source, so TMDB stays the default load and TheTVDB is
-  // only ever called once the user actually clicks its tab — after that, switching is instant.
+  // Gallery state. Images are cached per source, so TMDB stays the default load and TheTVDB /
+  // fanart.tv are only ever called once the user clicks their tab — after that, switching is instant.
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [imageSource, setImageSource] = useState<ImageSource>('tmdb')
   const [imagesBySource, setImagesBySource] = useState<Partial<Record<ImageSource, TmdbImagesResponse>>>({})
@@ -535,7 +541,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     try {
       const data = imageSource === 'tmdb'
         ? await getSeasonImages(item.tmdb_id, seasonNumber, galleryLanguage)
-        : await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
+        : imageSource === 'tvdb'
+          ? await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
+          : await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
       setSeasonImages((prev) => ({ ...prev, [sk]: data }))
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load season images'), 'error')
@@ -554,7 +562,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     try {
       const data = source === 'tmdb'
         ? await getTmdbImages(item.tmdb_id, item.media_type, language)
-        : await getTvdbImages(item, language)
+        : source === 'tvdb'
+          ? await getTvdbImages(item, language)
+          : await getFanartImages(item, language)
       setImagesBySource((prev) => ({ ...prev, [source]: data }))
       // Keep the current tab when the new source has content for it, else fall to the first
       // tab that does — so switching sources never lands on a needlessly empty grid.
@@ -565,8 +575,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       })
       return true
     } catch (error) {
-      const label = source === 'tmdb' ? 'TMDB' : 'TheTVDB'
-      showToast(getApiErrorMessage(error, `Failed to load ${label} images`), 'error')
+      showToast(getApiErrorMessage(error, `Failed to load ${SOURCE_LABEL[source]} images`), 'error')
       return false
     } finally {
       setLoadingSource((cur) => (cur === source ? null : cur))
@@ -766,12 +775,13 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
   // The season picker follows whichever source's images are being browsed: each provider can
   // list a season the other doesn't (TMDB often carries one more for an airing show), and
-  // pinning the chips to one source would make the other's season posters unreachable. Falls
-  // back to the preferred list when the active source has no seasons of its own.
+  // pinning the chips to one source would make the other's season posters unreachable. fanart.tv
+  // is keyed by TheTVDB id, so it follows TVDB's seasons. Falls back to the preferred list when
+  // the active source has no seasons of its own.
   const seasonList = !tvDetails
     ? []
-    : (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons).length > 0
-      ? (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons)
+    : (imageSource === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons).length > 0
+      ? (imageSource === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons)
       : tvDetails.seasons
 
   // Landing on the Seasons tab loads the first real season straight away (Specials only when
@@ -1065,17 +1075,19 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       {galleryOpen && (galleryImages || galleryLoading) && (() => { const _panel = (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs">
-            {psdConfig.tvdbEnabled && (
+            {(psdConfig.tvdbEnabled || psdConfig.fanartEnabled) && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Image source">
-                {([['tmdb', 'TMDB', tmdbIcon], ['tvdb', 'TVDB', tvdbIcon]] as const).map(([id, label, icon]) => (
+                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon]] as const)
+                  .filter(([id]) => id === 'tmdb' || (id === 'tvdb' ? psdConfig.tvdbEnabled : psdConfig.fanartEnabled))
+                  .map(([id, icon]) => (
                   <button
                     key={id}
                     type="button"
                     className={`tmdb-gallery-source tmdb-gallery-source--${id}${imageSource === id ? ' active' : ''}`}
                     onClick={() => void handleSourceChange(id)}
                     disabled={loadingSource !== null}
-                    title={`Browse ${label} images`}
-                    aria-label={`Browse ${label} images`}
+                    title={`Browse ${SOURCE_LABEL[id]} images`}
+                    aria-label={`Browse ${SOURCE_LABEL[id]} images`}
                   >
                     <img className="tmdb-gallery-source-icon" src={icon} alt="" />
                   </button>
@@ -1186,12 +1198,12 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           })()}
 
           {!galleryImages
-            ? <p className="tmdb-gallery-empty">Loading {imageSource === 'tmdb' ? 'TMDB' : 'TheTVDB'} images…</p>
-            : imageSource === 'tvdb' && galleryImages.posters.length === 0
+            ? <p className="tmdb-gallery-empty">Loading {SOURCE_LABEL[imageSource]} images…</p>
+            : imageSource !== 'tmdb' && galleryImages.posters.length === 0
               && galleryImages.backdrops.length === 0 && galleryImages.logos.length === 0
-            // Common for movies — plenty aren't in TVDB at all, so say that rather than
-            // showing an empty tab the user has to interpret.
-            ? <p className="tmdb-gallery-empty">No TheTVDB artwork for this title.</p>
+            // Common for movies — plenty aren't in TVDB or fanart.tv at all, so say that rather
+            // than showing an empty tab the user has to interpret.
+            ? <p className="tmdb-gallery-empty">No {SOURCE_LABEL[imageSource]} artwork for this title.</p>
             : activeGalleryTab === 'season-posters'
             ? (
               <div className="tmdb-season-picker">

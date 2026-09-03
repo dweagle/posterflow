@@ -39,6 +39,7 @@ from models.job import (
     update_job_state,
 )
 from models.setting import get_setting, get_setting_value, upsert_setting
+from services import fanart
 from services import tvdb
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
@@ -1863,6 +1864,68 @@ def tvdb_season_images(tvdb_id: int, season_number: int, language: str = "en+tex
     return TmdbImagesResponse(posters=[TmdbImage(**i) for i in buckets["posters"]], backdrops=[], logos=[])
 
 
+# ------------------------------------------------------------------ fanart.tv image browser
+
+def _fanart_key(db: Session) -> str:
+    key = fanart.get_fanart_key(db)
+    if not key:
+        raise HTTPException(status_code=400, detail="fanart.tv API key not configured.")
+    return key
+
+
+def _fanart_image(entry: dict) -> TmdbImage:
+    return TmdbImage(file_path=entry["file_path"], width=entry["width"], height=entry["height"],
+                     language=entry["language"], vote_average=entry["vote_average"],
+                     url_thumb=entry["url_thumb"], url_full=entry["url_full"])
+
+
+@router.get("/fanart/images", response_model=TmdbImagesResponse)
+def fanart_images(media_type: str, tmdb_id: int = 0, tvdb_id: int = 0, imdb_id: str = "",
+                  language: str = "en+textless", db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Posters, backgrounds, and logos for a title from fanart.tv — movies by TMDB (else IMDb)
+    id, series by TheTVDB id.
+
+    Returns empty lists (not an error) when the title has no usable id or no fanart.tv entry —
+    collections have none at all.
+    """
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    if mt == "collection":
+        return empty  # fanart.tv has no collection entity
+
+    key = _fanart_key(db)
+    try:
+        record = fanart.fetch_artwork(media_type=mt, tmdb_id=tmdb_id or None,
+                                      imdb_id=str(imdb_id or "").strip() or None,
+                                      tvdb_id=tvdb_id or None, api_key=key)
+    except fanart.FanartError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    buckets = fanart.group_artwork(record, mt, fanart.wanted_languages(_tvdb_language(language)))
+    return TmdbImagesResponse(
+        posters=[_fanart_image(i) for i in buckets["posters"]],
+        backdrops=[_fanart_image(i) for i in buckets["backgrounds"]],
+        logos=[_fanart_image(i) for i in buckets["logos"]],
+    )
+
+
+@router.get("/fanart/season-images", response_model=TmdbImagesResponse)
+def fanart_season_images(tvdb_id: int, season_number: int, language: str = "en+textless",
+                         db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Poster images for one TV season from fanart.tv (keyed by TheTVDB id, like its series art)."""
+    key = _fanart_key(db)
+    if tvdb_id <= 0:
+        return TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    try:
+        record = fanart.fetch_artwork(media_type="tv", tmdb_id=None, imdb_id=None, tvdb_id=tvdb_id, api_key=key)
+    except fanart.FanartError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    posters = fanart.season_posters(record, season_number, fanart.wanted_languages(_tvdb_language(language)))
+    return TmdbImagesResponse(posters=[_fanart_image(i) for i in posters], backdrops=[], logos=[])
+
+
 @router.get("/tvdb/image-proxy")
 def tvdb_image_proxy(url: str):
     """Proxy a TVDB artwork download so the browser gets a proper filename."""
@@ -2037,17 +2100,18 @@ class PsdExportRequest(BaseModel):
 
 
 def _is_export_ref_valid(ref: str) -> bool:
-    """Export refs are source-qualified: a TMDB file_path ('/abc.jpg') or an absolute TVDB URL."""
+    """Export refs are source-qualified: a TMDB file_path ('/abc.jpg') or an absolute TVDB /
+    fanart.tv artwork URL."""
     if ref.startswith("/"):
         return ".." not in ref
-    return tvdb.is_tvdb_image_url(ref)
+    return tvdb.is_tvdb_image_url(ref) or fanart.is_fanart_image_url(ref)
 
 
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
     """Download a full-resolution image for the PSD export and return raw bytes.
 
-    Accepts either source's ref: a TMDB file_path is expanded against the TMDB CDN, while a
-    TVDB ref is already an absolute artwork URL.
+    Accepts any source's ref: a TMDB file_path is expanded against the TMDB CDN, while TVDB and
+    fanart.tv refs are already absolute artwork URLs.
 
     If the original is an SVG (common for TMDB logos), converts it to a
     high-quality PNG in-process using cairosvg at 2000px wide.
@@ -2855,7 +2919,7 @@ async def save_poster_export(filename: str, request: Request, db: Session = Depe
 
 
 class SaveGalleryArtworkRequest(BaseModel):
-    path: str                        # TMDB file_path ('/abc.png') or absolute TVDB artwork URL
+    path: str                        # TMDB file_path ('/abc.png') or absolute TVDB / fanart.tv artwork URL
     subtype: str = "logo"            # logo | background | squareart — picks the export folder + name tag
     title: str
     media_type: str = "movie"        # movie | tv | collection
@@ -2872,7 +2936,7 @@ class SaveGalleryArtworkRequest(BaseModel):
 
 @router.post("/artwork-exports")
 def save_gallery_artwork(request: SaveGalleryArtworkRequest, db: Session = Depends(get_db)) -> JSONResponse:
-    """Fetch a gallery image (TMDB/TheTVDB) server-side and save it into the subtype's configured
+    """Fetch a gallery image (TMDB/TheTVDB/fanart.tv) server-side and save it into the subtype's configured
     export folder under IDarr's canonical artwork name (`Title (Year) {ids} - logo.png` /
     ` - background.jpg` / ` - squareart.jpg`), so the file is ready to drop onto an artwork
     drive. Square art takes a crop rect to cut a square out of a poster.

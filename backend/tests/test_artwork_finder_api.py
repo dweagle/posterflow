@@ -645,3 +645,102 @@ def test_picker_bundled_and_art_roots(client, test_db, tmp_path, monkeypatch):
         "tmdb_id": 438631, "subtype": "background", "source": "bundled", "path": bundled["path"]})
     assert add.status_code == 200, add.text
     assert (scope / "backgrounds" / add.json()["written"]).is_file()
+
+
+# ---------------------------------------------------------------- fanart.tv source
+
+FANART_LOGO = "https://assets.fanart.tv/fanart/movies/550/hdmovielogo/fight-club-1.png"
+
+
+def test_candidates_fanart_requires_a_fanart_key(client, test_db):
+    _set_tmdb_key(test_db)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 550, "media_type": "movie", "title": "Fight Club", "source": "fanart"})
+    assert resp.status_code == 400
+    assert "fanart.tv" in resp.json()["detail"]
+
+
+def test_candidates_fanart_lists_without_a_tmdb_key(client, test_db, monkeypatch):
+    upsert_setting(test_db, "fanart_api_key", "personal-key")
+    test_db.commit()
+    seen = {}
+
+    def fake_list(item, wanted, **kwargs):
+        seen.update(kwargs)
+        return {"logos": [{"source": "fanart", "ref": FANART_LOGO, "width": 800, "height": 310, "language": "en"}],
+                "backgrounds": [], "squareart": [], "posters": [], "plex_available": False}
+
+    monkeypatch.setattr("services.artwork_finder.list_candidates", fake_list)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 550, "media_type": "movie", "title": "Fight Club", "source": "fanart"})
+    assert resp.status_code == 200, resp.text
+    assert seen["source"] == "fanart"
+    assert seen["fanart_api_key"] == "personal-key"
+    assert resp.json()["logos"][0]["source"] == "fanart"
+
+
+def test_candidates_rejects_an_unknown_source(client, test_db):
+    _set_tmdb_key(test_db)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 550, "media_type": "movie", "title": "Fight Club", "source": "imgur"})
+    assert resp.status_code == 400
+
+
+def test_add_accepts_a_fanart_candidate(client, test_db, tmp_path, monkeypatch):
+    _set_asset_scope(test_db, str(tmp_path))
+    seen = {}
+
+    def fake_save(**kwargs):
+        seen.update(kwargs)
+        return {"status": "added", "written": "Fight Club (1999) {tmdb-550}_logo.png",
+                "subfolder": "logos", "archived": False}
+
+    monkeypatch.setattr(af, "save_candidate", fake_save)
+    resp = client.post("/api/artwork-finder/add", json={
+        "sync_target_index": 0, "title": "Fight Club", "media_type": "movie", "subtype": "logo",
+        "source": "fanart", "ref": FANART_LOGO, "year": 1999, "tmdb_id": 550})
+    assert resp.status_code == 200, resp.text
+    assert seen["source"] == "fanart" and seen["ref"] == FANART_LOGO
+
+
+def test_fanart_image_proxy_only_allows_the_asset_host(client):
+    for url in ("https://evil.example.com/x.png", "http://assets.fanart.tv/fanart/x.png"):
+        resp = client.get("/api/artwork-finder/fanart-image-proxy", params={"url": url})
+        assert resp.status_code == 400
+
+
+def test_fanart_image_proxy_streams_with_a_download_filename(client, monkeypatch):
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "image/png"}
+
+        def iter_content(self, chunk_size):
+            yield b"png"
+
+    monkeypatch.setattr("api.artwork_finder.requests.get", lambda *a, **k: _Resp())
+    resp = client.get("/api/artwork-finder/fanart-image-proxy", params={"url": FANART_LOGO})
+    assert resp.status_code == 200
+    assert 'filename="fight-club-1.png"' in resp.headers["content-disposition"]
+    assert resp.content == b"png"
+
+
+def test_tagged_download_accepts_a_fanart_ref(client, monkeypatch):
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "image/png"}
+
+        def iter_content(self, chunk_size):
+            yield b"png"
+
+    monkeypatch.setattr("api.artwork_finder.requests.get", lambda *a, **k: _Resp())
+    resp = client.get("/api/artwork-finder/tmdb-download", params={
+        "path": FANART_LOGO, "role": "logo", "title": "Fight Club", "media_type": "movie",
+        "year": 1999, "tmdb_id": 550})
+    assert resp.status_code == 200, resp.text
+    assert resp.content == b"png"
+    disposition = resp.headers["content-disposition"]
+    assert "Fight" in disposition and ".png" in disposition
+
+    resp = client.get("/api/artwork-finder/tmdb-download", params={
+        "path": "https://evil.example.com/x.png", "role": "logo", "title": "X", "media_type": "movie"})
+    assert resp.status_code == 400

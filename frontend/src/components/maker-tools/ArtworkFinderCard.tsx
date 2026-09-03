@@ -8,6 +8,8 @@ import {
   getGracenoteImageProxyUrl,
   getTmdbImageProxyUrl,
   getTvdbImageProxyUrl,
+  getFanartImageProxyUrl,
+  fanartPreviewUrl,
   type ArtworkCandidate,
   type ArtworkCandidatesResponse,
   type ArtworkListType,
@@ -20,11 +22,12 @@ import SquareCropModal from './SquareCropModal'
 import LocalArtworkPickerModal from './LocalArtworkPickerModal'
 import TextLogoModal from './TextLogoModal'
 import { TMDB_IMAGE_LANGUAGES } from './TmdbItemCard'
-import { useTvdbEnabled } from '../../hooks/useTvdbEnabled'
+import { useEnabledImageSources } from '../../hooks/useImageSources'
 import ServiceLinks from './ServiceLinks'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
+import fanartIcon from '../../assets/service-icons/fanart.png'
 
 type Props = {
   item: TmdbSearchResult
@@ -43,6 +46,8 @@ const MISSING_LABEL: Record<ArtworkSubtype, string> = {
   background: 'Backdrop',
   squareart: 'Square Art',
 }
+
+const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv' }
 
 const SECTIONS: { key: ArtworkListType; label: string }[] = [
   { key: 'logo', label: 'Logos' },
@@ -65,6 +70,7 @@ function candidatesForKey(data: ArtworkCandidatesResponse, key: ArtworkListType)
 function previewUrl(key: ArtworkListType, c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
   if (c.source === 'tvdb') return c.ref   // already an absolute artwork URL
+  if (c.source === 'fanart') return fanartPreviewUrl(c.ref)
   const size = key === 'background' ? 'w780' : 'w300'
   return `https://image.tmdb.org/t/p/${size}${c.ref}`
 }
@@ -82,7 +88,7 @@ const CHECKER: CSSProperties = {
 // Full-resolution URL for the lightbox preview.
 function fullUrl(c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
-  if (c.source === 'tvdb') return c.ref
+  if (c.source === 'tvdb' || c.source === 'fanart') return c.ref
   return `https://image.tmdb.org/t/p/original${c.ref}`
 }
 
@@ -90,6 +96,7 @@ function fullUrl(c: ArtworkCandidate): string {
 function downloadUrl(c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
   if (c.source === 'tvdb') return getTvdbImageProxyUrl(c.ref)
+  if (c.source === 'fanart') return getFanartImageProxyUrl(c.ref)
   return getTmdbImageProxyUrl(c.ref)
 }
 
@@ -100,9 +107,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB only
-  // once its tab is clicked.
-  const tvdbEnabled = useTvdbEnabled()
+  // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB and
+  // fanart.tv only once their tab is clicked.
+  const sources = useEnabledImageSources()
   const { overview } = useCardOverview(item)
   // TVDB-only items (no TMDB id) open straight on the TVDB tab — TMDB has nothing for them.
   const [source, setSource] = useState<ImageSource>((item.tmdb_id ?? 0) > 0 ? 'tmdb' : 'tvdb')
@@ -192,9 +199,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   }, [language, source, load])
 
   const noScope = syncTargetIndex == null
-  // Online browsing needs a TMDB id, or a TVDB id with TheTVDB configured. Custom collections
-  // have neither — their card offers only the local-folder picker.
-  const canBrowse = (item.tmdb_id ?? 0) > 0 || ((item.tvdb_id ?? 0) > 0 && tvdbEnabled)
+  // Online browsing needs a TMDB id, or a TVDB id with TheTVDB or fanart.tv configured. Custom
+  // collections have neither — their card offers only the local-folder picker.
+  const canBrowse = (item.tmdb_id ?? 0) > 0 || ((item.tvdb_id ?? 0) > 0 && (sources.tvdb || sources.fanart))
 
   const handleAdd = useCallback(async (subtype: ArtworkSubtype, c: ArtworkCandidate, confirmOverwrite = false) => {
     if (noScope) {
@@ -408,24 +415,26 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
       {open && (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
-            {tvdbEnabled && (
+            {(sources.tvdb || sources.fanart) && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Artwork source">
-                {([['tmdb', 'TMDB', tmdbIcon], ['tvdb', 'TVDB', tvdbIcon]] as const).map(([id, label, icon]) => (
+                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon]] as const)
+                  .filter(([id]) => id === 'tmdb' || sources[id])
+                  .map(([id, icon]) => (
                   <button
                     key={id}
                     type="button"
                     className={`tmdb-gallery-source tmdb-gallery-source--${id}${source === id ? ' active' : ''}`}
                     onClick={() => handleSourceChange(id)}
                     disabled={loading}
-                    title={`Browse ${label} artwork`}
-                    aria-label={`Browse ${label} artwork`}
+                    title={`Browse ${SOURCE_LABEL[id]} artwork`}
+                    aria-label={`Browse ${SOURCE_LABEL[id]} artwork`}
                   >
                     <img className="tmdb-gallery-source-icon" src={icon} alt="" />
                   </button>
                 ))}
               </div>
             )}
-            {/* Same language preference as the maker card's gallery; applies to the TMDB listings. */}
+            {/* Same language preference as the maker card's gallery; applies to the TMDB and fanart.tv listings. */}
             <div className="tmdb-gallery-lang-wrapper">
               <Globe size={13} className="tmdb-gallery-lang-icon" />
               <select
@@ -442,7 +451,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             </div>
           </div>
           {error && <p className="tmdb-error">{error}</p>}
-          {loading && !data && <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>Loading {source === 'tmdb' ? 'TMDB' : 'TheTVDB'} artwork…</p>}
+          {loading && !data && <p style={{ fontSize: '0.8rem', color: '#888', margin: '0 0 10px' }}>Loading {SOURCE_LABEL[source]} artwork…</p>}
           {data && source === 'tmdb' && !data.plex_available && (
             <p style={{ fontSize: '0.8rem', color: '#ffb74d', margin: '0 0 10px' }}>
               No Plex token configured — square art (Plex-only; TMDB has none) is unavailable. Add a Plex instance in Settings to enable it.
@@ -470,9 +479,11 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                 </div>
                 {cands.length === 0
                   ? <p style={{ fontSize: '0.78rem', color: '#777', margin: 0 }}>
-                      {key === 'squareart' && source === 'tvdb'
-                        ? "TheTVDB has no square art — switch to the TMDB tab for Plex's square art."
-                        : 'None found.'}
+                      {key === 'squareart' && source === 'fanart'
+                        ? "fanart.tv has no textless square art for this title — switch to the TMDB tab for Plex's square art."
+                        : key === 'squareart' && source === 'tvdb'
+                          ? "TheTVDB has no square art — switch to the TMDB tab for Plex's square art."
+                          : 'None found.'}
                     </p>
                   : (
                     <div className={`tmdb-gallery-grid ${gridClass}`}>
@@ -507,9 +518,10 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                             <div className="tmdb-gallery-item-meta">
                               <div className="tmdb-gallery-meta-row" style={{ gap: 6 }}>
                                 {/* Under the TMDB tab only square art comes from Plex, so its badge is
-                                    the one worth showing; the TVDB tab labels its own. */}
+                                    the one worth showing; the TVDB and fanart.tv tabs label their own. */}
                                 {c.source === 'gracenote' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Plex</span>}
                                 {c.source === 'tvdb' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>TVDB</span>}
+                                {c.source === 'fanart' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>fanart.tv</span>}
                                 {/* TL / language code, same badge the TMDB search gallery uses. Square art is a
                                     single Plex image with no language, so it gets none. */}
                                 {key !== 'squareart' && (c.language === null

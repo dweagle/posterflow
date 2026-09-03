@@ -145,7 +145,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
       ? buildResult(item, item.tmdb_id, item.poster_url, item.imdb_id, item.tvdb_id)
       // Custom collections (decades, holidays, …) have no TMDB entry, so resolve-first would
       // dead-end them — show the finder card anyway so the local-folder picker still works.
-      // A TVDB id alone is also enough: the card can browse TheTVDB's artwork with it.
+      // A TVDB id alone is also enough: the card can browse TheTVDB's and fanart.tv's artwork with it.
       // Items with neither stay resolve-first.
       : item.mediaType === 'collection' || item.tvdb_id
         ? buildResult(item, 0, item.poster_url, item.imdb_id, item.tvdb_id)
@@ -205,7 +205,7 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
             <p className="muted">
               {item.mediaType === 'collection'
                 ? 'Custom collection? Add artwork with From folder. If it does exist on TMDB, resolve it to browse online artwork:'
-                : 'No TMDB id — only TheTVDB artwork is browsable. Resolve it to add TMDB artwork and Plex square art:'}
+                : 'No TMDB id — only TheTVDB and fanart.tv artwork is browsable. Resolve it to add TMDB artwork and Plex square art:'}
             </p>
             {resolveControls}
           </div>

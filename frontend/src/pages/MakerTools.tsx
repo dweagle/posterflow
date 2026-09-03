@@ -157,6 +157,7 @@ function MakerTools() {
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
   const [psdSameTab, setPsdSameTab] = useState(false)
   const [tvdbEnabled, setTvdbEnabled] = useState(false)   // gallery's TheTVDB source tab
+  const [fanartEnabled, setFanartEnabled] = useState(false)   // gallery's fanart.tv source tab
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
@@ -240,6 +241,7 @@ function MakerTools() {
       setPsdOpenPhotopea(cfg.openPhotopea)
       setPsdSameTab(cfg.sameTab)
       setTvdbEnabled(cfg.tvdbEnabled)
+      setFanartEnabled(cfg.fanartEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
       setLogoExportFolder((settings.logo_export_folder || '').trim())
       setArtworkLogoExportFolder((settings.artwork_logo_export_folder || '').trim())
@@ -421,7 +423,8 @@ function MakerTools() {
     backgroundFolderSet: !!backgroundExportFolder.trim(),
     squareartFolderSet: !!squareartExportFolder.trim(),
     tvdbEnabled,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, artworkLogoExportFolder, backgroundExportFolder, squareartExportFolder, tvdbEnabled])
+    fanartEnabled,
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, artworkLogoExportFolder, backgroundExportFolder, squareartExportFolder, tvdbEnabled, fanartEnabled])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))

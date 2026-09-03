@@ -276,6 +276,7 @@ function Settings() {
   const [showFeatureWebhooks, setShowFeatureWebhooks] = useState<Record<string, boolean>>({})
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
+  const [showFanartKey, setShowFanartKey] = useState(false)
 
   const handleToggleTvdbKeyVisibility = async () => {
     const willShow = !showTvdbKey
@@ -294,6 +295,25 @@ function Settings() {
       }
     }
     setShowTvdbKey((prev) => !prev)
+  }
+
+  const handleToggleFanartKeyVisibility = async () => {
+    const willShow = !showFanartKey
+    if (willShow && fanartApiKey === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'fanart_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved fanart.tv API key available to reveal', 'error')
+          return
+        }
+        setFanartApiKey(revealedValue)
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal fanart.tv API key'), 'error')
+        return
+      }
+    }
+    setShowFanartKey((prev) => !prev)
   }
 
   const handleToggleTmdbKeyVisibility = async () => {
@@ -509,6 +529,9 @@ function Settings() {
     tvdbPin,
     setTvdbPin,
     handleSaveTvdbApiKey,
+    fanartApiKey,
+    setFanartApiKey,
+    handleSaveFanartApiKey,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -945,6 +968,45 @@ function Settings() {
               </div>
             </div>
             <SourceAttribution source="tvdb" />
+            <div className="setting-item api-key-setting">
+              <div className="setting-info">
+                <label>fanart.tv API Key</label>
+                <p className="setting-description">
+                  Optional. Adds fanart.tv as a third source in the Maker Tools image browser and the
+                  Artwork Finder, alongside TMDB and TheTVDB. Sign in at{' '}
+                  <a href="https://fanart.tv/" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                    fanart.tv
+                  </a>{' '}
+                  and copy the personal API key from your profile.
+                </p>
+              </div>
+              <div className="settings-input-row api-key-control">
+                <div className="input-with-toggle">
+                  <input
+                    type={showFanartKey ? 'text' : 'password'}
+                    value={fanartApiKey === MASKED_VALUE ? '' : fanartApiKey}
+                    onChange={(e) => setFanartApiKey(e.target.value)}
+                    placeholder={fanartApiKey === MASKED_VALUE ? '••••••••••••••••' : 'Enter your fanart.tv API key'}
+                  />
+                  <button
+                    className="toggle-visibility"
+                    type="button"
+                    onClick={handleToggleFanartKeyVisibility}
+                    title={showFanartKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showFanartKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <button
+                  className="btn-primary btn-inline-save"
+                  onClick={handleSaveFanartApiKey}
+                  disabled={saving}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+            <SourceAttribution source="fanart" />
           </div>
 
           <div className="settings-section">

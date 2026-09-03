@@ -38,6 +38,7 @@ interface FormData {
   tmdb_api_key: string
   tvdb_api_key: string
   tvdb_pin: string
+  fanart_api_key: string
   poster_destination: string
   gdrive_storage_path: string
   artwork_gdrive_storage_path: string
@@ -68,6 +69,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   const [showRefreshToken, setShowRefreshToken] = useState(false)
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
+  const [showFanartKey, setShowFanartKey] = useState(false)
 
   // What's already stored per instance name, so step 3 only writes configs the user actually
   // touched — re-running the wizard used to re-save every loaded config unchanged.
@@ -151,6 +153,25 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     setShowTvdbKey((prev) => !prev)
   }
 
+  const handleToggleFanartKeyVisibility = async () => {
+    const willShow = !showFanartKey
+    if (willShow && formData.fanart_api_key === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'fanart_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved fanart.tv API key available to reveal', 'error')
+          return
+        }
+        setFormData((prev) => ({ ...prev, fanart_api_key: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal fanart.tv API key'), 'error')
+        return
+      }
+    }
+    setShowFanartKey((prev) => !prev)
+  }
+
   const [showPlexTokens, setShowPlexTokens] = useState<Record<number, boolean>>({})
   const [showSonarrKeys, setShowSonarrKeys] = useState<Record<number, boolean>>({})
   const [showRadarrKeys, setShowRadarrKeys] = useState<Record<number, boolean>>({})
@@ -167,6 +188,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
     tmdb_api_key: '',
     tvdb_api_key: '',
     tvdb_pin: '',
+    fanart_api_key: '',
     poster_destination: '',
     gdrive_storage_path: '',
     artwork_gdrive_storage_path: '',
@@ -198,6 +220,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           tmdb_api_key: settings.tmdb_api_key || '',
           tvdb_api_key: settings.tvdb_api_key || '',
           tvdb_pin: settings.tvdb_pin || '',
+          fanart_api_key: settings.fanart_api_key || '',
           poster_destination: settings.poster_destination || '',
           gdrive_storage_path: settings.gdrive_storage_path || '',
           artwork_gdrive_storage_path: settings.artwork_gdrive_storage_path || '',
@@ -592,6 +615,8 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
       const tvdbPin = formData.tvdb_pin.trim()
       if (tvdbPin && tvdbPin !== MASKED_VALUE) payload.tvdb_pin = tvdbPin
       else if (!tvdbPin && savingTvdbKey) payload.tvdb_pin = ''
+      const fanartKey = formData.fanart_api_key.trim()
+      if (fanartKey && fanartKey !== MASKED_VALUE) payload.fanart_api_key = fanartKey
       if (Object.keys(payload).length > 0) {
         await saveSettings(payload)
       }
@@ -1479,6 +1504,30 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   autoComplete="off"
                 />
                 <small>Leave blank unless yours is a user-supported (subscriber) key.</small>
+              </div>
+
+              <div className="form-group">
+                <label>fanart.tv API Key</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showFanartKey ? 'text' : 'password'}
+                    name="fanart_api_key"
+                    value={formData.fanart_api_key}
+                    onChange={(e) => updateGoogleCreds('fanart_api_key', e.target.value)}
+                    placeholder="Enter your fanart.tv API key"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={handleToggleFanartKeyVisibility}
+                    title={showFanartKey ? 'Hide' : 'Show'}
+                  >
+                    {showFanartKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <small>Optional. Adds fanart.tv as a third source in the Maker Tools image browser and the Artwork Finder, alongside TMDB and TheTVDB.</small>
+                <small>Sign in at <a href="https://fanart.tv/" target="_blank" rel="noopener noreferrer">fanart.tv</a> and copy the personal API key from your profile.</small>
               </div>
 
               <div className="button-group">

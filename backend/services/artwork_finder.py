@@ -25,6 +25,7 @@ from PIL import Image, ImageChops, ImageFile
 
 from core.rate_limiter import tmdb_bucket
 from models.setting import get_setting
+from services import fanart as fanart_service
 from services import tvdb as tvdb_service
 
 Image.MAX_IMAGE_PIXELS = None  # some TMDB logos are 12000px wide
@@ -383,8 +384,8 @@ def _probe_size(session: requests.Session, url: str) -> Optional[tuple[int, int]
 
 
 def _resolve_url(source: str, ref: str) -> str:
-    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote and TVDB refs are
-    already absolute."""
+    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote, TVDB and
+    fanart.tv refs are already absolute."""
     if source == "tmdb":
         return f"{TMDB_IMG}{ref}"
     return ref
@@ -425,11 +426,47 @@ def tvdb_candidate_groups(item: FinderItem, api_key: str, pin: str, min_backdrop
     }
 
 
+def fanart_candidate_groups(item: FinderItem, api_key: str, min_backdrop_width: int, *,
+                            textless_backgrounds: bool = True,
+                            image_language: Optional[str] = "en,null") -> dict:
+    """fanart.tv's logos / backgrounds / posters / square art for an item, already in candidate
+    shape.
+
+    Mirrors the TMDB pickers: HD logos first, textless-first ordering, the same language
+    preference, and the strict textless/min-width background rule when asked for. Square art is
+    offered only when textless — fanart.tv's squares nearly always carry the title, and square
+    art here stands in for Plex's textless kind."""
+    if item.is_collection:
+        return {"logos": [], "backgrounds": [], "posters": [], "squareart": []}
+    record = fanart_service.fetch_artwork(media_type=item.media_type, tmdb_id=item.tmdb_id,
+                                          imdb_id=item.imdb_id, tvdb_id=item.tvdb_id, api_key=api_key)
+    grouped = fanart_service.group_artwork(record, item.media_type,
+                                           fanart_service.wanted_languages(image_language))
+
+    def shape(entries):
+        return [{"source": "fanart", "ref": e["file_path"], "width": e["width"],
+                 "height": e["height"], "language": e["language"]}
+                for e in entries]
+
+    backgrounds = grouped["backgrounds"]
+    if textless_backgrounds:
+        backgrounds = [b for b in backgrounds
+                       if b["language"] is None and b["width"] >= min_backdrop_width]
+
+    return {
+        "logos": shape(grouped["logos"]),
+        "backgrounds": shape(backgrounds),
+        "posters": shape(grouped["posters"]),
+        "squareart": shape([s for s in grouped["squareart"] if s["language"] is None]),
+    }
+
+
 def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     plex: Optional[PlexMetadataProvider], session: requests.Session,
                     min_backdrop_width: int = 1920, evaluate_white: bool = False,
                     white_top_n: int = 8, source: str = "tmdb",
                     tvdb_creds: Optional[tuple[str, str]] = None,
+                    fanart_api_key: str = "",
                     textless_backgrounds: bool = True,
                     image_language: Optional[str] = "en,null") -> dict:
     """Candidates per requested type, from one source at a time.
@@ -437,7 +474,8 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
     ``source='tmdb'`` is the default pairing: logos/backgrounds/posters from TMDB plus square art
     from Plex's Gracenote provider (TMDB has none, and Plex's logos/backdrops just duplicate
     TMDB's, so they aren't offered). ``source='tvdb'`` swaps in TheTVDB and yields no square art,
-    which TVDB doesn't carry either.
+    which TVDB doesn't carry either. ``source='fanart'`` swaps in fanart.tv, whose square art is
+    listed only when textless (nearly all of it carries the title).
 
     ``textless_backgrounds`` keeps the strict auto-pick rule (textless and >= min_backdrop_width);
     the interactive browser passes False so the user sees every backdrop and judges it themselves.
@@ -447,11 +485,14 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
     out: dict[str, Any] = {"logos": [], "backgrounds": [], "squareart": [], "posters": [],
                            "plex_available": plex is not None}
 
-    use_tvdb = source == "tvdb"
-    if use_tvdb:
+    if source == "tvdb":
         key, pin = tvdb_creds or ("", "")
         groups = tvdb_candidate_groups(item, key, pin, min_backdrop_width,
                                        textless_backgrounds=textless_backgrounds)
+    elif source == "fanart":
+        groups = fanart_candidate_groups(item, fanart_api_key, min_backdrop_width,
+                                         textless_backgrounds=textless_backgrounds,
+                                         image_language=image_language)
     else:
         tmdb_imgs = tmdb_images(item, tmdb_api_key, image_language) if item.tmdb_id else {}
         groups = {
@@ -468,7 +509,7 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
         }
 
     # Plex is consulted only for square art, and only alongside TMDB.
-    want_square = "squareart" in types and plex is not None and not item.is_collection and not use_tvdb
+    want_square = "squareart" in types and plex is not None and not item.is_collection and source == "tmdb"
     gn: dict = plex.images(item) if want_square else {}
 
     # ---- logos. Collections have none of their own on any source, so under TMDB they borrow
@@ -477,7 +518,7 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
         if item.is_collection:
             logos: list[dict] = (collection_member_logos(item.tmdb_id, tmdb_api_key,
                                                          image_language=image_language)
-                                 if item.tmdb_id and not use_tvdb else [])
+                                 if item.tmdb_id and source == "tmdb" else [])
         else:
             logos = groups["logos"]
         if evaluate_white:
@@ -497,8 +538,10 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
     if "poster" in types:
         out["posters"] = groups["posters"]
 
-    # ---- square art (Gracenote only — neither TMDB nor TVDB has any). Gracenote carries no
-    #      dims, so probe them.
+    # ---- square art: Gracenote under the TMDB tab (TMDB and TVDB have none), fanart.tv's own
+    #      textless squares under its tab. Gracenote carries no dims, so probe them.
+    if "squareart" in types and source == "fanart":
+        out["squareart"] = groups.get("squareart", [])
     if want_square and gn.get("backgroundSquare"):
         c = {"source": "gracenote", "ref": gn["backgroundSquare"], "width": None, "height": None}
         size = _probe_size(session, _resolve_url(c["source"], c["ref"]))

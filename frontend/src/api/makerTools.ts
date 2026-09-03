@@ -226,8 +226,8 @@ export const getSeasonImages = async (tmdb_id: number, season_number: number, la
   return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
 
-/** The image sources the gallery can browse. TMDB is always present; TVDB needs a configured key. */
-export type ImageSource = 'tmdb' | 'tvdb'
+/** The image sources the gallery can browse. TMDB is always present; TVDB and fanart.tv each need a configured key. */
+export type ImageSource = 'tmdb' | 'tvdb' | 'fanart'
 
 /**
  * Same response shape as the TMDB gallery, so both sources render through one code path.
@@ -248,6 +248,25 @@ export const getTvdbSeasonImages = async (tvdb_id: number, season_number: number
   return getData<TmdbImagesResponse>(`/api/maker-tools/tvdb/season-images?tvdb_id=${tvdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
 
+/**
+ * fanart.tv images in the gallery's shape. Movies resolve by TMDB (else IMDb) id, series by
+ * TheTVDB id — the item already carries both. Returns empty lists when fanart.tv has nothing.
+ */
+export const getFanartImages = async (
+  item: { media_type: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null },
+  language: string = 'en+textless',
+): Promise<TmdbImagesResponse> => {
+  const params = new URLSearchParams({ media_type: item.media_type, language })
+  if (item.tmdb_id) params.set('tmdb_id', String(item.tmdb_id))
+  if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
+  if (item.imdb_id) params.set('imdb_id', item.imdb_id)
+  return getData<TmdbImagesResponse>(`/api/maker-tools/fanart/images?${params.toString()}`)
+}
+
+export const getFanartSeasonImages = async (tvdb_id: number, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
+  return getData<TmdbImagesResponse>(`/api/maker-tools/fanart/season-images?tvdb_id=${tvdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
+}
+
 export const getTvdbImageProxyUrl = (url: string): string => {
   return `/api/maker-tools/tvdb/image-proxy?url=${encodeURIComponent(url)}`
 }
@@ -264,8 +283,11 @@ export type ArtworkSubtype = 'logo' | 'background' | 'squareart'
 // 'poster' is a listable/crop source, not a savable subtype.
 export type ArtworkListType = ArtworkSubtype | 'poster'
 
+/** Where a candidate image comes from — a browsable source, or Plex's Gracenote square art. */
+export type ArtworkCandidateSource = 'tmdb' | 'gracenote' | 'tvdb' | 'fanart'
+
 export interface ArtworkCandidate {
-  source: 'tmdb' | 'gracenote' | 'tvdb'
+  source: ArtworkCandidateSource
   ref: string
   width: number | null
   height: number | null
@@ -297,7 +319,7 @@ export const getArtworkCandidates = async (
   types: ArtworkListType[] = ['logo', 'background', 'squareart', 'poster'],
   evaluateWhite = true,
   source: ImageSource = 'tmdb',
-  language = 'en+textless',   // TMDB image language: all | en+textless | an ISO code
+  language = 'en+textless',   // TMDB / fanart.tv image language: all | en+textless | an ISO code
 ): Promise<ArtworkCandidatesResponse> => {
   const params = new URLSearchParams({
     tmdb_id: String(item.tmdb_id),
@@ -317,7 +339,7 @@ export const getArtworkCandidates = async (
 export interface AddArtworkRequest extends ArtworkItemRef {
   sync_target_index: number
   subtype: ArtworkSubtype
-  source: 'tmdb' | 'gracenote' | 'tvdb'
+  source: ArtworkCandidateSource
   ref: string
   make_white?: boolean
   confirm_overwrite?: boolean   // set true after the user confirms overwriting an existing file
@@ -338,7 +360,7 @@ export const addArtwork = async (req: AddArtworkRequest): Promise<AddArtworkResp
 
 export interface CropArtworkRequest extends ArtworkItemRef {
   sync_target_index: number
-  source: 'tmdb' | 'gracenote' | 'tvdb'
+  source: ArtworkCandidateSource
   ref: string
   x: number       // crop rect in the SOURCE image's own pixels
   y: number
@@ -397,6 +419,14 @@ export const getArtworkScopeItems = async (
   const scoped = source === 'poster_scope' && itemScopeIndex != null ? `&item_scope_index=${itemScopeIndex}` : ''
   return getData(`/api/artwork-finder/scope-items?sync_target_index=${syncTargetIndex}&source=${source}${scoped}`)
 }
+
+/** Same-origin download of a fanart.tv asset (proper filename, no CORS). */
+export const getFanartImageProxyUrl = (url: string): string => {
+  return `/api/artwork-finder/fanart-image-proxy?url=${encodeURIComponent(url)}`
+}
+
+/** fanart.tv serves a small preview of every asset at the same path under /preview/. */
+export const fanartPreviewUrl = (url: string): string => url.replace('/fanart/', '/preview/')
 
 /** Proxy URL for previewing a Gracenote (*.plex.tv) image (square art / clear logo). */
 export const getGracenoteImageProxyUrl = (url: string): string => {
