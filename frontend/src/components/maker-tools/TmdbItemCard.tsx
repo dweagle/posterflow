@@ -774,6 +774,16 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       ? (imageSource === 'tvdb' ? tvDetails.tvdb_seasons : tvDetails.tmdb_seasons)
       : tvDetails.seasons
 
+  // Landing on the Seasons tab loads the first real season straight away (Specials only when
+  // that's all there is) instead of showing bare chips. The pick is cleared by a source or
+  // language change, so this also refills it for the new source / language.
+  const firstSeasonNumber = seasonList.find((sn) => sn.season_number >= 1)?.season_number
+    ?? seasonList[0]?.season_number ?? null
+  useEffect(() => {
+    if (!galleryOpen || activeGalleryTab !== 'season-posters' || selectedSeason != null || firstSeasonNumber == null) return
+    void fetchSeasonImages(firstSeasonNumber)
+  }, [galleryOpen, activeGalleryTab, selectedSeason, firstSeasonNumber, fetchSeasonImages])
+
   // Air-date state for the seasons badge edge: red = a numbered season is listed with no air
   // dates yet (announced/TBA), green = every one is dated. Unknowns stay uncolored so a failed
   // lookup never reads as "all clear"; specials don't count — they're not "a season on the way".
