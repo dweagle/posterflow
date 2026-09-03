@@ -33,15 +33,31 @@ client.interceptors.request.use((config) => {
 export const NEW_VERSION_EVENT = 'app:new-version'
 let lastVersionDispatch = 0
 
+// "0.15.1" -> [0, 15, 1]; non-numeric parts count as 0 so odd strings never throw
+const parseVersion = (v: string): number[] =>
+  v.replace(/^v/, '').split('.').slice(0, 3).map((part) => parseInt(part, 10) || 0)
+
+export const isNewerVersion = (candidate: string, current: string): boolean => {
+  const a = parseVersion(candidate)
+  const b = parseVersion(current)
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (x !== y) return x > y
+  }
+  return false
+}
+
 // On 401 responses, signal the app to show the lock screen. On every response,
-// compare the server's X-App-Version against the baked-in bundle version and
-// signal the update banner on mismatch (throttled — one event per 30s is plenty).
+// signal the update banner when the server's X-App-Version is newer than the baked-in
+// bundle version (throttled — one event per 30s is plenty). Newer, not merely different:
+// the browser replays cached API responses still stamped with the pre-update version.
 client.interceptors.response.use(
   (response) => {
     const serverVersion = response.headers?.['x-app-version']
     if (
       typeof serverVersion === 'string' && serverVersion &&
-      serverVersion !== __APP_VERSION__ &&
+      isNewerVersion(serverVersion, __APP_VERSION__) &&
       Date.now() - lastVersionDispatch > 30_000
     ) {
       lastVersionDispatch = Date.now()
