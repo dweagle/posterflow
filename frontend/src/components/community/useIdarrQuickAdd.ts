@@ -86,7 +86,7 @@ export function useIdarrQuickAdd() {
       if (config.auto_rename_quick_add && response.uploaded_count > 0) {
         const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
         // The maker is on the requests page, not IDarr — pop a notice if anything went pending.
-        void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add))
+        void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add), syncTargetIndex)
       }
     } catch {
       // Silently ignore — best-effort maker convenience

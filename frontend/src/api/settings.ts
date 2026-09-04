@@ -376,7 +376,7 @@ export interface MakerIdarrUploadResponse {
 }
 
 // Per-file result of a targeted IDarr run (quick add / community drop).
-export type MakerIdarrRunOutcomeStatus = 'uploaded' | 'ready' | 'pending' | 'conflict' | 'upload_failed' | 'missing'
+export type MakerIdarrRunOutcomeStatus = 'uploaded' | 'ready' | 'ignored' | 'pending' | 'conflict' | 'upload_failed' | 'missing'
 
 export interface MakerIdarrRunOutcome {
   source_filename: string
@@ -384,6 +384,8 @@ export interface MakerIdarrRunOutcome {
   relative_path: string
   title: string
   year: number | null
+  // Pending rows only: the pending-match key, so the notice can act on the row.
+  asset_key?: string
   status: MakerIdarrRunOutcomeStatus
   reason: string
   uploaded: boolean
@@ -475,6 +477,15 @@ export const getMakerIdarrLastRun = async (syncTargetIndex?: number): Promise<Ma
 
 export const getMakerIdarrRunResult = async (jobId: number): Promise<MakerIdarrRunResult> => {
   return getData(`/api/idarr/run-result/${jobId}`)
+}
+
+export const ignoreAndUploadMakerIdarrPending = async (payload: {
+  asset_key: string
+  relative_path: string
+  sync_target_index: number
+  upload: boolean
+}): Promise<{ success: boolean; asset_key: string; upload_job_id: number | null }> => {
+  return postData('/api/idarr/pending-matches/ignore-and-upload', payload)
 }
 
 export const getMakerIdarrPendingMatches = async (

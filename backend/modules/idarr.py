@@ -259,6 +259,10 @@ def _queue_idarr_sync_after_run(db: Any, config_data: dict[str, Any], triggered_
             pass
 
 
+# Ignored re-drops go up unchanged alongside the renamed files.
+_TARGETED_UPLOAD_STATUSES = ("ready", "ignored")
+
+
 def _resolve_targeted_upload_target(config_data: dict[str, Any]) -> dict[str, str] | None:
     """Resolve the sync target a targeted run should upload to."""
     sync_target_index = int(config_data.get("sync_target_index") or 0)
@@ -410,8 +414,8 @@ def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> N
         except json.JSONDecodeError:
             details = {}
         outcomes = [row for row in (details.get("targeted_outcomes") or []) if isinstance(row, dict)]
-        ready = [row for row in outcomes if str(row.get("status") or "") == "ready"]
-        held_back = [row for row in outcomes if str(row.get("status") or "") != "ready"]
+        ready = [row for row in outcomes if str(row.get("status") or "") in _TARGETED_UPLOAD_STATUSES]
+        held_back = [row for row in outcomes if str(row.get("status") or "") not in _TARGETED_UPLOAD_STATUSES]
 
         log_info(
             LogTags.IDARR,
@@ -424,6 +428,9 @@ def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> N
                 f"{STEP_INDENT}Held back '{row.get('source_filename')}': {row.get('status')} "
                 f"({row.get('reason') or 'no reason given'}) — stays in the sync folder until it is resolved",
             )
+        for row in ready:
+            if str(row.get("status") or "") == "ignored":
+                log_info(LogTags.IDARR, f"{STEP_INDENT}'{row.get('source_filename')}' is on the ignore list — uploading unchanged")
 
         # One rclone process for the whole drop: paying startup, auth and connection setup per
         # file made a multi-file drop crawl (~2s each), and it gave up rclone's parallel transfers.
@@ -471,14 +478,18 @@ def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> N
                 log_error(LogTags.IDARR, f"{STEP_INDENT}Upload failed for '{relative_path}': {row['reason']}")
             else:
                 row["uploaded"] = True
-                row["status"] = "uploaded"
+                if str(row.get("status") or "") == "ready":
+                    row["status"] = "uploaded"
                 uploaded += 1
 
         details["targeted_outcomes"] = outcomes
         run.details_json = json.dumps(details)
         db.commit()
 
+        ignored_as_is = sum(1 for row in ready if row.get("status") == "ignored" and row.get("uploaded"))
         summary = f"uploaded={uploaded}, failed={failed}, held_back={len(held_back)}"
+        if ignored_as_is:
+            summary += f", ignored_as_is={ignored_as_is}"
         if failed:
             log_warning(LogTags.IDARR, f"Single-item upload finished with failures: {summary}")
         else:
@@ -504,6 +515,96 @@ def run_idarr_targeted_upload_job(job_id: int, config_data: dict[str, Any]) -> N
         log_error(LogTags.IDARR, f"IDarr single-item upload failed: {exc}\n{traceback.format_exc()}")
         mark_job_failed(db, job_id, exc)
         log_section_end(LogTags.IDARR, f"IDarr Single-Item Upload Failed (job_id={job_id})")
+    finally:
+        remove_job_log_handler(handler_id, job_type="idarr", success=success)
+        db.close()
+
+
+def run_idarr_file_upload_job(job_id: int, config_data: dict[str, Any]) -> None:
+    """Push named files from a sync folder to its drive unchanged (ignored quick-add drops)."""
+    db = SessionLocal()
+    handler_id = add_job_log_handler("idarr", job_id, "IDarr file upload")
+    success = False
+
+    try:
+        log_section_start(LogTags.IDARR, f"IDarr File Upload Started (job_id={job_id})")
+
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            log_error(LogTags.IDARR, f"Job {job_id} not found")
+            return
+
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_RUNNING,
+            progress=5,
+            message=format_start_message("IDarr file upload"),
+        )
+
+        personal_drive_id = str(config_data.get("personal_drive_id") or "").strip()
+        source_dir = Path(str(config_data.get("source_dir") or "").strip())
+        label = str(config_data.get("label") or "").strip() or personal_drive_id
+        relative_paths = [str(path).strip() for path in (config_data.get("relative_paths") or []) if str(path).strip()]
+        if not personal_drive_id or not relative_paths:
+            raise ValueError("A personal drive ID and at least one file are required")
+
+        log_info(
+            LogTags.IDARR,
+            f"Uploading {len(relative_paths)} file(s) unchanged from '{source_dir}' to '{label}'",
+            drive_id=personal_drive_id,
+        )
+        done = [0]
+
+        def _file_done(relative_path: str, action: str) -> None:
+            check_cancelled(job_id)
+            done[0] += 1
+            log_info(LogTags.IDARR, f"{STEP_INDENT}[{done[0]}/{len(relative_paths)}] {relative_path}: {action}")
+            update_job_state(
+                db,
+                job,
+                progress=min(95, int(5 + done[0] / len(relative_paths) * 90)),
+                message=_sanitize_message(f"Uploaded {done[0]}/{len(relative_paths)} to {label}: {Path(relative_path).name}"),
+            )
+
+        check_cancelled(job_id)
+        upload_result = RcloneService().upload_files(
+            source_dir,
+            personal_drive_id,
+            relative_paths,
+            drive_name=label,
+            file_done_callback=_file_done,
+        )
+
+        failed_paths = upload_result.get("failed") or {}
+        for relative_path, error in failed_paths.items():
+            log_error(LogTags.IDARR, f"{STEP_INDENT}Upload failed for '{relative_path}': {error}")
+        if failed_paths:
+            raise RuntimeError(
+                f"Upload failed for {len(failed_paths)} file(s): "
+                + "; ".join(f"{Path(path).name}: {error}" for path, error in failed_paths.items())
+            )
+
+        summary = f"uploaded={len(relative_paths)}"
+        log_success(LogTags.IDARR, f"File upload complete: {summary}")
+        update_job_state(
+            db,
+            job,
+            status=JOB_STATUS_COMPLETED,
+            progress=100,
+            message=format_complete_message("IDarr file upload", summary),
+            completed_at=datetime.now(timezone.utc),
+        )
+        success = True
+        log_section_end(LogTags.IDARR, f"IDarr File Upload Completed (job_id={job_id})")
+    except JobCancelled:
+        db.rollback()
+        finalize_job_cancelled(db, job_id)
+        log_section_end(LogTags.IDARR, f"IDarr File Upload Stopped (job_id={job_id})")
+    except Exception as exc:
+        log_error(LogTags.IDARR, f"IDarr file upload failed: {exc}\n{traceback.format_exc()}")
+        mark_job_failed(db, job_id, exc)
+        log_section_end(LogTags.IDARR, f"IDarr File Upload Failed (job_id={job_id})")
     finally:
         remove_job_log_handler(handler_id, job_type="idarr", success=success)
         db.close()
@@ -695,7 +796,7 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
             _targeted_outcomes = [
                 row for row in ((result.details or {}).get("targeted_outcomes") or []) if isinstance(row, dict)
             ]
-            _ready_count = sum(1 for row in _targeted_outcomes if str(row.get("status") or "") == "ready")
+            _ready_count = sum(1 for row in _targeted_outcomes if str(row.get("status") or "") in _TARGETED_UPLOAD_STATUSES)
             _held_count = len(_targeted_outcomes) - _ready_count
             if _ready_count:
                 _queue_idarr_targeted_upload(db, config_data, idarr_run, _ready_count, job_id)

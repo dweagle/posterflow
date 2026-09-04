@@ -3,6 +3,7 @@ import { getMakerIdarrRunResult } from '../../src/api/client'
 import {
   IDARR_QUICK_ADD_NOTICE_EVENT,
   describeOutcomeReason,
+  describeOutcomeStatus,
   notifyIdarrTargetedRun,
   waitForIdarrTargetedRun,
 } from '../../src/utils/idarrTargetedRun'
@@ -44,12 +45,27 @@ afterEach(() => {
 describe('waitForIdarrTargetedRun', () => {
   it('stays quiet when every file landed on the drive', async () => {
     mockedGet.mockResolvedValue(result({ outcomes: [outcome('uploaded')] }))
-    await expect(waitForIdarrTargetedRun(7, true)).resolves.toBeNull()
+    await expect(waitForIdarrTargetedRun(7, true, 0)).resolves.toBeNull()
   })
 
   it('stays quiet for ready files when auto-upload is off — nothing went wrong', async () => {
     mockedGet.mockResolvedValue(result({ outcomes: [outcome('ready')] }))
-    await expect(waitForIdarrTargetedRun(7, false)).resolves.toBeNull()
+    await expect(waitForIdarrTargetedRun(7, false, 0)).resolves.toBeNull()
+  })
+
+  it('stays quiet for a re-dropped ignored title that went up unchanged', async () => {
+    mockedGet.mockResolvedValue(result({ outcomes: [outcome('ignored', { reason: 'ignored_title', uploaded: true })] }))
+    await expect(waitForIdarrTargetedRun(7, true, 0)).resolves.toBeNull()
+  })
+
+  it('counts an ignored file that was uploaded as-is among the uploads', async () => {
+    mockedGet.mockResolvedValue(result({
+      outcomes: [outcome('ignored', { uploaded: true }), outcome('pending', { source_filename: 'mystery.jpg' })],
+    }))
+
+    const notice = await waitForIdarrTargetedRun(7, true, 0)
+    expect(notice?.uploadedCount).toBe(1)
+    expect(notice?.problems).toHaveLength(1)
   })
 
   it('reports pending files and counts the ones that did upload', async () => {
@@ -57,11 +73,12 @@ describe('waitForIdarrTargetedRun', () => {
       outcomes: [outcome('uploaded'), outcome('pending', { source_filename: 'mystery.jpg', reason: 'no_match' })],
     }))
 
-    const notice = await waitForIdarrTargetedRun(7, true)
+    const notice = await waitForIdarrTargetedRun(7, true, 0)
 
     expect(notice?.problems.map((row) => row.source_filename)).toEqual(['mystery.jpg'])
     expect(notice?.uploadedCount).toBe(1)
     expect(notice?.autoUpload).toBe(true)
+    expect(notice?.syncTargetIndex).toBe(0)
   })
 
   it('reports upload failures and files that never got scanned', async () => {
@@ -69,14 +86,14 @@ describe('waitForIdarrTargetedRun', () => {
       outcomes: [outcome('upload_failed', { reason: 'quota exceeded' }), outcome('missing')],
     }))
 
-    const notice = await waitForIdarrTargetedRun(7, true)
+    const notice = await waitForIdarrTargetedRun(7, true, 0)
     expect(notice?.problems.map((row) => row.status)).toEqual(['upload_failed', 'missing'])
   })
 
   it('reports a failed run even with no per-file outcomes', async () => {
     mockedGet.mockResolvedValue(result({ status: 'failed', error: 'TMDB unavailable' }))
 
-    const notice = await waitForIdarrTargetedRun(7, true)
+    const notice = await waitForIdarrTargetedRun(7, true, 0)
     expect(notice?.error).toBe('TMDB unavailable')
   })
 
@@ -86,7 +103,7 @@ describe('waitForIdarrTargetedRun', () => {
       .mockResolvedValueOnce(result({ status: 'running', finished: false }))
       .mockResolvedValueOnce(result({ outcomes: [outcome('pending')] }))
 
-    const promise = waitForIdarrTargetedRun(7, true)
+    const promise = waitForIdarrTargetedRun(7, true, 0)
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect((await promise)?.problems).toHaveLength(1)
@@ -95,7 +112,7 @@ describe('waitForIdarrTargetedRun', () => {
 
   it('gives up quietly when the endpoint errors', async () => {
     mockedGet.mockRejectedValue(new Error('network'))
-    await expect(waitForIdarrTargetedRun(7, true)).resolves.toBeNull()
+    await expect(waitForIdarrTargetedRun(7, true, 0)).resolves.toBeNull()
   })
 })
 
@@ -106,11 +123,11 @@ describe('notifyIdarrTargetedRun', () => {
     window.addEventListener(IDARR_QUICK_ADD_NOTICE_EVENT, listener)
 
     mockedGet.mockResolvedValue(result({ outcomes: [outcome('uploaded')] }))
-    await notifyIdarrTargetedRun(7, true)
+    await notifyIdarrTargetedRun(7, true, 0)
     expect(events).toHaveLength(0)
 
     mockedGet.mockResolvedValue(result({ outcomes: [outcome('pending')] }))
-    await notifyIdarrTargetedRun(7, true)
+    await notifyIdarrTargetedRun(7, true, 0)
     expect(events).toHaveLength(1)
     expect(events[0].detail.problems[0].status).toBe('pending')
 
@@ -127,6 +144,11 @@ describe('describeOutcomeReason', () => {
 
   it('passes an rclone error through verbatim', () => {
     expect(describeOutcomeReason(outcome('upload_failed', { reason: 'quota exceeded' }))).toBe('quota exceeded')
+  })
+
+  it('names an ignored title', () => {
+    expect(describeOutcomeReason(outcome('ignored', { reason: 'ignored_title' }))).toBe('Title is on the IDarr ignore list')
+    expect(describeOutcomeStatus('ignored')).toBe('Ignored')
   })
 
   it('falls back for an unknown code', () => {

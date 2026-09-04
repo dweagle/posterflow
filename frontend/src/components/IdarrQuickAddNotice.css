@@ -118,6 +118,52 @@
   line-height: 1.4;
 }
 
+.idarr-notice-item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.idarr-notice-btn-row {
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid #4a5568;
+  background-color: #2d3748;
+  color: #e8ecef;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.idarr-notice-btn-row:hover:not(:disabled) {
+  background-color: #3d4556;
+}
+
+.idarr-notice-btn-row:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.idarr-notice-pill-ignored {
+  background-color: rgba(129, 199, 132, 0.15);
+  color: #81c784;
+}
+
+.idarr-notice-item-status {
+  margin-top: 0.35rem;
+  color: #81c784;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.idarr-notice-item-status-error {
+  margin-top: 0;
+  color: #ef9a9a;
+}
+
 .idarr-notice-uploaded {
   margin: 1rem 0 0;
   color: #81c784;

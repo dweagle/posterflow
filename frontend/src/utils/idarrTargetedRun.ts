@@ -7,6 +7,7 @@ export interface IdarrQuickAddNotice {
   problems: MakerIdarrRunOutcome[]
   uploadedCount: number
   autoUpload: boolean
+  syncTargetIndex: number
   error: string
 }
 
@@ -28,6 +29,7 @@ const REASON_LABELS: Record<string, string> = {
   intra_batch_filename_conflict: 'Two dropped files map to the same corrected name',
   filename_too_long: 'The corrected filename is too long',
   not_scanned: "The file wasn't picked up by the scan",
+  ignored_title: 'Title is on the IDarr ignore list',
 }
 
 export function describeOutcomeReason(outcome: MakerIdarrRunOutcome): string {
@@ -38,6 +40,7 @@ export function describeOutcomeReason(outcome: MakerIdarrRunOutcome): string {
 
 export function describeOutcomeStatus(status: string): string {
   if (status === 'pending') return 'Pending match'
+  if (status === 'ignored') return 'Ignored'
   if (status === 'conflict') return 'Name conflict'
   if (status === 'upload_failed') return 'Upload failed'
   if (status === 'missing') return 'Not processed'
@@ -53,6 +56,7 @@ export function describeOutcomeStatus(status: string): string {
 export async function waitForIdarrTargetedRun(
   jobId: number,
   autoUpload: boolean,
+  syncTargetIndex: number,
 ): Promise<IdarrQuickAddNotice | null> {
   const deadline = Date.now() + POLL_TIMEOUT_MS
 
@@ -71,8 +75,9 @@ export async function waitForIdarrTargetedRun(
       return {
         jobId,
         problems,
-        uploadedCount: result.outcomes.filter((outcome) => outcome.status === 'uploaded').length,
+        uploadedCount: result.outcomes.filter((outcome) => outcome.uploaded).length,
         autoUpload,
+        syncTargetIndex,
         error,
       }
     }
@@ -87,8 +92,8 @@ export async function waitForIdarrTargetedRun(
  * Fire-and-forget version used by every drop target: watches the run in the background and
  * raises the popup handled by IdarrQuickAddNoticeHost if anything needs the maker.
  */
-export async function notifyIdarrTargetedRun(jobId: number, autoUpload: boolean): Promise<void> {
-  const notice = await waitForIdarrTargetedRun(jobId, autoUpload)
+export async function notifyIdarrTargetedRun(jobId: number, autoUpload: boolean, syncTargetIndex: number): Promise<void> {
+  const notice = await waitForIdarrTargetedRun(jobId, autoUpload, syncTargetIndex)
   if (!notice) return
   window.dispatchEvent(new CustomEvent<IdarrQuickAddNotice>(IDARR_QUICK_ADD_NOTICE_EVENT, { detail: notice }))
 }

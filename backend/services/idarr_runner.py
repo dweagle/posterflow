@@ -5186,10 +5186,12 @@ class IdarrRunner:
         unmatched_assets: list[dict[str, Any]],
         source_dir: Path,
         selected_filenames: set[str],
+        scope_token: str | None = None,
+        ignored_assets: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Per-file result of a targeted (quick add) run.
 
-        The caller uploads only the `ready` rows one at a time and reports the rest back to the
+        The caller uploads the `ready` and `ignored` rows and reports the rest back to the
         maker — a pending or conflicted file stays local until it is resolved.
         """
         renamed_from: dict[str, str] = {}
@@ -5235,15 +5237,43 @@ class IdarrRunner:
                 status = "ready"
                 reason = ""
 
+            title = str(asset.get("title") or "").strip()
+            year = asset.get("year") if isinstance(asset.get("year"), int) else None
+            # Same key _store_pending_assets gives the row, so the popup can act on it directly.
+            asset_key = build_idarr_asset_key("pending", title, year, scope_token) if status == "pending" else ""
             outcomes.append(
                 {
                     "source_filename": source_name,
                     "final_filename": final_name,
                     "relative_path": relative_path,
-                    "title": str(asset.get("title") or "").strip(),
-                    "year": asset.get("year") if isinstance(asset.get("year"), int) else None,
+                    "title": title,
+                    "year": year,
+                    "asset_key": asset_key,
                     "status": status,
                     "reason": reason,
+                    "uploaded": False,
+                }
+            )
+
+        # A re-dropped file for an ignored title: reported as ignored and uploaded unchanged.
+        for asset in ignored_assets or []:
+            file_path = asset.get("file_path")
+            if not isinstance(file_path, Path):
+                continue
+            try:
+                relative_path = str(file_path.relative_to(source_dir))
+            except ValueError:
+                relative_path = file_path.name
+            outcomes.append(
+                {
+                    "source_filename": file_path.name,
+                    "final_filename": file_path.name,
+                    "relative_path": relative_path,
+                    "title": str(asset.get("title") or "").strip(),
+                    "year": asset.get("year") if isinstance(asset.get("year"), int) else None,
+                    "asset_key": "",
+                    "status": "ignored",
+                    "reason": "ignored_title",
                     "uploaded": False,
                 }
             )
@@ -5260,6 +5290,7 @@ class IdarrRunner:
                     "relative_path": filename,
                     "title": "",
                     "year": None,
+                    "asset_key": "",
                     "status": "missing",
                     "reason": "not_scanned",
                     "uploaded": False,
@@ -5552,14 +5583,17 @@ class IdarrRunner:
             log_info(LogTags.IDARR, f"Completed scanning: discovered {total_assets} image asset(s)", total_assets=total_assets)
             _notify_progress("scanning", 12, f"Discovered {total_assets} image asset(s)")
 
+        # Excluded drops still get a targeted outcome, so the popup never calls them "not scanned".
+        ignored_assets: list[dict[str, Any]] = []
         if ignored_asset_keys:
-            before_ignored = len(assets)
-            assets = [
-                asset
-                for asset in assets
-                if not self.is_ignored(asset, ignored_asset_keys)
-            ]
-            ignored_count = before_ignored - len(assets)
+            kept_assets: list[dict[str, Any]] = []
+            for asset in assets:
+                if self.is_ignored(asset, ignored_asset_keys):
+                    ignored_assets.append(asset)
+                else:
+                    kept_assets.append(asset)
+            ignored_count = len(assets) - len(kept_assets)
+            assets = kept_assets
             if ignored_count > 0:
                 log_info(LogTags.IDARR, f"Ignored assets excluded: {ignored_count}", ignored_count=ignored_count)
 
@@ -5696,13 +5730,14 @@ class IdarrRunner:
         # Second pass: enrichment may have attached the ids/type an ID-keyed ignore
         # entry is stored under, so items missed at scan time are caught here.
         if ignored_asset_keys:
-            before_late_ignored = len(assets)
-            assets = [
-                asset
-                for asset in assets
-                if not self.is_ignored(asset, ignored_asset_keys)
-            ]
-            late_ignored = before_late_ignored - len(assets)
+            kept_assets = []
+            for asset in assets:
+                if self.is_ignored(asset, ignored_asset_keys):
+                    ignored_assets.append(asset)
+                else:
+                    kept_assets.append(asset)
+            late_ignored = len(assets) - len(kept_assets)
+            assets = kept_assets
             if late_ignored > 0:
                 ignored_count += late_ignored
                 log_info(LogTags.IDARR, f"Ignored assets excluded after enrichment: {late_ignored}", ignored_count=late_ignored)
@@ -5864,6 +5899,8 @@ class IdarrRunner:
                 unmatched_assets=unmatched_assets,
                 source_dir=source_dir,
                 selected_filenames=selected_source_filenames,
+                scope_token=self._scope_token,
+                ignored_assets=ignored_assets,
             )
         log_info(LogTags.IDARR, "Summary Report:")
         for _row in summary_report:

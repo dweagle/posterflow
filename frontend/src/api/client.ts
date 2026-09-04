@@ -105,6 +105,7 @@ export {
   archiveIdarrSourceFile,
   getSettings,
   importMakerIdarrIgnoredTitles,
+  ignoreAndUploadMakerIdarrPending,
   removeMakerIdarrIgnoredTitle,
   replaceMakerIdarrIgnoredTitles,
   revealSensitiveSetting,

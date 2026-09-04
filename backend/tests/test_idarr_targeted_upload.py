@@ -13,18 +13,20 @@ from types import SimpleNamespace
 import pytest
 
 from models.job import Job
-from models.idarr import IdarrRun
+from models.idarr import IdarrRun, build_idarr_asset_key
 from services.idarr_runner import IdarrRunner
 import modules.idarr as idarr_module
 
 
-def _outcomes(assets, operation_rows=None, unmatched=None, source_dir=Path("/scope"), selected=None):
+def _outcomes(assets, operation_rows=None, unmatched=None, source_dir=Path("/scope"), selected=None, scope_token=None, ignored=None):
     return IdarrRunner._build_targeted_outcomes(
         assets=assets,
         operation_rows=operation_rows or [],
         unmatched_assets=unmatched or [],
         source_dir=source_dir,
         selected_filenames=selected or set(),
+        scope_token=scope_token,
+        ignored_assets=ignored or [],
     )
 
 
@@ -122,6 +124,49 @@ def test_selected_file_that_never_scanned_is_reported_missing():
     rows = _outcomes(assets=[], selected={"ghost.jpg"})
 
     assert [(row["source_filename"], row["status"]) for row in rows] == [("ghost.jpg", "missing")]
+
+
+def test_pending_row_carries_the_key_its_pending_match_was_stored_under():
+    """The notice ignores a drop straight from the popup, so it needs the row's real key."""
+    rows = _outcomes(
+        assets=[{"file_path": Path("/scope/who knows.jpg"), "has_id": False, "match_reason": "no_match", "title": "Who Knows", "year": 2021}],
+        unmatched=[{"source_path": "/scope/who knows.jpg"}],
+        scope_token="t0_abc",
+    )
+
+    assert rows[0]["asset_key"] == build_idarr_asset_key("pending", "Who Knows", 2021, "t0_abc")
+
+
+def test_redropped_ignored_title_is_reported_as_ignored_not_missing():
+    """The run drops ignored titles before scanning finishes; the popup used to call that "not scanned"."""
+    rows = _outcomes(
+        assets=[],
+        selected={"who knows.jpg"},
+        ignored=[{"file_path": Path("/scope/who knows.jpg"), "title": "Who Knows", "year": 2021}],
+    )
+
+    assert [(row["source_filename"], row["status"], row["reason"]) for row in rows] == [("who knows.jpg", "ignored", "ignored_title")]
+    assert rows[0]["asset_key"] == ""
+    assert rows[0]["title"] == "Who Knows"
+
+
+def test_ignored_asset_drive_file_keeps_its_relative_path():
+    rows = _outcomes(
+        assets=[],
+        selected={"Show - logo.png"},
+        ignored=[{"file_path": Path("/scope/logos/Show - logo.png"), "title": "Show"}],
+    )
+
+    assert rows[0]["relative_path"] == "logos/Show - logo.png"
+
+
+def test_ready_and_missing_rows_have_no_pending_key():
+    rows = _outcomes(
+        assets=[{"file_path": Path("/scope/Inside Out (2015) {tmdb-150540}.jpg"), "has_id": True, "title": "Inside Out", "year": 2015}],
+        selected={"ghost.jpg"},
+    )
+
+    assert [row["asset_key"] for row in rows] == ["", ""]
 
 
 # --- Upload behavior ----------------------------------------------------------------------
@@ -239,6 +284,18 @@ def test_partial_batch_failure_marks_only_the_failed_file(run_targeted_upload):
     assert "uploaded=1, failed=1" in str(job.message)
 
 
+def test_ignored_redrop_is_uploaded_unchanged_and_keeps_its_status(run_targeted_upload):
+    job, outcomes, fake = run_targeted_upload([
+        _outcome("Matched (2020) {tmdb-1}.jpg"),
+        _outcome("who knows.jpg", status="ignored"),
+    ])
+
+    assert [Path(path).name for _, _, path in fake.uploads] == ["Matched (2020) {tmdb-1}.jpg", "who knows.jpg"]
+    assert outcomes[0]["status"] == "uploaded"
+    assert outcomes[1]["status"] == "ignored" and outcomes[1]["uploaded"] is True
+    assert "uploaded=2, failed=0, held_back=0, ignored_as_is=1" in str(job.message)
+
+
 def test_upload_uses_the_relative_path_for_asset_drives(run_targeted_upload):
     _, _, fake = run_targeted_upload([_outcome("Show - logo.png", relative_path="logos/Show - logo.png")])
 
@@ -340,6 +397,13 @@ def _run_row(test_db, job_id):
     return test_db.query(IdarrRun).filter(IdarrRun.job_id == job_id).first()
 
 
+def test_targeted_run_with_only_an_ignored_drop_still_queues_the_upload(run_targeted_job):
+    outcome = run_targeted_job(outcomes=[_outcome("who knows.jpg", status="ignored")])
+
+    assert len(outcome.submissions) == 1
+    assert outcome.submissions[0][0] is idarr_module.run_idarr_targeted_upload_job
+
+
 def test_targeted_run_queues_its_own_upload_job_not_the_mirror_sync(run_targeted_job, test_db):
     """The upload gets its own job so it has its own log, progress and history entry."""
     outcome = run_targeted_job(outcomes=[_outcome("Matched (2020) {tmdb-1}.jpg")])
@@ -421,3 +485,52 @@ def test_run_result_is_finished_immediately_when_no_upload_was_queued(client, te
     payload = client.get(f"/api/idarr/run-result/{outcome.job_id}").json()
     assert payload["finished"] is True
     assert payload["upload_job_id"] is None
+
+
+# --- As-is upload of an ignored drop ------------------------------------------------------
+
+
+@pytest.fixture
+def run_file_upload(test_db, monkeypatch, tmp_path):
+    """Run the real as-is file upload job against a fake rclone."""
+
+    def _go(relative_paths, *, fail_on=None):
+        source_dir = tmp_path / "scope"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        for relative_path in relative_paths:
+            (source_dir / relative_path).write_text("x")
+
+        fake = FakeRclone(fail_on=fail_on)
+        monkeypatch.setattr(idarr_module, "RcloneService", lambda: fake)
+        monkeypatch.setattr(idarr_module, "SessionLocal", lambda: test_db)
+        monkeypatch.setattr(test_db, "close", lambda: None, raising=False)
+
+        job = Job(job_type="idarr", status="pending", progress=0, message="Queued")
+        test_db.add(job)
+        test_db.commit()
+        test_db.refresh(job)
+
+        idarr_module.run_idarr_file_upload_job(
+            job.id,
+            {"personal_drive_id": "drive-1", "source_dir": str(source_dir), "label": "CL2K", "relative_paths": relative_paths},
+        )
+        test_db.refresh(job)
+        return job, fake
+
+    return _go
+
+
+def test_file_upload_job_pushes_the_named_file_unchanged(run_file_upload):
+    job, fake = run_file_upload(["who knows.jpg"])
+
+    assert fake.calls == [(str(Path(fake.uploads[0][0])), "drive-1", ["who knows.jpg"])]
+    assert job.status == "completed"
+    assert "uploaded=1" in str(job.message)
+    assert fake.folder_syncs == []
+
+
+def test_file_upload_job_fails_the_job_when_rclone_fails(run_file_upload):
+    job, _ = run_file_upload(["bad.jpg"], fail_on={"bad.jpg"})
+
+    assert job.status == "failed"
+    assert "bad.jpg" in str(job.error)

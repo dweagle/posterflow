@@ -21,7 +21,9 @@ from core.config import settings as app_settings
 from core.logging import LogTags, log_debug, log_error, log_info, log_user_action, log_warning
 from database import get_db
 from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key
-from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_RECENT_TERMINAL
+from core.job_queue import job_queue
+from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_RECENT_TERMINAL, JOB_TYPE_IDARR
+from modules.idarr import run_idarr_file_upload_job
 from models.setting import Setting, get_setting, upsert_setting
 from util.data.normalization import normalize_titles
 
@@ -59,6 +61,13 @@ class IdarrPendingResolveRequest(BaseModel):
     tmdb_type: str | None = None
     sync_target_index: int | None = None
     mark_as_renamed: bool = False
+
+
+class IdarrPendingIgnoreUploadRequest(BaseModel):
+    asset_key: str
+    relative_path: str = ""
+    sync_target_index: int | None = None
+    upload: bool = True
 
 
 class IdarrCacheMaintenanceRequest(BaseModel):
@@ -2043,6 +2052,74 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
     )
 
     return {"success": True, "action": requested_action, "asset_key": asset_key}
+
+
+@router.post("/pending-matches/ignore-and-upload")
+def ignore_and_upload_maker_idarr_pending_match(
+    payload: IdarrPendingIgnoreUploadRequest, db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Ignore a pending quick-add drop and, when asked, push its file to the drive unchanged."""
+    asset_key = payload.asset_key.strip()
+    relative_path = payload.relative_path.strip()
+    if not asset_key:
+        raise HTTPException(status_code=400, detail="asset_key is required")
+    if payload.upload and not relative_path:
+        raise HTTPException(status_code=400, detail="relative_path is required to upload")
+
+    scope_token, _ = _resolve_scope_context(db, payload.sync_target_index)
+    row = _filter_pending_query_by_scope(
+        db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == asset_key),
+        scope_token,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Pending match not found; it may already be resolved on the IDarr page")
+    title = str(row.title or "")
+
+    upload_config: dict[str, Any] | None = None
+    if payload.upload:
+        config = load_runtime_config(db)
+        targets = [item for item in config.sync_targets if isinstance(item, dict)]
+        target = targets[int(payload.sync_target_index)] if targets else {}
+        personal_drive_id = str(target.get("personal_drive_id") or "").strip()
+        source_dir_raw = str(target.get("source_dir") or "").strip()
+        if not personal_drive_id or not source_dir_raw:
+            raise HTTPException(status_code=400, detail="Sync target has no personal drive ID or sync folder configured")
+        source_dir = Path(source_dir_raw).resolve()
+        file_path = _resolve_authorized_idarr_source_image_path(str(source_dir / relative_path), [source_dir])
+        upload_config = {
+            "personal_drive_id": personal_drive_id,
+            "source_dir": str(source_dir),
+            "label": str(target.get("label") or "").strip() or personal_drive_id,
+            "relative_paths": [str(file_path.relative_to(source_dir))],
+        }
+
+    resolve_pending_matches(
+        IdarrPendingResolveRequest(asset_key=asset_key, action="ignore", sync_target_index=payload.sync_target_index),
+        db,
+        scope_token,
+    )
+
+    upload_job_id: int | None = None
+    if upload_config:
+        job = Job(
+            job_type=JOB_TYPE_IDARR,
+            status="pending",
+            progress=0,
+            message=f"Queued upload of ignored file '{Path(upload_config['relative_paths'][0]).name}'",
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        upload_job_id = job.id
+        job_queue.submit(run_idarr_file_upload_job, job.id, job.id, upload_config)
+
+    log_user_action(
+        "Ignored pending IDarr item from the quick-add notice",
+        asset_key=asset_key,
+        title=title,
+        upload_job_id=upload_job_id,
+    )
+    return {"success": True, "asset_key": asset_key, "upload_job_id": upload_job_id}
 
 
 @router.post("/pending-matches/candidates")

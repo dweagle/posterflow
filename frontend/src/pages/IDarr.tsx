@@ -792,7 +792,7 @@ function IDarr() {
           setRunning(true)
           const job = await startIdarr(false, selectedSyncTargetIndex, response.uploaded, config.auto_upload_quick_add)
           showToast(`IDarr auto-rename started for uploaded file(s) (Job ID: ${job.id})`, 'success')
-          void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add))
+          void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add), selectedSyncTargetIndex)
           const refreshed = await getMakerIdarrLastRun(selectedSyncTargetIndex)
           setLastRun(refreshed && Object.keys(refreshed).length > 0 ? refreshed : null)
           await loadPendingMatches()

@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
+import { getApiErrorMessage, ignoreAndUploadMakerIdarrPending, type MakerIdarrRunOutcome } from '../api/client'
 import {
   IDARR_QUICK_ADD_NOTICE_EVENT,
   describeOutcomeReason,
   describeOutcomeStatus,
   type IdarrQuickAddNotice as Notice,
 } from '../utils/idarrTargetedRun'
+import { useToast } from './Toast'
 import './IdarrQuickAddNotice.css'
+
+type RowAction =
+  | { state: 'working' }
+  | { state: 'done'; uploadJobId: number | null }
+  | { state: 'error'; message: string }
 
 /**
  * Global popup for quick-add drops that didn't make it to the drive. Mounted once in the
@@ -17,12 +24,17 @@ import './IdarrQuickAddNotice.css'
  */
 function IdarrQuickAddNoticeHost() {
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [rowActions, setRowActions] = useState<Record<string, RowAction>>({})
   const navigate = useNavigate()
+  const { showToast } = useToast()
 
   useEffect(() => {
     const onNotice = (event: Event) => {
       const detail = (event as CustomEvent<Notice>).detail
-      if (detail) setNotice(detail)
+      if (detail) {
+        setNotice(detail)
+        setRowActions({})
+      }
     }
     window.addEventListener(IDARR_QUICK_ADD_NOTICE_EVENT, onNotice)
     return () => window.removeEventListener(IDARR_QUICK_ADD_NOTICE_EVENT, onNotice)
@@ -48,6 +60,41 @@ function IdarrQuickAddNoticeHost() {
         : `Waiting in IDarr's pending matches. Resolve the match on the IDarr page before the next drive sync.`
       : 'These files stayed local.'
 
+  const doneText = (uploadJobId: number | null) =>
+    notice.autoUpload
+      ? `Added to the ignore list · uploading to the drive unchanged${uploadJobId ? ` (job ${uploadJobId})` : ''}`
+      : 'Added to the ignore list · goes up unchanged with the next drive sync'
+
+  // A drop the maker already knows will never match: ignore it here instead of on the IDarr page.
+  const ignoreRow = async (row: MakerIdarrRunOutcome) => {
+    const key = row.asset_key
+    if (!key) return
+    setRowActions((prev) => ({ ...prev, [key]: { state: 'working' } }))
+    try {
+      const response = await ignoreAndUploadMakerIdarrPending({
+        asset_key: key,
+        relative_path: row.relative_path || row.final_filename,
+        sync_target_index: notice.syncTargetIndex,
+        upload: notice.autoUpload,
+      })
+      // Nothing else to deal with: drop the popup and confirm with a toast instead.
+      if (notice.problems.length === 1) {
+        close()
+        showToast(doneText(response.upload_job_id), 'success')
+        return
+      }
+      setRowActions((prev) => ({ ...prev, [key]: { state: 'done', uploadJobId: response.upload_job_id } }))
+    } catch (error) {
+      const message = getApiErrorMessage(error, 'Failed to ignore this file')
+      setRowActions((prev) => ({ ...prev, [key]: { state: 'error', message } }))
+    }
+  }
+
+  const ignoreLabel = notice.autoUpload ? 'Upload as-is & ignore' : 'Ignore'
+  const ignoreHint = notice.autoUpload
+    ? 'Add this title to the IDarr ignore list and upload the file to the drive under its current name'
+    : 'Add this title to the IDarr ignore list; the file stays in the sync folder and goes up unchanged with the next drive sync'
+
   return (
     <div className="idarr-notice-overlay" onClick={(event) => { if (event.target === event.currentTarget) close() }}>
       <div className="idarr-notice-dialog" role="alertdialog" aria-labelledby="idarr-notice-title">
@@ -62,17 +109,40 @@ function IdarrQuickAddNoticeHost() {
 
           {count > 0 && (
             <ul className="idarr-notice-list">
-              {notice.problems.map((row) => (
-                <li key={`${row.source_filename}-${row.status}`} className="idarr-notice-item">
-                  <div className="idarr-notice-item-top">
-                    <span className="idarr-notice-filename" title={row.source_filename}>{row.source_filename}</span>
-                    <span className={`idarr-notice-pill idarr-notice-pill-${row.status}`}>
-                      {describeOutcomeStatus(row.status)}
-                    </span>
-                  </div>
-                  <div className="idarr-notice-reason">{describeOutcomeReason(row)}</div>
-                </li>
-              ))}
+              {notice.problems.map((row) => {
+                const action = row.asset_key ? rowActions[row.asset_key] : undefined
+                const ignored = action?.state === 'done'
+                const canIgnore = row.status === 'pending' && Boolean(row.asset_key) && !ignored
+                return (
+                  <li key={`${row.source_filename}-${row.status}`} className="idarr-notice-item">
+                    <div className="idarr-notice-item-top">
+                      <span className="idarr-notice-filename" title={row.source_filename}>{row.source_filename}</span>
+                      <span className={`idarr-notice-pill idarr-notice-pill-${ignored ? 'ignored' : row.status}`}>
+                        {ignored ? 'Ignored' : describeOutcomeStatus(row.status)}
+                      </span>
+                    </div>
+                    <div className="idarr-notice-reason">{describeOutcomeReason(row)}</div>
+                    {canIgnore && (
+                      <div className="idarr-notice-item-actions">
+                        <button
+                          className="idarr-notice-btn-row"
+                          onClick={() => { void ignoreRow(row) }}
+                          disabled={action?.state === 'working'}
+                          title={ignoreHint}
+                        >
+                          {action?.state === 'working' ? 'Working…' : ignoreLabel}
+                        </button>
+                        {action?.state === 'error' && (
+                          <span className="idarr-notice-item-status idarr-notice-item-status-error">{action.message}</span>
+                        )}
+                      </div>
+                    )}
+                    {action?.state === 'done' && (
+                      <div className="idarr-notice-item-status">{doneText(action.uploadJobId)}</div>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
 
