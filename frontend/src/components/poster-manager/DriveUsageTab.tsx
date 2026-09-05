@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Pin } from 'lucide-react'
 import Toolbar from '../Toolbar'
 import PriorityScopeSelector, { type PriorityScope } from './PriorityScopeSelector'
@@ -21,9 +21,9 @@ function DriveUsageTab({ scope, onScopeChange, styleStats }: DriveUsageTabProps)
   const [showOverrides, setShowOverrides] = useState(false)
   const [overrideCount, setOverrideCount] = useState<number | null>(null)
 
-  const refreshOverrideCount = () => {
+  const refreshOverrideCount = useCallback(() => {
     getPosterOverrides().then((o) => setOverrideCount(o.length)).catch(() => {})
-  }
+  }, [])
   useEffect(refreshOverrideCount, [])
 
   const driveInfo = new Map(
@@ -65,6 +65,7 @@ function DriveUsageTab({ scope, onScopeChange, styleStats }: DriveUsageTabProps)
             outrankedForDrive={poster.outrankedForDrive}
             compareForItem={poster.compareForItem}
             availableCountFor={poster.availableCountFor}
+            onOverridesChange={refreshOverrideCount}
             title="Last Rename - Poster Drive Usage"
             collapsible={false}
           />
@@ -74,6 +75,7 @@ function DriveUsageTab({ scope, onScopeChange, styleStats }: DriveUsageTabProps)
             outrankedForDrive={artwork.outrankedForDrive}
             compareForItem={artwork.compareForItem}
             availableCountFor={artwork.availableCountFor}
+            onOverridesChange={refreshOverrideCount}
             overrideDomain="artwork"
             noun="artwork file"
             filePrefix="artwork-usage"

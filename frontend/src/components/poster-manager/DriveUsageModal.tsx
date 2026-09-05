@@ -30,6 +30,8 @@ type DriveUsageModalProps = {
   noun?: string
   onClose: () => void
   onDownload: (mode: UsageView) => void
+  // Fired after an override is saved or removed so parents can refresh counts.
+  onOverridesChange?: () => void
   // Arrows swapping the modal to the neighboring drive.
   onNavigateDrive?: (delta: number) => void
   hasPrevDrive?: boolean
@@ -76,6 +78,7 @@ export default function DriveUsageModal({
   noun = 'poster',
   onClose,
   onDownload,
+  onOverridesChange,
   onNavigateDrive,
   hasPrevDrive = false,
   hasNextDrive = false,
@@ -267,13 +270,14 @@ export default function DriveUsageModal({
         })
         setOverrides((prev) => [...prev.filter((o) => o.id !== saved.id), saved])
       }
+      onOverridesChange?.()
     } catch {
       showToast('Failed to save poster override', 'error')
     } finally {
       setOverrideBusy(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drive.drive_id, overrideDomain, showToast])
+  }, [drive.drive_id, overrideDomain, showToast, onOverridesChange])
 
   // Side-by-side compare: this item's used file next to every drive's unused candidate.
   const [compare, setCompare] = useState<{ item: GroupedItem; season: number | null; slot: string | null } | null>(null)

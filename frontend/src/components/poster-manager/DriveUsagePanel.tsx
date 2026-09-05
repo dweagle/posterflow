@@ -36,6 +36,7 @@ type DriveUsagePanelProps = {
   compareForItem?: (item: FallbackItem, target: CompareTarget) => CompareCandidate[]
   availableCountFor?: (item: FallbackItem, target: CompareTarget) => number
   overrideDomain?: 'poster' | 'artwork'
+  onOverridesChange?: () => void
   noun?: string
   filePrefix?: string
   title?: string
@@ -51,6 +52,7 @@ export default function DriveUsagePanel({
   compareForItem,
   availableCountFor,
   overrideDomain = 'poster',
+  onOverridesChange,
   noun = 'poster',
   filePrefix = 'drive-usage',
   title = 'Last Rename - Drive Usage',
@@ -246,6 +248,7 @@ export default function DriveUsagePanel({
             noun={noun}
             onClose={() => setOpenDrive(null)}
             onDownload={(mode) => handleDownload(openDrive, mode)}
+            onOverridesChange={onOverridesChange}
             onNavigateDrive={(delta) => {
               const next = navList[openIndex + delta]
               if (next) setOpenDrive(next)
