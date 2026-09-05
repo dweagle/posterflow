@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import services.match_report as match_report
 from services.match_report import (
+    IDS_MISMATCH,
     _build_verdicts,
     _dedupe_titles,
     _record_matches_item,
@@ -163,6 +164,42 @@ class TestVerdicts:
         report["reference"]["plex"] = {"missing": "not found in any Plex library"}
         codes = [v["code"] for v in _build_verdicts(report)]
         assert "library_id_conflict" not in codes and "plex_unresolved" not in codes
+
+    def test_references_disagree_on_id_the_library_lacks(self):
+        report = _base_report()
+        report["reference"]["tvdb"] = {"tvdb_id": 372727, "tmdb_id": 123, "imdb_id": None,
+                                       "title": "RIPLEY", "year": 2024}
+        report["reference"]["tmdb"] = {"tvdb_id": 372727, "tmdb_id": 456, "imdb_id": None,
+                                       "title": "Ripley", "year": 2024}
+        report["reference"]["plex"] = {
+            "instance": "Plex", "tvdb_id": 372727, "tmdb_id": 123, "imdb_id": None,
+            "title": "RIPLEY", "year": 2024, "library": "TV Shows",
+            "servers": [{"instance": "Plex", "tvdb_id": 372727, "tmdb_id": 123, "imdb_id": None,
+                         "title": "RIPLEY", "year": 2024, "library": "TV Shows"},
+                        {"instance": "Jellyfin", "missing": True}],
+        }
+        verdicts = _build_verdicts(report)
+        verdict = next(v for v in verdicts if v["code"] == "sources_disagree_on_id")
+        assert "TMDB id" in verdict["message"]
+        assert "TVDB=123" in verdict["message"] and "TMDB=456" in verdict["message"] and "Plex=123" in verdict["message"]
+        assert not any(v["code"] == "library_id_conflict" for v in verdicts)
+
+    def test_library_held_id_stays_a_library_conflict(self):
+        report = _base_report()
+        report["reference"]["tmdb"] = {"tvdb_id": 111, "tmdb_id": 456, "imdb_id": None,
+                                       "title": "Ripley", "year": 2024}
+        report["reference"]["plex"] = {"instance": "Plex", "tvdb_id": 111, "tmdb_id": 456, "imdb_id": None,
+                                       "title": "RIPLEY", "year": 2024, "library": "TV Shows"}
+        codes = [v["code"] for v in _build_verdicts(report)]
+        assert "library_id_conflict" in codes and "sources_disagree_on_id" not in codes
+
+    def test_agreeing_references_are_quiet(self):
+        report = _base_report()
+        report["reference"]["tvdb"] = {"tvdb_id": 372727, "tmdb_id": 123, "imdb_id": "tt1", "title": "RIPLEY", "year": 2024}
+        report["reference"]["tmdb"] = {"tvdb_id": 372727, "tmdb_id": 123, "imdb_id": "tt1", "title": "Ripley", "year": 2024}
+        report["reference"]["plex"] = {"error": "connection failed"}
+        codes = [v["code"] for v in _build_verdicts(report)]
+        assert "sources_disagree_on_id" not in codes and "library_id_conflict" not in codes
 
     def test_malformed_tag_named(self):
         candidate = _candidate(matched=False, reason=YEAR_MISMATCH,
@@ -350,6 +387,37 @@ class TestVerdicts:
         report["item"]["media_type"] = "movies"
         report["library"]["records"][0]["status"] = "released"
         assert not any(v["code"] == "not_released" for v in _build_verdicts(report))
+
+
+class TestIdsMismatchVerdict:
+    def test_same_year_names_both_sides(self):
+        candidate = _candidate(matched=False, reason=IDS_MISMATCH, tvdb_id=111, tmdb_id=222,
+                               files=["RIPLEY (2024) {tvdb-111} {tmdb-222}.jpg"])
+        report = _base_report(candidates={"considered": 1, "shown": 1, "omitted": 0, "id_pool": 0,
+                                          "items": [candidate]})
+        verdict = _build_verdicts(report)[0]
+        assert verdict["code"] == "poster_ids_mismatch"
+        assert verdict["level"] == "problem"
+        assert "{tvdb-111}" in verdict["message"] and "{tvdb-372727}" in verdict["message"]
+        assert "same title and year" in verdict["message"]
+
+    def test_different_year_calls_it_another_release(self):
+        candidate = _candidate(matched=False, reason=IDS_MISMATCH, tvdb_id=111, year=1999,
+                               files=["RIPLEY (1999) {tvdb-111}.jpg"])
+        report = _base_report(candidates={"considered": 1, "shown": 1, "omitted": 0, "id_pool": 0,
+                                          "items": [candidate]})
+        verdict = _build_verdicts(report)[0]
+        assert verdict["code"] == "poster_ids_mismatch"
+        assert verdict["level"] == "info"
+        assert "(1999)" in verdict["message"] and "(2024)" in verdict["message"]
+        assert "different release" in verdict["message"]
+
+    def test_id_conflict_outranks_ids_mismatch(self):
+        conflict = _candidate(matched=False, reason=ID_CONFLICT, tvdb_id=111)
+        mismatch = _candidate(matched=False, reason=IDS_MISMATCH, tvdb_id=333, tmdb_id=444)
+        report = _base_report(candidates={"considered": 2, "shown": 2, "omitted": 0, "id_pool": 0,
+                                          "items": [conflict, mismatch]})
+        assert _build_verdicts(report)[0]["code"] == "poster_id_conflict"
 
 
 class TestRendering:
@@ -600,6 +668,46 @@ class TestBuildReport:
         assert report["candidates"]["items"] == []
         codes = [v["code"] for v in report["verdicts"]]
         assert "not_in_sources" in codes and "no_poster_found" in codes
+
+
+    def test_all_ids_disagree_is_reported_not_dropped(self, test_db, monkeypatch):
+        record = {"type": "series", "instance": "Sonarr", "title": "RIPLEY", "year": 2024,
+                  "folder": "/tv/RIPLEY (2024)", "tvdb_id": 372727, "tmdb_id_ref": 555, "imdb_id": None,
+                  "monitored": True, "normalized_title": "ripley", "alternate_titles": [],
+                  "normalized_alternate_titles": [], "seasons": [{"season_number": 1, "season_has_episodes": True}]}
+        # Same title and year, but every shared id type disagrees: is_match rejects silently.
+        asset = {"type": "series", "title": "RIPLEY", "year": 2024, "tvdb_id": 111, "tmdb_id": 222,
+                 "normalized_title": "ripley", "files": ["/d/a/RIPLEY (2024) {tvdb-111} {tmdb-222}.jpg"],
+                 "season_numbers": []}
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [record])
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(asset))
+
+        item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
+                "tmdb_id": 555, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
+        report = build_match_report(test_db, item)
+
+        shown = report["candidates"]["items"]
+        assert len(shown) == 1 and shown[0]["matched"] is False
+        assert shown[0]["reason"] == IDS_MISMATCH
+        assert report["verdicts"][0]["code"] == "poster_ids_mismatch"
+        assert "rejected: ids mismatch" in render_match_report_text(report)
+
+    def test_agreeing_id_is_never_an_ids_mismatch(self, test_db, monkeypatch):
+        record = {"type": "series", "instance": "Sonarr", "title": "RIPLEY", "year": 2024,
+                  "folder": "/tv/RIPLEY (2024)", "tvdb_id": 372727, "tmdb_id_ref": 555, "imdb_id": None,
+                  "monitored": True, "normalized_title": "ripley", "alternate_titles": [],
+                  "normalized_alternate_titles": [], "seasons": [{"season_number": 1, "season_has_episodes": True}]}
+        asset = {"type": "series", "title": "RIPLEY", "year": 2024, "tvdb_id": 372727, "tmdb_id": 222,
+                 "normalized_title": "ripley", "files": ["/d/a/RIPLEY (2024) {tvdb-372727} {tmdb-222}.jpg"],
+                 "season_numbers": []}
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [record])
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(asset))
+
+        item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
+                "tmdb_id": 555, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
+        report = build_match_report(test_db, item)
+        assert report["candidates"]["items"][0]["matched"] is True
+        assert report["verdicts"][0]["code"] == "poster_available"
 
 
 class TestEndpoint:

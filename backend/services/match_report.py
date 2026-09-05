@@ -29,6 +29,7 @@ from util.posters.match import (
     ID_CONFLICT,
     NO_SHARED_ID,
     YEAR_MISMATCH,
+    _title_criteria,
     collection_title_variants,
     is_match,
 )
@@ -160,8 +161,32 @@ def _dedupe_titles(titles: List[Any], exclude: str = "") -> List[str]:
             out.append(name)
     return out
 
+# Report-only rejection reason: is_match drops a same-title poster silently when every id
+# type both sides carry disagrees (two different releases, or a remapped record).
+IDS_MISMATCH = "ids mismatch"
+
 # Rejection-reason ranking for candidate ordering (matched candidates always sort first).
-_REASON_RANK = {ID_CONFLICT: 0, NO_SHARED_ID: 1, YEAR_MISMATCH: 2, "": 3}
+_REASON_RANK = {ID_CONFLICT: 0, NO_SHARED_ID: 1, IDS_MISMATCH: 2, YEAR_MISMATCH: 3, "": 4}
+
+
+def _ids_mismatch(asset: Dict[str, Any], media: Dict[str, Any]) -> bool:
+    """True when a title criterion agrees but every shared id type disagrees."""
+    if not any(condition for condition, _ in _title_criteria(asset, media)):
+        return False
+    # Same ref-key rule as is_match: series and type-less assets may use the lifted tmdb.
+    media_tmdb = media.get("tmdb_id") or (
+        media.get("tmdb_id_ref") if (media.get("type") == "series" or not asset.get("type")) else None
+    )
+    shared = [
+        (asset_value, media_value)
+        for asset_value, media_value in (
+            (asset.get("tvdb_id"), media.get("tvdb_id")),
+            (asset.get("tmdb_id"), media_tmdb),
+            (asset.get("imdb_id"), media.get("imdb_id")),
+        )
+        if asset_value and media_value
+    ]
+    return bool(shared) and all(str(a) != str(m) for a, m in shared)
 
 
 def _utc_now_iso() -> str:
@@ -874,13 +899,14 @@ def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
     if prefix_index is not None:
         pairs, id_pool = _collect_candidates(media, prefix_index, media_type)
         considered = len(pairs)
-        evaluated = [
-            (asset, found_by, matched, reason)
-            for asset, found_by in pairs
-            for matched, reason in [is_match(dict(asset), media)]
-            if matched or reason
-        ]
-        evaluated.sort(key=lambda e: (not e[2], _REASON_RANK.get(e[3], 4)))
+        evaluated = []
+        for asset, found_by in pairs:
+            matched, reason = is_match(dict(asset), media)
+            if not matched and not reason and _ids_mismatch(asset, media):
+                reason = IDS_MISMATCH
+            if matched or reason:
+                evaluated.append((asset, found_by, matched, reason))
+        evaluated.sort(key=lambda e: (not e[2], _REASON_RANK.get(e[3], 5)))
         any_matched = any(matched for _, _, matched, _ in evaluated)
         for asset, found_by, matched, reason in evaluated[:MAX_CANDIDATES]:
             files = asset.get("files") or []
@@ -1009,6 +1035,30 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 f"{origin} ({reference[key]}) — one side is stale or remapped. "
                 "Refresh the item's metadata, or remove and re-add it.")
 
+    # Id types the library record does NOT carry can still disagree between the references
+    # themselves (TVDB vs TMDB vs each media server)
+    rows: List[Tuple[str, Dict[str, Any]]] = []
+    for source in ("tvdb", "tmdb"):
+        reference = report["reference"].get(source) or {}
+        if not (reference.get("error") or reference.get("skipped") or reference.get("missing")):
+            rows.append((source.upper(), reference))
+    plex = report["reference"].get("plex") or {}
+    for entry in plex.get("servers") or [plex]:
+        if not (entry.get("error") or entry.get("skipped") or entry.get("missing")):
+            rows.append((entry.get("instance") or "media server", entry))
+    for key in ("tvdb_id", "tmdb_id", "imdb_id"):
+        if record_ids.get(key):
+            continue
+        values = {(label, str(row[key])) for label, row in rows if row.get(key)}
+        if len({value for _, value in values}) > 1:
+            label = key.replace("_id", "").upper()
+            listing = ", ".join(f"{src}={value}" for src, value in sorted(values))
+            add("problem", "sources_disagree_on_id",
+                f"Your sources disagree on this item's {label} id ({listing}), and the library record "
+                f"carries no {label} id to settle it — one mapping is stale or points at a different "
+                f"entry, so a poster tagged with either {label} id may belong to another item. "
+                "Check which entry each id really is before tagging.")
+
     if drives.get("error"):
         add("problem", "drive_scan_failed", drives["error"])
 
@@ -1126,6 +1176,20 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
             add("problem", "no_shared_id",
                 f"A title-matching poster shares no id type with the library record — poster {poster_tags} vs "
                 f"library {library_tags}. Add a matching id tag to the poster filename (or to the library record).")
+        elif best["reason"] == IDS_MISMATCH:
+            known_years = {item.get("year")} | {r.get("year") for r in library.get("records") or []}
+            if best.get("year") and best["year"] not in known_years:
+                add("info", "poster_ids_mismatch",
+                    f"A poster with this title exists, but both its ids and its year differ — poster "
+                    f"{poster_tags} ({best['year']}) vs library {library_tags} ({item.get('year')}). "
+                    "It is almost certainly a different release with the same name, not this item.")
+            else:
+                add("problem", "poster_ids_mismatch",
+                    f"A poster with the same title and year carries different ids — poster {poster_tags} vs "
+                    f"library {library_tags}. Every id type both sides share disagrees, so the poster is "
+                    "tagged for a different entry: either another release with this name, or a mistagged "
+                    "poster. If the ID cross-check above also disagrees with the library's ids, the "
+                    "library record is the side that is remapped.")
         elif best["reason"] == YEAR_MISMATCH:
             if best.get("year") is None and item["media_type"] != "collections":
                 add("problem", "yearless_poster",
