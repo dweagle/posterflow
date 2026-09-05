@@ -15,11 +15,12 @@ const EMPTY_META: TmdbCardMeta = { overview: '', poster_url: null }
  * no TMDB text — so those look it up here rather than making every scan fetch descriptions for
  * the whole library. The same details response carries poster_path, so media-server-sourced cards
  * (no public poster URL of their own) get a TMDB CDN poster from the same single request.
+ * Pass enabled=false when the host wants no description at all; that also skips the lookup.
  */
-export function useCardOverview(item: { tmdb_id: number; media_type: string; overview?: string }): { overview: string; posterUrl: string | null } {
-  const own = item.overview ?? ''
+export function useCardOverview(item: { tmdb_id: number; media_type: string; overview?: string }, enabled = true): { overview: string; posterUrl: string | null } {
+  const own = enabled ? item.overview ?? '' : ''
   const [fetched, setFetched] = useState<TmdbCardMeta>(EMPTY_META)
-  const needsFetch = !own && (item.tmdb_id ?? 0) > 0
+  const needsFetch = enabled && !own && (item.tmdb_id ?? 0) > 0
 
   useEffect(() => {
     if (!needsFetch) {

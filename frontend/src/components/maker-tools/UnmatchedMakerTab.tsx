@@ -262,6 +262,7 @@ function UnmatchedAssetCard({ item, psdConfig, posterAvailability, posterAvailab
         posterAvailabilityChecked={posterAvailabilityChecked}
         hidePoster
         hideTitle
+        hideOverview
       />
     </div>
   )

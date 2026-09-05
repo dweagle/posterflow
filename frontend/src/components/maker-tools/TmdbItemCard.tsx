@@ -306,6 +306,7 @@ export type TmdbItemCardProps = {
   posterStyle?: 'CL2K' | 'MM2K'
   hidePoster?: boolean
   hideTitle?: boolean
+  hideOverview?: boolean
   galleryPortalId?: string
   /** Bump this (e.g. when the parent request is completed) to auto-close the image gallery. */
   collapseSignal?: number
@@ -315,13 +316,13 @@ export type TmdbItemCardProps = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
   // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (gallery, id chip) but
   // still let the user export a blank/existing PSD, named by title + year.
   const hasTmdb = (item.tmdb_id ?? 0) > 0
-  const { overview, posterUrl: tmdbPosterUrl } = useCardOverview(item)
+  const { overview, posterUrl: tmdbPosterUrl } = useCardOverview(item, !hideOverview)
   // Display-only fallback chain; the thumb proxy is never published
   const posterUrl = item.poster_url || tmdbPosterUrl || item.thumb_url || ''
 
@@ -953,9 +954,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           </div>
         )}
 
-        {/* Left side: poster, title, year, overview. Omitted entirely when the host card already
-            shows all of it (request cards), so the box isn't pushed off a blank column. */}
-        {(!hideTitle || item.overview) && (
+        {/* Left side: poster, title, year, overview. Hosts that show the title themselves pass hideTitle;
+            those that want no description either (request cards) add hideOverview, so the box isn't pushed off a blank column. */}
+        {(!hideTitle || overview) && (
           <div className="tmdb-result-info">
             <div className="tmdb-result-title-row">
               {!hideTitle && <span className="tmdb-result-title">{item.title}</span>}
