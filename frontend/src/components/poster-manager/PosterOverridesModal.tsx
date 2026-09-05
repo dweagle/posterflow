@@ -6,6 +6,7 @@ import {
   getPosterOverrides,
 } from '../../api/posterManager'
 import { useToast } from '../Toast'
+import ConfirmDialog from '../ConfirmDialog'
 
 type PosterOverridesModalProps = {
   driveInfo: Map<string, { name: string; style?: string }>
@@ -30,12 +31,10 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
   }, [])
 
   const [removingAll, setRemovingAll] = useState(false)
+  const [confirmRemoveAll, setConfirmRemoveAll] = useState(false)
   const handleRemoveAll = async (list: PosterOverride[]) => {
+    setConfirmRemoveAll(false)
     if (list.length === 0) return
-    const nounWord = tab === 'poster' ? 'poster' : 'artwork'
-    if (!window.confirm(
-      `Remove all ${list.length} ${nounWord} override${list.length !== 1 ? 's' : ''}? The next rename goes back to normal priority for these items.`
-    )) return
     setRemovingAll(true)
     try {
       const results = await Promise.allSettled(list.map((o) => deletePosterOverride(o.id)))
@@ -75,6 +74,8 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
 
   const posterOverrides = (overrides ?? []).filter((o) => (o.domain ?? 'poster') === 'poster')
   const artworkOverrides = (overrides ?? []).filter((o) => (o.domain ?? 'poster') === 'artwork')
+  const tabOverrides = tab === 'poster' ? posterOverrides : artworkOverrides
+  const tabNoun = tab === 'poster' ? 'poster' : 'artwork'
 
   const renderOverride = (ov: PosterOverride) => {
     const info = driveInfo.get(ov.drive_id)
@@ -117,63 +118,76 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
   }
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      <div className="modal-content schedule-modal list-items-modal drive-usage-modal">
-        <div className="modal-header">
-          <h2>Poster Overrides</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
-        <div className="modal-body">
-          <p className="style-fallback-modal-subtitle">
-            Items pinned to a specific drive instead of the priority order. Overrides apply on
-            every rename and fall back to normal priority if the drive stops offering the file.
-          </p>
-
-          <div className="drive-usage-view-tabs">
-            <button
-              type="button"
-              className={`drive-usage-view-tab${tab === 'poster' ? ' active' : ''}`}
-              onClick={() => setTab('poster')}
-            >
-              Posters ({posterOverrides.length})
-            </button>
-            <button
-              type="button"
-              className={`drive-usage-view-tab${tab === 'artwork' ? ' active' : ''}`}
-              onClick={() => setTab('artwork')}
-            >
-              Artwork ({artworkOverrides.length})
-            </button>
+    <>
+      <div className="modal-overlay" onClick={handleOverlayClick}>
+        <div className="modal-content schedule-modal list-items-modal drive-usage-modal">
+          <div className="modal-header">
+            <h2>Poster Overrides</h2>
+            <button className="modal-close" onClick={onClose}>×</button>
           </div>
 
-          <div className="unmatched-list">
-            {overrides === null && <p className="drive-usage-hint">Loading…</p>}
-            {overrides !== null && (tab === 'poster' ? posterOverrides : artworkOverrides).length === 0 && (
-              <p className="drive-usage-hint">
-                No {tab === 'poster' ? 'poster' : 'artwork'} overrides yet - use the View or compare
-                buttons on a drive's {tab === 'poster' ? 'posters' : 'artwork'} to pin one.
-              </p>
-            )}
-            {(tab === 'poster' ? posterOverrides : artworkOverrides).map(renderOverride)}
-          </div>
-        </div>
+          <div className="modal-body">
+            <p className="style-fallback-modal-subtitle">
+              Items pinned to a specific drive instead of the priority order. Overrides apply on
+              every rename and fall back to normal priority if the drive stops offering the file.
+            </p>
 
-        <div className="modal-footer">
-          <div className="modal-footer-actions">
-            <button
-              className="btn-secondary"
-              onClick={() => handleRemoveAll(tab === 'poster' ? posterOverrides : artworkOverrides)}
-              disabled={removingAll || (tab === 'poster' ? posterOverrides : artworkOverrides).length === 0}
-              title="Remove every override on this tab - back to normal priority"
-            >
-              <Trash2 size={14} />
-              Remove all {tab === 'poster' ? 'poster' : 'artwork'} overrides
-            </button>
-            <button className="btn-secondary" onClick={onClose}>Close</button>
+            <div className="drive-usage-view-tabs">
+              <button
+                type="button"
+                className={`drive-usage-view-tab${tab === 'poster' ? ' active' : ''}`}
+                onClick={() => setTab('poster')}
+              >
+                Posters ({posterOverrides.length})
+              </button>
+              <button
+                type="button"
+                className={`drive-usage-view-tab${tab === 'artwork' ? ' active' : ''}`}
+                onClick={() => setTab('artwork')}
+              >
+                Artwork ({artworkOverrides.length})
+              </button>
+            </div>
+
+            <div className="unmatched-list">
+              {overrides === null && <p className="drive-usage-hint">Loading…</p>}
+              {overrides !== null && tabOverrides.length === 0 && (
+                <p className="drive-usage-hint">
+                  No {tabNoun} overrides yet - use the View or compare
+                  buttons on a drive's {tab === 'poster' ? 'posters' : 'artwork'} to pin one.
+                </p>
+              )}
+              {tabOverrides.map(renderOverride)}
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <div className="modal-footer-actions">
+              <button
+                className="btn-secondary"
+                onClick={() => setConfirmRemoveAll(true)}
+                disabled={removingAll || tabOverrides.length === 0}
+                title="Remove every override on this tab - back to normal priority"
+              >
+                <Trash2 size={14} />
+                Remove all {tabNoun} overrides
+              </button>
+              <button className="btn-secondary" onClick={onClose}>Close</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <ConfirmDialog
+        isOpen={confirmRemoveAll}
+        title={`Remove All ${tab === 'poster' ? 'Poster' : 'Artwork'} Overrides?`}
+        message={`Remove all ${tabOverrides.length} ${tabNoun} override${tabOverrides.length !== 1 ? 's' : ''}? The next rename goes back to normal priority for these items.`}
+        confirmText="Remove All"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={() => handleRemoveAll(tabOverrides)}
+        onCancel={() => setConfirmRemoveAll(false)}
+      />
+    </>
   )
 }
