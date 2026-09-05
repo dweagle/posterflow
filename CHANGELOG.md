@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-09-04
+### Added
+- fanart.tv added as an image source. Add your fanart.tv API key in Settings → General → API Keys and both the Maker Tools gallery and the Artwork Finder get a fanart.tv tab.
+- IDarr: a pending quick-add drop can now be ignored or uploaded straight from the popup.Handy for custom collections and other items that naturally don't match.
+- Maker Tools: the Seasons tab now auto-loads the first season's posters.
+
+### Changed
+- Drive Usage: "remove all overrides" now confirms with the in app dialog instead of a browser popup.
+
+### Fixed
+- Update refresh banner: only prompts when the server version is actually newer than the loaded bundle.
+- Drive Usage: the Overrides count refreshes as soon as a drive modal pins or unpins an item.
+- Maker Monitor: "needed" item cards correctly show their description.
+- Match Report: improved verdict and ID warnings.
+
 ## [0.15.1] - 2026-09-01
 ### Fixed
 - Settings: media server and arr instance removals correctly save upon deletion.
