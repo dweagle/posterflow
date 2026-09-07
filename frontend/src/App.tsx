@@ -16,6 +16,7 @@ import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
 import { checkSetupComplete } from './api/client'
 import { ToastProvider } from './components/Toast'
 import { AppEventsProvider } from './contexts/AppEventsContext'
+import { RemindersProvider } from './contexts/RemindersContext'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LockScreen from './components/LockScreen'
 
@@ -131,6 +132,7 @@ function AppContent() {
   return (
     <ToastProvider>
       <AppEventsProvider>
+        <RemindersProvider>
         <BrowserRouter>
           <RoutePersistence />
           <Routes>
@@ -159,6 +161,7 @@ function AppContent() {
           )}
           </Routes>
         </BrowserRouter>
+        </RemindersProvider>
       </AppEventsProvider>
     </ToastProvider>
   )

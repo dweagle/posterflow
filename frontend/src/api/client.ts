@@ -301,6 +301,17 @@ export {
   defaultTextLogoFields,
   previewTextLogo,
   addTextLogo,
+  type ReminderKind,
+  type PosterReminder,
+  type ReminderItem,
+  type PosterReminderInput,
+  getPosterReminders,
+  savePosterReminder,
+  updatePosterReminderNote,
+  deletePosterReminder,
+  reminderMatchesItem,
+  reminderInput,
+  reminderToSearchResult,
 } from './makerTools'
 
 export {

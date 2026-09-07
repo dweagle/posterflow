@@ -32,6 +32,7 @@ from api.database import router as database_router
 from api.idarr import router as idarr_router
 from api.maker_tools import router as maker_tools_router
 from api.artwork_finder import router as artwork_finder_router
+from api.poster_reminders import router as poster_reminders_router
 from api.stats import router as stats_router
 from api.scripts import router as scripts_router
 from api.community import router as community_router
@@ -556,6 +557,7 @@ app.include_router(database_router)
 app.include_router(idarr_router)
 app.include_router(maker_tools_router)
 app.include_router(artwork_finder_router)
+app.include_router(poster_reminders_router)
 app.include_router(stats_router)
 app.include_router(scripts_router)
 app.include_router(community_router)

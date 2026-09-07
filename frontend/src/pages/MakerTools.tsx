@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { BookOpen, Check, CircleHelp, Info, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
+import { Bell, BookOpen, Check, CircleHelp, Info, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
   getApiErrorMessage,
   Drive,
@@ -24,6 +24,8 @@ import {
 import TmdbItemCard, { derivePsdConfig, type PsdConfig } from '../components/maker-tools/TmdbItemCard'
 import UnmatchedMakerTab from '../components/maker-tools/UnmatchedMakerTab'
 import ArtworkFinderPanel from '../components/maker-tools/ArtworkFinderPanel'
+import RemindersTab from '../components/maker-tools/RemindersTab'
+import { useReminders } from '../contexts/RemindersContext'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './MakerTools.css'
@@ -31,7 +33,7 @@ import Toolbar from '../components/Toolbar'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
-type MainTab = 'monitor' | 'tmdb-search' | 'unmatched' | 'artwork'
+type MainTab = 'monitor' | 'tmdb-search' | 'unmatched' | 'artwork' | 'reminders'
 
 const DEFAULT_MONITOR_CONFIG: MakerMonitorConfig = {
   tmdb_api_key: '',
@@ -161,6 +163,7 @@ function MakerTools() {
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
+  const reminderCount = useReminders()?.reminders.length ?? 0
 
   const { jobs, unmatchedStats } = useAppEvents()
   const completionHandledRef = useRef(false)
@@ -624,6 +627,19 @@ function MakerTools() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === 'reminders'}
+          className={activeTab === 'reminders' ? 'active' : ''}
+          onClick={() => setActiveTab('reminders')}
+        >
+          <span className="maker-tab-icon">
+            <Bell size={16} />
+            {reminderCount > 0 && <span className="maker-tab-count">{reminderCount}</span>}
+          </span>
+          Reminders
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === 'monitor'}
           className={activeTab === 'monitor' ? 'active' : ''}
           onClick={() => setActiveTab('monitor')}
@@ -962,6 +978,8 @@ function MakerTools() {
       )}
 
       {activeTab === 'artwork' && <ArtworkFinderPanel />}
+
+      {activeTab === 'reminders' && <RemindersTab psdConfig={psdConfig} />}
 
       {showPsdConfigModal && (
         <div className="modal-overlay">

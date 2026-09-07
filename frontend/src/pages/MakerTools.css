@@ -2853,3 +2853,298 @@
   max-width: 100%;
   max-height: 260px;
 }
+
+/* ── Reminders ──────────────────────────────────────────────────────────── */
+/* Count on the main Reminders tab: a small badge pinned to the bell icon's corner, out of the
+   flow, so appearing or growing never resizes the tab strip or nudges the tabs beside it. */
+.maker-tab-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.maker-tab-count {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #ffb74d;
+  color: #1a1a1a;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Bell button at the right end of a card's header band; amber once the item is flagged. */
+.tmdb-reminder-bell {
+  position: relative;   /* anchors the hover tip */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  padding: 0;
+  color: #777;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.tmdb-reminder-bell:hover {
+  color: #ddd;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tmdb-reminder-bell.active {
+  color: #ffb74d;
+}
+
+.tmdb-reminder-bell.active:hover {
+  color: #ffcc80;
+}
+
+.tmdb-reminder-bell:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tmdb-result-meta .tmdb-reminder-bell {
+  margin-left: auto;
+  align-self: center;
+}
+
+/* Hover tip hangs from the bell's right edge and opens inward, like the note popover.
+   data-tooltip instead of title so it can be placed; pre-line keeps the two-line flagged hint.
+   The `button` prefix outranks the community page's generic [data-tooltip] rules (which anchor
+   above and cap the width differently), and bottom/left are pinned so none of theirs bleed in. */
+button.tmdb-reminder-bell[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  bottom: auto;
+  right: 0;
+  left: auto;
+  width: max-content;
+  max-width: 240px;
+  background: #1a1a1a;
+  color: #ccc;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease 0.5s;
+  z-index: 100;
+}
+
+button.tmdb-reminder-bell[data-tooltip]:hover:not(:disabled)::after {
+  opacity: 1;
+}
+
+/* Note popover — portaled to <body> and fixed, so nothing in the card can clip it. */
+.tmdb-reminder-pop {
+  position: fixed;
+  z-index: 9999;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+.tmdb-reminder-pop-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #eee;
+  font-weight: 600;
+}
+
+.tmdb-reminder-pop-title svg {
+  color: #ffb74d;
+  flex-shrink: 0;
+}
+
+.tmdb-reminder-pop-item {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #888;
+  font-weight: 400;
+}
+
+.tmdb-reminder-pop textarea,
+.reminder-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  resize: vertical;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  color: #eee;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.tmdb-reminder-pop textarea:focus,
+.reminder-note-input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.tmdb-reminder-pop-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tmdb-reminder-pop-spacer {
+  flex: 1;
+}
+
+.tmdb-reminder-pop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: none;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0.25rem 0.55rem;
+  color: #aaa;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.tmdb-reminder-pop-btn:hover {
+  color: #eee;
+  border-color: #666;
+}
+
+.tmdb-reminder-pop-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tmdb-reminder-pop-btn--primary {
+  background: #64b5f6;
+  border-color: #64b5f6;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.tmdb-reminder-pop-btn--primary:hover {
+  background: #90caf9;
+  border-color: #90caf9;
+  color: #1a1a1a;
+}
+
+.tmdb-reminder-pop-btn--danger:hover {
+  color: #ef9a9a;
+  border-color: #ef5350;
+}
+
+/* Reminders tab list: note bar above each real maker / artwork card. */
+.reminder-subtab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.reminder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.reminder-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* The artwork card carries its own inline bottom margin for the gap-less unmatched lists. */
+.reminder-item > .artwork-finder-card {
+  margin-bottom: 0 !important;
+}
+
+.reminder-note-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: rgba(255, 183, 77, 0.08);
+  border: 1px solid rgba(255, 183, 77, 0.35);
+  border-radius: 6px;
+}
+
+.reminder-note-icon {
+  color: #ffb74d;
+  flex-shrink: 0;
+}
+
+.reminder-note {
+  flex: 1;
+  min-width: 0;
+  color: #eee;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reminder-note--empty {
+  color: #777;
+  font-style: italic;
+}
+
+.reminder-date {
+  color: #888;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.reminder-note-bar .reminder-note-input {
+  flex: 1;
+  min-height: 44px;
+}
+
+.reminder-remove-btn:hover {
+  color: #ef9a9a;
+  border-color: #ef5350;
+}

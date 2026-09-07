@@ -51,6 +51,7 @@ import { useToast } from '../Toast'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
 import SquareCropModal from './SquareCropModal'
 import ServiceLinks from './ServiceLinks'
+import ReminderToggle from './ReminderToggle'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
@@ -997,6 +998,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               </>
             )}
             {driveSearchControl}
+            <ReminderToggle kind="poster" item={item} />
           </div>
 
           <ServiceLinks item={item} appleTvStorefront={appleTvStorefront} onAppleTvIntent={ensureAppleTvStorefront} />

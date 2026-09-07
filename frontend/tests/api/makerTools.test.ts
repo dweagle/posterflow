@@ -53,3 +53,29 @@ describe('defaultTextLogoFields', () => {
       .toEqual({ top: '', main: 'STAR WARS: THE FORCE AWAKENS', suffix: '' })
   })
 })
+
+describe('reminderMatchesItem', () => {
+  const base = {
+    id: 1, kind: 'poster' as const, media_type: 'tv' as const, tmdb_id: 10, tvdb_id: null, imdb_id: null,
+    title: 'Tulsa King', year: '2022', poster_url: null, homepage: null, note: '', created_at: null, updated_at: null,
+  }
+
+  it('matches on TMDB id within the same kind and media type', async () => {
+    const { reminderMatchesItem } = await import('../../src/api/makerTools')
+    const item = { tmdb_id: 10, media_type: 'tv' as const, title: 'Other', year: '' }
+    expect(reminderMatchesItem(base, 'poster', item)).toBe(true)
+    expect(reminderMatchesItem(base, 'artwork', item)).toBe(false)
+    expect(reminderMatchesItem(base, 'poster', { ...item, media_type: 'movie' })).toBe(false)
+    expect(reminderMatchesItem(base, 'poster', { ...item, tmdb_id: 11 })).toBe(false)
+  })
+
+  it('falls back to title + year only when neither side has a TMDB id', async () => {
+    const { reminderMatchesItem } = await import('../../src/api/makerTools')
+    const idless = { ...base, tmdb_id: null }
+    expect(reminderMatchesItem(idless, 'poster', { tmdb_id: 0, media_type: 'tv', title: 'tulsa king', year: '2022' })).toBe(true)
+    expect(reminderMatchesItem(idless, 'poster', { tmdb_id: 0, media_type: 'tv', title: 'Tulsa King', year: '2023' })).toBe(false)
+    // An id on one side only never matches by title — that would fuse two different items.
+    expect(reminderMatchesItem(idless, 'poster', { tmdb_id: 10, media_type: 'tv', title: 'Tulsa King', year: '2022' })).toBe(false)
+    expect(reminderMatchesItem(base, 'poster', { tmdb_id: 0, media_type: 'tv', title: 'Tulsa King', year: '2022' })).toBe(false)
+  })
+})

@@ -29,6 +29,7 @@ import models.setting  # noqa: F401
 import models.drive  # noqa: F401
 import models.poster  # noqa: F401
 import models.poster_override  # noqa: F401
+import models.poster_reminder  # noqa: F401
 import models.artwork_drive  # noqa: F401
 import models.artwork  # noqa: F401
 import models.job  # noqa: F401

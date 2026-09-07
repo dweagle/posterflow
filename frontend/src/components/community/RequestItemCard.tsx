@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import { ExternalLink, ImageOff, Upload } from 'lucide-react'
 import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
-import { type PosterAvailability } from '../../api/makerTools'
+import { type PosterAvailability, type TmdbSearchResult } from '../../api/makerTools'
 
 export type CardMediaType = 'movie' | 'show' | 'season' | 'collection' | 'person'
 
@@ -115,6 +115,17 @@ export default function RequestItemCard({
   const tmdbLink = tmdbLinkFor(mediaType, tmdbId)
   const tvdbLink = tvdbLinkFor(tvdbId)
   const tmdbMediaType = mediaType === 'movie' ? 'movie' : mediaType === 'collection' ? 'collection' : 'tv'
+  const cardItem: TmdbSearchResult = {
+    tmdb_id: tmdbId ?? 0,
+    media_type: tmdbMediaType,
+    title,
+    year: year ? String(year) : '',
+    overview: '',
+    poster_url: posterPath || '',
+    homepage: tmdbLink,
+    imdb_id: imdbId,
+    tvdb_id: tvdbId ?? null,
+  }
 
   return (
     <div className="community-request-wrapper">
@@ -184,17 +195,7 @@ export default function RequestItemCard({
           {showMakerTools && (
             <div className="request-maker-tools-panel">
               <TmdbItemCard
-                item={{
-                  tmdb_id: tmdbId ?? 0,
-                  media_type: tmdbMediaType,
-                  title,
-                  year: year ? String(year) : '',
-                  overview: '',
-                  poster_url: posterPath || '',
-                  homepage: tmdbLink,
-                  imdb_id: imdbId,
-                  tvdb_id: tvdbId ?? null,
-                }}
+                item={cardItem}
                 psdConfig={psdConfig}
                 posterStyle={styleLabel ?? undefined}
                 posterAvailability={posterAvailability}

@@ -1,4 +1,4 @@
-import { API_URL, getData, postData, putData } from './http'
+import { API_URL, deleteData, getData, postData, putData } from './http'
 // Inlined as a data URI (Vite ?inline) so Photopea renders it without a network fetch.
 // A remote-URL icon at our origin is passive mixed content on an http LAN instance — Chrome
 // auto-upgrades it to https, the upgrade fails (no TLS), and the button shows with no image.
@@ -880,4 +880,96 @@ export const uploadPsdToExportFolder = async (file: File, filename: string): Pro
   await axios.put(`/api/maker-tools/psd-exports/${encodeURIComponent(filename)}`, file, {
     headers: { 'Content-Type': 'application/octet-stream' },
   })
+}
+// ---------------------------------------------------------------------------
+// Poster reminders — items flagged on a maker / artwork card to come back to later
+// ---------------------------------------------------------------------------
+
+export type ReminderKind = 'poster' | 'artwork'
+
+export interface PosterReminder {
+  id: number
+  kind: ReminderKind
+  media_type: 'movie' | 'tv' | 'collection'
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  title: string
+  year: string
+  poster_url: string | null
+  homepage: string | null
+  note: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+/** The slice of a card item a reminder is keyed and displayed by. */
+export type ReminderItem = Pick<TmdbSearchResult, 'tmdb_id' | 'media_type' | 'title' | 'year'>
+  & Partial<Pick<TmdbSearchResult, 'tvdb_id' | 'imdb_id' | 'poster_url' | 'homepage'>>
+
+export interface PosterReminderInput {
+  kind: ReminderKind
+  media_type: 'movie' | 'tv' | 'collection'
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  imdb_id?: string | null
+  title: string
+  year?: string | null
+  poster_url?: string | null
+  homepage?: string | null
+  note: string
+}
+
+export const getPosterReminders = async (): Promise<PosterReminder[]> => {
+  return getData<PosterReminder[]>('/api/maker-tools/reminders')
+}
+
+export const savePosterReminder = async (input: PosterReminderInput): Promise<PosterReminder> => {
+  return postData<PosterReminder>('/api/maker-tools/reminders', input)
+}
+
+export const updatePosterReminderNote = async (id: number, note: string): Promise<PosterReminder> => {
+  return putData<PosterReminder>(`/api/maker-tools/reminders/${id}`, { note })
+}
+
+export const deletePosterReminder = async (id: number): Promise<void> => {
+  await deleteData<{ success: boolean }>(`/api/maker-tools/reminders/${id}`)
+}
+
+/** Same identity rule as the backend upsert: TMDB id when either side has one, else title + year. */
+export function reminderMatchesItem(r: PosterReminder, kind: ReminderKind, item: ReminderItem): boolean {
+  if (r.kind !== kind || r.media_type !== item.media_type) return false
+  const tmdb = (item.tmdb_id ?? 0) > 0 ? item.tmdb_id : null
+  if (tmdb || r.tmdb_id) return r.tmdb_id === tmdb
+  return r.title.trim().toLowerCase() === item.title.trim().toLowerCase() && (r.year || '') === (item.year || '')
+}
+
+export function reminderInput(kind: ReminderKind, item: ReminderItem, note: string): PosterReminderInput {
+  return {
+    kind,
+    media_type: item.media_type,
+    tmdb_id: (item.tmdb_id ?? 0) > 0 ? item.tmdb_id : null,
+    tvdb_id: item.tvdb_id ?? null,
+    imdb_id: item.imdb_id ?? null,
+    title: item.title,
+    year: item.year || null,
+    poster_url: item.poster_url || null,
+    homepage: item.homepage || null,
+    note,
+  }
+}
+
+/** Rebuild the card item a reminder was flagged from, so the Reminders tab can render the real card. */
+export function reminderToSearchResult(r: PosterReminder): TmdbSearchResult {
+  return {
+    tmdb_id: r.tmdb_id ?? 0,
+    media_type: r.media_type,
+    title: r.title,
+    year: r.year || '',
+    overview: '',
+    poster_url: r.poster_url || '',
+    homepage: r.homepage || '',
+    imdb_id: r.imdb_id,
+    tvdb_id: r.tvdb_id,
+  }
 }

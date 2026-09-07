@@ -24,6 +24,7 @@ import TextLogoModal from './TextLogoModal'
 import { TMDB_IMAGE_LANGUAGES } from './TmdbItemCard'
 import { useEnabledImageSources } from '../../hooks/useImageSources'
 import ServiceLinks from './ServiceLinks'
+import ReminderToggle from './ReminderToggle'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
@@ -347,6 +348,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                 ))}
               </>
             )}
+            <ReminderToggle kind="artwork" item={item} />
           </div>
 
           <ServiceLinks item={item} />
