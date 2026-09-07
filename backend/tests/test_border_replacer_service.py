@@ -1,6 +1,7 @@
 import filecmp
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,35 @@ def test_resolve_effective_colors_uses_active_holiday(test_db):
     assert holiday_name == "Always On"
     assert colors == ["#FF0000", "#00FF00"]
     assert style_opts["style"] == "solid"  # no style object → solid
+
+
+@pytest.mark.parametrize(
+    "now, expected",
+    [
+        (datetime(2026, 8, 31, 23, 59, 59), False),
+        (datetime(2026, 9, 1, 0, 0, 0), True),
+        (datetime(2026, 9, 7, 9, 21, 0), True),
+        (datetime(2026, 9, 7, 23, 59, 59), True),
+        (datetime(2026, 9, 8, 0, 0, 0), False),
+    ],
+)
+def test_holiday_range_includes_whole_last_day(test_db, now, expected):
+    service = BorderReplacerService(test_db)
+    assert service._is_within_holiday_range("range(09/01-09/07)", now) is expected
+
+
+@pytest.mark.parametrize(
+    "now, expected",
+    [
+        (datetime(2026, 12, 29, 12, 0, 0), False),
+        (datetime(2026, 12, 31, 12, 0, 0), True),
+        (datetime(2027, 1, 2, 18, 0, 0), True),
+        (datetime(2027, 1, 3, 0, 0, 0), False),
+    ],
+)
+def test_holiday_range_wrapping_year_includes_last_day(test_db, now, expected):
+    service = BorderReplacerService(test_db)
+    assert service._is_within_holiday_range("range(12/30-01/02)", now) is expected
 
 
 def test_main_style_remove_strips_border(test_db, tmp_path):

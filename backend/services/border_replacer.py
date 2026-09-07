@@ -806,7 +806,8 @@ class BorderReplacerService:
             else:
                 end_date = end_date.replace(year=year + 1)
 
-        return start_date <= now <= end_date
+        # Compare calendar dates so the range's last day counts past midnight.
+        return start_date.date() <= now.date() <= end_date.date()
 
     def _load_holiday_schedules(self) -> List[Dict[str, Any]]:
         """Load holiday schedules from DB setting `border_replacer_holidays`."""
