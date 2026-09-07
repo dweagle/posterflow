@@ -4,6 +4,8 @@ from pathlib import Path
 from core.config import settings
 from models.drive import Drive
 from models.poster import Poster
+from models.artwork import Artwork
+from models.artwork_drive import ArtworkDrive
 
 
 def test_get_logs_parses_entries_and_filters_by_level(client, tmp_path):
@@ -399,3 +401,92 @@ def test_poster_image_thumbnail_downscales_and_caches(client, test_db):
 
     # Width beyond the allowed range is rejected
     assert client.get(f"/api/stats/posters/{poster.id}/image?w=5000").status_code == 422
+
+
+def test_recent_artwork_filters_by_type_and_subscribed_drives(client, test_db):
+    subscribed = ArtworkDrive(name="Art Sub", drive_id="art-recent-sub-1", subscribed=True, is_custom=False)
+    unsubscribed = ArtworkDrive(name="Art Unsub", drive_id="art-recent-unsub-1", subscribed=False, is_custom=False)
+    test_db.add_all([subscribed, unsubscribed])
+    test_db.flush()
+
+    sub_root = subscribed.get_local_path(validate=False)
+    unsub_root = unsubscribed.get_local_path(validate=False)
+    sub_logo = sub_root / "logos" / "Dune (2021) - logo.png"
+    sub_bg = sub_root / "backgrounds" / "Dune (2021) - background.jpg"
+    unsub_logo = unsub_root / "logos" / "Heat (1995) - logo.png"
+    stray_logo = unsub_root / "logos" / "Stray (2000) - logo.png"
+    for path in (sub_logo, sub_bg, unsub_logo, stray_logo):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+
+    def row(drive, artwork_type, path, hour):
+        return Artwork(
+            artwork_drive_id=drive.drive_id,
+            artwork_type=artwork_type,
+            file_name=path.name,
+            file_path=str(path),
+            downloaded_at=datetime(2026, 9, 1, hour, 0, 0, tzinfo=timezone.utc),
+        )
+
+    # The stray row belongs to the subscribed drive but its file sits in another drive's root
+    stray = row(subscribed, "logo", stray_logo, 13)
+    test_db.add_all([
+        row(subscribed, "logo", sub_logo, 10),
+        row(subscribed, "background", sub_bg, 11),
+        row(unsubscribed, "logo", unsub_logo, 12),
+        stray,
+    ])
+    test_db.commit()
+
+    logos = client.get("/api/stats/recent-artwork?type=logo&limit=10")
+    assert logos.status_code == 200
+    assert [item["file_name"] for item in logos.json()["items"]] == ["Dune (2021) - logo.png"]
+    assert logos.json()["items"][0]["drive_name"] == "Art Sub"
+    assert logos.json()["items"][0]["image_url"].startswith("/api/stats/artwork/")
+
+    backgrounds = client.get("/api/stats/recent-artwork?type=background&limit=10")
+    assert [item["file_name"] for item in backgrounds.json()["items"]] == ["Dune (2021) - background.jpg"]
+
+    assert client.get("/api/stats/recent-artwork?type=poster").status_code == 400
+    assert client.get(f"/api/stats/artwork/{stray.id}/image").status_code == 404
+
+
+def test_artwork_image_thumbnail_keeps_transparency(client, test_db):
+    import io
+
+    from PIL import Image
+
+    drive = ArtworkDrive(name="Logo Thumb Drive", drive_id="art-thumb-1", subscribed=True, is_custom=False)
+    test_db.add(drive)
+    test_db.flush()
+
+    logo_file = drive.get_local_path(validate=False) / "logos" / "Big Logo (2024) - logo.png"
+    logo_file.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (800, 200), (255, 255, 255, 0)).save(logo_file, "PNG")
+
+    artwork = Artwork(
+        artwork_drive_id=drive.drive_id,
+        artwork_type="logo",
+        file_name=logo_file.name,
+        file_path=str(logo_file),
+        downloaded_at=datetime.now(timezone.utc),
+    )
+    test_db.add(artwork)
+    test_db.commit()
+
+    thumb_response = client.get(f"/api/stats/artwork/{artwork.id}/image?w=100")
+    assert thumb_response.status_code == 200
+    assert thumb_response.headers["content-type"] == "image/png"
+    with Image.open(io.BytesIO(thumb_response.content)) as thumb:
+        assert thumb.size == (100, 25)
+        assert thumb.mode == "RGBA"
+        assert thumb.getpixel((0, 0))[3] == 0
+
+    # Artwork thumbs live under their own cache key so they never collide with a poster of the same id
+    cache_dir = settings.config_dir / "cache" / "poster_thumbs"
+    assert len(list(cache_dir.glob(f"artwork_{artwork.id}_*_100.png"))) == 1
+
+    full_response = client.get(f"/api/stats/artwork/{artwork.id}/image")
+    assert full_response.status_code == 200
+    with Image.open(io.BytesIO(full_response.content)) as full:
+        assert full.size == (800, 200)

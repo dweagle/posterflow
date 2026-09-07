@@ -1,4 +1,5 @@
 import { getData, postData, putData, deleteData } from './http'
+import type { ArtworkType } from './artwork_unmatched'
 
 // Stats functions
 export interface Stats {
@@ -46,6 +47,10 @@ export interface RecentSyncedPosterResponse {
 
 export const getRecentSyncedPosters = async (limit: number = 100): Promise<RecentSyncedPosterResponse> => {
   return getData(`/api/stats/recent-posters?limit=${limit}`)
+}
+
+export const getRecentSyncedArtwork = async (artworkType: ArtworkType, limit: number = 100): Promise<RecentSyncedPosterResponse> => {
+  return getData(`/api/stats/recent-artwork?type=${artworkType}&limit=${limit}`)
 }
 
 export interface PosterActivityStats {

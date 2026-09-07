@@ -22,6 +22,8 @@ from models.job import (
 )
 from models.drive import Drive
 from models.poster import Poster
+from models.artwork import Artwork
+from models.artwork_drive import ArtworkDrive, ARTWORK_TYPES
 from models.job import Job
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -254,69 +256,81 @@ def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
     }
 
 
+def _local_file_within_drive(drive: Drive | ArtworkDrive, file_path: str) -> Optional[Path]:
+    """The record's file when it still exists inside its drive's local root, else None."""
+    try:
+        drive_root = drive.get_local_path(validate=False).resolve()
+        path = Path(file_path).resolve()
+    except Exception:
+        return None
+    if not _is_path_within(drive_root, path) or not path.is_file():
+        return None
+    return path
+
+
+def _content_recency(model):
+    """Newest content first: file mtime, falling back to the DB download time."""
+    return func.coalesce(model.file_mtime, func.strftime('%s', model.downloaded_at).cast(Float), 0.0)
+
+
+def _recent_synced_items(rows, limit: int, image_route: str) -> List[Dict[str, Any]]:
+    """Walk (record, drive) rows newest-first, keeping only files still on disk inside their drive root."""
+    items: List[Dict[str, Any]] = []
+    for record, drive in rows:
+        if _local_file_within_drive(drive, record.file_path) is None:
+            continue
+        items.append(
+            {
+                "id": record.id,
+                "file_name": record.file_name,
+                "drive_id": drive.drive_id,
+                "drive_name": drive.name,
+                "downloaded_at": record.downloaded_at.isoformat() if record.downloaded_at else None,
+                "file_mtime": record.file_mtime,
+                "image_url": f"/api/stats/{image_route}/{record.id}/image",
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
 @router.get("/recent-posters")
 def get_recent_synced_posters(limit: int = 10, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get most recent posters for dashboard carousel.
-
-    Ordering prioritizes the poster content timestamp (file mtime) and falls back
-    to DB download timestamp when mtime is unavailable.
-    """
+    """Most recent posters for the dashboard carousel, newest content (file mtime) first."""
     safe_limit = max(1, min(limit, 100))
-    raw_limit = min(safe_limit * 8, 800)
-    content_recency = func.coalesce(
-        Poster.file_mtime,
-        func.strftime('%s', Poster.downloaded_at).cast(Float),
-        0.0,
-    )
-
-    recent_rows = (
+    rows = (
         db.query(Poster, Drive)
         .join(Drive, Poster.drive_id == Drive.drive_id)
         .filter(Drive.subscribed == True)
-        .order_by(content_recency.desc(), Poster.downloaded_at.desc(), Poster.id.desc())
-        .limit(raw_limit)
+        .order_by(_content_recency(Poster).desc(), Poster.downloaded_at.desc(), Poster.id.desc())
+        .limit(min(safe_limit * 8, 800))
         .all()
     )
+    items = _recent_synced_items(rows, safe_limit, "posters")
+    return {"items": items, "count": len(items)}
 
-    items = []
-    for poster, drive in recent_rows:
-        drive_root: Path | None = None
-        poster_path: Path | None = None
-        try:
-            drive_root = drive.get_local_path(validate=False).resolve()
-            poster_path = Path(poster.file_path).resolve()
-        except Exception:
-            drive_root = None
-            poster_path = None
 
-        if drive_root is None or poster_path is None:
-            continue
-
-        if not poster_path.exists() or not poster_path.is_file():
-            continue
-
-        if not _is_path_within(drive_root, poster_path):
-            continue
-
-        items.append(
-            {
-                "id": poster.id,
-                "file_name": poster.file_name,
-                "drive_id": poster.drive_id,
-                "drive_name": drive.name,
-                "downloaded_at": poster.downloaded_at.isoformat() if poster.downloaded_at else None,
-                "file_mtime": poster.file_mtime,
-                "image_url": f"/api/stats/posters/{poster.id}/image",
-            }
-        )
-
-        if len(items) >= safe_limit:
-            break
-
-    return {
-        "items": items,
-        "count": len(items),
-    }
+@router.get("/recent-artwork")
+def get_recent_synced_artwork(
+    artwork_type: str = Query(alias="type"),
+    limit: int = 10,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Most recent artwork of one type (logo / background / squareart) for the dashboard carousel."""
+    if artwork_type not in ARTWORK_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown artwork type: {artwork_type}")
+    safe_limit = max(1, min(limit, 100))
+    rows = (
+        db.query(Artwork, ArtworkDrive)
+        .join(ArtworkDrive, Artwork.artwork_drive_id == ArtworkDrive.drive_id)
+        .filter(ArtworkDrive.subscribed == True, Artwork.artwork_type == artwork_type)
+        .order_by(_content_recency(Artwork).desc(), Artwork.downloaded_at.desc(), Artwork.id.desc())
+        .limit(min(safe_limit * 8, 800))
+        .all()
+    )
+    items = _recent_synced_items(rows, safe_limit, "artwork")
+    return {"items": items, "count": len(items)}
 
 
 _NO_CACHE_HEADERS = {
@@ -326,32 +340,50 @@ _NO_CACHE_HEADERS = {
 }
 
 
-def _thumbnail_for(poster_id: int, poster_path: Path, width: int) -> Path:
-    """Return a cached LANCZOS-downscaled JPEG for the poster, generating it if stale."""
+def _thumbnail_for(cache_key: str, image_path: Path, width: int) -> Path:
+    """Cached LANCZOS-downscaled thumbnail, regenerated when the source changes. Images with
+    transparency (logos) stay PNG; everything else becomes JPEG."""
     cache_dir = app_settings.config_dir / "cache" / "poster_thumbs"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    mtime_ns = poster_path.stat().st_mtime_ns
-    thumb_path = cache_dir / f"{poster_id}_{mtime_ns}_{width}.jpg"
-    if thumb_path.is_file():
-        return thumb_path
+    mtime_ns = image_path.stat().st_mtime_ns
+    stem = f"{cache_key}_{mtime_ns}_{width}"
+    for ext in ("jpg", "png"):
+        cached = cache_dir / f"{stem}.{ext}"
+        if cached.is_file():
+            return cached
 
-    with Image.open(poster_path) as img:
-        img = img.convert("RGB")
+    with Image.open(image_path) as img:
+        has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+        img = img.convert("RGBA" if has_alpha else "RGB")
         if img.width > width:
             height = max(1, round(img.height * width / img.width))
             img = img.resize((width, height), Image.LANCZOS)
+        thumb_path = cache_dir / f"{stem}.{'png' if has_alpha else 'jpg'}"
         # Write-then-rename so concurrent requests never read a half-written thumb
         tmp_path = thumb_path.with_name(f".{thumb_path.name}.{threading.get_ident()}.tmp")
-        img.save(tmp_path, "JPEG", quality=85)
+        if has_alpha:
+            img.save(tmp_path, "PNG")
+        else:
+            img.save(tmp_path, "JPEG", quality=85)
     os.replace(tmp_path, thumb_path)
 
-    # Drop variants from older versions of this poster
-    for stale in cache_dir.glob(f"{poster_id}_*_{width}.jpg"):
+    # Drop variants from older versions of this image
+    for stale in cache_dir.glob(f"{cache_key}_*_{width}.*"):
         if stale != thumb_path:
             stale.unlink(missing_ok=True)
 
     return thumb_path
+
+
+def _serve_image(cache_key: str, image_path: Path, width: Optional[int]) -> FileResponse:
+    """The full file, or a cached thumbnail when a width is requested and the image decodes."""
+    if width is not None:
+        try:
+            return FileResponse(str(_thumbnail_for(cache_key, image_path, width)), headers=_NO_CACHE_HEADERS)
+        except (UnidentifiedImageError, OSError):
+            pass
+    return FileResponse(str(image_path), headers=_NO_CACHE_HEADERS)
 
 
 @router.get("/posters/{poster_id}/image")
@@ -364,32 +396,28 @@ def get_poster_image(
     poster = db.query(Poster).filter(Poster.id == poster_id).first()
     if not poster:
         raise HTTPException(status_code=404, detail="Poster not found")
-
     drive = db.query(Drive).filter(Drive.drive_id == poster.drive_id).first()
-    if not drive:
-        raise HTTPException(status_code=404, detail="Drive not found for poster")
-
-    try:
-        drive_root = drive.get_local_path(validate=False).resolve()
-        poster_path = Path(poster.file_path).resolve()
-    except Exception:
-        raise HTTPException(status_code=404, detail="Poster path invalid")
-
-    if not _is_path_within(drive_root, poster_path):
+    poster_path = _local_file_within_drive(drive, poster.file_path) if drive else None
+    if poster_path is None:
         raise HTTPException(status_code=404, detail="Poster file not found")
+    return _serve_image(str(poster_id), poster_path, w)
 
-    if not poster_path.exists() or not poster_path.is_file():
-        raise HTTPException(status_code=404, detail="Poster file not found")
 
-    if w is not None:
-        try:
-            thumb_path = _thumbnail_for(poster_id, poster_path, w)
-        except (UnidentifiedImageError, OSError):
-            thumb_path = None
-        if thumb_path is not None:
-            return FileResponse(str(thumb_path), headers=_NO_CACHE_HEADERS)
-
-    return FileResponse(str(poster_path), headers=_NO_CACHE_HEADERS)
+@router.get("/artwork/{artwork_id}/image")
+def get_artwork_image(
+    artwork_id: int,
+    w: Optional[int] = Query(default=None, ge=50, le=1000),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Stream an artwork file by record id; `w` serves a downscaled thumbnail."""
+    artwork = db.query(Artwork).filter(Artwork.id == artwork_id).first()
+    if not artwork:
+        raise HTTPException(status_code=404, detail="Artwork not found")
+    drive = db.query(ArtworkDrive).filter(ArtworkDrive.drive_id == artwork.artwork_drive_id).first()
+    artwork_path = _local_file_within_drive(drive, artwork.file_path) if drive else None
+    if artwork_path is None:
+        raise HTTPException(status_code=404, detail="Artwork file not found")
+    return _serve_image(f"artwork_{artwork_id}", artwork_path, w)
 
 
 @router.get("/poster-daily-activity")

@@ -11,6 +11,7 @@ const mockGetSchedules = vi.fn()
 const mockGetDrives = vi.fn()
 const mockRunFlow = vi.fn()
 const mockGetRecentSyncedPosters = vi.fn()
+const mockGetRecentSyncedArtwork = vi.fn()
 const mockGetMakerIdarrConfig = vi.fn()
 
 vi.mock('react-router-dom', () => ({
@@ -43,6 +44,7 @@ vi.mock('../../src/api/client', () => ({
   getSchedules: (...args: unknown[]) => mockGetSchedules(...args),
   getDrives: (...args: unknown[]) => mockGetDrives(...args),
   getRecentSyncedPosters: (...args: unknown[]) => mockGetRecentSyncedPosters(...args),
+  getRecentSyncedArtwork: (...args: unknown[]) => mockGetRecentSyncedArtwork(...args),
   getMakerIdarrConfig: (...args: unknown[]) => mockGetMakerIdarrConfig(...args),
   runFlow: (...args: unknown[]) => mockRunFlow(...args),
   runBorderReplacer: vi.fn(),
@@ -77,6 +79,7 @@ describe('Dashboard', () => {
     mockGetSchedules.mockResolvedValue([])
     mockGetDrives.mockResolvedValue([])
     mockGetRecentSyncedPosters.mockResolvedValue({ items: [] })
+    mockGetRecentSyncedArtwork.mockResolvedValue({ items: [] })
     mockGetMakerIdarrConfig.mockResolvedValue({ sync_targets: [] })
     mockRunFlow.mockResolvedValue({ success: true, job_id: 10 })
   })
@@ -123,5 +126,77 @@ describe('Dashboard', () => {
     // Dashboard shows poster coverage, so the link pins the poster sub-tab regardless of
     // which asset type the Unmatched view was last left on.
     expect(mockNavigate).toHaveBeenCalledWith('/poster-manager', { state: { activeTab: 'unmatched', unmatchedScope: 'posters' } })
+  })
+
+  it('switches the recently synced carousel to the clicked coverage scope', async () => {
+    const user = userEvent.setup()
+    mockGetRecentSyncedArtwork.mockResolvedValue({
+      items: [{
+        id: 7,
+        file_name: 'Dune (2021) - logo.png',
+        drive_id: 'logo-drive',
+        drive_name: 'Logo Drive',
+        downloaded_at: '2026-09-01T00:00:00Z',
+        image_url: '/api/stats/artwork/7/image',
+      }],
+    })
+    render(<Dashboard />)
+
+    await screen.findByText('Recently Synced Posters')
+    expect(mockGetRecentSyncedArtwork).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('tab', { name: 'Logos' }))
+
+    await waitFor(() => {
+      expect(mockGetRecentSyncedArtwork).toHaveBeenCalledWith('logo', 100)
+    })
+    expect(await screen.findByText('Recently Synced Logos')).toBeTruthy()
+    const thumb = await screen.findByAltText('Dune (2021) - logo.png')
+    expect(thumb.getAttribute('src')).toContain('/api/stats/artwork/7/image')
+
+    await user.click(screen.getByRole('tab', { name: 'Posters' }))
+    expect(await screen.findByText('No recently synced posters')).toBeTruthy()
+    expect(mockGetRecentSyncedPosters).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the carousel row mounted with placeholders while a scope loads', async () => {
+    const user = userEvent.setup()
+    let resolveLogos: (value: { items: [] }) => void = () => {}
+    mockGetRecentSyncedArtwork.mockReturnValue(new Promise<{ items: [] }>(resolve => { resolveLogos = resolve }))
+    render(<Dashboard />)
+    await screen.findByText('No recently synced posters')
+
+    await user.click(screen.getByRole('tab', { name: 'Logos' }))
+
+    expect(await screen.findByText('Recently Synced Logos')).toBeTruthy()
+    expect(document.querySelectorAll('.poster-carousel-item--placeholder').length).toBeGreaterThan(0)
+    expect(screen.queryByText('No recently synced logos')).toBeNull()
+
+    resolveLogos({ items: [] })
+    expect(await screen.findByText('No recently synced logos')).toBeTruthy()
+    expect(document.querySelectorAll('.poster-carousel-item--placeholder').length).toBe(0)
+  })
+
+  it('wraps carousel paging around at both ends', async () => {
+    const user = userEvent.setup()
+    mockGetRecentSyncedPosters.mockResolvedValue({
+      items: Array.from({ length: 12 }, (_, i) => ({
+        id: i + 1,
+        file_name: `Movie ${i + 1} (2020).jpg`,
+        drive_id: 'drive',
+        drive_name: 'Drive',
+        downloaded_at: null,
+        image_url: `/api/stats/posters/${i + 1}/image`,
+      })),
+    })
+    render(<Dashboard />)
+
+    expect(await screen.findByText('1 / 2')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('2 / 2')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('1 / 2')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(await screen.findByText('2 / 2')).toBeTruthy()
   })
 })

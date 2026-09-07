@@ -1163,12 +1163,13 @@
   overflow: hidden;
 }
 
-/* Clip container: clips poster overflow without touching nav buttons */
+/* Clip container: clips track overflow without touching nav buttons. The padding is room for the
+   hover scale (4% of a full-track phone thumb is under 8px), so end thumbs keep their outline. */
 .poster-carousel-track-clip {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  padding: 0.3rem 0.1rem 0.1rem;
+  padding: 0.5rem;
 }
 
 /* Overlay nav buttons */
@@ -1210,11 +1211,16 @@
   display: flex;
   gap: 0.5rem;
   overflow: visible;
+  container-type: inline-size;
+  /* Row height = one poster thumb at 10 per page (5 / 2 at the breakpoints below). Every scope's
+     thumbs are this tall, so the card never changes height when the scope switches; Dashboard.tsx
+     mirrors this formula to pick how many artwork thumbs share a page. */
+  --row-h: calc((100cqw - 9 * 0.5rem) / 10 * 1.5);
 }
 
-/* Each poster item: exactly 1/10 of the track width */
+/* Each item is 1/N of the track, N set per scope by the carousel (--per-page) */
 .poster-carousel-item {
-  flex: 0 0 calc((100% - 9 * 0.5rem) / 10);
+  flex: 0 0 calc((100% - (var(--per-page, 10) - 1) * 0.5rem) / var(--per-page, 10));
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1231,13 +1237,22 @@
 
 .poster-carousel-thumb {
   width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
+  height: var(--row-h);
+  object-fit: var(--thumb-fit, cover);
   border-radius: 5px;
   border: 2px solid transparent;
   display: block;
   background: #1a1a1a;
   transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+/* Placeholder row while a scope loads for the first time, so the card keeps its height */
+.poster-carousel-item--placeholder {
+  pointer-events: none;
+}
+
+.poster-carousel-item--placeholder .poster-carousel-thumb {
+  opacity: 0.5;
 }
 
 .poster-carousel-item:hover .poster-carousel-thumb {
@@ -1288,7 +1303,7 @@
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
-  max-width: min(340px, 90vw);
+  max-width: min(var(--lightbox-max, 340px), 90vw);
 }
 
 .poster-lightbox-close {
@@ -1317,6 +1332,7 @@
 .poster-lightbox-img {
   width: 100%;
   height: auto;
+  background: #1a1a1a;
   border-radius: 8px;
   border: 2px solid #64b5f6;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
@@ -1503,16 +1519,16 @@
     height: auto !important;
   }
 
-  /* Show 5 posters on smaller screens */
-  .poster-carousel-item {
-    flex: 0 0 calc((100% - 4 * 0.5rem) / 5);
+  /* 5 posters per page */
+  .poster-carousel-track {
+    --row-h: calc((100cqw - 4 * 0.5rem) / 5 * 1.5);
   }
 }
 
-/* Mobile: 2 posters + 2x2 filter grid */
+/* Mobile: 2 posters per page + 2x2 filter grid */
 @media (max-width: 550px) {
-  .poster-carousel-item {
-    flex: 0 0 calc((100% - 0.5rem) / 2);
+  .poster-carousel-track {
+    --row-h: calc((100cqw - 0.5rem) / 2 * 1.5);
   }
 
   .poster-carousel-header {

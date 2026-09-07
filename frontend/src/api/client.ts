@@ -142,6 +142,7 @@ export {
   createSchedule,
   deleteSchedule,
   getPosterActivityStats,
+  getRecentSyncedArtwork,
   getRecentSyncedPosters,
   getSchedules,
   getStats,

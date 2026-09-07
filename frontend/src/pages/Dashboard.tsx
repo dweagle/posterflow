@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, getArtworkUnmatchedStats, type ArtworkUnmatchedStats, type ArtworkType, type UnmatchedStats, type Job } from '../api/client'
+import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
+import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, getRecentSyncedArtwork, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, getArtworkUnmatchedStats, type ArtworkUnmatchedStats, type ArtworkType, type UnmatchedStats, type Job } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X, CircleStop } from 'lucide-react'
 import { useToast } from '../components/Toast'
@@ -16,13 +16,25 @@ const COVERAGE_SCOPES: { key: CoverageScope; label: string; title: string; noun:
   { key: 'squareart', label: 'Square Art', title: 'Square Art Coverage', noun: 'square art' },
 ]
 
-// Drive-sync jobs use dynamic type strings (see backend models/job.py job_type_sync_* helpers)
+// Thumb shape per scope. Every scope's row is exactly one poster thumb tall (--row-h in Dashboard.css);
+// a page holds the nearest whole number of thumbs of this aspect at that height, stretched to fill
+// the track, so cover crops a few percent and contain letterboxes a little.
+const CAROUSEL_LAYOUT: Record<CoverageScope, { aspect: [number, number]; fit: 'cover' | 'contain'; lightboxMax: string }> = {
+  posters: { aspect: [2, 3], fit: 'cover', lightboxMax: '340px' },
+  logo: { aspect: [16, 9], fit: 'contain', lightboxMax: '720px' },
+  background: { aspect: [16, 9], fit: 'cover', lightboxMax: '720px' },
+  squareart: { aspect: [1, 1], fit: 'cover', lightboxMax: '420px' },
+}
+
+// Drive-sync jobs use dynamic type strings (see backend models/job.py job_type_sync_* helpers
+// and the "Artwork Sync" jobs in api/artwork_drives.py)
 const isDriveSyncJobType = (jobType: string): boolean =>
   jobType === 'gdrive_sync' ||
   jobType === 'sync' ||
   jobType.startsWith('Sync: ') ||
   jobType.startsWith('Sync All') ||
-  jobType.startsWith('Sync Group')
+  jobType.startsWith('Sync Group') ||
+  jobType.startsWith('Artwork Sync')
 
 function Dashboard() {
   const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
@@ -30,10 +42,13 @@ function Dashboard() {
   const { jobs, unmatchedStats } = useAppEvents()
   const [stats, setStats] = useState<Stats | null>(null)
   const [schedules, setSchedules] = useState<Schedule[]>([])
-  const [recentPosters, setRecentPosters] = useState<RecentSyncedPoster[]>([])
+  const [recentItems, setRecentItems] = useState<Partial<Record<CoverageScope, RecentSyncedPoster[]>>>({})
+  const [recentRefreshTick, setRecentRefreshTick] = useState(0)
   const [posterFilter, setPosterFilter] = useState<'all' | 'movie' | 'season' | 'collection'>('all')
   const [carouselPage, setCarouselPage] = useState(0)
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
+  const [trackGeometry, setTrackGeometry] = useState({ width: 0, gap: 8 })
+  const carouselClipRef = useRef<HTMLDivElement | null>(null)
   const [expandedPoster, setExpandedPoster] = useState<RecentSyncedPoster | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [idarrTargets, setIdarrTargets] = useState<MakerIdarrSyncTarget[]>([])
@@ -65,11 +80,15 @@ function Dashboard() {
     fetchSchedules()
     fetchDrives()
     fetchIdarrTargets()
-    fetchRecentPosters()
     fetchActivityStats()
     getArtworkUnmatchedStats().then(setArtworkUnmatched).catch(() => {})
     return undefined
   }, [])
+
+  // The carousel follows the coverage scope; the tick re-fetches on manual refresh or a finished sync
+  useEffect(() => {
+    fetchRecentItems(coverageScope)
+  }, [coverageScope, recentRefreshTick])
 
   // Refresh the recently-synced carousel when a workflow or drive sync finishes
   useEffect(() => {
@@ -91,7 +110,7 @@ function Dashboard() {
       lastSyncJobStatusRef.current[key] = job.status
     })
     if (shouldRefresh) {
-      fetchRecentPosters()
+      setRecentRefreshTick(t => t + 1)
     }
     if (shouldRefreshArtwork) {
       getArtworkUnmatchedStats().then(setArtworkUnmatched).catch(() => {})
@@ -147,11 +166,11 @@ function Dashboard() {
     }, 'Error fetching IDarr targets:')
   }
 
-  const fetchRecentPosters = async () => {
+  const fetchRecentItems = async (scope: CoverageScope) => {
     await fetchWithLogging(async () => {
-      const data = await getRecentSyncedPosters(100)
-      setRecentPosters(data.items)
-    }, 'Error fetching recent posters:')
+      const data = scope === 'posters' ? await getRecentSyncedPosters(100) : await getRecentSyncedArtwork(scope, 100)
+      setRecentItems(prev => ({ ...prev, [scope]: data.items }))
+    }, `Error fetching recent ${scope}:`)
   }
 
   const fetchActivityStats = async () => {
@@ -423,15 +442,47 @@ function Dashboard() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const POSTERS_PER_PAGE = windowWidth <= 550 ? 2 : windowWidth <= 980 ? 5 : 10
+  const recentPosters = recentItems[coverageScope] ?? []
+  const carouselLayout = CAROUSEL_LAYOUT[coverageScope]
   const filteredPosters = posterFilter === 'all'
     ? recentPosters
     : recentPosters.filter(p => getPosterMediaType(p) === posterFilter)
-  const totalPages = Math.ceil(filteredPosters.length / POSTERS_PER_PAGE)
+
+  // A scope shows placeholder thumbs until its first load lands, so the card keeps its height.
+  // The clip only exists while the row shows; its width decides how many artwork thumbs share a page.
+  const scopeLoaded = recentItems[coverageScope] !== undefined
+  const showCarousel = filteredPosters.length > 0 || !scopeLoaded
+  useLayoutEffect(() => {
+    const clip = carouselClipRef.current
+    if (!clip || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+      const next = { width: entry.contentRect.width, gap: rem * 0.5 }
+      setTrackGeometry(prev => (prev.width === next.width && prev.gap === next.gap ? prev : next))
+    })
+    observer.observe(clip)
+    return () => observer.disconnect()
+  }, [showCarousel])
+
+  // Mirrors --row-h in Dashboard.css: the poster count per breakpoint fixes the row height, and an
+  // artwork page holds the nearest whole number of poster-height thumbs of its aspect.
+  const postersPerPage = windowWidth <= 550 ? 2 : windowWidth <= 980 ? 5 : 10
+  const { width: trackWidth, gap } = trackGeometry
+  const rowHeight = (trackWidth - (postersPerPage - 1) * gap) / postersPerPage * 1.5
+  const [aspectW, aspectH] = carouselLayout.aspect
+  const itemsPerPage = coverageScope === 'posters'
+    ? postersPerPage
+    : Math.max(1, Math.round((trackWidth + gap) / (rowHeight * aspectW / aspectH + gap)))
+  const totalPages = Math.ceil(filteredPosters.length / itemsPerPage)
   const clampedPage = Math.min(carouselPage, Math.max(0, totalPages - 1))
-  const pagePosters = filteredPosters.slice(clampedPage * POSTERS_PER_PAGE, (clampedPage + 1) * POSTERS_PER_PAGE)
+  const pagePosters = filteredPosters.slice(clampedPage * itemsPerPage, (clampedPage + 1) * itemsPerPage)
+  // Paging wraps: past the last page returns to the first and vice versa
   const goCarouselPage = (dir: 'prev' | 'next') => {
-    setCarouselPage(p => dir === 'prev' ? Math.max(0, p - 1) : Math.min(totalPages - 1, p + 1))
+    if (totalPages <= 1) return
+    setCarouselPage(p => {
+      const current = Math.min(p, totalPages - 1)
+      return dir === 'prev' ? (current - 1 + totalPages) % totalPages : (current + 1) % totalPages
+    })
   }
 
   // Close lightbox on Escape
@@ -559,7 +610,7 @@ function Dashboard() {
                 role="tab"
                 aria-selected={coverageScope === s.key}
                 className={`coverage-scope-btn ${coverageScope === s.key ? 'active' : ''}`}
-                onClick={() => setCoverageScope(s.key)}
+                onClick={() => { setCoverageScope(s.key); setCarouselPage(0) }}
               >
                 {s.label}
               </button>
@@ -616,7 +667,11 @@ function Dashboard() {
       {/* Poster lightbox */}
       {expandedPoster && (
         <div className="poster-lightbox-overlay" onClick={() => setExpandedPoster(null)}>
-          <div className="poster-lightbox-content" onClick={e => e.stopPropagation()}>
+          <div
+            className="poster-lightbox-content"
+            style={{ '--lightbox-max': carouselLayout.lightboxMax } as CSSProperties}
+            onClick={e => e.stopPropagation()}
+          >
             <button
               type="button"
               className="poster-lightbox-close"
@@ -638,10 +693,10 @@ function Dashboard() {
         </div>
       )}
 
-      {/* Recently Synced Posters – paged carousel */}
+      {/* Recently synced carousel – paged, follows the coverage scope */}
       <div className="poster-carousel-section stat-card">
         <div className="poster-carousel-header">
-          <h3>Recently Synced Posters</h3>
+          <h3>{`Recently Synced ${activeScope.label}`}</h3>
           <div className="poster-carousel-header-right">
             <div className="poster-filter-bar">
               {(['all', 'movie', 'season', 'collection'] as const).map(f => (
@@ -656,31 +711,42 @@ function Dashboard() {
               ))}
             </div>
             <span className="poster-carousel-count">
-              {filteredPosters.length > 0 ? `${clampedPage + 1} / ${totalPages}` : '0 results'}
+              {!scopeLoaded ? '…' : filteredPosters.length > 0 ? `${clampedPage + 1} / ${totalPages}` : '0 results'}
             </span>
             <button
               className="recent-posters-refresh-btn"
-              onClick={fetchRecentPosters}
-              aria-label="Refresh recently synced posters"
+              onClick={() => setRecentRefreshTick(t => t + 1)}
+              aria-label={`Refresh recently synced ${activeScope.noun}`}
               title="Refresh"
             >
               <RefreshCw size={14} />
             </button>
           </div>
         </div>
-        {filteredPosters.length > 0 ? (
+        {showCarousel ? (
           <div className="poster-carousel-outer">
             <button
               type="button"
               className="poster-carousel-nav poster-carousel-nav-left"
               onClick={() => goCarouselPage('prev')}
               aria-label="Previous page"
-              disabled={clampedPage === 0}
+              disabled={totalPages <= 1}
             >
               <ChevronLeft size={22} />
             </button>
-            <div className="poster-carousel-track-clip">
-              <div className="poster-carousel-track">
+            <div className="poster-carousel-track-clip" ref={carouselClipRef}>
+              <div
+                className="poster-carousel-track"
+                style={{ '--per-page': itemsPerPage, '--thumb-fit': carouselLayout.fit } as CSSProperties}
+              >
+              {!scopeLoaded && Array.from({ length: itemsPerPage }, (_, i) => (
+                <div key={`placeholder-${i}`} className="poster-carousel-item poster-carousel-item--placeholder" aria-hidden="true">
+                  <div className="poster-carousel-thumb-wrap">
+                    <div className="poster-carousel-thumb" />
+                  </div>
+                  <span className="poster-carousel-label">&nbsp;</span>
+                </div>
+              ))}
               {pagePosters.map(poster => (
                 <div
                   key={poster.id}
@@ -708,14 +774,14 @@ function Dashboard() {
               className="poster-carousel-nav poster-carousel-nav-right"
               onClick={() => goCarouselPage('next')}
               aria-label="Next page"
-              disabled={clampedPage >= totalPages - 1}
+              disabled={totalPages <= 1}
             >
               <ChevronRight size={22} />
             </button>
           </div>
         ) : (
           <div className="poster-carousel-empty">
-            {recentPosters.length === 0 ? 'No recently synced posters' : `No ${posterFilter} posters in recent history`}
+            {recentPosters.length === 0 ? `No recently synced ${activeScope.noun}` : `No ${posterFilter} ${activeScope.noun} in recent history`}
           </div>
         )}
       </div>
