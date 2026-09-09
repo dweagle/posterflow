@@ -4,7 +4,7 @@ import tvdbIcon from '../../assets/service-icons/tvdb.png'
 import appleTvIcon from '../../assets/service-icons/appletv.png'
 import googleIcon from '../../assets/service-icons/google.png'
 import tpdbIcon from '../../assets/service-icons/tpdb.png'
-import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
+import { appleTvArtworkUrl, googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
 
 export type ServiceLinkItem = {
   tmdb_id: number
@@ -29,7 +29,6 @@ type Props = {
  *  the artwork finder card so both stay in step. */
 export default function ServiceLinks({ item, appleTvStorefront = '143441', onAppleTvIntent }: Props) {
   const hasTmdb = (item.tmdb_id ?? 0) > 0
-  const typeParam = item.media_type === 'tv' ? '&type=tv' : item.media_type === 'movie' ? '&type=movies' : ''
 
   return (
     <div className="tmdb-result-logos">
@@ -51,7 +50,7 @@ export default function ServiceLinks({ item, appleTvStorefront = '143441', onApp
       {(hasTmdb || item.tvdb_id) && (
         <a
           className="tmdb-result-link"
-          href={`https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${encodeURIComponent(item.title)}&storefront=${appleTvStorefront}${typeParam}`}
+          href={appleTvArtworkUrl(item.title, appleTvStorefront, item.media_type)}
           target="_blank"
           rel="noreferrer"
           onMouseEnter={onAppleTvIntent}

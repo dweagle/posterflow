@@ -26,3 +26,24 @@ export function tpdbSearchUrl(title: string, mediaType?: string | null): string 
   const base = `https://theposterdb.com/search?term=${term}`
   return section ? `${base}&section=${section}` : base
 }
+
+// Ben Dodson's Apple TV artwork finder queries the iTunes Search API, which matches far better
+// on bare words: hyphens and dashes split words ("Spider-Man" → "Spider Man"), apostrophes join
+// them ("Schitt's" → "Schitts"), and all other punctuation is dropped ("M*A*S*H" → "MASH").
+export function cleanAppleTvQuery(title: string): string {
+  return String(title ?? '')
+    .replace(/[-‐-―−/\\_]/g, ' ')
+    .replace(/['‘’]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const APPLE_TV_TYPE: Record<string, string> = { movie: 'movies', tv: 'tv' }
+
+export function appleTvArtworkUrl(title: string, storefront: string, mediaType?: string | null): string {
+  const query = encodeURIComponent(cleanAppleTvQuery(title))
+  const type = mediaType ? APPLE_TV_TYPE[mediaType] : undefined
+  const base = `https://bendodson.com/projects/apple-tv-movies-artwork-finder/pre-ios26/?query=${query}&storefront=${storefront}`
+  return type ? `${base}&type=${type}` : base
+}
