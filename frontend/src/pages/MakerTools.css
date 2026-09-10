@@ -1490,6 +1490,15 @@
   --gallery-source-tint: rgba(217, 217, 217, 0.16);
 }
 
+/* The source being fetched pulses until its listing is ready to swap in. */
+.tmdb-gallery-source--pending .tmdb-gallery-source-icon {
+  animation: tmdb-gallery-source-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes tmdb-gallery-source-pulse {
+  50% { opacity: 0.3; }
+}
+
 /* Same 6px corners as the content tabs, but joined into one segmented control. */
 .tmdb-gallery-source:first-child {
   border-radius: 6px 0 0 6px;
@@ -1701,8 +1710,9 @@
   object-fit: cover;
 }
 
+/* Same 16:9 box as the backdrop tiles, so switching between the two tabs doesn't change row height. */
 .tmdb-gallery-grid--logos .tmdb-gallery-thumb {
-  aspect-ratio: 16 / 7;
+  aspect-ratio: 16 / 9;
   object-fit: contain;
   background-color: #aaa;
   background-image:

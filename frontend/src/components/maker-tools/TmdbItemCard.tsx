@@ -414,12 +414,22 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     }
   }, [item.tmdb_id, item.tvdb_id, imageSource, galleryLanguage, seasonImages, showToast])
 
-  // Fetch one source's images and cache them; already-cached sources are a no-op unless forced
-  // (a language change, which invalidates every cache). Returns whether that source now has
-  // images to show, so callers can back out instead of leaving an empty panel open.
-  const loadSource = useCallback(async (source: ImageSource, opts?: { language?: string; force?: boolean }) => {
+  // Which tab to show for a freshly loaded source: keep the current one when it has content, else
+  // the first that does — so a switch never lands on a needlessly empty grid.
+  const settleTab = useCallback((data: TmdbImagesResponse) => {
+    setActiveGalleryTab((cur) => {
+      if (cur === 'season-posters') return cur
+      if (data[cur].length > 0) return cur
+      return data.posters.length > 0 ? 'posters' : data.backdrops.length > 0 ? 'backdrops' : 'logos'
+    })
+  }, [])
+
+  // Fetch one source's images and cache them; a cached source comes straight back unless forced
+  // (a language change, which invalidates every cache). Null when the load failed.
+  const loadSource = useCallback(async (source: ImageSource, opts?: { language?: string; force?: boolean }): Promise<TmdbImagesResponse | null> => {
     const language = opts?.language ?? galleryLanguage
-    if (!opts?.force && imagesBySource[source]) return true
+    const cached = imagesBySource[source]
+    if (!opts?.force && cached) return cached
     setLoadingSource(source)
     try {
       const data = source === 'tmdb'
@@ -430,17 +440,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             ? await getFanartImages(item, language)
             : await getAppleImages(item, language)
       setImagesBySource((prev) => ({ ...prev, [source]: data }))
-      // Keep the current tab when the new source has content for it, else fall to the first
-      // tab that does — so switching sources never lands on a needlessly empty grid.
-      setActiveGalleryTab((cur) => {
-        if (cur === 'season-posters') return cur
-        if (data[cur].length > 0) return cur
-        return data.posters.length > 0 ? 'posters' : data.backdrops.length > 0 ? 'backdrops' : 'logos'
-      })
-      return true
+      return data
     } catch (error) {
       showToast(getApiErrorMessage(error, `Failed to load ${SOURCE_LABEL[source]} images`), 'error')
-      return false
+      return null
     } finally {
       setLoadingSource((cur) => (cur === source ? null : cur))
     }
@@ -451,33 +454,46 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       setGalleryOpen(false)
       return
     }
-    setGalleryOpen(true)
     if (item.media_type === 'tv') void ensureTvDetails()
-    // Nothing to render if the load fails, so close again rather than showing an empty panel.
-    if (!(await loadSource(imageSource))) setGalleryOpen(false)
-  }, [galleryOpen, imageSource, item.media_type, ensureTvDetails, loadSource])
+    // Load before opening, so the panel appears with its grid in one go instead of as an empty
+    // shell that pushes the cards below down and then grows.
+    const data = await loadSource(imageSource)
+    if (!data) return
+    settleTab(data)
+    setGalleryOpen(true)
+  }, [galleryOpen, imageSource, item.media_type, ensureTvDetails, loadSource, settleTab])
 
+  // The grid in view stays put until the new source has loaded, then source and tab swap in one
+  // render — no collapse to a loading line and back, so the cards below don't jump.
   const handleSourceChange = useCallback(async (source: ImageSource) => {
     if (source === imageSource) return
-    const previous = imageSource
+    const data = await loadSource(source)
+    if (!data) return   // a failed switch stays on the source that still has images
     setImageSource(source)
     setSelectedSeason(null)
-    // A failed switch would leave the panel blank — stay on the source that still has images.
-    if (!(await loadSource(source))) setImageSource(previous)
-  }, [imageSource, loadSource])
+    settleTab(data)
+  }, [imageSource, loadSource, settleTab])
 
   const handleGalleryLanguageChange = useCallback(async (newLang: string) => {
     setGalleryLanguage(newLang)
-    // Every cache is language-scoped; drop them all and refetch only the source in view. The
-    // other reloads the next time its tab is clicked.
-    setImagesBySource({})
     setSeasonImages({})
     setSeasonImagesLoading({})
     setSelectedSeason(null)
-    if (galleryOpen && !(await loadSource(imageSource, { language: newLang, force: true }))) {
-      setGalleryOpen(false)
+    // Every cache is language-scoped. With the panel open, the grid in view stays put until its
+    // refetch lands; the other sources reload the next time their tab is clicked.
+    if (!galleryOpen) {
+      setImagesBySource({})
+      return
     }
-  }, [galleryOpen, imageSource, loadSource])
+    const data = await loadSource(imageSource, { language: newLang, force: true })
+    if (!data) {
+      setImagesBySource({})
+      setGalleryOpen(false)
+      return
+    }
+    setImagesBySource({ [imageSource]: data })
+    settleTab(data)
+  }, [galleryOpen, imageSource, loadSource, settleTab])
 
   const togglePsdSelection = useCallback((role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
     setPsdSelection((prev) => {
@@ -949,7 +965,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                   <button
                     key={id}
                     type="button"
-                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${imageSource === id ? ' active' : ''}`}
+                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${imageSource === id ? ' active' : ''}${loadingSource === id ? ' tmdb-gallery-source--pending' : ''}`}
                     onClick={() => void handleSourceChange(id)}
                     disabled={loadingSource !== null}
                     title={`Browse ${SOURCE_LABEL[id]} images`}

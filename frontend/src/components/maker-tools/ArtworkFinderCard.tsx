@@ -128,6 +128,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   const { showToast } = useToast()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [pendingSource, setPendingSource] = useState<ImageSource | null>(null)   // the tab being fetched
   const [error, setError] = useState<string | null>(null)
   // Candidates are cached per source: TMDB (+ Plex square art) loads with the card, TheTVDB and
   // fanart.tv only once their tab is clicked.
@@ -185,41 +186,57 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
     })
   }, [])
 
-  const load = useCallback(async (which: ImageSource, lang = language) => {
+  const load = useCallback(async (which: ImageSource, lang = language): Promise<boolean> => {
     setLoading(true)
+    setPendingSource(which)
     setError(null)
     try {
       const result = await getArtworkCandidates(item, undefined, undefined, which, lang)
       setDataBySource((prev) => ({ ...prev, [which]: result }))
+      return true
     } catch (e) {
       setError(getApiErrorMessage(e, 'Failed to load artwork'))
+      return false
     } finally {
       setLoading(false)
+      setPendingSource(null)
     }
   }, [item, language])
 
-  const toggle = useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev
-      if (next && !data && !loading) void load(source)
-      return next
-    })
-  }, [data, loading, load, source])
+  const toggle = useCallback(async () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    if (loading) return
+    // Load before opening, so the panel appears with its listing in one go instead of as an
+    // empty shell that pushes the cards below down and then grows.
+    if (!data && !(await load(source))) return
+    setOpen(true)
+  }, [open, data, loading, load, source])
 
-  const handleSourceChange = useCallback((next: ImageSource) => {
+  // The listing in view stays put until the new source has loaded, then swaps in — no collapse to
+  // a loading line and back, so the cards below don't jump.
+  const handleSourceChange = useCallback(async (next: ImageSource) => {
     if (next === source) return
+    if (!dataBySource[next] && !(await load(next))) return
     setSource(next)
     setError(null)
-    if (!dataBySource[next]) void load(next)
   }, [source, dataBySource, load])
 
-  const handleLanguageChange = useCallback((next: string) => {
+  const handleLanguageChange = useCallback(async (next: string) => {
     if (next === language) return
     setLanguage(next)
-    setDataBySource({})   // every cached listing is language-scoped
     setError(null)
-    void load(source, next)
-  }, [language, source, load])
+    // Every cached listing is language-scoped. With the panel open, the listing in view stays
+    // put until its refetch lands; the other sources reload the next time their tab is clicked.
+    if (!open) {
+      setDataBySource({})
+      return
+    }
+    if (!(await load(source, next))) return
+    setDataBySource((prev) => ({ [source]: prev[source] }))
+  }, [language, open, source, load])
 
   const noScope = syncTargetIndex == null
   // Online browsing needs a TMDB id, a TVDB id with TheTVDB or fanart.tv configured, or Apple TV
@@ -413,7 +430,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
           <div className="tmdb-gallery-toggle-row">
             {canBrowse && (
-              <button type="button" className="tmdb-gallery-toggle" onClick={toggle} disabled={loading}>
+              <button type="button" className="tmdb-gallery-toggle" onClick={() => void toggle()} disabled={loading}>
                 <ImageIcon size={13} />
                 {loading ? 'Loading…' : open ? <><ChevronUp size={13} /> Hide</> : <><ChevronDown size={13} /> Find artwork</>}
               </button>
@@ -449,8 +466,8 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                   <button
                     key={id}
                     type="button"
-                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${source === id ? ' active' : ''}`}
-                    onClick={() => handleSourceChange(id)}
+                    className={`tmdb-gallery-source tmdb-gallery-source--${id}${source === id ? ' active' : ''}${pendingSource === id ? ' tmdb-gallery-source--pending' : ''}`}
+                    onClick={() => void handleSourceChange(id)}
                     disabled={loading}
                     title={`Browse ${SOURCE_LABEL[id]} artwork`}
                     aria-label={`Browse ${SOURCE_LABEL[id]} artwork`}
@@ -466,7 +483,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
               <select
                 className="tmdb-gallery-lang-select"
                 value={language}
-                onChange={(e) => handleLanguageChange(e.target.value)}
+                onChange={(e) => void handleLanguageChange(e.target.value)}
                 disabled={loading}
                 title="Image language preference"
               >
