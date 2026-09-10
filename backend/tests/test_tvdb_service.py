@@ -485,3 +485,71 @@ def test_resolve_movie_tvdb_id_picks_the_movie_entry(monkeypatch):
 
 def test_resolve_movie_tvdb_id_returns_none_without_an_imdb_id():
     assert tvdb.resolve_movie_tvdb_id("", "k", "") is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_series_outline / fetch_season_episodes (maker monitor premiere lookups)
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_series_outline_keeps_official_seasons_and_air_dates(monkeypatch):
+    import services.tvdb as tvdb_service
+    payload = {
+        "lastAired": "2026-09-27", "nextAired": "2026-09-27", "status": {"id": 1, "name": "Continuing"},
+        "seasons": [
+            {"number": 0, "type": {"type": "official"}},
+            {"number": 2, "type": {"type": "official"}},
+            {"number": 1, "type": {"type": "official"}},
+            {"number": 1, "type": {"type": "dvd"}},
+            {"number": 7, "type": {"type": "absolute"}},
+            {"number": "x", "type": {"type": "official"}},
+        ],
+    }
+    monkeypatch.setattr(tvdb_service, "_get", lambda *a, **k: payload)
+    assert tvdb_service.fetch_series_outline(tvdb_id=1, api_key="k", pin="") == {
+        "season_numbers": [0, 1, 2], "last_aired": "2026-09-27", "next_aired": "2026-09-27", "status": "Continuing",
+    }
+
+
+def test_fetch_series_outline_blank_dates_become_none(monkeypatch):
+    import services.tvdb as tvdb_service
+    monkeypatch.setattr(tvdb_service, "_get", lambda *a, **k: {"lastAired": "", "nextAired": "", "seasons": []})
+    assert tvdb_service.fetch_series_outline(tvdb_id=1, api_key="k", pin="") == {
+        "season_numbers": [], "last_aired": None, "next_aired": None, "status": None,
+    }
+
+
+def test_fetch_series_outline_returns_none_for_an_unknown_series(monkeypatch):
+    import services.tvdb as tvdb_service
+    monkeypatch.setattr(tvdb_service, "_get", lambda *a, **k: None)
+    assert tvdb_service.fetch_series_outline(tvdb_id=1, api_key="k", pin="") is None
+
+
+def test_fetch_season_episodes_asks_for_one_season_and_sorts(monkeypatch):
+    import services.tvdb as tvdb_service
+    seen = {}
+
+    def fake_get(path, api_key, pin, params=None, *, what="data"):
+        seen.update(path=path, params=params)
+        return {"episodes": [
+            {"number": 2, "seasonNumber": 38, "aired": "2026-10-04"},
+            {"number": 1, "seasonNumber": 38, "aired": "2026-09-27"},
+            {"number": 3, "seasonNumber": 38, "aired": ""},
+            {"number": None},
+            "junk",
+        ]}
+
+    monkeypatch.setattr(tvdb_service, "_get", fake_get)
+    rows = tvdb_service.fetch_season_episodes(tvdb_id=71663, season_number=38, api_key="k", pin="")
+    assert seen == {"path": "/series/71663/episodes/official", "params": {"page": 0, "season": 38}}
+    assert rows == [
+        {"number": 1, "aired": "2026-09-27"},
+        {"number": 2, "aired": "2026-10-04"},
+        {"number": 3, "aired": None},
+    ]
+
+
+def test_fetch_season_episodes_is_empty_for_an_unknown_series(monkeypatch):
+    import services.tvdb as tvdb_service
+    monkeypatch.setattr(tvdb_service, "_get", lambda *a, **k: None)
+    assert tvdb_service.fetch_season_episodes(tvdb_id=1, season_number=1, api_key="k", pin="") == []

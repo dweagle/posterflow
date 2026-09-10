@@ -733,7 +733,7 @@ function MakerTools() {
                         <div className="maker-show-item">
                           <div className="maker-show-main">
                             <a href={show.homepage} target="_blank" rel="noreferrer">{show.name}{show.first_air_year ? <> <span className="tmdb-result-year">{show.first_air_year}</span></> : ''}</a>
-                            <span>{show.season_number === 0 ? 'Specials' : `Season ${show.season_number}`} starts: {show.date}</span>
+                            <span title={show.date_source === 'tvdb' ? 'Premiere date from TheTVDB — the same source Sonarr uses' : show.date_source === 'tmdb' ? 'Premiere date from TMDB' : undefined}>{show.season_number === 0 ? 'Specials' : `Season ${show.season_number}`} starts: {show.date}</span>
                           </div>
                           <div className="maker-badges">
                             <span className="badge badge-grey">Season Premiere</span>
@@ -1336,7 +1336,7 @@ function MakerTools() {
                 <div className="maker-card">
                   <h3>General</h3>
                   <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.8rem', color: '#888' }}>
-                    TMDB API key is managed in{' '}
+                    TMDB and TheTVDB API keys are managed in{' '}
                     <a
                       href="/settings"
                       onClick={(e) => { e.preventDefault(); localStorage.setItem('posterflow.settings.activeTab', 'basic'); navigate('/settings') }}
@@ -1344,6 +1344,9 @@ function MakerTools() {
                     >
                       Settings → General → API Keys
                     </a>
+                    . With a TheTVDB key, season numbers and premiere dates come from TheTVDB — the same source Sonarr uses — and
+                    TMDB fills in show details or steps in when TheTVDB can't answer. Shows marked ended are skipped and re-checked
+                    every 30 days, and a re-check looks back over the days it skipped.
                   </p>
                   <label className="field-label">
                     Lookahead Days

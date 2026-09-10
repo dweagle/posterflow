@@ -892,7 +892,7 @@ function Settings() {
               <div className="setting-info">
                 <label>TMDB API Key</label>
                 <p className="setting-description">
-                  Used by Unmatched Assets and IDarr to search The Movie Database. Get a free key at{' '}
+                  Used by Unmatched Assets, IDarr, and the Maker Tools monitor to search The Movie Database. Get a free key at{' '}
                   <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
                     themoviedb.org
                   </a>.
@@ -929,8 +929,9 @@ function Settings() {
               <div className="setting-info">
                 <label>TheTVDB API Key</label>
                 <p className="setting-description">
-                  Optional. Adds TheTVDB as a second source in the Maker Tools image browser,
-                  alongside TMDB. Create a v4 key at{' '}
+                  Optional. Adds TheTVDB as a second source in the Maker Tools image browser, and lets the
+                  Maker Tools monitor take season numbers and premiere dates from TheTVDB — the same source
+                  Sonarr uses — with TMDB as the fallback. Create a v4 key at{' '}
                   <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
                     thetvdb.com
                   </a>. Leave the PIN blank unless yours is a subscriber-supported key.

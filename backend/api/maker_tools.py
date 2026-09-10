@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 from urllib.parse import quote
 
 import requests
+import zlib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
@@ -48,8 +49,12 @@ router = APIRouter(prefix="/api/maker-tools", tags=["maker-tools"])
 
 SETTING_MAKER_MONITOR_CONFIG = "maker_tools_monitor_config"
 SETTING_MAKER_MONITOR_LAST_RESULT = "maker_tools_monitor_last_result"
+SETTING_MAKER_MONITOR_STATUS_CACHE = "maker_tools_monitor_status_cache"
 MAKER_MONITOR_DEFAULT_MISSING_RETENTION_DAYS = 2
 MAKER_MONITOR_TODAY_GRACE_DAYS = 1
+MAKER_MONITOR_TVDB_SEASON_PROBES = 3  # newest seasons to check before giving up on undated placeholders
+MAKER_MONITOR_WORKERS = 8  # matches the TVDB client's in-flight cap
+MAKER_MONITOR_ENDED_RECHECK_DAYS = 30  # how long an ended show stays skipped before it's looked at again
 TMDB_REGEX = re.compile(r"\{tmdb-(\d+)\}", re.IGNORECASE)
 TVDB_REGEX = re.compile(r"\{tvdb-(\d+)\}", re.IGNORECASE)
 PSD_ID_TAG_REGEX = re.compile(r"\s*\{(?:tmdb|tvdb|imdb)-[^}]+\}", re.IGNORECASE)
@@ -83,6 +88,7 @@ class MakerMonitorShowResult(BaseModel):
     imdb_id: str = ""
     tvdb_id: int | None = None
     external_sources: list[str] = Field(default_factory=list)
+    date_source: str = ""  # "tvdb" or "tmdb": which source dated the premiere
 
 
 class MakerMonitorLibraryResult(BaseModel):
@@ -298,6 +304,7 @@ def _merge_recent_missing_items(
                     imdb_id=str(previous_show.get("imdb_id") or ""),
                     tvdb_id=previous_show.get("tvdb_id") if isinstance(previous_show.get("tvdb_id"), int) else None,
                     external_sources=external_sources,
+                    date_source=str(previous_show.get("date_source") or ""),
                 )
             )
             current_keys.add(show_key)
@@ -447,9 +454,10 @@ def _extract_name(filename: str) -> str:
     return filename
 
 
-def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], set[str]]:
+def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], set[str], dict[str, int]]:
     tv_inventory: dict[str, set[int]] = {}
     movie_ids: set[str] = set()
+    tv_tvdb_ids: dict[str, int] = {}  # the drive's own {tvdb-N} tag per show
     files_seen = 0
     tmdb_tagged_files = 0
 
@@ -463,7 +471,7 @@ def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], se
     folder_path = Path(path)
     if not folder_path.exists() or not folder_path.is_dir():
         log_warning(LogTags.MONITOR, f"Maker monitor path not found: {path}", library=library_name)
-        return tv_inventory, movie_ids
+        return tv_inventory, movie_ids, tv_tvdb_ids
 
     def _on_walk_error(exc: OSError) -> None:
         log_warning(LogTags.MONITOR, f"Monitor scan walk error: {exc}", library=library_name, path=path)
@@ -486,6 +494,8 @@ def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], se
 
                     if has_tvdb or season_match or specials_match:
                         tv_inventory.setdefault(tmdb_id, set())
+                        if has_tvdb:
+                            tv_tvdb_ids.setdefault(tmdb_id, int(has_tvdb.group(1)))
                         if season_match:
                             tv_inventory[tmdb_id].add(int(season_match.group(1)))
                         elif specials_match:
@@ -496,7 +506,7 @@ def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], se
                     log_warning(LogTags.MONITOR, f"Monitor scan skipped file due to parse error: {exc}", library=library_name, file=filename, root=root)
     except Exception as exc:
         log_error(LogTags.MONITOR, f"Monitor scan failed traversing library: {exc}\n{traceback.format_exc()}", library=library_name, path=path)
-        return {}, set()
+        return {}, set(), {}
 
     log_info(
         LogTags.MONITOR,
@@ -511,7 +521,7 @@ def _scan_library(path: str, library_name: str) -> tuple[dict[str, set[int]], se
         unique_movies=len(movie_ids),
     )
 
-    return tv_inventory, movie_ids
+    return tv_inventory, movie_ids, tv_tvdb_ids
 
 
 def _translate_year_season(
@@ -544,13 +554,217 @@ def _translate_year_season(
     return None
 
 
+class SourceTally:
+    """Thread-safe count of which source answered each premiere check, for the progress lines."""
+
+    _NAMES = (("tvdb", "TheTVDB"), ("tmdb", "TMDB"))
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.counts: dict[str, int] = {"tvdb": 0, "tmdb": 0, "skipped_ended": 0}
+
+    def add(self, source: str) -> None:
+        with self._lock:
+            self.counts[source] = self.counts.get(source, 0) + 1
+
+    def summary(self) -> str:
+        with self._lock:
+            return " ".join(f"{key}={count}" for key, count in self.counts.items() if count) or "none yet"
+
+    def label(self) -> str:
+        with self._lock:
+            used = [name for key, name in self._NAMES if self.counts.get(key)]
+        return " + ".join(used) or "TMDB"
+
+
+_ENDED_STATUSES = {"ended", "canceled", "cancelled"}
+
+
+class StatusCache:
+    """Shows TheTVDB/TMDB call finished, so a daily run skips them until their rolling re-check.
+
+    One entry per (source, id): the status, the next-aired date seen with it, and when to look
+    again. Only an ended show with nothing dated ahead is ever skipped; a revival flips the status
+    back on its next re-check. First sightings are staggered so re-checks spread across days.
+    """
+
+    def __init__(self, entries: dict[str, dict[str, Any]] | None = None) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[str, dict[str, Any]] = dict(entries or {})
+        self._touched: set[str] = set()
+
+    @classmethod
+    def load(cls, db: Session) -> "StatusCache":
+        setting = get_setting(db, SETTING_MAKER_MONITOR_STATUS_CACHE)
+        if not setting or not setting.value:
+            return cls()
+        try:
+            payload = json.loads(setting.value)
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            log_warning(LogTags.MONITOR, "Invalid maker monitor status cache; starting fresh")
+            return cls()
+        return cls({str(key): value for key, value in payload.items() if isinstance(value, dict)})
+
+    @staticmethod
+    def _key(source: str, show_id: int | str | None) -> str | None:
+        return f"{source}:{show_id}" if show_id else None
+
+    def skip(self, source: str, show_id: int | str | None, today: date) -> bool:
+        key = self._key(source, show_id)
+        if not key:
+            return False
+        with self._lock:
+            entry = self._entries.get(key)
+            if not entry:
+                return False
+            self._touched.add(key)
+        if str(entry.get("status") or "").lower() not in _ENDED_STATUSES or entry.get("next_aired"):
+            return False
+        recheck = _parse_iso_date(entry.get("recheck"))
+        return recheck is not None and today < recheck
+
+    def lookback(self, source: str, show_id: int | str | None) -> date | None:
+        """When a skippable show was last checked, so its re-check covers the span it sat out."""
+        key = self._key(source, show_id)
+        with self._lock:
+            entry = self._entries.get(key) if key else None
+        if not entry or str(entry.get("status") or "").lower() not in _ENDED_STATUSES or entry.get("next_aired"):
+            return None
+        return _parse_iso_date(entry.get("checked"))
+
+    def record(self, source: str, show_id: int | str | None, status: str | None,
+               next_aired: str | None, today: date) -> None:
+        key = self._key(source, show_id)
+        if not key or not status:
+            return
+        with self._lock:
+            # A first sighting lands somewhere inside the window; a re-check gets the full window.
+            days = (MAKER_MONITOR_ENDED_RECHECK_DAYS if key in self._entries
+                    else 1 + zlib.crc32(key.encode()) % MAKER_MONITOR_ENDED_RECHECK_DAYS)
+            self._entries[key] = {
+                "status": status,
+                "next_aired": next_aired or None,
+                "checked": today.isoformat(),
+                "recheck": (today + timedelta(days=days)).isoformat(),
+            }
+            self._touched.add(key)
+
+    def prune(self) -> None:
+        """Drop shows this run never saw (gone from the drives) so the cache tracks the library."""
+        with self._lock:
+            self._entries = {key: entry for key, entry in self._entries.items() if key in self._touched}
+
+    def dump(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            return dict(self._entries)
+
+    def describe(self) -> str:
+        with self._lock:
+            ended = sum(1 for entry in self._entries.values()
+                        if str(entry.get("status") or "").lower() in _ENDED_STATUSES)
+            return f"ended={ended} of {len(self._entries)} cached"
+
+
+def _tmdb_premiere(payload: dict[str, Any], start_date: date, end_date: date) -> tuple[int, date] | None:
+    """TMDB's next episode to air, or the last one once it has aired, when it's a season opener inside the window."""
+    for field in ("next_episode_to_air", "last_episode_to_air"):
+        episode = payload.get(field)
+        if not isinstance(episode, dict):
+            continue
+        season_number = episode.get("season_number")
+        if not isinstance(season_number, int) or episode.get("episode_number") != 1:
+            continue
+        premiere_date = _parse_iso_date(str(episode.get("air_date") or ""))
+        if premiere_date is not None and start_date <= premiere_date <= end_date:
+            return season_number, premiere_date
+    return None
+
+
+def _tvdb_premiere(
+    tvdb_id: int | None,
+    start_date: date,
+    end_date: date,
+    tvdb_credentials: tuple[str, str],
+    on_outline: Callable[[int, dict[str, Any]], None] | None = None,
+) -> tuple[bool, tuple[int, date] | None]:
+    """When TheTVDB's newest season starts, if that lands inside the window.
+
+    Sonarr numbers seasons TVDB's way, so this is the number the drive files use. Returns
+    (answered, premiere): answered=False means TVDB couldn't say (no key, no id, error) and TMDB
+    decides instead; answered=True with no premiere means nothing starts in the window.
+    """
+    api_key, pin = tvdb_credentials
+    if not api_key or not tvdb_id:
+        return False, None
+    try:
+        outline = tvdb.fetch_series_outline(tvdb_id=tvdb_id, api_key=api_key, pin=pin) or {}
+        if outline and on_outline is not None:
+            on_outline(tvdb_id, outline)
+        numbered = [n for n in outline.get("season_numbers") or [] if n > 0]
+        if not numbered:
+            return False, None
+        last_aired = _parse_iso_date(outline.get("last_aired"))
+        next_aired = _parse_iso_date(outline.get("next_aired"))
+        # A premiere inside the window always leaves a trace in one of these dates, so most shows stop here.
+        if not ((last_aired and last_aired >= start_date) or (next_aired and start_date <= next_aired <= end_date)):
+            return True, None
+        # Newest season first, stepping past seasons TVDB lists but hasn't dated yet.
+        for season_number in sorted(numbered, reverse=True)[:MAKER_MONITOR_TVDB_SEASON_PROBES]:
+            episodes = tvdb.fetch_season_episodes(tvdb_id=tvdb_id, season_number=season_number, api_key=api_key, pin=pin)
+            dated = [d for d in (_parse_iso_date(ep.get("aired")) for ep in episodes) if d]
+            if not dated:
+                continue
+            premiere_date = min(dated)
+            if start_date <= premiere_date <= end_date:
+                return True, (season_number, premiere_date)
+            return True, None
+        return True, None
+    except tvdb.TvdbError as exc:
+        log_warning(LogTags.MONITOR, f"TheTVDB premiere lookup failed for tvdb-{tvdb_id} ({exc}); using TMDB", tvdb_id=tvdb_id)
+        return False, None
+
+
 def _check_show_status(
     tmdb_id: str,
     existing_seasons: set[int],
     tmdb_api_key: str,
     lookahead_days: int,
     tvdb_credentials: tuple[str, str] = ("", ""),
+    tally: SourceTally | None = None,
+    tvdb_id: int | None = None,
+    status_cache: StatusCache | None = None,
 ) -> MakerMonitorShowResult | None:
+    today = _monitor_today_local()
+    end_date = today + timedelta(days=lookahead_days)
+    start_date = today - timedelta(days=MAKER_MONITOR_TODAY_GRACE_DAYS)
+
+    # An ended show with nothing dated ahead was settled on an earlier run. Only the source that
+    # would decide is consulted: TMDB's "Ended" can't overrule TheTVDB when it's configured.
+    if status_cache is not None:
+        source, show_id = ("tvdb", tvdb_id) if tvdb_credentials[0] else ("tmdb", tmdb_id)
+        if status_cache.skip(source, show_id, today):
+            if tally is not None:
+                tally.add("skipped_ended")
+            return None
+        # A re-check covers the days the show sat out, so a revival that premiered meanwhile still shows up.
+        last_checked = status_cache.lookback(source, show_id)
+        if last_checked is not None:
+            start_date = min(start_date, last_checked)
+
+    def remember_outline(used_id: int, outline: dict[str, Any]) -> None:
+        if status_cache is not None:
+            status_cache.record("tvdb", used_id, outline.get("status"), outline.get("next_aired"), today)
+
+    # TheTVDB decides when it can (its numbering is what the drive files use). With the drive's
+    # own tvdb tag, a show with nothing coming is settled here without touching TMDB at all.
+    answered, premiere = _tvdb_premiere(tvdb_id, start_date, end_date, tvdb_credentials, on_outline=remember_outline)
+    if answered and premiere is None:
+        if tally is not None:
+            tally.add("tvdb")
+        return None
+
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
     # append_to_response=external_ids folds the IMDb/TVDB ids into this same call
     # (free — no extra request) so the card can show them like the request cards.
@@ -561,35 +775,33 @@ def _check_show_status(
         "show status",
     )
 
-    next_episode = payload.get("next_episode_to_air")
-    if not isinstance(next_episode, dict):
-        return None
-
-    air_date = str(next_episode.get("air_date") or "").strip()
-    season_number = next_episode.get("season_number")
-    episode_number = next_episode.get("episode_number")
-    if not air_date or not isinstance(season_number, int) or not isinstance(episode_number, int):
-        return None
-
-    try:
-        premiere_date = datetime.strptime(air_date, "%Y-%m-%d").date()
-    except ValueError:
-        return None
-
-    today = _monitor_today_local()
-    end_date = today + timedelta(days=lookahead_days)
-    start_date = today - timedelta(days=MAKER_MONITOR_TODAY_GRACE_DAYS)
-    if not (start_date <= premiere_date <= end_date):
-        return None
-    if episode_number != 1:
-        return None
+    if status_cache is not None:
+        next_episode = payload.get("next_episode_to_air")
+        status_cache.record("tmdb", tmdb_id, payload.get("status"),
+                            next_episode.get("air_date") if isinstance(next_episode, dict) else None, today)
 
     ext_ids = payload.get("external_ids") if isinstance(payload.get("external_ids"), dict) else {}
     imdb_id = str(ext_ids.get("imdb_id") or "").strip()
     tvdb_raw = ext_ids.get("tvdb_id")
-    tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
+    ext_tvdb_id = int(tvdb_raw) if isinstance(tvdb_raw, int) and tvdb_raw > 0 else None
 
-    if season_number not in existing_seasons and tvdb_id:
+    # No usable tag on the drive: TMDB's tvdb id gets one try before TMDB's next episode decides.
+    if not answered and ext_tvdb_id and ext_tvdb_id != tvdb_id:
+        answered, premiere = _tvdb_premiere(ext_tvdb_id, start_date, end_date, tvdb_credentials, on_outline=remember_outline)
+        if answered:
+            tvdb_id = ext_tvdb_id
+    tvdb_id = tvdb_id or ext_tvdb_id
+    date_source = "tvdb"
+    if not answered:
+        premiere = _tmdb_premiere(payload, start_date, end_date)
+        date_source = "tmdb"
+    if tally is not None:
+        tally.add(date_source)
+    if premiere is None:
+        return None
+    season_number, premiere_date = premiere
+
+    if date_source == "tmdb" and season_number not in existing_seasons and tvdb_id:
         mapped = _translate_year_season(season_number, premiere_date.year, tvdb_id, tvdb_credentials)
         if mapped is not None:
             log_info(
@@ -600,6 +812,7 @@ def _check_show_status(
             )
             season_number = mapped
 
+    air_date = premiere_date.isoformat()
     poster_exists = season_number in existing_seasons
 
     name = str(payload.get("name") or "Unknown")
@@ -611,12 +824,13 @@ def _check_show_status(
         LogTags.MONITOR,
         (
             f"Premiere match: '{name}' (tmdb:{tmdb_id}) | season={season_number} | air_date={air_date} "
-            f"| poster_exists={poster_exists}"
+            f"| source={date_source} | poster_exists={poster_exists}"
         ),
         tmdb_id=tmdb_id,
         show=name,
         season=season_number,
         air_date=air_date,
+        source=date_source,
         poster_exists=poster_exists,
     )
     return MakerMonitorShowResult(
@@ -632,6 +846,7 @@ def _check_show_status(
         imdb_id=imdb_id,
         tvdb_id=tvdb_id,
         external_sources=[],
+        date_source=date_source,
     )
 
 
@@ -667,7 +882,7 @@ def _build_inventory_by_type(selected_drives: list[Drive]) -> tuple[
     for drive in selected_drives:
         drive_type = str(drive.style_type or "").strip().upper() or "CUSTOM"
         drive_path = drive.get_local_path()
-        tv_inventory, movie_inventory = _scan_library(str(drive_path), drive.name)
+        tv_inventory, movie_inventory, _ = _scan_library(str(drive_path), drive.name)
 
         tv_inventory_by_type.setdefault(drive_type, {})
         movie_inventory_by_type.setdefault(drive_type, {})
@@ -3345,11 +3560,13 @@ def run_maker_monitor_scan_internal(
             log_error(LogTags.MONITOR, f"Failed persisting monitor config during run: {exc}\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail="Failed to save monitor configuration")
 
+    status_cache = StatusCache.load(db)
     log_info(
         LogTags.MONITOR,
         (
             f"{LogIcons.START} Maker monitor scan started | drives={len(selected_drives)} "
-            f"| lookahead_days={resolved_config.lookahead_days} | retention_days={resolved_config.missing_retention_days}"
+            f"| lookahead_days={resolved_config.lookahead_days} | retention_days={resolved_config.missing_retention_days} "
+            f"| status cache: {status_cache.describe()}"
         ),
         drives=len(selected_drives),
         lookahead_days=resolved_config.lookahead_days,
@@ -3388,33 +3605,34 @@ def run_maker_monitor_scan_internal(
                 style_type=drive_type,
                 path=str(drive_path),
             )
-            tv_inventory, _ = _scan_library(str(drive_path), drive.name)
+            tv_inventory, _, tv_tvdb_ids = _scan_library(str(drive_path), drive.name)
             scanned_tmdb_ids[(drive.name, drive_type)] = set(tv_inventory.keys())
             scanned_seasons[(drive.name, drive_type)] = tv_inventory
             shows: list[MakerMonitorShowResult] = []
             tmdb_ids = list(tv_inventory.keys())
             total_tmdb_ids = len(tmdb_ids)
             progress_step = max(1, total_tmdb_ids // 10) if total_tmdb_ids > 0 else 1
+            tally = SourceTally()
+            planned_source = "TheTVDB (TMDB fallback)" if tvdb_credentials[0] else "TMDB"
 
             log_info(
                 LogTags.MONITOR,
                 (
-                    f"TMDB checks started: '{drive.name}' | candidates={total_tmdb_ids} "
-                    f"| lookahead_days={resolved_config.lookahead_days}"
+                    f"Premiere checks started: '{drive.name}' | candidates={total_tmdb_ids} "
+                    f"| source={planned_source} | lookahead_days={resolved_config.lookahead_days}"
                 ),
                 drive_id=drive.id,
                 drive_name=drive.name,
                 total_candidates=total_tmdb_ids,
+                source=planned_source,
                 lookahead_days=resolved_config.lookahead_days,
             )
 
-            # Each premiere check is one independent /tv/{id} lookup (we already
-            # have the ids from the filenames), so run them in a small thread pool
-            # instead of one-at-a-time — a big library otherwise takes minutes. The
-            # HTTP calls run in parallel; results are consumed here on the main
-            # thread so the circuit breaker and progress stay single-threaded.
-            # 6 workers keeps us comfortably under TMDB's abuse threshold.
-            with ThreadPoolExecutor(max_workers=6) as pool:
+            # Each premiere check is an independent lookup (ids come from the filenames), so
+            # run them in a small thread pool — a big library otherwise takes minutes. Results
+            # are consumed here on the main thread so the circuit breaker and progress stay
+            # single-threaded; the TVDB and TMDB buckets pace the calls themselves.
+            with ThreadPoolExecutor(max_workers=MAKER_MONITOR_WORKERS) as pool:
                 future_to_id = {
                     pool.submit(
                         _check_show_status,
@@ -3423,6 +3641,9 @@ def run_maker_monitor_scan_internal(
                         resolved_config.tmdb_api_key,
                         resolved_config.lookahead_days,
                         tvdb_credentials,
+                        tally,
+                        tvdb_id=tv_tvdb_ids.get(tmdb_id),
+                        status_cache=status_cache,
                     ): tmdb_id
                     for tmdb_id, seasons in tv_inventory.items()
                 }
@@ -3464,13 +3685,14 @@ def run_maker_monitor_scan_internal(
                         log_info(
                             LogTags.MONITOR,
                             (
-                                f"TMDB progress: '{drive.name}' | checked={index}/{total_tmdb_ids} "
-                                f"| matches={len(shows)}"
+                                f"Premiere checks: '{drive.name}' | checked={index}/{total_tmdb_ids} "
+                                f"| via {tally.summary()} | matches={len(shows)}"
                             ),
                             drive_id=drive.id,
                             drive_name=drive.name,
                             checked=index,
                             total=total_tmdb_ids,
+                            sources=dict(tally.counts),
                             matches=len(shows),
                         )
 
@@ -3480,7 +3702,7 @@ def run_maker_monitor_scan_internal(
                             drive_percent = drive_base + int((index / total_tmdb_ids) * max(1, drive_cap - drive_base))
                             progress_callback(
                                 drive_percent,
-                                f"Checking TMDB ({index}/{total_tmdb_ids}) for {drive.name}",
+                                f"Checking {tally.label()} ({index}/{total_tmdb_ids}) for {drive.name}",
                             )
 
             shows.sort(key=lambda item: item.date)
@@ -3512,11 +3734,13 @@ def run_maker_monitor_scan_internal(
             log_info(
                 LogTags.MONITOR,
                 (
-                    f"Drive scan complete: '{drive.name}' | scanned={scanned} | premieres={premieres} | needed={needed}"
+                    f"Drive scan complete: '{drive.name}' | scanned={scanned} | via {tally.summary()} "
+                    f"| premieres={premieres} | needed={needed}"
                 ),
                 drive_id=drive.id,
                 drive_name=drive.name,
                 scanned=scanned,
+                sources=dict(tally.counts),
                 premieres=premieres,
                 needed=needed,
             )
@@ -3653,8 +3877,10 @@ def run_maker_monitor_scan_internal(
 
     try:
         upsert_setting(db, SETTING_MAKER_MONITOR_LAST_RESULT, response.model_dump_json())
+        status_cache.prune()
+        upsert_setting(db, SETTING_MAKER_MONITOR_STATUS_CACHE, json.dumps(status_cache.dump()))
         db.commit()
-        log_info(LogTags.MONITOR, "Saved monitor last-result snapshot")
+        log_info(LogTags.MONITOR, f"Saved monitor last-result snapshot | status cache: {status_cache.describe()}")
         if progress_callback:
             progress_callback(99, "Finalizing monitor results...")
     except Exception as exc:

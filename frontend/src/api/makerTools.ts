@@ -29,6 +29,7 @@ export interface MakerMonitorShowResult {
   imdb_id?: string
   tvdb_id?: number | null
   external_sources: string[]
+  date_source?: string
 }
 
 export interface MakerMonitorLibraryResult {

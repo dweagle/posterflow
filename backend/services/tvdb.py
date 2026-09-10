@@ -22,15 +22,16 @@ from models.setting import get_setting
 TVDB_API = "https://api4.thetvdb.com/v4"
 TVDB_ARTWORK_HOST = "artworks.thetvdb.com"
 
-# TVDB publishes no rate limit; this is only ever driven by a user clicking a gallery tab,
-# so a polite ceiling costs nothing.
-tvdb_bucket = TokenBucket(10.0, 5)
+# TVDB publishes no rate limit. Card clicks barely touch this; the maker monitor's premiere
+# checks are the real consumer (one light call per show), so the ceiling is sized for that batch.
+tvdb_bucket = TokenBucket(20.0, 10)
 
 # Requests run in the app's thread pool, and every one waiting on TVDB holds a thread. A page of
 # maker cards can ask for dozens of season lookups at once, which is enough to starve the pool
 # and stall unrelated work (a monitor run refusing to start, say). Cap how many may be in flight
-# and give up quickly rather than queueing — the caller just falls back to TMDB.
-_MAX_INFLIGHT = 4
+# and give up quickly rather than queueing — the caller just falls back to TMDB. Sized to the
+# maker monitor's worker pool so its premiere checks never queue here.
+_MAX_INFLIGHT = 8
 _SLOT_WAIT = 3.0
 _slots = threading.Semaphore(_MAX_INFLIGHT)
 
@@ -324,6 +325,15 @@ def fetch_artwork(*, tvdb_id: int, media_type: str, api_key: str, pin: str) -> l
     return [r for r in records if isinstance(r, dict)]
 
 
+def _is_official_season(season: Any) -> bool:
+    """TVDB stacks its alternate orders (DVD, absolute, ...) in one array; only official matches Sonarr."""
+    if not isinstance(season, dict):
+        return False
+    stype = season.get("type")
+    slug = str((stype or {}).get("type") or "") if isinstance(stype, dict) else ""
+    return not slug or slug == "official"
+
+
 def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
     """A series' seasons in official (aired) order — the same ordering Sonarr uses.
 
@@ -370,11 +380,7 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
 
     seasons: list[dict] = []
     for season in ((data or {}).get("seasons") or []):
-        if not isinstance(season, dict):
-            continue
-        stype = season.get("type")
-        type_slug = str((stype or {}).get("type") or "") if isinstance(stype, dict) else ""
-        if type_slug and type_slug != "official":
+        if not _is_official_season(season):
             continue
         try:
             number = int(season.get("number"))
@@ -396,6 +402,49 @@ def fetch_series_seasons(*, tvdb_id: int, api_key: str, pin: str) -> list[dict]:
     seasons.sort(key=lambda s: s["number"])
     _store_seasons(tvdb_id, seasons)
     return seasons
+
+
+def fetch_series_outline(*, tvdb_id: int, api_key: str, pin: str) -> dict | None:
+    """Official season numbers plus the series' last/next air dates, without the episode list.
+
+    A few KB per series (the episode list runs to megabytes for a long runner), so a monitor run
+    can afford it for every show. Returns None when TVDB has no record.
+    """
+    data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"}, what="series outline")
+    if not data:
+        return None
+    numbers: set[int] = set()
+    for season in data.get("seasons") or []:
+        if not _is_official_season(season):
+            continue
+        try:
+            numbers.add(int(season.get("number")))
+        except (TypeError, ValueError):
+            continue
+    status = data.get("status") if isinstance(data.get("status"), dict) else {}
+    return {
+        "season_numbers": sorted(numbers),
+        "last_aired": str(data.get("lastAired") or "").strip() or None,
+        "next_aired": str(data.get("nextAired") or "").strip() or None,
+        "status": str(status.get("name") or "").strip() or None,
+    }
+
+
+def fetch_season_episodes(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
+    """One official season's episodes as [{number, aired}], sorted by episode number."""
+    data = _get(f"/series/{tvdb_id}/episodes/official", api_key, pin,
+                params={"page": 0, "season": season_number}, what="season episodes")
+    rows: list[dict] = []
+    for ep in (data or {}).get("episodes") or []:
+        if not isinstance(ep, dict):
+            continue
+        try:
+            number = int(ep.get("number"))
+        except (TypeError, ValueError):
+            continue
+        rows.append({"number": number, "aired": str(ep.get("aired") or "").strip() or None})
+    rows.sort(key=lambda r: r["number"])
+    return rows
 
 
 def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
