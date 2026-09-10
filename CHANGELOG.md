@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-09-10
+### Added
+- Maker Tools: poster reminders — a clickable bell on maker cards plus a Reminders tab on the Maker Tools page.
+- Maker Tools: Apple TV Artwork joins TMDB, TheTVDB, and fanart.tv as an artwork source in the maker card and the Artwork Finder.
+- Dashboard: the recently synced carousel follows the coverage scope — clicking Posters / Logos / Backgrounds / Square Art in the coverage card swaps the carousel to that type.
+
+### Changed
+- Maker Monitor: new-season checks now ask TVDB first and fall back to TMDB when no TVDB key is set. Ended/canceled shows are cached for 30 days with periodic rechecks for revivals, making Monitor run faster.
+
+### Fixed
+- IDarr: ignore entries are now keyed by title so they survive stripped tags and conflict cards.
+- Maker Tools: the gallery keeps its shape while loading and switching sources.
+- Border Replacer: holiday date ranges now include the full last day.
+
 ## [0.15.2] - 2026-09-04
 ### Added
 - fanart.tv added as an image source. Add your fanart.tv API key in Settings → General → API Keys and both the Maker Tools gallery and the Artwork Finder get a fanart.tv tab.
