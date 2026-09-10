@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from core.config import settings as app_settings
 from core.logging import LogTags, log_debug, log_error, log_info, log_user_action, log_warning
 from database import get_db
-from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key
+from models.idarr import IdarrAssetCache, IdarrPendingMatch, IdarrRun, upsert_idarr_asset_cache, upsert_idarr_pending_match, make_pending_entry_payload, resolve_idarr_scope_token, normalize_idarr_asset_type, build_idarr_asset_key, strip_idarr_conflict_token, is_id_keyed_idarr_key, idarr_ignore_identity, normalize_idarr_ignored_entry
 from core.job_queue import job_queue
 from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_RECENT_TERMINAL, JOB_TYPE_IDARR
 from modules.idarr import run_idarr_file_upload_job
@@ -686,7 +686,8 @@ def _with_inferred_ignored_type(item: Any) -> Any:
     return item
 
 
-def _load_ignored_titles(db: Session, scope_token: str | None = None) -> list[dict[str, Any]]:
+def _load_ignored_entries(db: Session, scope_token: str | None = None) -> list[dict[str, Any]]:
+    """Scoped ignore entries, normalized (title-keyed, aliases folded) and one per title."""
     payload = _load_ignored_titles_raw(db)
     if scope_token is not None:
         payload = [
@@ -694,7 +695,12 @@ def _load_ignored_titles(db: Session, scope_token: str | None = None) -> list[di
             for item in payload
             if isinstance(item, dict) and _asset_key_in_scope(item.get("asset_key"), scope_token)
         ]
-    return [_with_inferred_ignored_type(item) for item in payload]
+    merged, _ = _merge_ignored_items([], payload)
+    return merged
+
+
+def _load_ignored_titles(db: Session, scope_token: str | None = None) -> list[dict[str, Any]]:
+    return [_with_inferred_ignored_type(item) for item in _load_ignored_entries(db, scope_token)]
 
 
 def _save_ignored_titles(db: Session, items: list[dict[str, Any]], scope_token: str | None = None) -> None:
@@ -728,18 +734,52 @@ def _parse_ignored_title_with_optional_year(value: str) -> tuple[str, int | None
     return normalized_title, parsed_year
 
 
-def _build_ignored_entry(*, title: str, year: int | None, asset_type: str, asset_key: str | None = None, scope_token: str | None = None) -> dict[str, Any]:
+def _build_ignored_entry(
+    *,
+    title: str,
+    year: int | None,
+    asset_type: str,
+    asset_key: str | None = None,
+    scope_token: str | None = None,
+    alias_keys: list[str] | None = None,
+) -> dict[str, Any]:
     normalized_title = str(title or "").strip()
     normalized_type = _infer_ignored_entry_type(normalized_title, asset_type)
     normalized_year = year if isinstance(year, int) else None
     key = str(asset_key).strip() if isinstance(asset_key, str) and str(asset_key).strip() else _idarr_asset_key(normalized_type, normalized_title, normalized_year, scope_token)
-    return {
+    entry: dict[str, Any] = {
         "asset_key": key,
         "title": normalized_title,
         "year": normalized_year,
         "type": normalized_type,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if alias_keys:
+        entry["alias_keys"] = [str(k).strip() for k in alias_keys if isinstance(k, str) and str(k).strip()]
+    return normalize_idarr_ignored_entry(entry)
+
+
+def _fold_ignored_entry(base: dict[str, Any], extra: dict[str, Any], *, prefer_concrete_type: bool = True) -> dict[str, Any]:
+    """Combine two entries for one title: a concrete type beats pending, alias keys union,
+    the earliest created_at is kept."""
+    folded = dict(base)
+    base_type = normalize_idarr_asset_type(base.get("type"))
+    extra_type = normalize_idarr_asset_type(extra.get("type"))
+    if prefer_concrete_type and base_type not in ("movie", "tv_series", "collection") and extra_type in ("movie", "tv_series", "collection"):
+        folded["asset_key"] = extra["asset_key"]
+        folded["type"] = extra["type"]
+    aliases: list[str] = []
+    for alias in [*(base.get("alias_keys") or []), *(extra.get("alias_keys") or [])]:
+        if isinstance(alias, str) and alias and alias != folded["asset_key"] and alias not in aliases:
+            aliases.append(alias)
+    if aliases:
+        folded["alias_keys"] = aliases
+    else:
+        folded.pop("alias_keys", None)
+    stamps = [str(s) for s in (base.get("created_at"), extra.get("created_at")) if s]
+    if stamps:
+        folded["created_at"] = min(stamps)
+    return folded
 
 
 def _resolve_ignored_entries_for_title(db: Session, raw_title: str, scope_token: str | None = None) -> list[dict[str, Any]]:
@@ -762,43 +802,27 @@ def _resolve_ignored_entries_for_title(db: Session, raw_title: str, scope_token:
         cache_query = cache_query.filter(IdarrAssetCache.year == parsed_year)
         pending_query = pending_query.filter(IdarrPendingMatch.year == parsed_year)
 
-    resolved_entries: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
-
-    for row in cache_query.all():
+    # One title-keyed entry per title/year so it keeps matching after the file's ids change;
+    # the rows' id keys ride along as aliases, conflict tokens never become keys.
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in [*cache_query.all(), *pending_query.all()]:
         row_title = str(row.title or "").strip() or normalized_title
         row_year = row.year if isinstance(row.year, int) else parsed_year
-        row_type = _normalize_idarr_asset_type(row.asset_type)
+        row_type = normalize_idarr_asset_type(row.asset_type) or "pending"
+        row_key = strip_idarr_conflict_token(row.asset_key)
         entry = _build_ignored_entry(
             title=row_title,
             year=row_year,
             asset_type=row_type,
-            asset_key=str(row.asset_key or "").strip() or None,
             scope_token=scope_token,
+            alias_keys=[row_key] if is_id_keyed_idarr_key(row_key) else None,
         )
-        key = str(entry.get("asset_key") or "").strip()
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            resolved_entries.append(entry)
+        identity = idarr_ignore_identity(entry["asset_key"])
+        prior = grouped.get(identity)
+        grouped[identity] = _fold_ignored_entry(prior, entry) if prior else entry
 
-    for row in pending_query.all():
-        row_title = str(row.title or "").strip() or normalized_title
-        row_year = row.year if isinstance(row.year, int) else parsed_year
-        row_type = _normalize_idarr_asset_type(row.asset_type)
-        entry = _build_ignored_entry(
-            title=row_title,
-            year=row_year,
-            asset_type=row_type,
-            asset_key=str(row.asset_key or "").strip() or None,
-            scope_token=scope_token,
-        )
-        key = str(entry.get("asset_key") or "").strip()
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            resolved_entries.append(entry)
-
-    if resolved_entries:
-        return resolved_entries
+    if grouped:
+        return list(grouped.values())
 
     if isinstance(parsed_year, int):
         # "James Bond Collection (1962)" must key as collection — the runner types
@@ -829,22 +853,27 @@ def _normalize_bulk_ignored_titles(values: Any) -> list[str]:
 
 
 def _merge_ignored_items(existing_items: list[dict[str, Any]], incoming_items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    merged = [item for item in existing_items if isinstance(item, dict)]
-    existing_keys = {
-        str(item.get("asset_key") or "").strip()
-        for item in merged
-        if isinstance(item, dict) and str(item.get("asset_key") or "").strip()
-    }
+    """Normalize and merge by type-less identity; returns the list and how many incoming titles were new."""
+    merged: list[dict[str, Any]] = []
+    slots: dict[str, int] = {}
     added = 0
-    for item in incoming_items:
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("asset_key") or "").strip()
-        if not key or key in existing_keys:
-            continue
-        merged.append(item)
-        existing_keys.add(key)
-        added += 1
+    for source, counts in ((existing_items, False), (incoming_items, True)):
+        for raw in source:
+            if not isinstance(raw, dict):
+                continue
+            item = normalize_idarr_ignored_entry(raw)
+            key = str(item.get("asset_key") or "").strip()
+            if not key:
+                continue
+            identity = idarr_ignore_identity(key)
+            slot = slots.get(identity)
+            if slot is None:
+                slots[identity] = len(merged)
+                merged.append(item)
+                if counts:
+                    added += 1
+                continue
+            merged[slot] = _fold_ignored_entry(merged[slot], item)
     return merged, added
 
 
@@ -1947,19 +1976,16 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                 IdarrAssetCache.matched.is_(False),
             ).delete(synchronize_session=False)
     elif requested_action == "ignore":
-        ignored = _load_ignored_titles(db, scope_token)
+        ignored = _load_ignored_entries(db, scope_token)
         key = _idarr_asset_key(row.asset_type, row.title, row.year, scope_token)
         ignored_at = datetime.now(timezone.utc).isoformat()
-        if not any(isinstance(item, dict) and item.get("asset_key") == key for item in ignored):
-            ignored.append(_build_ignored_entry(
-                title=row.title,
-                year=row.year if isinstance(row.year, int) else None,
-                asset_type=row.asset_type,
-                asset_key=key,
-            ))
-            _save_ignored_titles(db, ignored, scope_token)
-        # No else-commit needed: the unconditional db.commit() at the end of this
-        # function covers the cache upsert and pending-row deletion.
+        merged, _ = _merge_ignored_items(ignored, [_build_ignored_entry(
+            title=row.title,
+            year=row.year if isinstance(row.year, int) else None,
+            asset_type=row.asset_type,
+            asset_key=key,
+        )])
+        _save_ignored_titles(db, merged, scope_token)
 
         ignore_event = {
             "resolved_at": ignored_at,
@@ -2425,14 +2451,14 @@ def add_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Session
         raise HTTPException(status_code=400, detail="title and type are required")
 
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
-    key = payload.asset_key.strip() if payload.asset_key and payload.asset_key.strip() else _idarr_asset_key(normalized_type, title, year, scope_token)
-    items = _load_ignored_titles(db, scope_token)
-    if not any(isinstance(item, dict) and item.get("asset_key") == key for item in items):
-        items.append(_build_ignored_entry(title=title, year=year, asset_type=normalized_type, asset_key=key))
-        _save_ignored_titles(db, items, scope_token)
+    # A conflict card's key carries a per-file token the runner never matches on.
+    key = strip_idarr_conflict_token(payload.asset_key) if payload.asset_key and payload.asset_key.strip() else _idarr_asset_key(normalized_type, title, year, scope_token)
+    entry = _build_ignored_entry(title=title, year=year, asset_type=normalized_type, asset_key=key)
+    items, _ = _merge_ignored_items(_load_ignored_entries(db, scope_token), [entry])
+    _save_ignored_titles(db, items, scope_token)
 
-    log_user_action("Added IDarr ignored title", asset_key=key)
-    return {"success": True, "asset_key": key}
+    log_user_action("Added IDarr ignored title", asset_key=entry["asset_key"])
+    return {"success": True, "asset_key": entry["asset_key"]}
 
 
 @router.post("/ignored-titles/remove")
@@ -2442,11 +2468,12 @@ def remove_maker_idarr_ignored_title(payload: IdarrIgnoredTitleRequest, db: Sess
     normalized_type = _normalize_idarr_asset_type(payload.type)
     normalized_title = str(payload.title or "").strip()
     normalized_year = payload.year if isinstance(payload.year, int) else None
-    key = payload.asset_key.strip() if payload.asset_key and payload.asset_key.strip() else _idarr_asset_key(normalized_type, normalized_title, normalized_year, scope_token)
+    key = strip_idarr_conflict_token(payload.asset_key) if payload.asset_key and payload.asset_key.strip() else _idarr_asset_key(normalized_type, normalized_title, normalized_year, scope_token)
 
-    items = _load_ignored_titles(db, scope_token)
-    removed_item = next((item for item in items if isinstance(item, dict) and item.get("asset_key") == key), None)
-    remaining = [item for item in items if not (isinstance(item, dict) and item.get("asset_key") == key)]
+    identity = idarr_ignore_identity(key)
+    items = _load_ignored_entries(db, scope_token)
+    removed_item = next((item for item in items if idarr_ignore_identity(item.get("asset_key")) == identity), None)
+    remaining = [item for item in items if idarr_ignore_identity(item.get("asset_key")) != identity]
     _save_ignored_titles(db, remaining, scope_token)
 
     restored_title = normalized_title or str(removed_item.get("title") or "").strip() if isinstance(removed_item, dict) else normalized_title
@@ -2529,7 +2556,7 @@ def import_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, db
     for title in normalized_titles:
         resolved_items.extend(_resolve_ignored_entries_for_title(db, title, scope_token))
 
-    existing_items = _load_ignored_titles(db, scope_token)
+    existing_items = _load_ignored_entries(db, scope_token)
     merged_items, added_count = _merge_ignored_items(existing_items, resolved_items)
     _save_ignored_titles(db, merged_items, scope_token)
 
@@ -2556,9 +2583,17 @@ def replace_maker_idarr_ignored_titles(payload: IdarrIgnoredTitlesBulkRequest, d
     normalized_titles = _normalize_bulk_ignored_titles(payload.titles)
 
     scope_token = _resolve_scope_token(db, payload.sync_target_index)
+    existing_by_identity = {
+        idarr_ignore_identity(item.get("asset_key")): item
+        for item in _load_ignored_entries(db, scope_token)
+    }
     resolved_items: list[dict[str, Any]] = []
     for title in normalized_titles:
-        resolved_items.extend(_resolve_ignored_entries_for_title(db, title, scope_token))
+        for entry in _resolve_ignored_entries_for_title(db, title, scope_token):
+            # A line that is already ignored keeps its entry (key, type, created_at); only
+            # newly seen id aliases are added, since a no-row fallback type is a guess.
+            prior = existing_by_identity.get(idarr_ignore_identity(entry["asset_key"]))
+            resolved_items.append(_fold_ignored_entry(prior, entry, prefer_concrete_type=False) if prior else entry)
 
     deduped_items, _ = _merge_ignored_items([], resolved_items)
     _save_ignored_titles(db, deduped_items, scope_token)

@@ -31,6 +31,8 @@ from models.idarr import (
     build_idarr_scope_token,
     make_pending_entry_payload,
     normalize_idarr_asset_type,
+    normalize_idarr_ignored_entry,
+    strip_idarr_conflict_token,
     upsert_idarr_asset_cache,
     upsert_idarr_pending_match,
 )
@@ -3320,9 +3322,13 @@ class IdarrRunner:
         for item in payload:
             if not isinstance(item, dict):
                 continue
-            key = item.get("asset_key")
-            if isinstance(key, str) and key.strip():
-                if self._asset_key_in_scope(key):
+            raw_key = item.get("asset_key")
+            if not (isinstance(raw_key, str) and raw_key.strip()) or not self._asset_key_in_scope(raw_key):
+                continue
+            # Legacy id-/conflict-keyed entries load as title keys with the id kept as an alias.
+            entry = normalize_idarr_ignored_entry(item)
+            for key in (entry.get("asset_key"), *(entry.get("alias_keys") or [])):
+                if isinstance(key, str) and key.strip():
                     keys.update(self._expand_asset_key_aliases(key))
         return keys
 
@@ -4335,7 +4341,8 @@ class IdarrRunner:
             asset_key = str(row.asset_key or "").strip()
             if not asset_key:
                 continue
-            if asset_key in ignored_asset_keys:
+            # Conflict rows carry a per-file token; an ignored title clears them too.
+            if strip_idarr_conflict_token(asset_key) in ignored_asset_keys:
                 self.db.delete(row)
                 removed_pending += 1
                 current_pending_keys.discard(asset_key)
@@ -4358,7 +4365,7 @@ class IdarrRunner:
             status = str(payload.get("status") or "").strip().lower()
             payload_changed = False
 
-            if asset_key in ignored_asset_keys:
+            if strip_idarr_conflict_token(asset_key) in ignored_asset_keys:
                 if status != "ignored":
                     payload["status"] = "ignored"
                     payload_changed = True

@@ -315,6 +315,7 @@ export interface MakerIdarrPendingCandidatesResponse {
 
 export interface MakerIdarrIgnoredItem {
   asset_key: string
+  alias_keys?: string[]
   title: string
   year?: number | null
   type: string

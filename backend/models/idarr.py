@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -414,6 +415,66 @@ def build_idarr_asset_key(
     if scope_token:
         return f"{key}::scope={scope_token}"
     return key
+
+
+_CONFLICT_TOKEN_REGEX = re.compile(r"::conflict=[^:]+")
+
+
+def strip_idarr_conflict_token(asset_key: Any) -> str:
+    """Return *asset_key* without the ``::conflict=<token>`` segment a rename-conflict row carries."""
+    key = str(asset_key or "").strip()
+    return _CONFLICT_TOKEN_REGEX.sub("", key) if "::conflict=" in key else key
+
+
+def split_idarr_scope_suffix(asset_key: Any) -> tuple[str, str | None]:
+    """Split ``<key>::scope=<token>`` into ``(key, token)``; token is None when unscoped."""
+    key = str(asset_key or "").strip()
+    base, sep, token = key.rpartition("::scope=")
+    if sep and base and token:
+        return base, token
+    return key, None
+
+
+def is_id_keyed_idarr_key(asset_key: Any) -> bool:
+    """True for the resolved ``<type>::tmdb=<id>`` (or tvdb=/imdb=) key shape."""
+    base, _ = split_idarr_scope_suffix(strip_idarr_conflict_token(asset_key))
+    _type, sep, rest = base.partition("::")
+    return bool(sep) and rest.startswith(("tmdb=", "tvdb=", "imdb="))
+
+
+def idarr_ignore_identity(asset_key: Any) -> str:
+    """Type-less form of an ignore key: the runner matches ignores across movie/tv_series/
+    collection/pending, so those variants of one title are one entry."""
+    key = strip_idarr_conflict_token(asset_key)
+    _type, sep, rest = key.partition("::")
+    return rest if sep else key
+
+
+def normalize_idarr_ignored_entry(item: Any) -> Any:
+    """Ignore entries key by title/year so they outlive id changes and stripped tags; a legacy
+    id-keyed key moves into ``alias_keys`` and any conflict token is dropped."""
+    if not isinstance(item, dict):
+        return item
+    raw_key = str(item.get("asset_key") or "").strip()
+    key = strip_idarr_conflict_token(raw_key)
+    aliases = [str(k).strip() for k in (item.get("alias_keys") or []) if isinstance(k, str) and str(k).strip()]
+    title = str(item.get("title") or "").strip()
+    if key and title and is_id_keyed_idarr_key(key):
+        _base, scope_token = split_idarr_scope_suffix(key)
+        asset_type = normalize_idarr_asset_type(item.get("type")) or str(item.get("type") or "").strip().lower() or key.partition("::")[0]
+        year = item.get("year") if isinstance(item.get("year"), int) else None
+        aliases.append(key)
+        key = build_idarr_asset_key(asset_type, title, year, scope_token)
+    deduped: list[str] = []
+    for alias in aliases:
+        if alias != key and alias not in deduped:
+            deduped.append(alias)
+    normalized = {**item, "asset_key": key}
+    if deduped:
+        normalized["alias_keys"] = deduped
+    else:
+        normalized.pop("alias_keys", None)
+    return normalized
 
 
 def build_idarr_scope_token(sync_target_index: int, source_dir: str) -> str:

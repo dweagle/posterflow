@@ -4,7 +4,7 @@ matching across type flips."""
 import json
 from datetime import datetime, timezone
 
-from models.idarr import IdarrAssetCache
+from models.idarr import IdarrAssetCache, IdarrPendingMatch
 from models.setting import Setting
 from services.idarr_runner import IdarrRunner
 
@@ -197,3 +197,187 @@ def test_ignored_titles_list_infers_collection_type_for_pending_entries(client):
     assert ignored[0]["type"] == "collection"
     # The key keeps its pending:: form so cache/pending row sync still matches.
     assert ignored[0]["asset_key"] == "pending::astarwarsstorycollection::"
+
+
+def test_replace_keys_a_manual_line_by_title_and_keeps_row_ids_as_aliases(client, test_db):
+    """Edit List used to copy whatever row key matched the line — an id key, or a conflict
+    card's per-file key. Stripping the file's tags then orphaned the entry. A line now keys
+    by title/year, keeps the row's id key as an alias, and never carries a conflict token."""
+    test_db.add_all([
+        IdarrAssetCache(
+            asset_key="tv_series::tmdb=332219",
+            title="The Legend of Zelda",
+            year=1989,
+            asset_type="tv_series",
+            matched=True,
+            tmdb_id=332219,
+        ),
+        IdarrPendingMatch(
+            asset_key="tv_series::thelegendofzelda::1989::conflict=fbefaa2c36b8",
+            title="The Legend of Zelda",
+            year=1989,
+            asset_type="tv_series",
+        ),
+    ])
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/ignored-titles/replace",
+        json={"titles": ["The Legend of Zelda (1989)"], "sync_target_index": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    assert len(ignored) == 1
+    assert ignored[0]["asset_key"] == "tv_series::thelegendofzelda::1989"
+    assert ignored[0]["alias_keys"] == ["tv_series::tmdb=332219"]
+    assert ignored[0]["type"] == "tv_series"
+
+
+def test_replace_keeps_the_entry_a_line_already_has(client, test_db):
+    """Saving the editor must not re-key or re-stamp lines that are already ignored."""
+    stamp = "2026-09-09T22:03:40+00:00"
+    test_db.add(
+        Setting(
+            key="maker_tools_idarr_ignored_titles",
+            value=json.dumps([
+                {
+                    "asset_key": "pending::thelegendofzelda::1989",
+                    "title": "The Legend of Zelda",
+                    "year": 1989,
+                    "type": "pending",
+                    "created_at": stamp,
+                }
+            ]),
+        )
+    )
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/ignored-titles/replace",
+        json={"titles": ["The Legend of Zelda (1989)", "Tom and Jerry (1940)"], "sync_target_index": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    by_title = {item["title"]: item for item in ignored}
+    assert by_title["The Legend of Zelda"]["asset_key"] == "pending::thelegendofzelda::1989"
+    assert by_title["The Legend of Zelda"]["created_at"] == stamp
+    assert by_title["Tom and Jerry"]["asset_key"] == "movie::tomandjerry::1940"
+
+
+def test_add_from_a_conflict_card_stores_the_base_key(client):
+    """The pending-card Ignore button passes the card's key through; a conflict card's key
+    carries a per-file token the runner never matches on."""
+    response = client.post(
+        "/api/idarr/ignored-titles/add",
+        json={
+            "title": "The Legend of Zelda",
+            "year": 1989,
+            "type": "tv_series",
+            "asset_key": "tv_series::thelegendofzelda::1989::conflict=fbefaa2c36b8",
+            "sync_target_index": 0,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["asset_key"] == "tv_series::thelegendofzelda::1989"
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    assert [item["asset_key"] for item in ignored] == ["tv_series::thelegendofzelda::1989"]
+
+
+def test_ignored_list_folds_legacy_duplicates_and_migrates_id_keys(client, test_db):
+    """Entries written by older builds: a pending-keyed and a conflict-keyed twin of one
+    title show as one entry, and an id-keyed entry becomes title-keyed with the id as alias."""
+    test_db.add(
+        Setting(
+            key="maker_tools_idarr_ignored_titles",
+            value=json.dumps([
+                {"asset_key": "pending::thelegendofzelda::1989", "title": "The Legend of Zelda", "year": 1989, "type": "pending", "created_at": "2026-09-10T20:36:35+00:00"},
+                {"asset_key": "tv_series::thelegendofzelda::1989::conflict=fbefaa2c36b8", "title": "The Legend of Zelda", "year": 1989, "type": "tv_series", "created_at": "2026-09-10T20:36:35+00:00"},
+                {"asset_key": "tv_series::tmdb=35466", "title": "Ghost Stories", "year": 2000, "type": "tv_series", "created_at": "2026-09-10T20:36:35+00:00"},
+            ]),
+        )
+    )
+    test_db.commit()
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    by_title = {item["title"]: item for item in ignored}
+    assert len(ignored) == 2
+    assert by_title["The Legend of Zelda"]["asset_key"] == "tv_series::thelegendofzelda::1989"
+    assert by_title["The Legend of Zelda"]["type"] == "tv_series"
+    assert "alias_keys" not in by_title["The Legend of Zelda"]
+    assert by_title["Ghost Stories"]["asset_key"] == "tv_series::ghoststories::2000"
+    assert by_title["Ghost Stories"]["alias_keys"] == ["tv_series::tmdb=35466"]
+
+
+def test_remove_matches_any_typed_twin_of_the_title(client, test_db):
+    test_db.add(
+        Setting(
+            key="maker_tools_idarr_ignored_titles",
+            value=json.dumps([
+                {"asset_key": "pending::thelegendofzelda::1989", "title": "The Legend of Zelda", "year": 1989, "type": "pending"},
+                {"asset_key": "movie::tomandjerry::1940", "title": "Tom and Jerry", "year": 1940, "type": "movie"},
+            ]),
+        )
+    )
+    test_db.commit()
+
+    response = client.post(
+        "/api/idarr/ignored-titles/remove",
+        json={"title": "The Legend of Zelda", "year": 1989, "type": "tv_series", "sync_target_index": 0},
+    )
+    assert response.status_code == 200
+
+    ignored = client.get("/api/idarr/ignored-titles", params={"sync_target_index": 0}).json()["items"]
+    assert [item["asset_key"] for item in ignored] == ["movie::tomandjerry::1940"]
+
+
+def test_idarr_runner_ignored_keys_cover_legacy_id_and_conflict_entries(test_db):
+    """A manual entry stored under the tagged file's TMDB id stopped matching once the file
+    was renamed without tags: the scan-time check only builds title keys for an untagged
+    file. Legacy id/conflict-keyed entries now load as title keys, ids kept as aliases."""
+    test_db.add(
+        Setting(
+            key="maker_tools_idarr_ignored_titles",
+            value=json.dumps([
+                {"asset_key": "tv_series::tmdb=332219", "title": "The Legend of Zelda", "year": 1989, "type": "tv_series"},
+                {"asset_key": "tv_series::ghoststories::2000::conflict=abc123", "title": "Ghost Stories", "year": 2000, "type": "tv_series"},
+            ]),
+        )
+    )
+    test_db.commit()
+
+    runner = IdarrRunner(test_db)
+    keys = runner._load_ignored_asset_keys()
+
+    assert runner.is_ignored({"type": "movie", "title": "The Legend of Zelda", "year": 1989}, keys) is True
+    assert runner.is_ignored({"type": "tv_series", "title": "Super Mario", "year": 1989, "tmdb_id": 332219}, keys) is True
+    assert runner.is_ignored({"type": "movie", "title": "Ghost Stories", "year": 2000}, keys) is True
+    assert runner.is_ignored({"type": "movie", "title": "Ghost Stories", "year": 2019}, keys) is False
+
+
+def test_idarr_runner_sync_ignore_clears_conflict_rows_for_an_ignored_title(test_db):
+    """Ignoring a title also clears its conflict card instead of needing a separate dismiss."""
+    runner = IdarrRunner(test_db)
+    conflict_key = "tv_series::thelegendofzelda::1989::conflict=fbefaa2c36b8"
+    test_db.add(IdarrPendingMatch(asset_key=conflict_key, title="The Legend of Zelda", year=1989, asset_type="tv_series"))
+    test_db.add(
+        IdarrAssetCache(
+            asset_key=conflict_key,
+            title="The Legend of Zelda",
+            year=1989,
+            asset_type="tv_series",
+            matched=False,
+            payload_json=json.dumps({"status": "not_found"}),
+        )
+    )
+    test_db.commit()
+
+    stats = runner._sync_ignore_and_pending(runner._expand_asset_key_aliases("pending::thelegendofzelda::1989"))
+
+    assert stats["removed_pending"] == 1
+    assert stats["marked_ignored"] == 1
+    assert test_db.query(IdarrPendingMatch).filter(IdarrPendingMatch.asset_key == conflict_key).first() is None
