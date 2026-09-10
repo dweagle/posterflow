@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
+import services.apple_tv as apple_tv
 from models.setting import Setting
 
 
@@ -1041,49 +1042,184 @@ def test_tv_details_falls_back_when_tvdb_has_no_seasons(client, test_db):
 
 
 # ---------------------------------------------------------------------------
-# API: GET /api/maker-tools/tmdb/origin-country
+# API: GET /api/maker-tools/tmdb/apple-storefront
 # ---------------------------------------------------------------------------
 
 
-def test_origin_country_tv_uses_origin_country_field(client, test_db):
+def _apple_store(provider_id: int = 2, name: str = "Apple TV Store") -> dict:
+    return {"provider_id": provider_id, "provider_name": name}
+
+
+def _mock_tmdb_by_url(detail: dict, providers: dict):
+    """requests.get side effect: the details URL returns ``detail``, the watch/providers URL ``providers``."""
+    def _get(url, *args, **kwargs):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = providers if url.endswith("/watch/providers") else detail
+        return resp
+    return _get
+
+
+@pytest.fixture
+def _apple_cache():
+    apple_tv._cache.clear()
+    yield
+    apple_tv._cache.clear()
+
+
+def test_apple_storefront_tv_prefers_english_stores_that_list_the_title(client, test_db, _apple_cache):
     _seed_tmdb_key(test_db)
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"origin_country": ["GB"], "production_countries": [{"iso_3166_1": "US"}]}
+    detail = {"origin_country": ["JP"]}
+    providers = {"results": {
+        "AU": {"buy": [_apple_store()]},
+        "GB": {"rent": [_apple_store()]},
+        "DE": {"flatrate": [_apple_store(350, "Apple TV")]},   # streaming only, not the store
+        "FR": {"buy": [{"provider_id": 10, "provider_name": "Amazon Video"}]},
+    }}
 
-    with patch("api.maker_tools.requests.get", return_value=mock_resp):
-        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=1396&media_type=tv")
+    with patch("services.apple_tv.requests.get", side_effect=_mock_tmdb_by_url(detail, providers)):
+        response = client.get("/api/maker-tools/tmdb/apple-storefront?tmdb_id=92588&media_type=tv")
 
     assert response.status_code == 200
-    # origin_country is preferred and de-duped ahead of production_countries
-    assert response.json()["countries"] == ["GB", "US"]
+    # buy and rent both count; the Apple TV streaming service (350) does not; JP origin is skipped
+    assert response.json() == {"storefront": "143444", "iso": "GB", "sold_in": ["GB", "AU"]}
 
 
-def test_origin_country_movie_falls_back_to_production_countries(client, test_db):
+def test_apple_storefront_movie_falls_back_to_the_origin_country(client, test_db, _apple_cache):
     _seed_tmdb_key(test_db)
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"production_countries": [{"iso_3166_1": "fr"}, {"iso_3166_1": "DE"}]}
+    detail = {"production_countries": [{"iso_3166_1": "fr"}, {"iso_3166_1": "DE"}]}
 
-    with patch("api.maker_tools.requests.get", return_value=mock_resp):
-        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=550&media_type=movie")
+    with patch("services.apple_tv.requests.get", side_effect=_mock_tmdb_by_url(detail, {"results": {}})):
+        response = client.get("/api/maker-tools/tmdb/apple-storefront?tmdb_id=550&media_type=movie")
 
     assert response.status_code == 200
-    assert response.json()["countries"] == ["FR", "DE"]
+    assert response.json() == {"storefront": "143442", "iso": "FR", "sold_in": []}
 
 
-def test_origin_country_non_movie_tv_returns_empty_without_call(client, test_db):
-    # Collections have no origin country; the endpoint short-circuits before any TMDB call.
-    with patch("api.maker_tools.requests.get") as mock_get:
-        response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=10&media_type=collection")
+def test_apple_storefront_non_movie_tv_is_the_us_store_without_a_call(client, test_db):
+    with patch("services.apple_tv.requests.get") as mock_get:
+        response = client.get("/api/maker-tools/tmdb/apple-storefront?tmdb_id=10&media_type=collection")
     assert response.status_code == 200
-    assert response.json()["countries"] == []
+    assert response.json() == {"storefront": "143441", "iso": "US", "sold_in": []}
     mock_get.assert_not_called()
 
 
-def test_origin_country_no_api_key_returns_400(client):
-    response = client.get("/api/maker-tools/tmdb/origin-country?tmdb_id=1396&media_type=tv")
+def test_apple_storefront_no_api_key_returns_400(client):
+    response = client.get("/api/maker-tools/tmdb/apple-storefront?tmdb_id=1396&media_type=tv")
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/apple/images, /apple/season-images
+# ---------------------------------------------------------------------------
+
+_APPLE_TMPL = "https://is1-ssl.mzstatic.com/image/thumb/abc/pr_source.jpg/{w}x{h}.{f}"
+
+
+def _apple_show():
+    return {"id": "umc.cmc.1", "type": "Show", "title": "DECA-DENCE", "images": {
+        "coverArt": {"url": _APPLE_TMPL, "width": 3000, "height": 3000},
+        "previewFrame": {"url": _APPLE_TMPL, "width": 3840, "height": 2160},
+        "fullColorContentLogo": {"url": _APPLE_TMPL, "width": 4315, "height": 878},
+    }}
+
+
+def _apple_found(iso="GB"):
+    return apple_tv.Found(item=_apple_show(), iso=iso, storefront=apple_tv.STOREFRONTS[iso])
+
+
+def test_apple_images_is_refused_when_turned_off(client, test_db):
+    test_db.add(Setting(key="apple_artwork_enabled", value="false"))
+    test_db.commit()
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence"})
+    assert response.status_code == 400
+    assert "turned off" in response.json()["detail"]
+
+
+def test_apple_images_rejects_an_unknown_media_type(client):
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "person", "title": "x"})
+    assert response.status_code == 400
+
+
+def test_apple_images_returns_empty_for_collections_without_a_search(client, monkeypatch):
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: (_ for _ in ()).throw(AssertionError("no search")))
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "collection", "title": "Alien Collection"})
+    assert response.status_code == 200
+    assert response.json() == {"posters": [], "backdrops": [], "logos": []}
+
+
+def test_apple_images_returns_empty_when_no_store_lists_the_title(client, monkeypatch):
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: None)
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "BNA", "year": 2020})
+    assert response.status_code == 200
+    assert response.json() == {"posters": [], "backdrops": [], "logos": []}
+
+
+def test_apple_images_maps_a_listing_into_the_gallery_shape(client, monkeypatch):
+    seen = {}
+
+    def fake_fetch(**kwargs):
+        seen.update(kwargs)
+        return _apple_found("GB")
+
+    monkeypatch.setattr(apple_tv, "fetch_artwork", fake_fetch)
+    # No TMDB key seeded, so the plan is the bare US default and no TMDB call is made.
+    response = client.get("/api/maker-tools/apple/images",
+                          params={"media_type": "tv", "title": "Deca-Dence", "year": 2020, "tmdb_id": 92588})
+    assert response.status_code == 200, response.text
+    assert seen["media_type"] == "tv" and seen["title"] == "Deca-Dence" and seen["year"] == 2020
+    assert seen["plan"].search_order == [("US", "143441")]
+    data = response.json()
+    # A show's square cover art sits with the posters in the gallery.
+    assert [(p["width"], p["height"], p["language"]) for p in data["posters"]] == [(3000, 3000, "en")]
+    assert data["posters"][0]["url_thumb"].endswith("/400x400.jpg")
+    assert [(b["width"], b["language"]) for b in data["backdrops"]] == [(3840, None)]
+    assert data["logos"][0]["url_full"].endswith("/4315x878.png")
+
+    # Found in a German store: cover art carries German and drops under the default preference,
+    # logos come from the English listing and stay.
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: _apple_found("DE"))
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence"})
+    assert response.json()["posters"] == [] and [l["language"] for l in response.json()["logos"]] == ["en"]
+
+    # A named language asks the product page in that language, regioned to the store.
+    seen = {}
+    german = "https://is1-ssl.mzstatic.com/image/thumb/de-logo/{w}x{h}.{f}"
+    monkeypatch.setattr(apple_tv, "fetch_product_view", lambda item_id, storefront, locale="en-US": (
+        seen.update(locale=locale) or {"content": {"images": {"fullColorContentLogo": {"url": german, "width": 4000, "height": 900}}}}))
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence", "language": "de"})
+    assert seen["locale"] == "de-DE"
+    assert [(l["language"], l["width"]) for l in response.json()["logos"]] == [("de", 4000)]
+
+
+def test_apple_images_maps_apple_failures_to_http_errors(client, monkeypatch):
+    def boom(**kwargs):
+        raise apple_tv.AppleTvError("Apple TV search failed (HTTP 503).")
+    monkeypatch.setattr(apple_tv, "fetch_artwork", boom)
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "movie", "title": "Alien"})
+    assert response.status_code == 502
+    assert "HTTP 503" in response.json()["detail"]
+
+
+def test_apple_season_images_pick_one_seasons_cover(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: _apple_found("GB"))
+
+    def fake_seasons(item_id, storefront):
+        seen.update(item_id=item_id, storefront=storefront)
+        return [{"type": "Season", "seasonNumber": 2,
+                 "images": {"coverArt": {"url": _APPLE_TMPL, "width": 3000, "height": 3000}}}]
+
+    monkeypatch.setattr(apple_tv, "fetch_seasons", fake_seasons)
+    response = client.get("/api/maker-tools/apple/season-images",
+                          params={"title": "Deca-Dence", "season_number": 2, "year": 2020})
+    assert response.status_code == 200, response.text
+    assert seen == {"item_id": "umc.cmc.1", "storefront": "143444"}
+    assert [p["width"] for p in response.json()["posters"]] == [3000]
+    assert response.json()["backdrops"] == [] and response.json()["logos"] == []
+
+    response = client.get("/api/maker-tools/apple/season-images", params={"title": "Deca-Dence", "season_number": 3})
+    assert response.json()["posters"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -2492,6 +2628,20 @@ def test_photoshop_queue_rejects_bad_filenames():
 # ---------------------------------------------------------------------------
 # Save gallery artwork to the export folders (POST /artwork-exports)
 # ---------------------------------------------------------------------------
+
+
+def test_artwork_export_refuses_apple_art_of_the_wrong_shape(client):
+    hero = "https://is1-ssl.mzstatic.com/image/thumb/abc/4320x3240.jpg"
+    response = client.post("/api/maker-tools/artwork-exports", json={
+        "path": hero, "subtype": "background", "title": "Deca-Dence", "media_type": "tv", "year": 2020})
+    assert response.status_code == 400
+    assert "16:9" in response.json()["detail"]
+    # A crop makes a square, so square art from any shape is fine (fails later only for the missing folder).
+    response = client.post("/api/maker-tools/artwork-exports", json={
+        "path": hero, "subtype": "squareart", "title": "Deca-Dence", "media_type": "tv", "year": 2020,
+        "crop_x": 0, "crop_y": 0, "crop_size": 3240})
+    assert response.status_code == 400
+    assert "folder" in response.json()["detail"]
 
 def _artwork_image_bytes(mode: str = "RGBA", fmt: str = "PNG", size: tuple[int, int] = (10, 4)) -> bytes:
     buf = BytesIO()

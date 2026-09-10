@@ -25,6 +25,7 @@ from PIL import Image, ImageChops, ImageFile
 
 from core.rate_limiter import tmdb_bucket
 from models.setting import get_setting
+from services import apple_tv as apple_service
 from services import fanart as fanart_service
 from services import tvdb as tvdb_service
 
@@ -384,8 +385,8 @@ def _probe_size(session: requests.Session, url: str) -> Optional[tuple[int, int]
 
 
 def _resolve_url(source: str, ref: str) -> str:
-    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote, TVDB and
-    fanart.tv refs are already absolute."""
+    """A candidate's downloadable full URL. TMDB refs are /file_path; Gracenote, TVDB,
+    fanart.tv and Apple TV refs are already absolute."""
     if source == "tmdb":
         return f"{TMDB_IMG}{ref}"
     return ref
@@ -461,6 +462,40 @@ def fanart_candidate_groups(item: FinderItem, api_key: str, min_backdrop_width: 
     }
 
 
+def apple_candidate_groups(item: FinderItem, tmdb_api_key: str, min_backdrop_width: int, *,
+                           textless_backgrounds: bool = True,
+                           image_language: Optional[str] = "en,null") -> dict:
+    """Apple TV's logos / backgrounds / posters / square art for an item, already in candidate
+    shape. The title is searched by name in the storefronts TMDB's watch providers say sell it
+    (none needed: without a TMDB id or key it tries the US store). Square art is a show's own
+    cover art, title and all — that is the kind Apple makes."""
+    if item.is_collection:
+        return {"logos": [], "backgrounds": [], "posters": [], "squareart": []}
+    origin, store = apple_service.storefront_hints(item.tmdb_id, item.media_type, tmdb_api_key)
+    plan = apple_service.plan_storefronts(store, origin)
+    found = apple_service.fetch_artwork(media_type=item.media_type, title=item.title, year=item.year, plan=plan)
+    if not found:
+        return {"logos": [], "backgrounds": [], "posters": [], "squareart": []}
+    grouped = apple_service.artwork_for(found, image_language, fanart_service.wanted_languages(image_language))
+
+    def shape(entries):
+        return [{"source": "apple", "ref": e["file_path"], "width": e["width"],
+                 "height": e["height"], "language": e["language"]}
+                for e in entries]
+
+    backgrounds = grouped["backgrounds"]
+    if textless_backgrounds:
+        backgrounds = [b for b in backgrounds
+                       if b["language"] is None and b["width"] >= min_backdrop_width]
+
+    return {
+        "logos": shape(grouped["logos"]),
+        "backgrounds": shape(backgrounds),
+        "posters": shape(grouped["posters"]),
+        "squareart": shape(grouped["squareart"]),
+    }
+
+
 def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
                     plex: Optional[PlexMetadataProvider], session: requests.Session,
                     min_backdrop_width: int = 1920, evaluate_white: bool = False,
@@ -493,6 +528,10 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
         groups = fanart_candidate_groups(item, fanart_api_key, min_backdrop_width,
                                          textless_backgrounds=textless_backgrounds,
                                          image_language=image_language)
+    elif source == "apple":
+        groups = apple_candidate_groups(item, tmdb_api_key, min_backdrop_width,
+                                        textless_backgrounds=textless_backgrounds,
+                                        image_language=image_language)
     else:
         tmdb_imgs = tmdb_images(item, tmdb_api_key, image_language) if item.tmdb_id else {}
         groups = {
@@ -539,8 +578,9 @@ def list_candidates(item: FinderItem, types: list[str], *, tmdb_api_key: str,
         out["posters"] = groups["posters"]
 
     # ---- square art: Gracenote under the TMDB tab (TMDB and TVDB have none), fanart.tv's own
-    #      textless squares under its tab. Gracenote carries no dims, so probe them.
-    if "squareart" in types and source == "fanart":
+    #      textless squares and Apple TV's show cover art under their tabs. Gracenote carries no
+    #      dims, so probe them.
+    if "squareart" in types and source in ("fanart", "apple"):
         out["squareart"] = groups.get("squareart", [])
     if want_square and gn.get("backgroundSquare"):
         c = {"source": "gracenote", "ref": gn["backgroundSquare"], "width": None, "height": None}

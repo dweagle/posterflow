@@ -5,6 +5,7 @@ import appleTvIcon from '../../assets/service-icons/appletv.png'
 import googleIcon from '../../assets/service-icons/google.png'
 import tpdbIcon from '../../assets/service-icons/tpdb.png'
 import { appleTvArtworkUrl, googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
+import type { AppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 
 export type ServiceLinkItem = {
   tmdb_id: number
@@ -18,16 +19,19 @@ export type ServiceLinkItem = {
 
 type Props = {
   item: ServiceLinkItem
-  /** Apple TV storefront id. The maker card resolves it from the title's country of origin;
-   *  callers that don't get the US default. */
-  appleTvStorefront?: string
-  /** Fired on hover/focus of the Apple TV link, so a caller can resolve the storefront lazily. */
-  onAppleTvIntent?: () => void
+  appleTv: AppleTvStorefront
+}
+
+// TMDB's terms require crediting JustWatch wherever its watch-provider data is shown.
+function appleTvTitle({ iso, soldIn }: AppleTvStorefront): string {
+  if (soldIn == null) return 'Find Apple TV artwork'
+  const where = soldIn.length ? `Sold in ${soldIn.join(', ')}` : 'Not sold on any Apple TV Store'
+  return `Find Apple TV artwork (${iso} store) · ${where} · via JustWatch`
 }
 
 /** External-service links for a title, as one row of icon buttons. Shared by the maker card and
  *  the artwork finder card so both stay in step. */
-export default function ServiceLinks({ item, appleTvStorefront = '143441', onAppleTvIntent }: Props) {
+export default function ServiceLinks({ item, appleTv }: Props) {
   const hasTmdb = (item.tmdb_id ?? 0) > 0
 
   return (
@@ -50,12 +54,12 @@ export default function ServiceLinks({ item, appleTvStorefront = '143441', onApp
       {(hasTmdb || item.tvdb_id) && (
         <a
           className="tmdb-result-link"
-          href={appleTvArtworkUrl(item.title, appleTvStorefront, item.media_type)}
+          href={appleTvArtworkUrl(item.title, appleTv.storefront, item.media_type)}
           target="_blank"
           rel="noreferrer"
-          onMouseEnter={onAppleTvIntent}
-          onFocus={onAppleTvIntent}
-          title="Find Apple TV artwork"
+          onMouseEnter={appleTv.ensure}
+          onFocus={appleTv.ensure}
+          title={appleTvTitle(appleTv)}
         >
           <img className="tmdb-link-icon" src={appleTvIcon} alt="Apple TV Art" />
         </a>

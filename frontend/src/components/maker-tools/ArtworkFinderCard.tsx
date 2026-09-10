@@ -10,6 +10,8 @@ import {
   getTvdbImageProxyUrl,
   getFanartImageProxyUrl,
   fanartPreviewUrl,
+  getAppleImageProxyUrl,
+  applePreviewUrl,
   type ArtworkCandidate,
   type ArtworkCandidatesResponse,
   type ArtworkListType,
@@ -26,9 +28,11 @@ import { useEnabledImageSources } from '../../hooks/useImageSources'
 import ServiceLinks from './ServiceLinks'
 import ReminderToggle from './ReminderToggle'
 import { useCardOverview } from '../../hooks/useCardOverview'
+import { useAppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
 import fanartIcon from '../../assets/service-icons/fanart.png'
+import appleTvIcon from '../../assets/service-icons/appletv.png'
 
 type Props = {
   item: TmdbSearchResult
@@ -48,7 +52,7 @@ const MISSING_LABEL: Record<ArtworkSubtype, string> = {
   squareart: 'Square Art',
 }
 
-const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv' }
+const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv', apple: 'Apple TV' }
 
 const SECTIONS: { key: ArtworkListType; label: string }[] = [
   { key: 'logo', label: 'Logos' },
@@ -72,6 +76,7 @@ function previewUrl(key: ArtworkListType, c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
   if (c.source === 'tvdb') return c.ref   // already an absolute artwork URL
   if (c.source === 'fanart') return fanartPreviewUrl(c.ref)
+  if (c.source === 'apple') return applePreviewUrl(c.ref)
   const size = key === 'background' ? 'w780' : 'w300'
   return `https://image.tmdb.org/t/p/${size}${c.ref}`
 }
@@ -89,7 +94,7 @@ const CHECKER: CSSProperties = {
 // Full-resolution URL for the lightbox preview.
 function fullUrl(c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
-  if (c.source === 'tvdb' || c.source === 'fanart') return c.ref
+  if (c.source === 'tvdb' || c.source === 'fanart' || c.source === 'apple') return c.ref
   return `https://image.tmdb.org/t/p/original${c.ref}`
 }
 
@@ -98,7 +103,23 @@ function downloadUrl(c: ArtworkCandidate): string {
   if (c.source === 'gracenote') return getGracenoteImageProxyUrl(c.ref)
   if (c.source === 'tvdb') return getTvdbImageProxyUrl(c.ref)
   if (c.source === 'fanart') return getFanartImageProxyUrl(c.ref)
+  if (c.source === 'apple') return getAppleImageProxyUrl(c.ref)
   return getTmdbImageProxyUrl(c.ref)
+}
+
+const TILE_BOX: Partial<Record<ArtworkListType, number>> = { poster: 2 / 3, background: 16 / 9 }
+function offBox(key: ArtworkListType, c: ArtworkCandidate): boolean {
+  const box = TILE_BOX[key]
+  return !!box && !!c.width && !!c.height && Math.abs(c.width / c.height - box) / box > 0.15
+}
+
+// Apple TV art keeps Apple's own shapes; only the ones a drive role expects may be added (backgrounds
+// 16:9, square art square). Crop → Square is always fine since the result is square.
+function shapeFitsRole(key: ArtworkListType, c: ArtworkCandidate): boolean {
+  if (c.source !== 'apple' || !c.width || !c.height) return true
+  if (key === 'background') return Math.abs(c.width / c.height - 16 / 9) < 0.01
+  if (key === 'squareart') return c.width === c.height
+  return true
 }
 
 type ArtworkPreview = { src: string; download: string; filename: string; isLogo: boolean; white: boolean; dims: string }
@@ -112,8 +133,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   // fanart.tv only once their tab is clicked.
   const sources = useEnabledImageSources()
   const { overview } = useCardOverview(item)
+  const appleTv = useAppleTvStorefront(item)
   // TVDB-only items (no TMDB id) open straight on the TVDB tab — TMDB has nothing for them.
-  const [source, setSource] = useState<ImageSource>((item.tmdb_id ?? 0) > 0 ? 'tmdb' : 'tvdb')
+  const [source, setSource] = useState<ImageSource>((item.tmdb_id ?? 0) > 0 ? 'tmdb' : (item.tvdb_id ?? 0) > 0 ? 'tvdb' : 'apple')
   const [language, setLanguage] = useState('en+textless')   // TMDB image language preference
   const [dataBySource, setDataBySource] = useState<Partial<Record<ImageSource, ArtworkCandidatesResponse>>>({})
   const data = dataBySource[source] ?? null
@@ -200,9 +222,11 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
   }, [language, source, load])
 
   const noScope = syncTargetIndex == null
-  // Online browsing needs a TMDB id, or a TVDB id with TheTVDB or fanart.tv configured. Custom
-  // collections have neither — their card offers only the local-folder picker.
+  // Online browsing needs a TMDB id, a TVDB id with TheTVDB or fanart.tv configured, or Apple TV
+  // switched on (it searches by title). Custom collections have no Apple TV entity — their card
+  // offers only the local-folder picker.
   const canBrowse = (item.tmdb_id ?? 0) > 0 || ((item.tvdb_id ?? 0) > 0 && (sources.tvdb || sources.fanart))
+    || (sources.apple && item.media_type !== 'collection')
 
   const handleAdd = useCallback(async (subtype: ArtworkSubtype, c: ArtworkCandidate, confirmOverwrite = false) => {
     if (noScope) {
@@ -351,7 +375,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             <ReminderToggle kind="artwork" item={item} />
           </div>
 
-          <ServiceLinks item={item} />
+          <ServiceLinks item={item} appleTv={appleTv} />
 
           {/* All three chips always render, matching the maker card. */}
           <div className="tmdb-result-ids tmdb-result-ids--compact">
@@ -417,9 +441,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
       {open && (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs" style={{ marginBottom: 10 }}>
-            {(sources.tvdb || sources.fanart) && (
+            {(sources.tvdb || sources.fanart || sources.apple) && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Artwork source">
-                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon]] as const)
+                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon], ['apple', appleTvIcon]] as const)
                   .filter(([id]) => id === 'tmdb' || sources[id])
                   .map(([id, icon]) => (
                   <button
@@ -505,6 +529,9 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                   loading="lazy"
                                   style={{
                                     ...(key === 'squareart' ? { aspectRatio: '1 / 1' } : {}),
+                                    // One box per grid keeps rows aligned; an image far from it (Apple TV's 4:3 and
+                                    // portrait heroes) is shown whole inside the box rather than cropped.
+                                    ...(offBox(key, c) ? { objectFit: 'contain' } : {}),
                                     // Logos: keep the checkerboard on the BUTTON (behind the img), and blank the
                                     // img's own — so "make white" recolors only the logo, board stays checkered.
                                     ...(key === 'logo' ? { backgroundColor: 'transparent', backgroundImage: 'none' } : {}),
@@ -524,6 +551,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                 {c.source === 'gracenote' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Plex</span>}
                                 {c.source === 'tvdb' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>TVDB</span>}
                                 {c.source === 'fanart' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>fanart.tv</span>}
+                                {c.source === 'apple' && <span className="badge badge-grey" style={{ fontSize: '0.62rem' }}>Apple TV</span>}
                                 {/* TL / language code, same badge the TMDB search gallery uses. Square art is a
                                     single Plex image with no language, so it gets none. */}
                                 {key !== 'squareart' && (c.language === null
@@ -539,11 +567,18 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
                                 )}
                               </div>
                               <div style={{ display: 'flex', gap: 6 }}>
-                                {canAdd && (
-                                  <button type="button" className={`btn-toolbar ${isAdded ? '' : 'btn-primary'}`} style={{ flex: 1, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} onClick={() => handleAdd(key as ArtworkSubtype, c)} disabled={isAdding || isAdded}>
-                                    {isAdded ? <><Check size={12} /> Added</> : isAdding ? 'Adding…' : <><Plus size={12} /> Add</>}
-                                  </button>
-                                )}
+                                {canAdd && (shapeFitsRole(key, c)
+                                  ? (
+                                    <button type="button" className={`btn-toolbar ${isAdded ? '' : 'btn-primary'}`} style={{ flex: 1, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} onClick={() => handleAdd(key as ArtworkSubtype, c)} disabled={isAdding || isAdded}>
+                                      {isAdded ? <><Check size={12} /> Added</> : isAdding ? 'Adding…' : <><Plus size={12} /> Add</>}
+                                    </button>
+                                  ) : (
+                                    <span style={{ flex: 1, minWidth: 0, display: 'flex' }} title={`Apple TV art must be ${key === 'background' ? '16:9' : 'square'} to add as ${key === 'squareart' ? 'square art' : key}`}>
+                                      <button type="button" className="btn-toolbar" style={{ flex: 1, minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} disabled>
+                                        <Plus size={12} /> Add
+                                      </button>
+                                    </span>
+                                  ))}
                                 {key === 'logo' && (
                                   <button type="button" className={`btn-toolbar ${white ? 'btn-primary' : ''}`} style={{ minWidth: 0, fontSize: '0.72rem', padding: '3px 6px', justifyContent: 'center' }} title="Recolor to solid white on save" onClick={() => setMakeWhite((m) => ({ ...m, [c.ref]: !m[c.ref] }))}>
                                     <Wand2 size={12} /> White

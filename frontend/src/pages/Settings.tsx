@@ -532,6 +532,8 @@ function Settings() {
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    appleArtworkEnabled,
+    handleToggleAppleArtwork,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -1007,6 +1009,28 @@ function Settings() {
               </div>
             </div>
             <SourceAttribution source="fanart" />
+            <div className="setting-item">
+              <div className="setting-info">
+                <label>Apple TV Artwork</label>
+                <p className="setting-description">
+                  Adds Apple TV as a source in the Maker Tools image browser and the Artwork Finder: movie posters,
+                  square show art, logos and backgrounds, found by title in the storefronts that sell it. No key
+                  needed. Apple publishes no artwork API, so this uses the search behind tv.apple.com and may stop
+                  working without notice.
+                </p>
+              </div>
+              <div className="setting-control">
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={appleArtworkEnabled}
+                    onChange={(e) => void handleToggleAppleArtwork(e.target.checked)}
+                    disabled={saving}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div className="settings-section">

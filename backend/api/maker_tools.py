@@ -39,6 +39,7 @@ from models.job import (
     update_job_state,
 )
 from models.setting import get_setting, get_setting_value, upsert_setting
+from services import apple_tv
 from services import fanart
 from services import tvdb
 from services.discord_notifications import send_discord_notification, send_major_error_notification
@@ -1007,6 +1008,7 @@ def _tmdb_http_error(err: TmdbUpstreamError) -> HTTPException:
 _TMDB_DETAIL_TTL = 10 * 60      # details/overviews/artwork lists
 _TMDB_OVERVIEW_TTL = 24 * 60 * 60   # description text rarely changes; unmatched tabs fetch it in bulk
 _TMDB_STATIC_TTL = 12 * 60 * 60  # facts that don't change (country of origin)
+_TMDB_PROVIDERS_TTL = 24 * 60 * 60  # store availability moves slowly
 _TMDB_CACHE_MAX = 512
 _tmdb_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _tmdb_cache_lock = threading.Lock()
@@ -1725,41 +1727,29 @@ def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) ->
     )
 
 
-class TmdbOriginCountry(BaseModel):
-    countries: list[str] = []  # ISO 3166-1 alpha-2, preference-ordered
+class TmdbAppleStorefront(BaseModel):
+    storefront: str           # Apple storefront id for the artwork-finder link
+    iso: str                  # its country
+    sold_in: list[str] = []   # countries whose Apple TV Store lists the title, preference-ordered
 
 
-@router.get("/tmdb/origin-country", response_model=TmdbOriginCountry)
-def tmdb_origin_country(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) -> TmdbOriginCountry:
-    """Return a movie/TV item's country of origin as ISO 3166-1 alpha-2 codes.
-
-    Used to pre-select the Apple TV artwork region. Prefers TMDB's ``origin_country``
-    (always set for TV, sometimes for movies), then falls back to ``production_countries``.
-    """
+@router.get("/tmdb/apple-storefront", response_model=TmdbAppleStorefront)
+def tmdb_apple_storefront(tmdb_id: int, media_type: str, db: Session = Depends(get_db)) -> TmdbAppleStorefront:
+    """The Apple TV storefront to open for a title: English stores that list it first (TMDB watch
+    providers, data sourced from JustWatch), then its country of origin, then the US."""
     mt = str(media_type or "").strip().lower()
-    if mt not in ("movie", "tv"):
-        return TmdbOriginCountry(countries=[])
-
-    api_key = _get_monitor_tmdb_key(db)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
-
-    url = f"https://api.themoviedb.org/3/{mt}/{tmdb_id}"
-    # A title's country of origin never changes; hold it longer.
-    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "country of origin",
-                          cache_ttl=_TMDB_STATIC_TTL)
-
-    countries: list[str] = []
-    for c in (data.get("origin_country") or []):
-        code = str(c).strip().upper()
-        if code and code not in countries:
-            countries.append(code)
-    for pc in (data.get("production_countries") or []):
-        code = str(pc.get("iso_3166_1") or "").strip().upper()
-        if code and code not in countries:
-            countries.append(code)
-
-    return TmdbOriginCountry(countries=countries)
+    if mt in ("movie", "tv"):
+        api_key = _get_monitor_tmdb_key(db)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+        try:
+            origin, store = apple_tv.storefront_hints(tmdb_id, mt, api_key)
+        except apple_tv.AppleTvError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+    else:
+        origin, store = [], []
+    plan = apple_tv.plan_storefronts(store, origin)
+    return TmdbAppleStorefront(storefront=plan.storefront, iso=plan.iso, sold_in=plan.sold_in)
 
 
 @router.get("/tmdb/season-images", response_model=TmdbImagesResponse)
@@ -1923,6 +1913,72 @@ def fanart_season_images(tvdb_id: int, season_number: int, language: str = "en+t
     except fanart.FanartError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
     posters = fanart.season_posters(record, season_number, fanart.wanted_languages(_tvdb_language(language)))
+    return TmdbImagesResponse(posters=[_fanart_image(i) for i in posters], backdrops=[], logos=[])
+
+
+# ------------------------------------------------------------------ Apple TV image browser
+
+def _apple_plan(db: Session, media_type: str, tmdb_id: int) -> apple_tv.StorefrontPlan:
+    """Storefronts to search, from TMDB's watch providers when a TMDB id and key are at hand."""
+    origin, store = apple_tv.storefront_hints(tmdb_id or None, media_type, _get_monitor_tmdb_key(db))
+    return apple_tv.plan_storefronts(store, origin)
+
+
+def _apple_find(db: Session, media_type: str, title: str, year: int, tmdb_id: int) -> Optional[apple_tv.Found]:
+    if not apple_tv.is_enabled(db):
+        raise HTTPException(status_code=400, detail="Apple TV artwork is turned off in Settings → General → API Keys.")
+    try:
+        plan = _apple_plan(db, media_type, tmdb_id)
+        return apple_tv.fetch_artwork(media_type=media_type, title=title, year=year or None, plan=plan)
+    except apple_tv.AppleTvError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@router.get("/apple/images", response_model=TmdbImagesResponse)
+def apple_images(media_type: str, title: str, year: int = 0, tmdb_id: int = 0, language: str = "en+textless",
+                 db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """Posters, backgrounds, and logos for a title from Apple TV, found by name in the storefronts
+    that sell it. A show's cover art is square and is listed with the posters.
+
+    Returns empty lists (not an error) when no storefront lists the title — collections have no
+    Apple TV entity at all.
+    """
+    mt = str(media_type or "").strip().lower()
+    if mt not in ("movie", "tv", "collection"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    if mt == "collection":
+        return empty
+
+    found = _apple_find(db, mt, title, year, tmdb_id)
+    if not found:
+        return empty
+    try:
+        buckets = apple_tv.artwork_for(found, _tvdb_language(language), fanart.wanted_languages(_tvdb_language(language)))
+    except apple_tv.AppleTvError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    return TmdbImagesResponse(
+        posters=[_fanart_image(i) for i in buckets["posters"] + buckets["squareart"]],
+        backdrops=[_fanart_image(i) for i in buckets["backgrounds"]],
+        logos=[_fanart_image(i) for i in buckets["logos"]],
+    )
+
+
+@router.get("/apple/season-images", response_model=TmdbImagesResponse)
+def apple_season_images(title: str, season_number: int, year: int = 0, tmdb_id: int = 0,
+                        language: str = "en+textless", db: Session = Depends(get_db)) -> TmdbImagesResponse:
+    """One season's cover art from Apple TV (a square, like the show's)."""
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    found = _apple_find(db, "tv", title, year, tmdb_id)
+    if not found:
+        return empty
+    try:
+        seasons = apple_tv.fetch_seasons(str(found.item.get("id") or ""), found.storefront)
+    except apple_tv.AppleTvError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    posters = apple_tv.season_posters(seasons, season_number, fanart.wanted_languages(_tvdb_language(language)),
+                                      apple_tv.storefront_language(found.iso))
     return TmdbImagesResponse(posters=[_fanart_image(i) for i in posters], backdrops=[], logos=[])
 
 
@@ -2101,10 +2157,10 @@ class PsdExportRequest(BaseModel):
 
 def _is_export_ref_valid(ref: str) -> bool:
     """Export refs are source-qualified: a TMDB file_path ('/abc.jpg') or an absolute TVDB /
-    fanart.tv artwork URL."""
+    fanart.tv / Apple TV artwork URL."""
     if ref.startswith("/"):
         return ".." not in ref
-    return tvdb.is_tvdb_image_url(ref) or fanart.is_fanart_image_url(ref)
+    return tvdb.is_tvdb_image_url(ref) or fanart.is_fanart_image_url(ref) or apple_tv.is_apple_image_url(ref)
 
 
 def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
@@ -2951,6 +3007,10 @@ def save_gallery_artwork(request: SaveGalleryArtworkRequest, db: Session = Depen
         raise HTTPException(status_code=400, detail="subtype must be logo, background, or squareart")
     if not _is_export_ref_valid(request.path):
         raise HTTPException(status_code=400, detail="Invalid image path")
+    if apple_tv.is_apple_image_url(request.path) and request.crop_size is None:
+        problem = apple_tv.role_fit_problem(request.subtype, request.path)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
     folder = (get_setting_value(db, folder_key) or "").strip()
     if not folder:
         raise HTTPException(status_code=400, detail=f"No {request.subtype} export folder configured.")

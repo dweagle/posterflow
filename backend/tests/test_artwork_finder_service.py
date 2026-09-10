@@ -286,3 +286,69 @@ def test_list_candidates_fanart_lists_only_textless_square_art(monkeypatch):
     assert [c["ref"].rsplit("/", 1)[1] for c in out["squareart"]] == ["clean.jpg"]
     assert out["squareart"][0]["language"] is None
     assert (out["squareart"][0]["width"], out["squareart"][0]["height"]) == (1000, 1000)
+
+
+# ---------------------------------------------------------------- Apple TV source
+
+_APPLE_TMPL = "https://is1-ssl.mzstatic.com/image/thumb/abc/pr_source.jpg/{w}x{h}.{f}"
+
+
+def _apple_show_listing():
+    return {"id": "umc.cmc.1", "type": "Show", "title": "DECA-DENCE", "images": {
+        "coverArt": {"url": _APPLE_TMPL, "width": 3000, "height": 3000},
+        "coverArt16X9": {"url": _APPLE_TMPL, "width": 1920, "height": 1080},
+        "previewFrame": {"url": _APPLE_TMPL, "width": 3840, "height": 2160},
+        "fullColorContentLogo": {"url": _APPLE_TMPL, "width": 4315, "height": 878},
+    }}
+
+
+class _NoPlex:
+    def images(self, item):
+        raise AssertionError("must not be consulted under the Apple TV tab")
+
+
+def test_list_candidates_apple_source_searches_by_title_and_skips_tmdb_and_plex(monkeypatch):
+    seen = {}
+
+    def fake_hints(tmdb_id, media_type, key):
+        seen.update(tmdb_id=tmdb_id, key=key)
+        return ["JP"], ["AU", "GB"]
+
+    def fake_fetch(**kwargs):
+        seen.update(kwargs)
+        return af.apple_service.Found(item=_apple_show_listing(), iso="GB", storefront="143444")
+
+    monkeypatch.setattr(af.apple_service, "storefront_hints", fake_hints)
+    monkeypatch.setattr(af.apple_service, "fetch_artwork", fake_fetch)
+    monkeypatch.setattr(af, "tmdb_images", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no TMDB")))
+
+    item = af.FinderItem(title="Deca-Dence", year=2020, tmdb_id=92588, media_type="tv")
+    out = af.list_candidates(item, ["logo", "background", "squareart", "poster"], tmdb_api_key="k",
+                             plex=_NoPlex(), session=None, source="apple", textless_backgrounds=False)
+    assert seen["tmdb_id"] == 92588 and seen["key"] == "k"
+    assert seen["title"] == "Deca-Dence" and seen["year"] == 2020
+    assert [iso for iso, _ in seen["plan"].search_order] == ["GB", "AU", "US"]
+    assert [c["source"] for c in out["logos"]] == ["apple"]
+    assert out["logos"][0]["ref"].endswith("/4315x878.png")
+    # A show's square cover art is offered as square art, title and all.
+    assert [(c["width"], c["language"]) for c in out["squareart"]] == [(3000, "en")]
+    assert out["posters"] == []
+    assert sorted(b["width"] for b in out["backgrounds"]) == [1920, 3840]
+
+
+def test_list_candidates_apple_strict_backgrounds_keep_textless_only(monkeypatch):
+    monkeypatch.setattr(af.apple_service, "storefront_hints", lambda *a: ([], []))
+    monkeypatch.setattr(af.apple_service, "fetch_artwork",
+                        lambda **k: af.apple_service.Found(item=_apple_show_listing(), iso="US", storefront="143441"))
+    item = af.FinderItem(title="Deca-Dence", year=2020, tmdb_id=None, media_type="tv")
+    out = af.list_candidates(item, ["background"], tmdb_api_key="", plex=None, session=None,
+                             source="apple", textless_backgrounds=True)
+    assert [b["width"] for b in out["backgrounds"]] == [3840]
+
+
+def test_list_candidates_apple_is_empty_when_no_store_lists_the_title(monkeypatch):
+    monkeypatch.setattr(af.apple_service, "storefront_hints", lambda *a: ([], []))
+    monkeypatch.setattr(af.apple_service, "fetch_artwork", lambda **k: None)
+    item = af.FinderItem(title="BNA", year=2020, tmdb_id=None, media_type="tv")
+    out = af.list_candidates(item, ["logo", "squareart"], tmdb_api_key="", plex=None, session=None, source="apple")
+    assert out["logos"] == [] and out["squareart"] == []

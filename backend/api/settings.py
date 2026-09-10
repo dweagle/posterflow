@@ -86,6 +86,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "tvdb_api_key",
     "tvdb_pin",
     "fanart_api_key",
+    "apple_artwork_enabled",
     # Border Replacer
     "border_replacer_colors",
     "border_replacer_width",

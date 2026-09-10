@@ -1445,7 +1445,7 @@
   align-items: center;
 }
 
-/* Image-source switcher (TMDB | TVDB | fanart.tv) — a joined segmented control left of the content tabs,
+/* Image-source switcher (TMDB | TVDB | fanart.tv | Apple TV) — a joined segmented control left of the content tabs,
    separated by a rule so it doesn't read as another Posters/Backdrops/Logos tab. */
 .tmdb-gallery-sources {
   display: inline-flex;
@@ -1483,6 +1483,11 @@
 .tmdb-gallery-source--fanart {
   --gallery-source-color: #1a8fb8;
   --gallery-source-tint: rgba(26, 143, 184, 0.16);
+}
+
+.tmdb-gallery-source--apple {
+  --gallery-source-color: #d9d9d9;
+  --gallery-source-tint: rgba(217, 217, 217, 0.16);
 }
 
 /* Same 6px corners as the content tabs, but joined into one segmented control. */

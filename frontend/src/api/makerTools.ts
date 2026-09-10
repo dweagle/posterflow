@@ -226,8 +226,9 @@ export const getSeasonImages = async (tmdb_id: number, season_number: number, la
   return getData<TmdbImagesResponse>(`/api/maker-tools/tmdb/season-images?tmdb_id=${tmdb_id}&season_number=${season_number}&language=${encodeURIComponent(language)}`)
 }
 
-/** The image sources the gallery can browse. TMDB is always present; TVDB and fanart.tv each need a configured key. */
-export type ImageSource = 'tmdb' | 'tvdb' | 'fanart'
+/** The image sources the gallery can browse. TMDB is always present; TVDB and fanart.tv each need a configured key;
+ *  Apple TV needs none but can be switched off in Settings. */
+export type ImageSource = 'tmdb' | 'tvdb' | 'fanart' | 'apple'
 
 /**
  * Same response shape as the TMDB gallery, so both sources render through one code path.
@@ -271,20 +272,45 @@ export const getTvdbImageProxyUrl = (url: string): string => {
   return `/api/maker-tools/tvdb/image-proxy?url=${encodeURIComponent(url)}`
 }
 
-/** Origin country/countries (ISO 3166-1 alpha-2, preference-ordered) of a movie/TV item. */
-export const getTmdbOriginCountry = async (tmdb_id: number, media_type: string): Promise<string[]> => {
-  const data = await getData<{ countries: string[] }>(
-    `/api/maker-tools/tmdb/origin-country?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
-  )
-  return data.countries ?? []
+export type AppleImageItem = { media_type: string; title: string; year?: string | number | null; tmdb_id?: number | null }
+
+const appleParams = (item: AppleImageItem, language: string): URLSearchParams => {
+  const params = new URLSearchParams({ media_type: item.media_type, title: item.title, language })
+  if (item.year) params.set('year', String(item.year))
+  if (item.tmdb_id) params.set('tmdb_id', String(item.tmdb_id))   // sharpens which storefronts are searched
+  return params
 }
+
+/** Apple TV images in the gallery's shape, found by title in the storefronts that sell it. A show's
+ *  cover art is square and arrives with the posters. Returns empty lists when no store lists it. */
+export const getAppleImages = async (item: AppleImageItem, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
+  return getData<TmdbImagesResponse>(`/api/maker-tools/apple/images?${appleParams(item, language).toString()}`)
+}
+
+export const getAppleSeasonImages = async (item: AppleImageItem, season_number: number, language: string = 'en+textless'): Promise<TmdbImagesResponse> => {
+  const params = appleParams(item, language)
+  params.set('season_number', String(season_number))
+  return getData<TmdbImagesResponse>(`/api/maker-tools/apple/season-images?${params.toString()}`)
+}
+
+/** The Apple TV storefront to open for a title, chosen server-side from where it is sold. */
+export type TmdbAppleStorefront = {
+  storefront: string   // Apple storefront id
+  iso: string          // its country
+  sold_in: string[]    // countries whose Apple TV Store lists the title, preference-ordered
+}
+
+export const getTmdbAppleStorefront = (tmdb_id: number, media_type: string): Promise<TmdbAppleStorefront> =>
+  getData<TmdbAppleStorefront>(
+    `/api/maker-tools/tmdb/apple-storefront?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
+  )
 
 export type ArtworkSubtype = 'logo' | 'background' | 'squareart'
 // 'poster' is a listable/crop source, not a savable subtype.
 export type ArtworkListType = ArtworkSubtype | 'poster'
 
 /** Where a candidate image comes from — a browsable source, or Plex's Gracenote square art. */
-export type ArtworkCandidateSource = 'tmdb' | 'gracenote' | 'tvdb' | 'fanart'
+export type ArtworkCandidateSource = 'tmdb' | 'gracenote' | 'tvdb' | 'fanart' | 'apple'
 
 export interface ArtworkCandidate {
   source: ArtworkCandidateSource
@@ -427,6 +453,14 @@ export const getFanartImageProxyUrl = (url: string): string => {
 
 /** fanart.tv serves a small preview of every asset at the same path under /preview/. */
 export const fanartPreviewUrl = (url: string): string => url.replace('/fanart/', '/preview/')
+
+export const getAppleImageProxyUrl = (url: string): string => {
+  return `/api/artwork-finder/apple-image-proxy?url=${encodeURIComponent(url)}`
+}
+
+/** Apple's CDN sizes on request: swap the full size at the end of the URL for a 400px-wide one. */
+export const applePreviewUrl = (url: string): string =>
+  url.replace(/\/(\d+)x(\d+)([a-z]*)\.(\w+)$/, (_m, w, h, crop, fmt) => `/400x${Math.round(400 * Number(h) / Number(w))}${crop}.${fmt}`)
 
 /** Proxy URL for previewing a Gracenote (*.plex.tv) image (square art / clear logo). */
 export const getGracenoteImageProxyUrl = (url: string): string => {

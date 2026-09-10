@@ -73,6 +73,7 @@ export const useSettingsCore = ({
   const [tvdbApiKey, setTvdbApiKey] = useState('')
   const [tvdbPin, setTvdbPin] = useState('')
   const [fanartApiKey, setFanartApiKey] = useState('')
+  const [appleArtworkEnabled, setAppleArtworkEnabled] = useState(true)
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
@@ -95,6 +96,7 @@ export const useSettingsCore = ({
       setTvdbApiKey((settings.tvdb_api_key || '').trim())
       setTvdbPin((settings.tvdb_pin || '').trim())
       setFanartApiKey((settings.fanart_api_key || '').trim())
+      setAppleArtworkEnabled((settings.apple_artwork_enabled || '').trim().toLowerCase() !== 'false')
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
@@ -302,6 +304,20 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleToggleAppleArtwork = async (value: boolean): Promise<void> => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ apple_artwork_enabled: value ? 'true' : 'false' })
+      setAppleArtworkEnabled(value)
+      showToast(value ? 'Apple TV artwork enabled' : 'Apple TV artwork disabled')
+    } catch (error) {
+      console.error('Error saving Apple TV artwork setting:', error)
+      showToast('Failed to save setting', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleTogglePsdOpenPhotopea = async (value: boolean): Promise<void> => {
     try {
       setSaving(true)
@@ -341,6 +357,8 @@ export const useSettingsCore = ({
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    appleArtworkEnabled,
+    handleToggleAppleArtwork,
     psdExportFolder,
     setPsdExportFolder,
     handleSavePsdExportFolder,

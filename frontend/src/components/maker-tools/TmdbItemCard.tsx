@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -39,15 +39,17 @@ import {
   getTvdbSeasonImages,
   getFanartImages,
   getFanartSeasonImages,
+  getAppleImages,
+  getAppleSeasonImages,
   getArtworkTaggedDownloadUrl, // canonical download names
   saveGalleryArtworkToFolder,
   type ArtworkSubtype,
-  getTmdbOriginCountry,
   getTvDetails,
   getApiErrorMessage,
   getSettings,
 } from '../../api/client'
 import { useToast } from '../Toast'
+import { useAppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
 import SquareCropModal from './SquareCropModal'
 import ServiceLinks from './ServiceLinks'
@@ -56,149 +58,12 @@ import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
 import fanartIcon from '../../assets/service-icons/fanart.png'
+import appleTvIcon from '../../assets/service-icons/appletv.png'
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-// value = Apple storefront id (matches Ben Dodson's region dropdown 1:1),
-// iso = ISO 3166-1 alpha-2 used to auto-match a TMDB origin_country.
-const APPLE_TV_STOREFRONTS = [
-  { value: '143441', label: 'United States of America', iso: 'US' },
-  { value: '143444', label: 'United Kingdom', iso: 'GB' },
-  { value: '143460', label: 'Australia', iso: 'AU' },
-  { value: '143455', label: 'Canada', iso: 'CA' },
-  { value: '143442', label: 'France', iso: 'FR' },
-  { value: '143443', label: 'Germany', iso: 'DE' },
-  { value: '143450', label: 'Italy', iso: 'IT' },
-  { value: '143462', label: 'Japan', iso: 'JP' },
-  { value: '143452', label: 'Netherlands', iso: 'NL' },
-  { value: '143461', label: 'New Zealand', iso: 'NZ' },
-  { value: '143457', label: 'Norway', iso: 'NO' },
-  { value: '143454', label: 'Spain', iso: 'ES' },
-  { value: '143456', label: 'Sweden', iso: 'SE' },
-  { value: '143459', label: 'Switzerland', iso: 'CH' },
-  { value: '143563', label: 'Algeria', iso: 'DZ' },
-  { value: '143564', label: 'Angola', iso: 'AO' },
-  { value: '143538', label: 'Anguilla', iso: 'AI' },
-  { value: '143540', label: 'Antigua & Barbuda', iso: 'AG' },
-  { value: '143505', label: 'Argentina', iso: 'AR' },
-  { value: '143524', label: 'Armenia', iso: 'AM' },
-  { value: '143445', label: 'Austria', iso: 'AT' },
-  { value: '143568', label: 'Azerbaijan', iso: 'AZ' },
-  { value: '143559', label: 'Bahrain', iso: 'BH' },
-  { value: '143490', label: 'Bangladesh', iso: 'BD' },
-  { value: '143541', label: 'Barbados', iso: 'BB' },
-  { value: '143565', label: 'Belarus', iso: 'BY' },
-  { value: '143446', label: 'Belgium', iso: 'BE' },
-  { value: '143555', label: 'Belize', iso: 'BZ' },
-  { value: '143542', label: 'Bermuda', iso: 'BM' },
-  { value: '143556', label: 'Bolivia', iso: 'BO' },
-  { value: '143525', label: 'Botswana', iso: 'BW' },
-  { value: '143503', label: 'Brazil', iso: 'BR' },
-  { value: '143543', label: 'British Virgin Islands', iso: 'VG' },
-  { value: '143560', label: 'Brunei', iso: 'BN' },
-  { value: '143526', label: 'Bulgaria', iso: 'BG' },
-  { value: '143544', label: 'Cayman Islands', iso: 'KY' },
-  { value: '143483', label: 'Chile', iso: 'CL' },
-  { value: '143465', label: 'China', iso: 'CN' },
-  { value: '143501', label: 'Colombia', iso: 'CO' },
-  { value: '143495', label: 'Costa Rica', iso: 'CR' },
-  { value: '143527', label: "Cote D'Ivoire", iso: 'CI' },
-  { value: '143494', label: 'Croatia', iso: 'HR' },
-  { value: '143557', label: 'Cyprus', iso: 'CY' },
-  { value: '143489', label: 'Czech Republic', iso: 'CZ' },
-  { value: '143458', label: 'Denmark', iso: 'DK' },
-  { value: '143545', label: 'Dominica', iso: 'DM' },
-  { value: '143508', label: 'Dominican Rep.', iso: 'DO' },
-  { value: '143509', label: 'Ecuador', iso: 'EC' },
-  { value: '143516', label: 'Egypt', iso: 'EG' },
-  { value: '143506', label: 'El Salvador', iso: 'SV' },
-  { value: '143518', label: 'Estonia', iso: 'EE' },
-  { value: '143447', label: 'Finland', iso: 'FI' },
-  { value: '143573', label: 'Ghana', iso: 'GH' },
-  { value: '143448', label: 'Greece', iso: 'GR' },
-  { value: '143546', label: 'Grenada', iso: 'GD' },
-  { value: '143504', label: 'Guatemala', iso: 'GT' },
-  { value: '143553', label: 'Guyana', iso: 'GY' },
-  { value: '143510', label: 'Honduras', iso: 'HN' },
-  { value: '143463', label: 'Hong Kong', iso: 'HK' },
-  { value: '143482', label: 'Hungary', iso: 'HU' },
-  { value: '143558', label: 'Iceland', iso: 'IS' },
-  { value: '143467', label: 'India', iso: 'IN' },
-  { value: '143476', label: 'Indonesia', iso: 'ID' },
-  { value: '143449', label: 'Ireland', iso: 'IE' },
-  { value: '143491', label: 'Israel', iso: 'IL' },
-  { value: '143511', label: 'Jamaica', iso: 'JM' },
-  { value: '143528', label: 'Jordan', iso: 'JO' },
-  { value: '143517', label: 'Kazakstan', iso: 'KZ' },
-  { value: '143529', label: 'Kenya', iso: 'KE' },
-  { value: '143466', label: 'Korea, Republic Of', iso: 'KR' },
-  { value: '143493', label: 'Kuwait', iso: 'KW' },
-  { value: '143519', label: 'Latvia', iso: 'LV' },
-  { value: '143497', label: 'Lebanon', iso: 'LB' },
-  { value: '143522', label: 'Liechtenstein', iso: 'LI' },
-  { value: '143520', label: 'Lithuania', iso: 'LT' },
-  { value: '143451', label: 'Luxembourg', iso: 'LU' },
-  { value: '143515', label: 'Macau', iso: 'MO' },
-  { value: '143530', label: 'Macedonia', iso: 'MK' },
-  { value: '143531', label: 'Madagascar', iso: 'MG' },
-  { value: '143473', label: 'Malaysia', iso: 'MY' },
-  { value: '143488', label: 'Maldives', iso: 'MV' },
-  { value: '143532', label: 'Mali', iso: 'ML' },
-  { value: '143521', label: 'Malta', iso: 'MT' },
-  { value: '143533', label: 'Mauritius', iso: 'MU' },
-  { value: '143468', label: 'Mexico', iso: 'MX' },
-  { value: '143523', label: 'Moldova, Republic Of', iso: 'MD' },
-  { value: '143547', label: 'Montserrat', iso: 'MS' },
-  { value: '143484', label: 'Nepal', iso: 'NP' },
-  { value: '143512', label: 'Nicaragua', iso: 'NI' },
-  { value: '143534', label: 'Niger', iso: 'NE' },
-  { value: '143561', label: 'Nigeria', iso: 'NG' },
-  { value: '143562', label: 'Oman', iso: 'OM' },
-  { value: '143477', label: 'Pakistan', iso: 'PK' },
-  { value: '143485', label: 'Panama', iso: 'PA' },
-  { value: '143513', label: 'Paraguay', iso: 'PY' },
-  { value: '143507', label: 'Peru', iso: 'PE' },
-  { value: '143474', label: 'Philippines', iso: 'PH' },
-  { value: '143478', label: 'Poland', iso: 'PL' },
-  { value: '143453', label: 'Portugal', iso: 'PT' },
-  { value: '143498', label: 'Qatar', iso: 'QA' },
-  { value: '143487', label: 'Romania', iso: 'RO' },
-  { value: '143469', label: 'Russia', iso: 'RU' },
-  { value: '143479', label: 'Saudi Arabia', iso: 'SA' },
-  { value: '143535', label: 'Senegal', iso: 'SN' },
-  { value: '143500', label: 'Serbia', iso: 'RS' },
-  { value: '143464', label: 'Singapore', iso: 'SG' },
-  { value: '143496', label: 'Slovakia', iso: 'SK' },
-  { value: '143499', label: 'Slovenia', iso: 'SI' },
-  { value: '143472', label: 'South Africa', iso: 'ZA' },
-  { value: '143486', label: 'Sri Lanka', iso: 'LK' },
-  { value: '143548', label: 'St. Kitts & Nevis', iso: 'KN' },
-  { value: '143549', label: 'St. Lucia', iso: 'LC' },
-  { value: '143550', label: 'St. Vincent & The Grenadines', iso: 'VC' },
-  { value: '143554', label: 'Suriname', iso: 'SR' },
-  { value: '143470', label: 'Taiwan', iso: 'TW' },
-  { value: '143572', label: 'Tanzania', iso: 'TZ' },
-  { value: '143475', label: 'Thailand', iso: 'TH' },
-  { value: '143539', label: 'The Bahamas', iso: 'BS' },
-  { value: '143551', label: 'Trinidad & Tobago', iso: 'TT' },
-  { value: '143536', label: 'Tunisia', iso: 'TN' },
-  { value: '143480', label: 'Turkey', iso: 'TR' },
-  { value: '143552', label: 'Turks & Caicos', iso: 'TC' },
-  { value: '143537', label: 'Uganda', iso: 'UG' },
-  { value: '143492', label: 'Ukraine', iso: 'UA' },
-  { value: '143481', label: 'United Arab Emirates', iso: 'AE' },
-  { value: '143514', label: 'Uruguay', iso: 'UY' },
-  { value: '143566', label: 'Uzbekistan', iso: 'UZ' },
-  { value: '143502', label: 'Venezuela', iso: 'VE' },
-  { value: '143471', label: 'Vietnam', iso: 'VN' },
-  { value: '143571', label: 'Yemen', iso: 'YE' },
-]
-
-// ISO 3166-1 alpha-2 → Apple storefront id, for auto-selecting the region from origin country.
-const STOREFRONT_BY_ISO = new Map(APPLE_TV_STOREFRONTS.map((s) => [s.iso, s.value]))
 
 // TV details shared across cards; keyed "tmdb:tvdb", failed fetches evicted
 const tvDetailsCache = new Map<string, Promise<TmdbTvDetails>>()
@@ -239,7 +104,17 @@ export const TMDB_IMAGE_LANGUAGES = [
 
 // Season image caches are per source — the same season number has different artwork on each.
 const seasonKey = (source: ImageSource, seasonNumber: number) => `${source}:s${seasonNumber}`
-const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv' }
+// Tiles keep one box per grid (2:3 posters, 16:9 backdrops) so rows line up; an image far from that
+// shape — Apple TV's squares and 4:3 / portrait heroes — is shown whole inside it instead of cropped.
+const TILE_BOX = { poster: 2 / 3, backdrop: 16 / 9 } as const
+const tileStyle = (img: TmdbImage, role: keyof typeof TILE_BOX): CSSProperties | undefined =>
+  img.width > 0 && img.height > 0 && Math.abs(img.width / img.height - TILE_BOX[role]) / TILE_BOX[role] > 0.15
+    ? { objectFit: 'contain' } : undefined
+
+// Apple TV keeps its own shapes; a background export folder expects 16:9, so its 4:3 hero can't go there.
+const isWidescreen = (img: TmdbImage): boolean => img.height > 0 && Math.abs(img.width / img.height - 16 / 9) < 0.01
+
+const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv', apple: 'Apple TV' }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -263,9 +138,11 @@ export type PsdConfig = {
   backgroundFolderSet: boolean
   squareartFolderSet: boolean
   // Not PSD-related, but this is the settings-derived config every card already receives:
-  // gates the gallery's TheTVDB and fanart.tv source tabs on a configured API key.
+  // gates the gallery's TheTVDB and fanart.tv source tabs on a configured API key, and Apple TV's
+  // on its Settings switch.
   tvdbEnabled: boolean
   fanartEnabled: boolean
+  appleEnabled: boolean
 }
 
 /** Empty config used before settings load (shared by every consumer). */
@@ -273,7 +150,7 @@ export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
   openPhotopea: false, sameTab: false, defaultEditor: 'photopea',
-  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false, fanartEnabled: false,
+  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false, fanartEnabled: false, appleEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -294,6 +171,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     // The keys are sensitive, so they come back masked when set — presence is all we need.
     tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
     fanartEnabled: !!(s.fanart_api_key || '').trim(),
+    appleEnabled: (s.apple_artwork_enabled || '').trim().toLowerCase() !== 'false',
   }
 }
 
@@ -385,9 +263,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [seasonImages, setSeasonImages] = useState<Record<string, TmdbImagesResponse>>({})
   const [seasonImagesLoading, setSeasonImagesLoading] = useState<Record<string, boolean>>({})
 
-  // Apple TV artwork: storefront auto-detected from the title's country of origin
-  const [appleTvStorefront, setAppleTvStorefront] = useState('143441')
-  const appleTvOriginFetchedRef = useRef(false)  // origin country resolved once per card
+  const appleTv = useAppleTvStorefront(item)
 
   // Save-artwork-to-folder state (gallery logos/backdrops/poster crops → the subtype's configured
   // export folder, artwork-drive names). Keys are `${subtype}:${file_path}`.
@@ -419,24 +295,6 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     void ensureTvDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.tmdb_id])
-
-  // Resolve the title's origin country once (on first hover/focus of the link) and pre-select
-  // the matching Apple storefront, so the link opens the right region by click time.
-  const ensureAppleTvStorefront = useCallback(() => {
-    if (appleTvOriginFetchedRef.current) return
-    if ((item.tmdb_id ?? 0) <= 0) return
-    if (item.media_type !== 'movie' && item.media_type !== 'tv') return
-    appleTvOriginFetchedRef.current = true
-    getTmdbOriginCountry(item.tmdb_id, item.media_type)
-      .then((countries) => {
-        for (const iso of countries) {
-          if (iso.toUpperCase() === 'JP' || iso.toUpperCase() === 'CN') continue  // JP/CN stores list native-language titles; English queries find nothing there
-          const storefront = STOREFRONT_BY_ISO.get(iso.toUpperCase())
-          if (storefront) { setAppleTvStorefront(storefront); break }
-        }
-      })
-      .catch(() => { /* keep the current default */ })
-  }, [item.tmdb_id, item.media_type])
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -545,7 +403,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         ? await getSeasonImages(item.tmdb_id, seasonNumber, galleryLanguage)
         : imageSource === 'tvdb'
           ? await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
-          : await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
+          : imageSource === 'fanart'
+            ? await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
+            : await getAppleSeasonImages(item, seasonNumber, galleryLanguage)
       setSeasonImages((prev) => ({ ...prev, [sk]: data }))
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load season images'), 'error')
@@ -566,7 +426,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         ? await getTmdbImages(item.tmdb_id, item.media_type, language)
         : source === 'tvdb'
           ? await getTvdbImages(item, language)
-          : await getFanartImages(item, language)
+          : source === 'fanart'
+            ? await getFanartImages(item, language)
+            : await getAppleImages(item, language)
       setImagesBySource((prev) => ({ ...prev, [source]: data }))
       // Keep the current tab when the new source has content for it, else fall to the first
       // tab that does — so switching sources never lands on a needlessly empty grid.
@@ -1001,7 +863,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             <ReminderToggle kind="poster" item={item} />
           </div>
 
-          <ServiceLinks item={item} appleTvStorefront={appleTvStorefront} onAppleTvIntent={ensureAppleTvStorefront} />
+          <ServiceLinks item={item} appleTv={appleTv} />
 
           {/* ID chips — all three always render, so the row keeps its shape whichever ids the
               item happens to carry. Present ones copy on click; missing ones say so. */}
@@ -1078,10 +940,11 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       {galleryOpen && (galleryImages || galleryLoading) && (() => { const _panel = (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs">
-            {(psdConfig.tvdbEnabled || psdConfig.fanartEnabled) && (
+            {(psdConfig.tvdbEnabled || psdConfig.fanartEnabled || psdConfig.appleEnabled) && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Image source">
-                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon]] as const)
-                  .filter(([id]) => id === 'tmdb' || (id === 'tvdb' ? psdConfig.tvdbEnabled : psdConfig.fanartEnabled))
+                {([['tmdb', tmdbIcon, true], ['tvdb', tvdbIcon, psdConfig.tvdbEnabled],
+                   ['fanart', fanartIcon, psdConfig.fanartEnabled], ['apple', appleTvIcon, psdConfig.appleEnabled]] as const)
+                  .filter(([, , enabled]) => enabled)
                   .map(([id, icon]) => (
                   <button
                     key={id}
@@ -1248,7 +1111,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                         onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(false); setGalleryPreviewRole('poster'); setGalleryPreviewSeason(selectedSeason) }}
                                         title="Preview full size"
                                       >
-                                        <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
+                                        <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" style={tileStyle(img, 'poster')} />
                                       </button>
                                       <div className="tmdb-thumb-actions">
                                         <button
@@ -1330,7 +1193,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                             onClick={() => { setGalleryPreview(img); setGalleryPreviewIsLogo(activeGalleryTab === 'logos'); setGalleryPreviewRole(role); setGalleryPreviewSeason(null) }}
                             title="Preview full size"
                           >
-                            <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" />
+                            <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" style={role === 'logo' ? undefined : tileStyle(img, role)} />
                           </button>
                           <div className="tmdb-thumb-actions">
                             <button
@@ -1383,7 +1246,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                             >
                               <Download size={12} />
                             </button>
-                            {((role === 'logo' && psdConfig.logoFolderSet) || (role === 'backdrop' && psdConfig.backgroundFolderSet)) && (() => {
+                            {((role === 'logo' && psdConfig.logoFolderSet) || (role === 'backdrop' && psdConfig.backgroundFolderSet && (imageSource !== 'apple' || isWidescreen(img)))) && (() => {
                               const subtype: ArtworkSubtype = role === 'logo' ? 'logo' : 'background'
                               const key = `${subtype}:${img.file_path}`
                               return (
@@ -1452,7 +1315,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               >
                 <Download size={13} /> Download
               </button>
-              {((galleryPreviewRole === 'logo' && psdConfig.logoFolderSet) || (galleryPreviewRole === 'backdrop' && psdConfig.backgroundFolderSet)) && (() => {
+              {((galleryPreviewRole === 'logo' && psdConfig.logoFolderSet) || (galleryPreviewRole === 'backdrop' && psdConfig.backgroundFolderSet && (imageSource !== 'apple' || isWidescreen(galleryPreview)))) && (() => {
                 const subtype: ArtworkSubtype = galleryPreviewRole === 'logo' ? 'logo' : 'background'
                 const key = `${subtype}:${galleryPreview.file_path}`
                 return (

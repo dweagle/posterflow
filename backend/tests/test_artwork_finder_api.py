@@ -703,6 +703,90 @@ def test_add_accepts_a_fanart_candidate(client, test_db, tmp_path, monkeypatch):
     assert seen["source"] == "fanart" and seen["ref"] == FANART_LOGO
 
 
+# ---------------------------------------------------------------- Apple TV source
+
+APPLE_LOGO = "https://is1-ssl.mzstatic.com/image/thumb/abc/4315x878.png"
+
+
+def test_candidates_apple_is_refused_when_turned_off(client, test_db):
+    upsert_setting(test_db, "apple_artwork_enabled", "false")
+    test_db.commit()
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 92588, "media_type": "tv", "title": "Deca-Dence", "source": "apple"})
+    assert resp.status_code == 400
+    assert "Apple TV" in resp.json()["detail"]
+
+
+def test_candidates_apple_lists_without_a_tmdb_key(client, test_db, monkeypatch):
+    seen = {}
+
+    def fake_list(item, wanted, **kwargs):
+        seen.update(kwargs)
+        return {"logos": [{"source": "apple", "ref": APPLE_LOGO, "width": 4315, "height": 878, "language": "en"}],
+                "backgrounds": [], "squareart": [], "posters": [], "plex_available": False}
+
+    monkeypatch.setattr("services.artwork_finder.list_candidates", fake_list)
+    resp = client.get("/api/artwork-finder/candidates", params={
+        "tmdb_id": 0, "media_type": "tv", "title": "Deca-Dence", "source": "apple"})
+    assert resp.status_code == 200, resp.text
+    assert seen["source"] == "apple" and seen["tmdb_api_key"] == ""
+    assert resp.json()["logos"][0]["source"] == "apple"
+
+
+def test_add_accepts_an_apple_candidate(client, test_db, tmp_path, monkeypatch):
+    _set_asset_scope(test_db, str(tmp_path))
+    seen = {}
+
+    def fake_save(**kwargs):
+        seen.update(kwargs)
+        return {"status": "added", "written": "Deca-Dence (2020) {tmdb-92588}_logo.png",
+                "subfolder": "logos", "archived": False}
+
+    monkeypatch.setattr(af, "save_candidate", fake_save)
+    resp = client.post("/api/artwork-finder/add", json={
+        "sync_target_index": 0, "title": "Deca-Dence", "media_type": "tv", "subtype": "logo",
+        "source": "apple", "ref": APPLE_LOGO, "year": 2020, "tmdb_id": 92588})
+    assert resp.status_code == 200, resp.text
+    assert seen["source"] == "apple" and seen["ref"] == APPLE_LOGO
+
+
+def test_add_refuses_apple_art_of_the_wrong_shape_for_the_role(client, test_db, tmp_path, monkeypatch):
+    _set_asset_scope(test_db, str(tmp_path))
+    monkeypatch.setattr(af, "save_candidate", lambda **k: (_ for _ in ()).throw(AssertionError("must not save")))
+    hero = "https://is1-ssl.mzstatic.com/image/thumb/abc/4320x3240.jpg"
+    resp = client.post("/api/artwork-finder/add", json={
+        "sync_target_index": 0, "title": "Deca-Dence", "media_type": "tv", "subtype": "background",
+        "source": "apple", "ref": hero, "year": 2020, "tmdb_id": 92588})
+    assert resp.status_code == 400
+    assert "16:9" in resp.json()["detail"]
+
+    resp = client.post("/api/artwork-finder/add", json={
+        "sync_target_index": 0, "title": "Deca-Dence", "media_type": "tv", "subtype": "squareart",
+        "source": "apple", "ref": hero, "year": 2020, "tmdb_id": 92588})
+    assert resp.status_code == 400
+    assert "square" in resp.json()["detail"]
+
+
+def test_add_accepts_apple_art_that_fits_the_role(client, test_db, tmp_path, monkeypatch):
+    _set_asset_scope(test_db, str(tmp_path))
+    seen = []
+    monkeypatch.setattr(af, "save_candidate", lambda **k: seen.append(k["ref"]) or {
+        "status": "added", "written": "x", "subfolder": "backgrounds", "archived": False})
+    for subtype, ref in (("background", "https://is1-ssl.mzstatic.com/image/thumb/abc/3840x2160.jpg"),
+                         ("squareart", "https://is1-ssl.mzstatic.com/image/thumb/abc/3000x3000.jpg")):
+        resp = client.post("/api/artwork-finder/add", json={
+            "sync_target_index": 0, "title": "Deca-Dence", "media_type": "tv", "subtype": subtype,
+            "source": "apple", "ref": ref, "year": 2020, "tmdb_id": 92588})
+        assert resp.status_code == 200, resp.text
+    assert len(seen) == 2
+
+
+def test_apple_image_proxy_only_allows_apples_cdn(client):
+    for url in ("https://evil.example.com/x.png", "http://is1-ssl.mzstatic.com/image/thumb/abc/1x1.jpg"):
+        resp = client.get("/api/artwork-finder/apple-image-proxy", params={"url": url})
+        assert resp.status_code == 400
+
+
 def test_fanart_image_proxy_only_allows_the_asset_host(client):
     for url in ("https://evil.example.com/x.png", "http://assets.fanart.tv/fanart/x.png"):
         resp = client.get("/api/artwork-finder/fanart-image-proxy", params={"url": url})

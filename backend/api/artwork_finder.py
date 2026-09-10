@@ -23,6 +23,7 @@ from core.logging import log_user_action
 from database import get_db
 from models.job import JOB_STATUSES_ACTIVE, JOB_TYPE_ARTWORK_PULL, Job, create_job
 from models.setting import get_setting, upsert_setting
+from services import apple_tv
 from services import artwork_finder as af
 from services import fanart
 from services import text_logo
@@ -48,8 +49,8 @@ class Candidate(BaseModel):
 LISTABLE_TYPES = {"logo", "background", "squareart", "poster"}
 
 # Sources the browser can list, and the wider set a chosen candidate may come from.
-BROWSE_SOURCES = ("tmdb", "tvdb", "fanart")
-CANDIDATE_SOURCES = ("tmdb", "gracenote", "tvdb", "fanart")
+BROWSE_SOURCES = ("tmdb", "tvdb", "fanart", "apple")
+CANDIDATE_SOURCES = ("tmdb", "gracenote", "tvdb", "fanart", "apple")
 
 
 def _year_or_none(v):
@@ -200,15 +201,19 @@ def get_candidates(
     showing nothing at all."""
     src = str(source or "tmdb").strip().lower()
     if src not in BROWSE_SOURCES:
-        raise HTTPException(status_code=400, detail="source must be tmdb, tvdb, or fanart")
+        raise HTTPException(status_code=400, detail="source must be tmdb, tvdb, fanart, or apple")
 
     item = _make_item(title=title, media_type=media_type, year=year, tmdb_id=tmdb_id,
                       tvdb_id=tvdb_id, imdb_id=imdb_id)
     wanted = [t.strip() for t in types.split(",") if t.strip() in LISTABLE_TYPES]
 
-    key = _require_tmdb_key(db) if src == "tmdb" else ""
+    # Apple TV searches by title; a TMDB key only sharpens which storefronts it tries.
+    key = _require_tmdb_key(db) if src == "tmdb" else _tmdb_key(db) if src == "apple" else ""
     tvdb_creds: Optional[tuple[str, str]] = None
     fanart_key = ""
+    if src == "apple" and not apple_tv.is_enabled(db):
+        raise HTTPException(status_code=400,
+                            detail="Apple TV artwork is turned off in Settings → General → API Keys.")
     if src == "tvdb":
         tvdb_key, tvdb_pin = tvdb.get_tvdb_credentials(db)
         if not tvdb_key:
@@ -234,6 +239,8 @@ def get_candidates(
         raise HTTPException(status_code=exc.status, detail=str(exc))
     except fanart.FanartError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    except apple_tv.AppleTvError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
     return CandidatesResponse(**result)
 
 
@@ -244,7 +251,12 @@ def add_artwork(request: AddRequest, db: Session = Depends(get_db)) -> AddRespon
     if request.subtype not in af.SUBTYPE_EXT:
         raise HTTPException(status_code=400, detail="subtype must be logo, background, or squareart")
     if request.source not in CANDIDATE_SOURCES:
-        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, tvdb, or fanart")
+        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, tvdb, fanart, or apple")
+    if request.source == "apple":
+        # Apple keeps its own shapes; only the ones a drive role expects may go in (crop-to-square is separate).
+        problem = apple_tv.role_fit_problem(request.subtype, request.ref)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
 
     source_dir, is_asset_drive, label = _resolve_artwork_scope(db, request.sync_target_index)
     item = _make_item(title=request.title, media_type=request.media_type, year=request.year,
@@ -270,7 +282,7 @@ def crop_square(request: CropSquareRequest, db: Session = Depends(get_db)) -> Ad
     """Crop a chosen image (usually a poster/background) to a square and save it as the item's
     square art — for titles where Plex has no square art."""
     if request.source not in CANDIDATE_SOURCES:
-        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, tvdb, or fanart")
+        raise HTTPException(status_code=400, detail="source must be tmdb, gracenote, tvdb, fanart, or apple")
     if request.size <= 0:
         raise HTTPException(status_code=400, detail="crop size must be positive")
 
@@ -365,7 +377,8 @@ def tmdb_tagged_download(
     ``path`` is source-qualified the same way PSD export refs are: a TMDB file_path ('/abc.jpg')
     or an absolute TVDB / fanart.tv artwork URL."""
     is_tmdb = path.startswith("/")
-    if not is_tmdb and not tvdb.is_tvdb_image_url(path) and not fanart.is_fanart_image_url(path):
+    if not is_tmdb and not (tvdb.is_tvdb_image_url(path) or fanart.is_fanart_image_url(path)
+                            or apple_tv.is_apple_image_url(path)):
         raise HTTPException(status_code=400, detail="Invalid image path")
     item = _make_item(title=title, media_type=media_type, year=year, tmdb_id=tmdb_id,
                       tvdb_id=tvdb_id, imdb_id=imdb_id)
@@ -410,6 +423,24 @@ def fanart_image_proxy(url: str = Query(...)):
     assets.fanart.tv."""
     if not fanart.is_fanart_image_url(url):
         raise HTTPException(status_code=400, detail="Only https assets.fanart.tv image URLs are allowed.")
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch image: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Image fetch failed (HTTP {resp.status_code}).")
+    filename = urlparse(url).path.rstrip("/").split("/")[-1] or "artwork.jpg"
+    return StreamingResponse(resp.iter_content(chunk_size=8192),
+                             media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/apple-image-proxy")
+def apple_image_proxy(url: str = Query(...)):
+    """Proxy an Apple TV artwork download so the browser gets a proper filename. Host-allowlisted
+    to Apple's artwork CDN."""
+    if not apple_tv.is_apple_image_url(url):
+        raise HTTPException(status_code=400, detail="Only https *.mzstatic.com image URLs are allowed.")
     try:
         resp = requests.get(url, stream=True, timeout=30)
     except Exception as exc:
