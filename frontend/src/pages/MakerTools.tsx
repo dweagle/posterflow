@@ -5,6 +5,7 @@ import {
   getApiErrorMessage,
   Drive,
   checkTmdbPosterAvailability,
+  posterCheckKey,
   getDrives,
   getMakerMonitorConfig,
   getMakerMonitorLastResult,
@@ -140,7 +141,7 @@ function MakerTools() {
   const [tmdbResults, setTmdbResults] = useState<TmdbSearchResult[] | null>(null)
   const [tmdbError, setTmdbError] = useState<string | null>(null)
   const [tmdbHelpExpanded, setTmdbHelpExpanded] = useState(false)
-  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   // PSD export settings (used in config modal and passed to TmdbItemCard).
   // CL2K = the existing keys (default style); MM2K = the *_mm2k counterparts.
@@ -513,7 +514,7 @@ function MakerTools() {
   const fetchPosterAvailability = async (results: TmdbSearchResult[]) => {
     if (results.length === 0) return
     try {
-      const items = results.map((r) => ({ tmdb_id: r.tmdb_id, title: r.title, year: r.year, media_type: r.media_type }))
+      const items = results.map((r) => ({ tmdb_id: r.tmdb_id, tvdb_id: r.tvdb_id, title: r.title, year: r.year, media_type: r.media_type }))
       const availability = await checkTmdbPosterAvailability(items)
       setPosterAvailability(availability)
       setPosterAvailabilityChecked(true)
@@ -755,7 +756,7 @@ function MakerTools() {
                           <TmdbItemCard
                             item={{ tmdb_id: hasTmdb ? tmdbId : 0, media_type: 'tv', title: show.name, year: show.first_air_year, overview: show.overview || '', poster_url: show.poster_url || '', homepage: hasTmdb ? show.homepage : '', imdb_id: show.imdb_id || null, tvdb_id: show.tvdb_id ?? null }}
                             psdConfig={psdConfig}
-                            posterAvailability={hasTmdb ? posterAvailability[tmdbId] : undefined}
+                            posterAvailability={posterAvailability[posterCheckKey({ tmdb_id: hasTmdb ? tmdbId : 0, tvdb_id: show.tvdb_id }) ?? '']}
                             posterAvailabilityChecked={posterAvailabilityChecked}
                             hideTitle
                           />
@@ -837,7 +838,7 @@ function MakerTools() {
                           <TmdbItemCard
                             item={{ tmdb_id: parsed ? parsed.tmdb_id : 0, media_type: parsed ? parsed.media_type : (discoveryTab === 'movies' ? 'movie' : 'tv'), title: item.name, year: item.date?.slice(0, 4) ?? '', overview: item.overview || '', poster_url: item.poster_url || '', homepage: parsed ? item.homepage : '', imdb_id: item.imdb_id || null, tvdb_id: item.tvdb_id ?? null }}
                             psdConfig={psdConfig}
-                            posterAvailability={parsed ? posterAvailability[parsed.tmdb_id] : undefined}
+                            posterAvailability={posterAvailability[posterCheckKey({ tmdb_id: parsed ? parsed.tmdb_id : 0, tvdb_id: item.tvdb_id }) ?? '']}
                             posterAvailabilityChecked={posterAvailabilityChecked}
                             hideTitle
                           />
@@ -961,7 +962,7 @@ function MakerTools() {
                       <TmdbItemCard
                         key={`${item.media_type}-${item.tmdb_id}`}
                         item={item}
-                        posterAvailability={posterAvailability[item.tmdb_id]}
+                        posterAvailability={posterAvailability[posterCheckKey(item) ?? '']}
                         posterAvailabilityChecked={posterAvailabilityChecked}
                         psdConfig={psdConfig}
                       />

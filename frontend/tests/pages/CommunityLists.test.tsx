@@ -64,6 +64,8 @@ vi.mock('../../src/api/client', () => ({
 
 vi.mock('../../src/api/makerTools', () => ({
   checkTmdbPosterAvailability: () => Promise.resolve({}),
+  posterCheckKey: (item: { tmdb_id?: number | null; tvdb_id?: number | null }) =>
+    item.tmdb_id ? `tmdb-${item.tmdb_id}` : item.tvdb_id ? `tvdb-${item.tvdb_id}` : null,
 }))
 
 // Avoid TMDB lookups from the style modal's per-row child.

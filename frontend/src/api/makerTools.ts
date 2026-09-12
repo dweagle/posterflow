@@ -892,21 +892,30 @@ export interface PosterStyleEntry {
   seasons: number[] // sorted season numbers, empty for non-TV
 }
 
-/** PosterAvailability is a list of per-style entries for a TMDB item. */
+/** PosterAvailability is a list of per-style entries for one item. */
 export type PosterAvailability = PosterStyleEntry[]
 
 export interface PosterCheckItem {
-  tmdb_id: number
+  tmdb_id?: number | null
+  tvdb_id?: number | null   // a show TMDB doesn't carry is checked by this instead
   title: string
   year: string
   media_type: string
 }
 
-/** Returns a map of tmdb_id -> per-style availability info. */
+/** The key an item's availability comes back under: its TMDB id, else its TheTVDB id; null for a
+ *  custom item with neither, which can't be checked. Mirrors the server. */
+export const posterCheckKey = (item: { tmdb_id?: number | null; tvdb_id?: number | null }): string | null => {
+  if (item.tmdb_id && item.tmdb_id > 0) return `tmdb-${item.tmdb_id}`
+  if (item.tvdb_id && item.tvdb_id > 0) return `tvdb-${item.tvdb_id}`
+  return null
+}
+
+/** Returns a map of posterCheckKey -> per-style availability info. Items with no id are skipped. */
 export const checkTmdbPosterAvailability = async (
   items: PosterCheckItem[],
-): Promise<Record<number, PosterAvailability>> => {
-  return postData<Record<number, PosterAvailability>>('/api/maker-tools/tmdb/poster-check', { items })
+): Promise<Record<string, PosterAvailability>> => {
+  return postData<Record<string, PosterAvailability>>('/api/maker-tools/tmdb/poster-check', { items })
 }
 
 /**

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
-import { checkTmdbPosterAvailability, type PosterAvailability } from '../../api/makerTools'
+import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../../api/makerTools'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
 import { useAppEvents } from '../../contexts/AppEventsContext'
 import { useToast } from '../Toast'
@@ -99,7 +99,7 @@ export default function ListsView() {
   const [actionStates, setActionStates] = useState<Map<string, 'loading' | string>>(new Map())
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
-  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)
   const [confirmClearMine, setConfirmClearMine] = useState(false)
@@ -112,7 +112,7 @@ export default function ListsView() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadTargetRef = useRef<string | null>(null)
   const fetchRef = useRef<(() => void) | null>(null)
-  const checkedTmdbRef = useRef<Set<number>>(new Set())
+  const checkedTmdbRef = useRef<Set<string>>(new Set())   // posterCheckKey values already looked up
   const requestSeqRef = useRef(0)
 
   useEffect(() => {
@@ -268,27 +268,30 @@ export default function ListsView() {
     }
   }, [reloadInPlace, fetchOwners, refreshClaimStatus])
 
-  // Poster availability for the loaded items. Check only tmdb_ids we haven't
+  // Poster availability for the loaded items. Check only ids we haven't
   // checked yet and merge the result — a "Load more" appends items, so re-checking
   // the whole (growing) set each time made every Load more slower than the last and
   // could stall the backend (one scan per item). In-place card updates
   // (claim/release/upload) add no new ids, so they never trigger a re-check or
   // flash the ✓/✗ indicators.
   useEffect(() => {
-    const lookups: { tmdb_id: number; title: string; year: string; media_type: 'movie' | 'collection' | 'tv' }[] = []
-    const batch = new Set<number>()
+    const lookups: { key: string; tmdb_id: number | null; tvdb_id: number | null; title: string; year: string; media_type: 'movie' | 'collection' | 'tv' }[] = []
+    const batch = new Set<string>()
     for (const i of items) {
-      if (i.tmdb_id == null || checkedTmdbRef.current.has(i.tmdb_id) || batch.has(i.tmdb_id)) continue
-      batch.add(i.tmdb_id)
+      const key = posterCheckKey(i)
+      if (key == null || checkedTmdbRef.current.has(key) || batch.has(key)) continue
+      batch.add(key)
       lookups.push({
+        key,
         tmdb_id: i.tmdb_id,
+        tvdb_id: i.tvdb_id,
         title: i.title,
         year: i.year ? String(i.year) : '',
         media_type: i.media_type === 'movie' ? 'movie' : i.media_type === 'collection' ? 'collection' : 'tv',
       })
     }
     if (lookups.length === 0) return
-    lookups.forEach((l) => checkedTmdbRef.current.add(l.tmdb_id))
+    lookups.forEach((l) => checkedTmdbRef.current.add(l.key))
     checkTmdbPosterAvailability(lookups)
       .then((availability) => {
         setPosterAvailability((prev) => ({ ...prev, ...availability }))
@@ -296,7 +299,7 @@ export default function ListsView() {
       })
       .catch(() => {
         // let these ids be retried on a later change
-        lookups.forEach((l) => checkedTmdbRef.current.delete(l.tmdb_id))
+        lookups.forEach((l) => checkedTmdbRef.current.delete(l.key))
       })
   }, [items])
 
@@ -793,7 +796,7 @@ export default function ListsView() {
                 isMaker={isMaker}
                 showMakerTools={showMakerTools}
                 psdConfig={psdConfig}
-                posterAvailability={item.tmdb_id != null ? posterAvailability[item.tmdb_id] : undefined}
+                posterAvailability={posterAvailability[posterCheckKey(item) ?? '']}
                 posterAvailabilityChecked={posterAvailabilityChecked}
                 dragOver={dragOverId === item.id}
                 onDragEnter={() => setDragOverId(item.id)}

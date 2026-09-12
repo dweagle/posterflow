@@ -17,7 +17,7 @@ import zlib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -1562,14 +1562,30 @@ def _matches_media_type(file_name: str, media_type: str) -> bool:
 
 
 class PosterCheckItem(BaseModel):
-    tmdb_id: int
+    tmdb_id: int = 0
+    tvdb_id: int = 0      # a show TMDB doesn't carry is keyed and matched by this instead
     title: str
     year: str = ""
     media_type: str = ""  # "movie" | "tv" | "collection"
 
+    # Cards send whatever the item carries, so a missing id arrives as null.
+    @field_validator("tmdb_id", "tvdb_id", mode="before")
+    @classmethod
+    def _null_id_is_none(cls, v):
+        return 0 if v is None else v
+
 
 class PosterCheckRequest(BaseModel):
     items: list[PosterCheckItem]
+
+
+def poster_check_key(tmdb_id: int | None, tvdb_id: int | None) -> str | None:
+    """The result key for one item: its TMDB id, else its TheTVDB id. Mirrored in the client."""
+    if tmdb_id and int(tmdb_id) > 0:
+        return f"tmdb-{int(tmdb_id)}"
+    if tvdb_id and int(tvdb_id) > 0:
+        return f"tvdb-{int(tvdb_id)}"
+    return None
 
 
 def _collect_style_seasons(
@@ -1577,15 +1593,16 @@ def _collect_style_seasons(
     media_type: str,
     year: str,
     expected_tmdb_id: int | None = None,
+    expected_tvdb_id: int | None = None,
 ) -> dict[str, set[int]]:
     """Build a mapping of style_label -> {season_numbers} from (Poster, Drive) rows.
 
     Every matched style is present as a key; the season set is empty for non-TV items.
-    When expected_tmdb_id is provided, any file that carries a {tmdb-XXXX} tag must
-    have XXXX == expected_tmdb_id — this double-checks title-fallback matches against
-    the actual TMDB ID so a file for a different title can't trigger a false positive.
-    Files with no embedded TMDB tag are always accepted (they are the intended target
-    of the fallback for legacy untagged posters).
+    When expected_tmdb_id / expected_tvdb_id is provided, any file that carries that kind of
+    id tag must carry the expected value — this double-checks title-fallback matches against
+    the actual ids so a file for a different title can't trigger a false positive. Files with
+    no embedded tag are always accepted (they are the intended target of the fallback for
+    legacy untagged posters).
     """
     style_seasons: dict[str, set[int]] = {}
     for poster, drive in rows:
@@ -1596,6 +1613,10 @@ def _collect_style_seasons(
         if expected_tmdb_id is not None:
             m = TMDB_REGEX.search(poster.file_name)
             if m and int(m.group(1)) != expected_tmdb_id:
+                continue
+        if expected_tvdb_id is not None:
+            m = TVDB_REGEX.search(poster.file_name)
+            if m and int(m.group(1)) != expected_tvdb_id:
                 continue
         style = "Custom" if drive.is_custom else drive.style_type
         if style not in style_seasons:
@@ -1614,66 +1635,82 @@ def _collect_style_seasons(
 def tmdb_poster_check(
     payload: PosterCheckRequest,
     db: Session = Depends(get_db),
-) -> dict[int, list[dict[str, Any]]]:
-    """Check the local poster database for matching files for a list of TMDB items.
+) -> dict[str, list[dict[str, Any]]]:
+    """Check the local poster database for matching files for a list of items.
 
-    Primary match: indexed lookup on the extracted tmdb_id column (collision-safe via
-    the media type guard). Fallback match: filename starts with title + year, for legacy
-    files synced before tmdb_id existed or files with no embedded TMDB ID.
+    Primary match: indexed lookup on the extracted tmdb_id column (collision-safe via the
+    media type guard). Fallback match, batched into one scan: a {tvdb-N} tag for the item's
+    TheTVDB id (a show TMDB doesn't carry has nothing else), or a filename starting with
+    title + year for legacy files synced before tmdb_id existed or files with no embedded id.
 
-    Returns a mapping of tmdb_id -> list of {style, seasons} objects, one per drive style found.
+    Returns a mapping of poster_check_key -> list of {style, seasons} objects, one per drive
+    style found. Items with neither id are skipped.
     """
     from models.poster import Poster
 
-    result: dict[int, list[dict[str, Any]]] = {}
-    items = [it for it in payload.items if it.title.strip()]
+    result: dict[str, list[dict[str, Any]]] = {}
+    items: list[tuple[str, PosterCheckItem]] = []
+    for it in payload.items:
+        key = poster_check_key(it.tmdb_id, it.tvdb_id)
+        if key and it.title.strip():
+            items.append((key, it))
     if not items:
         return result
 
-    def _emit(item: PosterCheckItem, style_seasons: dict[str, set[int]]) -> None:
+    def _emit(key: str, style_seasons: dict[str, set[int]]) -> None:
         if style_seasons:
-            result[item.tmdb_id] = [
+            result[key] = [
                 {"style": style, "seasons": sorted(style_seasons[style])}
                 for style in sorted(style_seasons.keys())
             ]
 
     # ── Primary: one indexed lookup for every TMDB ID in the batch ──────────
-    ids = list({it.tmdb_id for it in items})
+    ids = list({it.tmdb_id for _, it in items if it.tmdb_id > 0})
     rows_by_id: dict[int, list[tuple]] = {}
-    for poster, drive in (
-        db.query(Poster, Drive)
-        .join(Drive, Poster.drive_id == Drive.drive_id)
-        .filter(Poster.tmdb_id.in_(ids), Drive.last_synced.isnot(None))
-        .all()
-    ):
-        rows_by_id.setdefault(poster.tmdb_id, []).append((poster, drive))
+    if ids:
+        for poster, drive in (
+            db.query(Poster, Drive)
+            .join(Drive, Poster.drive_id == Drive.drive_id)
+            .filter(Poster.tmdb_id.in_(ids), Drive.last_synced.isnot(None))
+            .all()
+        ):
+            rows_by_id.setdefault(poster.tmdb_id, []).append((poster, drive))
 
-    # ── Fallback: title + year for untagged files, batched into one scan ────
-    unmatched: list[tuple[PosterCheckItem, str]] = []
-    for item in items:
+    # ── Fallback: {tvdb-N} tag or title + year, batched into one scan ───────
+    unmatched: list[tuple[str, PosterCheckItem, str]] = []
+    for key, item in items:
         style_seasons = _collect_style_seasons(rows_by_id.get(item.tmdb_id, []), item.media_type, item.year)
         if style_seasons:
-            _emit(item, style_seasons)
+            _emit(key, style_seasons)
             continue
         safe_title = " ".join(_LIKE_UNSAFE_RE.sub("", item.title.strip()).split()).strip()
-        if safe_title:
-            unmatched.append((item, safe_title))
+        if safe_title or item.tvdb_id > 0:
+            unmatched.append((key, item, safe_title))
 
     if unmatched:
-        clauses = [
-            Poster.file_name.ilike(safe_title.replace("_", r"\_") + " (%", escape="\\")
-            for _, safe_title in unmatched
-        ]
+        clauses = []
+        for _, item, safe_title in unmatched:
+            if safe_title:
+                clauses.append(Poster.file_name.ilike(safe_title.replace("_", r"\_") + " (%", escape="\\"))
+            if item.tvdb_id > 0:
+                clauses.append(Poster.file_name.ilike(f"%{{tvdb-{item.tvdb_id}}}%"))
         fallback_rows = (
             db.query(Poster, Drive)
             .join(Drive, Poster.drive_id == Drive.drive_id)
             .filter(or_(*clauses), Drive.last_synced.isnot(None))
             .all()
         )
-        for item, safe_title in unmatched:
-            prefix = f"{safe_title} (".lower()
-            item_rows = [(p, d) for (p, d) in fallback_rows if p.file_name.lower().startswith(prefix)]
-            _emit(item, _collect_style_seasons(item_rows, item.media_type, item.year, expected_tmdb_id=item.tmdb_id))
+        for key, item, safe_title in unmatched:
+            prefix = f"{safe_title} (".lower() if safe_title else None
+            tag = f"{{tvdb-{item.tvdb_id}}}" if item.tvdb_id > 0 else None
+            item_rows = [
+                (p, d) for (p, d) in fallback_rows
+                if (prefix and p.file_name.lower().startswith(prefix))
+                or (tag and tag in p.file_name.lower())
+            ]
+            _emit(key, _collect_style_seasons(item_rows, item.media_type, item.year,
+                                              expected_tmdb_id=item.tmdb_id or None,
+                                              expected_tvdb_id=item.tvdb_id or None))
 
     return result
 

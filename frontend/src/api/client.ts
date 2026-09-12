@@ -243,6 +243,7 @@ export {
   downloadPhotoshopPlugin,
   uploadPsdToExportFolder,
   checkTmdbPosterAvailability,
+  posterCheckKey,
   getMakerMonitorConfig,
   getMakerMonitorLastResult,
   getMakerMonitorNeededCount,

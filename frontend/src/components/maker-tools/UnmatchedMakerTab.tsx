@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { AlertCircle, Clapperboard as MovieIcon, FolderOpen, HardDrive, Loader2, RefreshCw, Search, Tv, X } from 'lucide-react'
 import {
   checkTmdbPosterAvailability,
+  posterCheckKey,
   PosterAvailability,
   searchUnmatchedTmdb,
   TmdbCandidate,
@@ -287,7 +288,7 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
   const { scopes, selectedValue, selected, onSelectScope, scopesLoaded } = useArtworkScopes()
   const [filter, setFilter] = useState<FilterTab>('all')
   const [query, setQuery] = useState('')
-  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
 
   const items = useMemo(() => (unmatchedStats ? flatten(unmatchedStats) : []), [unmatchedStats])
@@ -298,20 +299,21 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
     return c
   }, [items])
 
-  // Check synced-drive poster availability once for every item that has a TMDB id,
+  // Check synced-drive poster availability once for every item that has a TMDB or TheTVDB id,
   // so each card shows the same "Search Drives" availability cap as the search tab.
   const checkItems = useMemo(() => {
-    const seen = new Set<number>()
-    const out: Array<{ tmdb_id: number; title: string; year: string; media_type: FlatItem['mediaType'] }> = []
+    const seen = new Set<string>()
+    const out: Array<{ key: string; tmdb_id: number | null; tvdb_id: number | null; title: string; year: string; media_type: FlatItem['mediaType'] }> = []
     for (const it of items) {
-      if (it.tmdb_id && !seen.has(it.tmdb_id)) {
-        seen.add(it.tmdb_id)
-        out.push({ tmdb_id: it.tmdb_id, title: it.title, year: it.year ? String(it.year) : '', media_type: it.mediaType })
+      const key = posterCheckKey(it)
+      if (key && !seen.has(key)) {
+        seen.add(key)
+        out.push({ key, tmdb_id: it.tmdb_id, tvdb_id: it.tvdb_id, title: it.title, year: it.year ? String(it.year) : '', media_type: it.mediaType })
       }
     }
     return out
   }, [items])
-  const checkKey = useMemo(() => checkItems.map((i) => i.tmdb_id).join(','), [checkItems])
+  const checkKey = useMemo(() => checkItems.map((i) => i.key).join(','), [checkItems])
 
   useEffect(() => {
     if (checkItems.length === 0) {
@@ -448,7 +450,7 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
                   key={it.key}
                   item={it}
                   psdConfig={psdConfig}
-                  posterAvailability={it.tmdb_id ? posterAvailability[it.tmdb_id] : undefined}
+                  posterAvailability={posterAvailability[posterCheckKey(it) ?? '']}
                   posterAvailabilityChecked={posterAvailabilityChecked}
                 />
               ))}

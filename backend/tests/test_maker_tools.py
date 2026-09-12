@@ -3230,3 +3230,81 @@ def test_tv_details_tvdb_only_show_with_nothing_on_tvdb_is_404(client):
 def test_tv_details_requires_some_id(client):
     response = client.get("/api/maker-tools/tv-details")
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# API: POST /api/maker-tools/tmdb/poster-check — keyed by tmdb-N, else tvdb-N
+# ---------------------------------------------------------------------------
+
+
+def _seed_drive_posters(test_db, *file_names):
+    from datetime import datetime, timezone
+    from models.drive import Drive
+    from models.poster import Poster
+    from util.data.extract import extract_tmdb_id
+
+    test_db.add(Drive(name="CL Drive", drive_id="cl-check", style_type="CL2K", subscribed=True,
+                      last_synced=datetime.now(timezone.utc)))
+    for name in file_names:
+        test_db.add(Poster(drive_id="cl-check", file_name=name, file_path=f"/cl/{name}",
+                           tmdb_id=extract_tmdb_id(name)))
+    test_db.commit()
+
+
+def test_poster_check_keys_tmdb_items_by_tmdb_id(client, test_db):
+    _seed_drive_posters(test_db, "Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 1.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tmdb_id": 111625, "tvdb_id": 371940, "title": "Dash & Lily", "year": "2020", "media_type": "tv"},
+    ]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"tmdb-111625": [{"style": "CL2K", "seasons": [1]}]}
+
+
+def test_poster_check_matches_a_tvdb_only_show_by_its_tag(client, test_db):
+    # A show TMDB doesn't carry: the drive file is tagged {tvdb-N} only, under a different title spelling.
+    _seed_drive_posters(test_db, "Educating... (2011) {tvdb-252106}.jpg", "Educating... (2011) {tvdb-252106} - Season 3.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tmdb_id": 0, "tvdb_id": 252106, "title": "Educating", "year": "2011", "media_type": "tv"},
+    ]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"tvdb-252106": [{"style": "CL2K", "seasons": [3]}]}
+
+
+def test_poster_check_tvdb_only_show_falls_back_to_title_and_year(client, test_db):
+    _seed_drive_posters(test_db, "Popeye the Sailor (1933) - Season 1933.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tvdb_id": 78435, "title": "Popeye the Sailor", "year": "1933", "media_type": "tv"},
+    ]})
+
+    assert resp.json() == {"tvdb-78435": [{"style": "CL2K", "seasons": [1933]}]}
+
+
+def test_poster_check_title_fallback_rejects_a_file_tagged_with_another_tvdb_id(client, test_db):
+    _seed_drive_posters(test_db, "Popeye the Sailor (1933) {tvdb-999} - Season 1.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tvdb_id": 78435, "title": "Popeye the Sailor", "year": "1933", "media_type": "tv"},
+        {"title": "Custom title with no ids", "year": "", "media_type": "movie"},
+    ]})
+
+    assert resp.json() == {}
+
+
+def test_poster_check_accepts_null_ids_in_the_batch(client, test_db):
+    # The pages send an item's ids as-is, so a movie has tvdb_id null and a TheTVDB-only show has
+    # tmdb_id null; one such item must not fail the whole batch (every card went blank).
+    _seed_drive_posters(test_db, "Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 1.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tmdb_id": 111625, "tvdb_id": None, "title": "Dash & Lily", "year": "2020", "media_type": "tv"},
+        {"tmdb_id": None, "tvdb_id": 78435, "title": "Popeye the Sailor", "year": "1933", "media_type": "tv"},
+        {"tmdb_id": None, "tvdb_id": None, "title": "Custom", "year": "", "media_type": "movie"},
+    ]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"tmdb-111625": [{"style": "CL2K", "seasons": [1]}]}

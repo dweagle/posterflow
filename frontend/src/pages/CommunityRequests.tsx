@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest } from '../api/community'
 import { getSettings } from '../api/client'
-import { checkTmdbPosterAvailability, type PosterAvailability } from '../api/makerTools'
+import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
@@ -101,7 +101,7 @@ export default function CommunityRequests() {
   const [claimConflict, setClaimConflict] = useState<string | null>(null)   // message shown when a claim fails (already claimed)
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
-  const [posterAvailability, setPosterAvailability] = useState<Record<number, PosterAvailability>>({})
+  const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
   const [posterAvailabilityChecked, setPosterAvailabilityChecked] = useState(false)
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false)
   const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
@@ -144,9 +144,10 @@ export default function CommunityRequests() {
   // Fetch poster availability whenever the visible request list changes
   useEffect(() => {
     const items = requests
-      .filter((r) => r.tmdb_id != null)
+      .filter((r) => posterCheckKey(r) != null)
       .map((r) => ({
-        tmdb_id: r.tmdb_id!,
+        tmdb_id: r.tmdb_id,
+        tvdb_id: r.tvdb_id,
         title: r.title,
         year: r.year ? String(r.year) : '',
         media_type: r.media_type === 'movie' ? 'movie' : r.media_type === 'collection' ? 'collection' : ('tv' as const),
@@ -828,7 +829,7 @@ export default function CommunityRequests() {
                 isMaker={isMaker}
                 showMakerTools={showMakerTools}
                 psdConfig={psdConfig}
-                posterAvailability={req.tmdb_id != null ? posterAvailability[req.tmdb_id] : undefined}
+                posterAvailability={posterAvailability[posterCheckKey(req) ?? '']}
                 posterAvailabilityChecked={posterAvailabilityChecked}
                 collapseSignal={collapseSignals.get(req.id) ?? 0}
                 dragOver={dragOverId === req.id}

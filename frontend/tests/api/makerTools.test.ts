@@ -79,3 +79,14 @@ describe('reminderMatchesItem', () => {
     expect(reminderMatchesItem(base, 'poster', { tmdb_id: 0, media_type: 'tv', title: 'Tulsa King', year: '2022' })).toBe(false)
   })
 })
+
+describe('posterCheckKey (availability map key, mirrors the server)', () => {
+  it('prefers the TMDB id, then TheTVDB, and is null with neither', async () => {
+    const { posterCheckKey } = await import('../../src/api/makerTools')
+    expect(posterCheckKey({ tmdb_id: 111625, tvdb_id: 371940 })).toBe('tmdb-111625')
+    expect(posterCheckKey({ tmdb_id: 0, tvdb_id: 78435 })).toBe('tvdb-78435')
+    expect(posterCheckKey({ tmdb_id: null, tvdb_id: 83294 })).toBe('tvdb-83294')
+    expect(posterCheckKey({ tmdb_id: null, tvdb_id: null })).toBeNull()
+    expect(posterCheckKey({})).toBeNull()
+  })
+})
