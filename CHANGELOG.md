@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-09-11
+### Fixed
+- Maker Tools: request/list titles with only a TheTVDB id — or a dead TMDB id correctly get an image gallery instead of an empty card.
+- Maker Tools: the "Search Drives" check covers shows that only have a TheTVDB id.
+
 ## [0.15.3] - 2026-09-10
 ### Added
 - Maker Tools: poster reminders — a clickable bell on maker cards plus a Reminders tab on the Maker Tools page.
