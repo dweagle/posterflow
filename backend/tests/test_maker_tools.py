@@ -3164,3 +3164,69 @@ def test_photoshop_plugin_ccx_contains_manifest_and_excludes_tests():
     assert any(n.startswith("icons/") for n in names)
     assert not any(n.startswith("test/") for n in names)
     assert not any(n.endswith(".md") for n in names)
+
+
+# ---------------------------------------------------------------------------
+# API: GET /api/maker-tools/tv-details — shows TMDB doesn't carry
+# ---------------------------------------------------------------------------
+
+
+def _season(number, name=None):
+    from api.maker_tools import TmdbSeasonInfo
+    return TmdbSeasonInfo(season_number=number, name=name or f"Season {number}", episode_count=10,
+                          air_date="2011", poster_url=None, has_air_date=True)
+
+
+def test_tv_details_serves_tvdb_only_show_without_tmdb_id(client):
+    with patch("api.maker_tools._tvdb_season_list", return_value=[_season(0, "Specials"), _season(1), _season(2)]), \
+         patch("api.maker_tools._tmdb_fetch_json") as tmdb:
+        response = client.get("/api/maker-tools/tv-details", params={"tvdb_id": 83294})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["season_source"] == "tvdb"
+    assert data["season_count"] == 2
+    assert [s["season_number"] for s in data["seasons"]] == [0, 1, 2]
+    assert data["tmdb_seasons"] == []
+    assert data["series_type"] is None
+    assert data["tmdb_found"] is False
+    tmdb.assert_not_called()
+
+
+def test_tv_details_falls_back_to_tvdb_when_tmdb_id_is_not_a_tv_entry(client):
+    # TheTVDB's remote id for P90X2 points at a TMDB *movie*; /tv/<id> is a 404 there.
+    from api.maker_tools import TmdbUpstreamError
+
+    with patch("api.maker_tools._get_monitor_tmdb_key", return_value="key"), \
+         patch("api.maker_tools._tmdb_fetch_json", side_effect=TmdbUpstreamError("not found", status=404)), \
+         patch("api.maker_tools._tvdb_season_list", return_value=[_season(1), _season(2), _season(3)]):
+        response = client.get("/api/maker-tools/tv-details", params={"tmdb_id": 498801, "tvdb_id": 394871})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["season_source"] == "tvdb"
+    assert data["season_count"] == 3
+    assert data["tmdb_seasons"] == []
+    assert data["tmdb_found"] is False
+
+
+def test_tv_details_dead_tmdb_id_without_tvdb_still_errors(client):
+    from api.maker_tools import TmdbUpstreamError
+
+    with patch("api.maker_tools._get_monitor_tmdb_key", return_value="key"), \
+         patch("api.maker_tools._tmdb_fetch_json", side_effect=TmdbUpstreamError("not found", status=404)):
+        response = client.get("/api/maker-tools/tv-details", params={"tmdb_id": 498801})
+
+    assert response.status_code == 502
+
+
+def test_tv_details_tvdb_only_show_with_nothing_on_tvdb_is_404(client):
+    with patch("api.maker_tools._tvdb_season_list", return_value=None):
+        response = client.get("/api/maker-tools/tv-details", params={"tvdb_id": 83294})
+
+    assert response.status_code == 404
+
+
+def test_tv_details_requires_some_id(client):
+    response = client.get("/api/maker-tools/tv-details")
+    assert response.status_code == 400

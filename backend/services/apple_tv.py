@@ -184,6 +184,8 @@ def _uts(path: str, params: dict[str, str], *, what: str) -> dict:
 
 
 def _tmdb(path: str, params: dict[str, str], *, ttl: float, what: str) -> dict:
+    """One TMDB read, cached. A 404 is an empty dict: the id isn't a title of this media type
+    (TheTVDB's remote id can point at a movie), which just means TMDB has no hints for it."""
     key = f"tmdb:{path}"
     data, found = _cache_get(key)
     if found:
@@ -191,8 +193,11 @@ def _tmdb(path: str, params: dict[str, str], *, ttl: float, what: str) -> dict:
     tmdb_bucket.acquire()
     try:
         resp = requests.get(f"{TMDB_API}{path}", params=params, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
+        if resp.status_code == 404:
+            data = {}
+        else:
+            resp.raise_for_status()
+            data = resp.json()
     except (requests.RequestException, ValueError) as exc:
         raise AppleTvError(f"TMDB {what} lookup failed: {exc}")
     if not isinstance(data, dict):
@@ -209,6 +214,8 @@ def storefront_hints(tmdb_id: Optional[int], media_type: str, tmdb_api_key: str)
         return [], []
     base = f"/{media_type}/{int(tmdb_id)}"
     detail = _tmdb(base, {"api_key": tmdb_api_key, "language": "en-US"}, ttl=_ORIGIN_TTL, what="country of origin")
+    if not detail:
+        return [], []   # not on TMDB as this media type: no origin, and no providers to ask for
     origin = _uniq_upper(list(detail.get("origin_country") or [])
                          + [pc.get("iso_3166_1") for pc in (detail.get("production_countries") or [])
                             if isinstance(pc, dict)])

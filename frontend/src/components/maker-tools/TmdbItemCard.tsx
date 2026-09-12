@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type CSSProperties } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -115,6 +115,7 @@ const tileStyle = (img: TmdbImage, role: keyof typeof TILE_BOX): CSSProperties |
 const isWidescreen = (img: TmdbImage): boolean => img.height > 0 && Math.abs(img.width / img.height - 16 / 9) < 0.01
 
 const SOURCE_LABEL: Record<ImageSource, string> = { tmdb: 'TMDB', tvdb: 'TheTVDB', fanart: 'fanart.tv', apple: 'Apple TV' }
+const EMPTY_IMAGES: TmdbImagesResponse = { posters: [], backdrops: [], logos: [] }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -198,9 +199,10 @@ export type TmdbItemCardProps = {
 export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
   const { showToast } = useToast()
 
-  // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (gallery, id chip) but
+  // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (id chip, TMDB tab) but
   // still let the user export a blank/existing PSD, named by title + year.
   const hasTmdb = (item.tmdb_id ?? 0) > 0
+  const hasTvdb = (item.tvdb_id ?? 0) > 0
   const { overview, posterUrl: tmdbPosterUrl } = useCardOverview(item, !hideOverview)
   // Display-only fallback chain; the thumb proxy is never published
   const posterUrl = item.poster_url || tmdbPosterUrl || item.thumb_url || ''
@@ -211,7 +213,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [imageSource, setImageSource] = useState<ImageSource>('tmdb')
   const [imagesBySource, setImagesBySource] = useState<Partial<Record<ImageSource, TmdbImagesResponse>>>({})
   const [loadingSource, setLoadingSource] = useState<ImageSource | null>(null)
-  const galleryImages = imagesBySource[imageSource] ?? null
+  // Set when every source failed to load: the panel opens empty so the export buttons stay reachable.
+  const [galleryEmptyFallback, setGalleryEmptyFallback] = useState(false)
+  const galleryImages = imagesBySource[imageSource] ?? (galleryEmptyFallback ? EMPTY_IMAGES : null)
   const galleryLoading = loadingSource === imageSource
   const [activeGalleryTab, setActiveGalleryTab] = useState<'posters' | 'backdrops' | 'logos' | 'season-posters'>('posters')
   const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
@@ -263,7 +267,33 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [seasonImages, setSeasonImages] = useState<Record<string, TmdbImagesResponse>>({})
   const [seasonImagesLoading, setSeasonImagesLoading] = useState<Record<string, boolean>>({})
 
-  const appleTv = useAppleTvStorefront(item)
+  // Each source is keyed by a different id, so a title TMDB doesn't carry (a TheTVDB-only show, or a
+  // TMDB id that turns out not to be a TV entry) still gets a gallery from whichever sources can be
+  // asked. Only these are offered as tabs and tried on open; none at all → the standalone export group.
+  // A show whose details came back with no TMDB entry (TheTVDB's remote id pointing at a movie)
+  // drops the TMDB tab rather than failing on it first.
+  const tmdbUsable = hasTmdb && tvDetails?.tmdb_found !== false
+  const gallerySources = useMemo<ImageSource[]>(() => {
+    if (item.media_type === 'collection') return hasTmdb ? ['tmdb'] : []   // the other three have no collection entity
+    const out: ImageSource[] = []
+    if (tmdbUsable) out.push('tmdb')
+    if (psdConfig.tvdbEnabled && (hasTvdb || (item.media_type === 'movie' && !!item.imdb_id))) out.push('tvdb')
+    if (psdConfig.fanartEnabled && (item.media_type === 'tv' ? hasTvdb : hasTmdb || !!item.imdb_id)) out.push('fanart')
+    if (psdConfig.appleEnabled && !!item.title) out.push('apple')
+    return out
+  }, [item.media_type, item.title, item.imdb_id, hasTmdb, tmdbUsable, hasTvdb, psdConfig.tvdbEnabled, psdConfig.fanartEnabled, psdConfig.appleEnabled])
+  const hasGallery = gallerySources.length > 0
+  // What the other sources are asked with: a TMDB id known to be dead is left out so fanart.tv and
+  // Apple TV don't chase it (Apple's storefront hints come from TMDB). Exports and downloads keep
+  // the item's real ids — filenames carry what the library carries.
+  const sourceItem = useMemo(() => (tmdbUsable ? item : { ...item, tmdb_id: 0 }), [item, tmdbUsable])
+  // The default source is the first that can be asked; one dropped by a settings change hands over
+  // to the next while the panel is closed.
+  useEffect(() => {
+    if (!galleryOpen && hasGallery && !gallerySources.includes(imageSource)) setImageSource(gallerySources[0])
+  }, [galleryOpen, hasGallery, gallerySources, imageSource])
+
+  const appleTv = useAppleTvStorefront(sourceItem)
 
   // Save-artwork-to-folder state (gallery logos/backdrops/poster crops → the subtype's configured
   // export folder, artwork-drive names). Keys are `${subtype}:${file_path}`.
@@ -289,12 +319,13 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     if (collapseSignal) setGalleryOpen(false)
   }, [collapseSignal])
 
-  // Eagerly fetch TV details on mount so season/specials badges render immediately
+  // Eagerly fetch TV details on mount so season/specials badges render immediately. A show with
+  // only a TheTVDB id gets its seasons from there.
   useEffect(() => {
-    if (item.media_type !== 'tv' || (item.tmdb_id ?? 0) <= 0) return
+    if (item.media_type !== 'tv' || (!hasTmdb && !hasTvdb)) return
     void ensureTvDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.tmdb_id])
+  }, [item.tmdb_id, item.tvdb_id])
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -373,7 +404,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   }, [item, showToast])
 
   const ensureTvDetails = useCallback(async () => {
-    if (tvDetails || tvDetailsLoading) return
+    if (tvDetails || tvDetailsLoading || (!hasTmdb && !hasTvdb)) return
     setTvDetailsLoading(true)
     try {
       // Shared in-flight/result cache: many cards mount at once (and StrictMode
@@ -391,7 +422,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } finally {
       setTvDetailsLoading(false)
     }
-  }, [item.tmdb_id, item.tvdb_id, tvDetails, tvDetailsLoading])
+  }, [item.tmdb_id, item.tvdb_id, hasTmdb, hasTvdb, tvDetails, tvDetailsLoading])
 
   const fetchSeasonImages = useCallback(async (seasonNumber: number) => {
     setSelectedSeason(seasonNumber)
@@ -405,14 +436,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           ? await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
           : imageSource === 'fanart'
             ? await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
-            : await getAppleSeasonImages(item, seasonNumber, galleryLanguage)
+            : await getAppleSeasonImages(sourceItem, seasonNumber, galleryLanguage)
       setSeasonImages((prev) => ({ ...prev, [sk]: data }))
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load season images'), 'error')
     } finally {
       setSeasonImagesLoading((prev) => ({ ...prev, [sk]: false }))
     }
-  }, [item.tmdb_id, item.tvdb_id, imageSource, galleryLanguage, seasonImages, showToast])
+  }, [item.tmdb_id, item.tvdb_id, sourceItem, imageSource, galleryLanguage, seasonImages, showToast])
 
   // Which tab to show for a freshly loaded source: keep the current one when it has content, else
   // the first that does — so a switch never lands on a needlessly empty grid.
@@ -425,8 +456,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   }, [])
 
   // Fetch one source's images and cache them; a cached source comes straight back unless forced
-  // (a language change, which invalidates every cache). Null when the load failed.
-  const loadSource = useCallback(async (source: ImageSource, opts?: { language?: string; force?: boolean }): Promise<TmdbImagesResponse | null> => {
+  // (a language change, which invalidates every cache). Null when the load failed; `quiet` keeps
+  // the failure out of the toasts (the message is left in lastLoadError for the caller).
+  const lastLoadError = useRef<string | null>(null)
+  const loadSource = useCallback(async (source: ImageSource, opts?: { language?: string; force?: boolean; quiet?: boolean }): Promise<TmdbImagesResponse | null> => {
     const language = opts?.language ?? galleryLanguage
     const cached = imagesBySource[source]
     if (!opts?.force && cached) return cached
@@ -435,33 +468,49 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       const data = source === 'tmdb'
         ? await getTmdbImages(item.tmdb_id, item.media_type, language)
         : source === 'tvdb'
-          ? await getTvdbImages(item, language)
+          ? await getTvdbImages(sourceItem, language)
           : source === 'fanart'
-            ? await getFanartImages(item, language)
-            : await getAppleImages(item, language)
+            ? await getFanartImages(sourceItem, language)
+            : await getAppleImages(sourceItem, language)
       setImagesBySource((prev) => ({ ...prev, [source]: data }))
+      setGalleryEmptyFallback(false)
       return data
     } catch (error) {
-      showToast(getApiErrorMessage(error, `Failed to load ${SOURCE_LABEL[source]} images`), 'error')
+      lastLoadError.current = getApiErrorMessage(error, `Failed to load ${SOURCE_LABEL[source]} images`)
+      if (!opts?.quiet) showToast(lastLoadError.current, 'error')
       return null
     } finally {
       setLoadingSource((cur) => (cur === source ? null : cur))
     }
-  }, [galleryLanguage, imagesBySource, item, showToast])
+  }, [galleryLanguage, imagesBySource, item.tmdb_id, item.media_type, sourceItem, showToast])
 
   const toggleGallery = useCallback(async () => {
     if (galleryOpen) {
       setGalleryOpen(false)
+      setGalleryEmptyFallback(false)
       return
     }
     if (item.media_type === 'tv') void ensureTvDetails()
     // Load before opening, so the panel appears with its grid in one go instead of as an empty
-    // shell that pushes the cards below down and then grows.
-    const data = await loadSource(imageSource)
-    if (!data) return
-    settleTab(data)
+    // shell that pushes the cards below down and then grows. A source that fails (a TMDB id that
+    // isn't a TV entry) hands over quietly to the next; only when none loads is the failure
+    // shown, and the panel still opens empty so the export buttons stay reachable.
+    const order = gallerySources.includes(imageSource)
+      ? [imageSource, ...gallerySources.filter((s) => s !== imageSource)]
+      : gallerySources
+    for (const source of order) {
+      const data = await loadSource(source, { quiet: true })
+      if (!data) continue
+      setImageSource(source)
+      setSelectedSeason(null)
+      settleTab(data)
+      setGalleryOpen(true)
+      return
+    }
+    showToast(lastLoadError.current ?? 'No image source could be loaded for this title', 'error')
+    setGalleryEmptyFallback(true)
     setGalleryOpen(true)
-  }, [galleryOpen, imageSource, item.media_type, ensureTvDetails, loadSource, settleTab])
+  }, [galleryOpen, imageSource, gallerySources, item.media_type, ensureTvDetails, loadSource, settleTab, showToast])
 
   // The grid in view stays put until the new source has loaded, then source and tab swap in one
   // render — no collapse to a loading line and back, so the cards below don't jump.
@@ -927,7 +976,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             )}
           </div>
 
-          {hasTmdb ? (
+          {hasGallery ? (
             <button
               type="button"
               className={`tmdb-gallery-toggle${galleryOpen ? ' open' : ''}`}
@@ -943,8 +992,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               }
             </button>
           ) : (
-            // No TMDB match → no image gallery; expose the export buttons directly so a blank
-            // (or existing) PSD can still be made.
+            // No source can be asked for this title → no image gallery; expose the export buttons
+            // directly so a blank (or existing) PSD can still be made.
             <div className="tmdb-psd-export-group tmdb-psd-export-group--standalone">
               {psdExportControls}
             </div>
@@ -956,11 +1005,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       {galleryOpen && (galleryImages || galleryLoading) && (() => { const _panel = (
         <div className="tmdb-gallery-panel">
           <div className="tmdb-gallery-tabs">
-            {(psdConfig.tvdbEnabled || psdConfig.fanartEnabled || psdConfig.appleEnabled) && (
+            {gallerySources.length > 1 && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Image source">
-                {([['tmdb', tmdbIcon, true], ['tvdb', tvdbIcon, psdConfig.tvdbEnabled],
-                   ['fanart', fanartIcon, psdConfig.fanartEnabled], ['apple', appleTvIcon, psdConfig.appleEnabled]] as const)
-                  .filter(([, , enabled]) => enabled)
+                {([['tmdb', tmdbIcon], ['tvdb', tvdbIcon], ['fanart', fanartIcon], ['apple', appleTvIcon]] as const)
+                  .filter(([id]) => gallerySources.includes(id))
                   .map(([id, icon]) => (
                   <button
                     key={id}
@@ -1081,6 +1129,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
           {!galleryImages
             ? <p className="tmdb-gallery-empty">Loading {SOURCE_LABEL[imageSource]} images…</p>
+            : galleryEmptyFallback
+            ? <p className="tmdb-gallery-empty">No images could be loaded for this title.</p>
             : imageSource !== 'tmdb' && galleryImages.posters.length === 0
               && galleryImages.backdrops.length === 0 && galleryImages.logos.length === 0
             // Common for movies — plenty aren't in TVDB or fanart.tv at all, so say that rather

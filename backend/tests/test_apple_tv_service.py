@@ -430,6 +430,19 @@ def test_storefront_hints_need_an_id_and_a_key(monkeypatch):
     assert apple.storefront_hints(10, "collection", "key") == ([], [])
 
 
+def test_storefront_hints_treat_a_tmdb_404_as_no_hints(monkeypatch):
+    # P90X2: TheTVDB's remote id is a TMDB *movie*, so /tv/498801 is a 404 — search by title instead.
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        return _Resp(status=404, payload={"status_code": 34})
+
+    monkeypatch.setattr(apple.requests, "get", fake_get)
+    assert apple.storefront_hints(498801, "tv", "key") == ([], [])
+    assert len(calls) == 1   # no watch-providers call for a title TMDB doesn't have
+
+
 def test_storefront_hints_map_tmdb_failures(monkeypatch):
     monkeypatch.setattr(apple.requests, "get", lambda *a, **k: _Resp(status=500))
     with pytest.raises(apple.AppleTvError, match="TMDB"):

@@ -194,6 +194,9 @@ export interface TmdbTvDetails {
   seasons: TmdbSeasonInfo[]        // preferred source (TheTVDB when available)
   series_type: string | null       // TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
   season_source: 'tmdb' | 'tvdb'   // which provider the preferred season list came from
+  // False when TMDB has no TV entry for the item's tmdb_id (served from TheTVDB alone); absent on
+  // older servers.
+  tmdb_found?: boolean
   // Both providers' lists, so the gallery's season picker can follow the source being browsed.
   tmdb_seasons: TmdbSeasonInfo[]
   tvdb_seasons: TmdbSeasonInfo[]

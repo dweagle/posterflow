@@ -108,8 +108,20 @@ def _token_exp(token: str) -> Optional[int]:
         return None
 
 
+def _item_key(group: str, item: dict) -> Optional[tuple]:
+    """(group, id source, id) — TMDB when the item has one, else TheTVDB (a show TMDB doesn't
+    carry still has Sonarr's tvdb id). None for a custom item, which can't be matched by id."""
+    tid = item.get("tmdb_id")
+    if tid:
+        return (group, "tmdb", int(tid))
+    vid = item.get("tvdb_id")
+    if vid:
+        return (group, "tvdb", int(vid))
+    return None
+
+
 def _unmatched_keys(db: Session) -> Optional[tuple[set, set]]:
-    """((group, tmdb_id) for items still missing a poster, {groups actually
+    """({(group, id source, id)} for items still missing a poster, {groups actually
     scanned}). None if the stats are absent/unreadable. The scanned set is the
     partial-scan guard: a media type whose summary total is 0 wasn't scanned, so
     its absence from the unmatched list must NOT be read as 'resolved'."""
@@ -122,9 +134,10 @@ def _unmatched_keys(db: Session) -> Optional[tuple[set, set]]:
     keys: set = set()
     for bucket in ("movies", "series", "collections"):
         for it in unmatched.get(bucket) or []:
-            tid = it.get("tmdb_id")
-            if tid:
-                keys.add((_norm_group(bucket), int(tid)))
+            # Both ids go in: a list item compares by whichever it carries.
+            for key_source in ("tmdb_id", "tvdb_id"):
+                if it.get(key_source):
+                    keys.add((_norm_group(bucket), key_source[:4], int(it[key_source])))
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
     scanned: set = set()
     for bucket in ("movies", "series", "collections"):
@@ -214,7 +227,7 @@ def _fetch_wanted_items(discord_id: str, sources: set) -> list:
             f"{SUPABASE_URL}/rest/v1/poster_list_items",
             headers=SUPABASE_HEADERS,
             params={
-                "select": "id,tmdb_id,media_type,status",
+                "select": "id,tmdb_id,tvdb_id,media_type,status",
                 "id": f"in.({','.join(item_ids[:1000])})",
                 "status": "in.(open,in_progress)",
                 "limit": 1000,
@@ -298,23 +311,23 @@ def reconcile_community_lists(db: Session, sources: Iterable[str]) -> int:
             media_type = (it.get("media_type") or "").lower()
             if media_type not in _RECONCILABLE_TYPES:
                 continue  # season items skipped in v1
-            tid = it.get("tmdb_id")
-            if not tid:
-                continue  # custom items can't be matched by id
             group = _norm_group(media_type)
-            key = (group, int(tid))
+            key = _item_key(group, it)
+            if key is None:
+                continue  # custom items can't be matched by id
             if src == "unmatched" and unmatched_data is not None:
                 keys, scanned = unmatched_data
                 # Resolved only if this type was actually scanned (partial-scan
                 # guard) AND the poster is no longer in the outstanding set.
                 if group in scanned and key not in keys:
                     resolved_ids.append(it["id"])
-            elif src == "style_fallback" and fallback_data is not None:
+            elif src == "style_fallback" and fallback_data is not None and key[1] == "tmdb":
                 # Resolved once the item wins under the instance's preferred style
                 # locally — i.e. the user now actually has the style they asked for.
                 # Presence is self-validating, so no partial-scan guard is needed.
+                # Renamer stats are TMDB-keyed, so only TMDB items can resolve here.
                 present_by_style, preferred = fallback_data
-                if preferred and key in present_by_style.get(preferred, set()):
+                if preferred and (group, key[2]) in present_by_style.get(preferred, set()):
                     resolved_ids.append(it["id"])
 
         if not resolved_ids:

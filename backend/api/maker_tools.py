@@ -1714,6 +1714,9 @@ class TmdbTvDetails(BaseModel):
     seasons: list[TmdbSeasonInfo]   # preferred source (TheTVDB when available)
     series_type: str | None = None  # TMDB "type": Scripted, Miniseries, Documentary, Reality, etc.
     season_source: str = "tmdb"     # which provider the preferred season list came from
+    # False when TMDB has no TV entry for the tmdb_id (or none was given) — the card then skips
+    # the TMDB image tab instead of failing on it.
+    tmdb_found: bool = True
     # Both providers' lists, kept separate so the gallery's season picker can follow whichever
     # source's images are being browsed. Either one can carry a season the other doesn't.
     tmdb_seasons: list[TmdbSeasonInfo] = []
@@ -1883,20 +1886,29 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
 
 
 @router.get("/tv-details", response_model=TmdbTvDetails)
-def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) -> TmdbTvDetails:
+def tv_details(tmdb_id: int = 0, tvdb_id: int = 0, db: Session = Depends(get_db)) -> TmdbTvDetails:
     """TV show details for a maker card: the seasons list, season count, and series type.
 
     Seasons come from TheTVDB when a key is configured and the item has a tvdb_id, so the count
     matches Sonarr; otherwise they come from TMDB. The series type stays TMDB-only either way —
-    TVDB has no Miniseries equivalent.
+    TVDB has no Miniseries equivalent. A show TMDB doesn't carry — no tmdb_id, or one that isn't
+    a TV entry (TheTVDB's remote id can point at a movie) — is served from TheTVDB alone.
     """
-    api_key = _get_monitor_tmdb_key(db)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+    if tmdb_id <= 0 and tvdb_id <= 0:
+        raise HTTPException(status_code=400, detail="tmdb_id or tvdb_id is required.")
 
-    url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
-    data = _tmdb_get_json(url, {"api_key": api_key, "language": "en-US"}, "TV details",
-                          cache_ttl=_TMDB_DETAIL_TTL)
+    data: dict[str, Any] = {}
+    if tmdb_id > 0:
+        api_key = _get_monitor_tmdb_key(db)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="TMDB API key not configured.")
+        url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+        try:
+            data = _tmdb_fetch_json(url, {"api_key": api_key, "language": "en-US"}, "TV details",
+                                    cache_ttl=_TMDB_DETAIL_TTL)
+        except TmdbUpstreamError as err:
+            if err.status != 404 or tvdb_id <= 0:
+                raise _tmdb_http_error(err)
 
     tmdb_seasons: list[TmdbSeasonInfo] = []
     for s in (data.get("seasons") or []):
@@ -1931,12 +1943,15 @@ def tv_details(tmdb_id: int, tvdb_id: int = 0, db: Session = Depends(get_db)) ->
         # Match TMDB's number_of_seasons semantics, which exclude specials.
         season_count = sum(1 for s in tvdb_seasons if s.season_number > 0)
         season_source = "tvdb"
+    elif not data:
+        raise HTTPException(status_code=404, detail="No TV entry found for this title on TMDB or TheTVDB.")
 
     return TmdbTvDetails(
         season_count=season_count,
         seasons=seasons,
         series_type=str(data.get("type") or "") or None,
         season_source=season_source,
+        tmdb_found=bool(data),
         tmdb_seasons=tmdb_seasons,
         tvdb_seasons=tvdb_seasons,
     )
