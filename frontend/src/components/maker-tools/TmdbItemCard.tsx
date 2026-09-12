@@ -1261,6 +1261,10 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                           >
                             <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" style={role === 'logo' ? undefined : tileStyle(img, role)} />
                           </button>
+                          {/* Collection logos are borrowed from a member movie — say which one. */}
+                          {img.origin && (
+                            <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom" title={`From ${img.origin}`}>{img.origin}</span>
+                          )}
                           <div className="tmdb-thumb-actions">
                             <button
                               type="button"

@@ -1828,6 +1828,12 @@
   pointer-events: none;   /* clicks fall through to the preview button */
 }
 
+/* Maker cards keep their select buttons top-left, so the badge sits along the bottom edge there. */
+.tmdb-gallery-origin-badge--bottom {
+  top: auto;
+  bottom: 4px;
+}
+
 /* Overlay action buttons (P/B/L select, T tag, trash) live in a flex row in the top-left corner. */
 .tmdb-thumb-actions {
   position: absolute;

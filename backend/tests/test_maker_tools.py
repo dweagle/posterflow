@@ -631,6 +631,103 @@ def test_tmdb_images_language_all_omits_include_image_language(client, test_db):
     assert "include_image_language" not in call_params
 
 
+def _collection_get(responses: dict[str, object]):
+    """requests.get stand-in answering by URL; a value that is an int is served as that status."""
+    def fake_get(url, params=None, timeout=None, **_):
+        mock_resp = MagicMock()
+        body = responses.get(url)
+        if isinstance(body, int):
+            mock_resp.status_code = body
+            return mock_resp
+        assert body is not None, f"unexpected TMDB call {url}"
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = body
+        return mock_resp
+    return fake_get
+
+
+_COLLECTION_PARTS = {
+    "id": 86311,
+    "name": "The Avengers Collection",
+    "parts": [
+        {"id": 99861, "title": "Avengers: Age of Ultron", "release_date": "2015-04-22"},
+        {"id": 24428, "title": "The Avengers", "release_date": "2012-04-25"},
+        {"id": 299536, "title": "Avengers: Infinity War", "release_date": "2018-04-25"},
+    ],
+}
+
+
+def test_tmdb_images_collection_borrows_first_movie_logos(client, test_db):
+    _seed_tmdb_key(test_db)
+    responses = {
+        "https://api.themoviedb.org/3/collection/86311/images": {
+            "posters": [{"file_path": "/cp.jpg", "width": 1000, "height": 1500, "iso_639_1": "en", "vote_average": 5.0}],
+            "backdrops": [{"file_path": "/cb.jpg", "width": 1920, "height": 1080, "iso_639_1": None, "vote_average": 5.0}],
+            "logos": [],
+        },
+        "https://api.themoviedb.org/3/collection/86311": _COLLECTION_PARTS,
+        "https://api.themoviedb.org/3/movie/24428/images": {
+            "logos": [
+                {"file_path": "/l_en.png", "width": 800, "height": 300, "iso_639_1": "en", "vote_average": 6.0},
+                {"file_path": "/l_tl.png", "width": 900, "height": 300, "iso_639_1": None, "vote_average": 4.0},
+            ],
+        },
+    }
+
+    with patch("api.maker_tools.requests.get", side_effect=_collection_get(responses)) as mock_get:
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=86311&media_type=collection&language=en%2Btextless")
+
+    assert response.status_code == 200
+    data = response.json()
+    # The collection's own posters and backdrops are untouched.
+    assert [p["file_path"] for p in data["posters"]] == ["/cp.jpg"]
+    assert [b["file_path"] for b in data["backdrops"]] == ["/cb.jpg"]
+    # Logos come from the earliest release only (not the first-listed), tagged with its title, and
+    # follow the gallery's textless-first order.
+    assert [l["file_path"] for l in data["logos"]] == ["/l_tl.png", "/l_en.png"]
+    assert {l["origin"] for l in data["logos"]} == {"The Avengers"}
+    called = [c.args[0] for c in mock_get.call_args_list]
+    assert "https://api.themoviedb.org/3/movie/99861/images" not in called
+    assert "https://api.themoviedb.org/3/movie/299536/images" not in called
+    # The member lookup carries the gallery's language filter, like the collection's own call.
+    member_call = next(c for c in mock_get.call_args_list if c.args[0].endswith("/movie/24428/images"))
+    assert member_call.kwargs["params"].get("include_image_language") == "en,null"
+
+
+def test_tmdb_images_collection_keeps_gallery_when_borrow_fails(client, test_db):
+    _seed_tmdb_key(test_db)
+    responses = {
+        "https://api.themoviedb.org/3/collection/86311/images": {
+            "posters": [{"file_path": "/cp.jpg", "width": 1000, "height": 1500, "iso_639_1": "en", "vote_average": 5.0}],
+            "backdrops": [],
+            "logos": [],
+        },
+        "https://api.themoviedb.org/3/collection/86311": 503,
+    }
+
+    with patch("api.maker_tools.requests.get", side_effect=_collection_get(responses)):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=86311&media_type=collection&language=en%2Btextless")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [p["file_path"] for p in data["posters"]] == ["/cp.jpg"]
+    assert data["logos"] == []
+
+
+def test_tmdb_images_movie_does_not_look_up_collection_members(client, test_db):
+    _seed_tmdb_key(test_db)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"posters": [], "backdrops": [], "logos": []}
+
+    with patch("api.maker_tools.requests.get", return_value=mock_resp) as mock_get:
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=24428&media_type=movie&language=en")
+
+    assert response.status_code == 200
+    assert mock_get.call_count == 1
+    assert response.json()["logos"] == []
+
+
 # ---------------------------------------------------------------------------
 # API: GET /api/maker-tools/tv-details
 # ---------------------------------------------------------------------------

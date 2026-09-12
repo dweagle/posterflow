@@ -164,6 +164,7 @@ export interface TmdbImage {
   vote_average: number
   url_thumb: string
   url_full: string
+  origin?: string | null   // collection logos: the member movie this came from
 }
 
 export interface TmdbImagesResponse {

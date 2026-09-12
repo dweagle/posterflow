@@ -1727,6 +1727,7 @@ class TmdbImage(BaseModel):
     vote_average: float
     url_thumb: str          # w300 thumbnail
     url_full: str           # original
+    origin: str | None = None   # collection logos: the member movie this came from
 
 
 class TmdbImagesResponse(BaseModel):
@@ -1760,7 +1761,8 @@ class TmdbTvDetails(BaseModel):
     tvdb_seasons: list[TmdbSeasonInfo] = []
 
 
-def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300") -> list[TmdbImage]:
+def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300",
+                       origin: str | None = None) -> list[TmdbImage]:
     out: list[TmdbImage] = []
     for img in items:
         fp = str(img.get("file_path") or "")
@@ -1774,8 +1776,33 @@ def _build_tmdb_images(items: list[dict[str, Any]], size_thumb: str = "w300") ->
             vote_average=float(img.get("vote_average") or 0),
             url_thumb=f"https://image.tmdb.org/t/p/{size_thumb}{fp}",
             url_full=f"https://image.tmdb.org/t/p/original{fp}",
+            origin=origin,
         ))
     return out
+
+
+def _collection_member_logos(collection_id: int, api_key: str, img_lang: str | None) -> list[TmdbImage]:
+    """Collection logos borrowed from the first member movie by release date (the artwork finder's
+    rule; TMDB has no collection logos), each tagged with ``origin`` = that movie's title.
+    A failed borrow returns [] so the collection's own gallery still loads."""
+    from services.artwork_finder import COLLECTION_LOGO_MOVIE_CAP
+
+    lang_params = {"include_image_language": img_lang} if img_lang else {}
+    try:
+        detail = _tmdb_fetch_json(f"https://api.themoviedb.org/3/collection/{collection_id}",
+                                  {"api_key": api_key}, "collection members", cache_ttl=_TMDB_DETAIL_TTL)
+        parts = [p for p in (detail.get("parts") or []) if isinstance(p, dict) and p.get("id")]
+        parts.sort(key=lambda p: str(p.get("release_date") or "9999"))
+        out: list[TmdbImage] = []
+        for part in parts[:COLLECTION_LOGO_MOVIE_CAP]:
+            images = _tmdb_fetch_json(f"https://api.themoviedb.org/3/movie/{part['id']}/images",
+                                      {"api_key": api_key, **lang_params}, "collection member logos",
+                                      cache_ttl=_TMDB_DETAIL_TTL)
+            title = str(part.get("title") or "").strip() or None
+            out.extend(_build_tmdb_images(images.get("logos", []), origin=title))
+        return out
+    except TmdbUpstreamError:
+        return []   # already logged by the fetch
 
 
 @router.get("/tmdb/images", response_model=TmdbImagesResponse)
@@ -1808,6 +1835,10 @@ def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session
     posters = _build_tmdb_images(data.get("posters", []))
     backdrops = _build_tmdb_images(data.get("backdrops", []), size_thumb="w780")
     logos = _build_tmdb_images(data.get("logos", []))
+    # Collections have no logos of their own on TMDB; borrow the first member movie's, as the
+    # artwork finder does.
+    if mt == "collection":
+        logos += _collection_member_logos(tmdb_id, api_key, img_lang)
 
     # Sort each group: textless (language=None) first, then by vote_average descending
     for group in (posters, backdrops, logos):

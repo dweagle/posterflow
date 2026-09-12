@@ -186,6 +186,25 @@ describe('TmdbItemCard gallery sources', () => {
     expect(screen.getByRole('button', { name: /New Export/ })).toBeTruthy()
   })
 
+  it('labels a collection\'s borrowed logos with the member movie they came from', async () => {
+    mockedTmdbImages.mockResolvedValue({
+      posters: [],
+      backdrops: [],
+      logos: [{ file_path: '/l1.png', width: 800, height: 300, language: 'en', vote_average: 6, url_thumb: 'https://x/l.png', url_full: 'https://x/l.png', origin: 'The Avengers' }],
+    })
+    const { container } = render(
+      <TmdbItemCard item={item({ tmdb_id: 86311, media_type: 'collection', title: 'The Avengers Collection', year: '' })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+
+    await waitFor(() => expect(container.querySelector('.tmdb-gallery-panel')).not.toBeNull())
+    expect(mockedTmdbImages).toHaveBeenCalledWith(86311, 'collection', 'en+textless')
+    const badge = container.querySelector('.tmdb-gallery-origin-badge')
+    expect(badge?.textContent).toBe('The Avengers')
+    expect(badge?.getAttribute('title')).toBe('From The Avengers')
+  })
+
   it('only lists sources that can be asked', async () => {
     mockedTvdbImages.mockResolvedValue(noImages)
     const { container } = render(
