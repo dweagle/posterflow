@@ -19,11 +19,6 @@
     <sp-action-button size="s" data-act="refresh" title="Reload layers from the active document">⟳</sp-action-button>
   </div>
 
-  <div class="tools">
-    <sp-action-button size="s" data-act="logo" title="Resize and place the SELECTED layer as a logo, using Maker Tools' formula">Place Logo</sp-action-button>
-    <sp-action-button size="s" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</sp-action-button>
-  </div>
-
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
     <div class="batchrow hidden">
@@ -53,9 +48,14 @@
     </div>
   </div>
 
+  <div class="tools">
+    <sp-action-button size="s" data-act="logo" title="Resize and place the SELECTED layer as a logo, using Maker Tools' formula">Place Logo</sp-action-button>
+    <sp-action-button size="s" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</sp-action-button>
+  </div>
+
   <div class="trimbar">
     <sp-action-button size="s" data-act="trim" title="Trim off-canvas pixels from ALL layers. Shrinks the saved file, no visible change. Save after.">Trim</sp-action-button>
-    <sp-action-button size="s" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG">Logo</sp-action-button>
+    <sp-action-button size="s" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG.  ·  Alt-click: rename the visible logo layer to &quot;&lt;title&gt; - Logo&quot;">Logo</sp-action-button>
     <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders — the next JPG / Logo / Poster / Square Art export asks again">📂</sp-action-button>
     <sp-action-button size="s" data-act="link" title="Posterflow server link — exports queued as 'PS' in the web app open here automatically">🔗</sp-action-button>
   </div>

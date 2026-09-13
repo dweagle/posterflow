@@ -85,6 +85,8 @@ const showError = (e) => note('Error: ' + (e && e.message ? e.message : e));
 const flash = (btn, mark, restore) => { btn.textContent = mark; setTimeout(() => { btn.textContent = restore; }, 1400); };
 const hasDoc = () => app.documents && app.documents.length > 0;
 const baseName = (doc) => (((doc || app.activeDocument) || {}).name || 'poster').replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+// Strip the {tmdb-…} {tvdb-…} {imdb-…} id tags: "Ragna Crimson (2023) {tmdb-1} {imdb-tt2}" -> "Ragna Crimson (2023)"
+const cleanTitle = (s_) => String(s_ || '').replace(/\s*\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
 
 function updateBadge(style) {
   styleEl.textContent = style || '—';
@@ -124,6 +126,45 @@ const onDecade = (D)  => applyChanges(T.clickDecade(model, D));
 const onYear   = (Y)  => applyChanges(T.clickYear(model, Y));
 const onYearsG = (YG) => applyChanges(T.clickYearsGroup(model, YG));
 
+// ---- Tagging: rename the selected layer to a Posterflow export tag ----
+// The tag language is parseTagName() in batch.js (a port of frontend/src/lib/photopeaBatch.ts):
+//   show / movie / poster / main -> the main export (no filename suffix)
+//   s0 -> Specials, s{N} -> Season N (1-4 digits, so year seasons like s1985 are valid)
+//   c -> Collection, cls -> Complete Limited Series (writes the Season 1 file)
+// Chips that map to a tag rename on Alt-click. MOVIE / SHOW have no layer to toggle: a plain
+// click clears every season / single layer, Alt-click renames.
+const SINGLE_TAG = { SP: 's0', C: 'c', CLS: 'cls' };
+const MAIN_TAGS = [{ lab: 'MOVIE', tag: 'main' }, { lab: 'SHOW', tag: 'show' }];
+
+// Season chips ("3") and season-year chips ("1985") both become s{digits}.
+// Group chips (S, S1-10, YEARS) have no tag in the language.
+function chipTag(N) {
+  if (N.r !== 'season' && N.r !== 'year') return null;
+  const lab = M.label(N.n);
+  return /^\d{1,4}$/.test(lab) ? 's' + parseInt(lab, 10) : null;
+}
+
+const tagTitle = (base, tag) =>
+  base + '  \u00b7  Alt-click: rename the selected layer to "' + tag + '"';
+
+async function renameSelectedTo(tag) {
+  if (!hasDoc()) { note('No document open.'); return; }
+  const doc = app.activeDocument;
+  const sel = (doc.activeLayers || []);
+  if (!sel.length) { note('Select a layer first, then tag it.'); return; }
+  const layer = sel[0];
+  const from = layer.name;
+  if (from === tag) { note('That layer is already named "' + tag + '".'); return; }
+  try {
+    await runExclusive(() => core.executeAsModal(
+      async () => { layer.name = tag; },
+      { commandName: 'Rename layer to ' + tag }
+    ));
+    note('Renamed "' + from + '" \u2192 "' + tag + '"' +
+         (sel.length > 1 ? '  (' + sel.length + ' selected \u2014 only the first was renamed)' : '') + '.');
+  } catch (e) { showError(e); }
+}
+
 // ---- render ----
 function chip(text, on, folder) {
   const c = document.createElement('div');
@@ -132,14 +173,58 @@ function chip(text, on, folder) {
   return c;
 }
 
+// UXP renders `title` tooltips only on Spectrum widgets, so the div chips get their own hover tip:
+// shown under the chip after a short delay, hidden on leave / press / scroll / re-render.
+const tipEl = document.createElement('div');
+tipEl.className = 'tip hidden';
+document.body.appendChild(tipEl);
+let tipTimer = null;
+const hideTip = () => { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } tipEl.classList.add('hidden'); };
+function tip(el, text) {
+  el.addEventListener('mouseover', () => {
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => {
+      tipTimer = null;
+      tipEl.textContent = text;
+      tipEl.style.left = '0px'; tipEl.style.top = '0px';
+      tipEl.classList.remove('hidden');
+      const r = el.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+      const bw = document.body.clientWidth, bh = document.body.clientHeight;
+      const left = Math.max(2, Math.min(r.left, bw - t.width - 2));
+      const top = (r.bottom + 4 + t.height <= bh) ? r.bottom + 4 : Math.max(2, r.top - t.height - 4);
+      tipEl.style.left = Math.round(left) + 'px'; tipEl.style.top = Math.round(top) + 'px';
+    }, 350);
+  });
+  el.addEventListener('mouseout', hideTip);
+  el.addEventListener('mousedown', hideTip);
+}
+listEl.addEventListener('scroll', hideTip);
+
 function render() {
+  hideTip();
   singlesEl.innerHTML = '';
   model.singles.forEach((SI) => {
-    const c = chip(SI.lab, SI.v, false); c.title = SI.n;
-    c.addEventListener('click', () => onSingle(SI));
+    const c = chip(SI.lab, SI.v, false);
+    const tag = SINGLE_TAG[SI.lab] || null;
+    tip(c, tag ? tagTitle(SI.n, tag) : SI.n);
+    c.addEventListener('click', (ev) => {
+      if (tag && wantsRepick(ev)) renameSelectedTo(tag); else onSingle(SI);
+    });
     singlesEl.appendChild(c);
   });
-  singlesEl.classList.toggle('hidden', model.singles.length === 0);
+  MAIN_TAGS.forEach((T_) => {
+    const c = chip(T_.lab, false, false);
+    c.classList.add('tagonly');
+    tip(c, 'Clear all season / Specials / Collection / CLS layers.  \u00b7  '
+           + 'Alt-click: rename the selected layer to "' + T_.tag + '"');
+    c.addEventListener('click', (ev) => {
+      if (wantsRepick(ev)) renameSelectedTo(T_.tag);
+      else applyChanges(T.clearAll(model));
+    });
+    singlesEl.appendChild(c);
+  });
+  // MOVIE / SHOW are always available, so the row shows even with no SP/C/CLS layers.
+  singlesEl.classList.remove('hidden');
 
   sequelsEl.innerHTML = '';
   const sqs = T.seqs(model);
@@ -147,7 +232,7 @@ function render() {
     const lbl = document.createElement('span'); lbl.className = 'rowlabel'; lbl.textContent = 'Sequel';
     sequelsEl.appendChild(lbl);
     sqs.forEach((SQ) => {
-      const c = chip(M.seqLabel(SQ.n), SQ.v, false); c.classList.add('num'); c.title = SQ.n;
+      const c = chip(M.seqLabel(SQ.n), SQ.v, false); c.classList.add('num'); tip(c, SQ.n);
       c.addEventListener('click', () => onSequel(SQ));
       sequelsEl.appendChild(c);
     });
@@ -159,18 +244,24 @@ function render() {
     listEl.innerHTML = '<div class="msg">No SEASONS / SPECIALS layers found. Press ⟳ once the PSD is open.</div>';
     return;
   }
+  // With no decade or YEARS group open, still show the first decade's season chips
+  // (unselected) so a layer can be Alt-click tagged without switching SEASONS on first.
+  const anyOpen = model.seasons.some((n) => (n.r === 'decade' || n.r === 'years') && n.v);
+  const firstDecade = model.seasons.filter((n) => n.r === 'decade')[0] || null;
   let decadeOpen = true, yearsOpen = true;
   let row = null, rowCount = 0, rowRole = '';   // season chips flow in centered rows of 5, year chips (wider) in rows of 4
   model.seasons.forEach((N) => {
     if (N.r === 'other' || N.r === 'group' || N.r === 'otherLeaf') return;
-    if (N.r === 'decade') decadeOpen = N.v;
+    if (N.r === 'decade') decadeOpen = N.v || (!anyOpen && N === firstDecade);
     if (N.r === 'years') yearsOpen = N.v;
     if (N.r === 'season' && !decadeOpen) return;
     if (N.r === 'year' && !yearsOpen) return;
     const folder = (N.r === 'main' || N.r === 'decade' || N.r === 'years');
-    const c = chip(M.label(N.n), N.v, folder); c.title = N.n;
-    if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', () => onSeason(N)); }
-    else if (N.r === 'year')   c.addEventListener('click', () => onYear(N));
+    const c = chip(M.label(N.n), N.v, folder);
+    const sTag = chipTag(N);
+    tip(c, sTag ? tagTitle(N.n, sTag) : N.n);
+    if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', (ev) => { if (sTag && wantsRepick(ev)) renameSelectedTo(sTag); else onSeason(N); }); }
+    else if (N.r === 'year')   c.addEventListener('click', (ev) => { if (sTag && wantsRepick(ev)) renameSelectedTo(sTag); else onYear(N); });
     else if (N.r === 'decade') c.addEventListener('click', () => onDecade(N));
     else if (N.r === 'years')  c.addEventListener('click', () => onYearsG(N));
     else                       c.addEventListener('click', () => onMain(N));
@@ -254,15 +345,59 @@ async function onPlace(mode, btn, label) {
   } catch (e) { flash(btn, '✗', label); showError(e); }
 }
 
+// ---- Alt-click Logo: rename the visible layer inside the LOGO group to "<title> - Logo" ----
+async function renameLogoLayer() {
+  if (!hasDoc()) { note('No document open.'); return; }
+  const doc = app.activeDocument;
+
+  // Find the LOGO group LIVE (like tools.js exportLogoPng) — the cached layerByPath snapshot can go stale.
+  const isGroup = (L) => L.kind === constants.LayerKind.GROUP;
+  const findLogo = (layers) => {
+    for (let i = 0; i < layers.length; i++) {
+      const L = layers[i];
+      if (isGroup(L)) {
+        if (/^\s*logos?\s*$/i.test(L.name)) return L;
+        const f = findLogo(L.layers);
+        if (f) return f;
+      }
+    }
+    return null;
+  };
+
+  const grp = findLogo(doc.layers);
+  if (!grp) { note('No LOGO group in this document.'); return; }
+
+  const kids = Array.from(grp.layers || []);
+  if (!kids.length) { note('The LOGO group is empty.'); return; }
+  const vis = kids.filter((L) => L.visible);
+  if (!vis.length) { note('No visible layer in the LOGO group.'); return; }
+
+  const ctx = remoteCtx();
+  const target = cleanTitle((ctx && ctx.name) || baseName()) + ' - Logo';
+  const layer = vis[0];
+  const from = layer.name;
+  if (from === target) { note('The logo layer is already named "' + target + '".'); return; }
+
+  try {
+    await runExclusive(() => core.executeAsModal(
+      async () => { layer.name = target; },
+      { commandName: 'Rename logo layer' }
+    ));
+    note('Renamed "' + from + '" \u2192 "' + target + '"' +
+         (vis.length > 1 ? '  (' + vis.length + ' visible \u2014 only the topmost was renamed)' : '') + '.');
+  } catch (e) { showError(e); }
+}
+
 // ---- Export the LOGO group as a trimmed transparent PNG (Alt-click re-picks the folder).
 // Remote docs render to a temp file and upload to the server's logo folder instead. ----
 async function onLogoExport(ev) {
   if (!hasDoc()) { note('No document open.'); return; }
+  if (wantsRepick(ev)) { await renameLogoLayer(); return; }
   if (!curLogoGroup) { note('No LOGO group in this document.'); return; }
   const ctx = remoteCtx();
   logoExpBtn.textContent = '…';
   try {
-    const folder = ctx ? await R.tempFolder() : await FS.getLogoFolder({ forcePick: wantsRepick(ev) });
+    const folder = ctx ? await R.tempFolder() : await FS.getLogoFolder({});
     if (!folder) { logoExpBtn.textContent = 'Logo'; note('Logo export cancelled — no folder chosen.'); return; }
     const filename = ((ctx && ctx.name) || baseName()) + ' - logo.png';
     const res = await runExclusive(() => TL.exportLogoPng(app.activeDocument, constants, folder, filename));

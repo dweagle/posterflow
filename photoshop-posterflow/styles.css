@@ -8,7 +8,7 @@ html, body {
   color: var(--uxp-host-text-color);
   overflow: hidden;
 }
-body { display: flex; flex-direction: column; height: 100vh; }
+body { display: flex; flex-direction: column; height: 100vh; position: relative; }
 
 .style-head { flex-shrink: 0; padding: 2px 8px; background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--uxp-host-border-color); text-align: center; }
 .style-name { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: var(--uxp-host-text-color-secondary); }
@@ -21,7 +21,8 @@ body { display: flex; flex-direction: column; height: 100vh; }
 sp-action-button.bolt-tags { background-color: #8a5a1c; }
 sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 
-.tools { flex-shrink: 0; display: flex; justify-content: center; padding: 3px 2px; border-bottom: 1px solid var(--uxp-host-border-color); }
+/* Moved below .list so the batch panel opens directly under the bolts that spawn it. */
+.tools { flex-shrink: 0; display: flex; justify-content: center; padding: 3px 2px; border-top: 1px solid var(--uxp-host-border-color); background: rgba(0, 0, 0, 0.15); }
 .tools sp-action-button { margin: 0 2px; }
 
 .batchbar { flex-shrink: 0; padding: 5px 8px; background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--uxp-host-border-color); }
@@ -55,6 +56,8 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 
 .singles, .sequels { flex-shrink: 0; display: flex; justify-content: center; align-items: center; padding: 5px 6px 2px 6px; border-bottom: 1px solid var(--uxp-host-border-color); }
 .singles.hidden, .sequels.hidden { display: none; }
+/* Tag chips (SP / C / CLS / MOVIE / SHOW) match the season number chips' height and 28px minimum. */
+.singles .chip { padding: 3px 7px; min-width: 28px; }
 .rowlabel { color: var(--uxp-host-text-color-secondary); font-size: 10px; margin-right: 4px; }
 
 /* overflow-y: scroll (not auto) — the gutter is ALWAYS reserved, so the chips' width never changes
@@ -69,6 +72,8 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .chip.grp { display: block; font-weight: 700; margin-right: 0; }
 .chip.grp.on { background: #3b6bd6; border-color: #5a86f0; color: #ffffff; }
 .chip.num { width: 28px; padding-left: 0; padding-right: 0; padding-top: 3px; padding-bottom: 3px; }
+/* MOVIE / SHOW toggle nothing: plain click clears the season text, Alt-click tags a layer. After .chip.off so the tint wins. */
+.chip.tagonly { background: rgba(90, 130, 200, 0.22); }
 
 .trimbar { flex-shrink: 0; display: flex; justify-content: center; padding: 3px; border-top: 1px solid var(--uxp-host-border-color); background: rgba(0, 0, 0, 0.15); }
 .trimbar sp-action-button { margin: 0 2px; }
@@ -85,5 +90,9 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .sqpresets sp-action-button[data-sq="1000"] { width: 38px; }
 .sqpresets.hidden { display: flex; visibility: hidden; }
 .sqcancel.hidden { display: none; }
+
+/* Hover tip for the div chips (UXP shows `title` tooltips only on Spectrum widgets). */
+.tip { position: absolute; left: 0; top: 0; max-width: 200px; padding: 3px 6px; font-size: 10px; line-height: 1.3; color: var(--uxp-host-text-color); background: var(--uxp-host-background-color); border: 1px solid var(--uxp-host-border-color); border-radius: 4px; }
+.tip.hidden { display: none; }
 
 .hidden { display: none; }

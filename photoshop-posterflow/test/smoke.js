@@ -68,6 +68,10 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   apply(model, T.clickSingle(model, sp));
   ok(M.activeSuffix(model) === ' - Specials', 'clicking Specials → suffix " - Specials"');
   ok(model.seasons.filter((n) => n.r === 'season').every((n) => n.v === false), 'seasons hidden when Specials on');
+
+  apply(model, T.clearAll(model));
+  ok(model.singles.every((s) => s.v === false) && model.seasons.every((n) => n.v === false), 'clearAll hides every single, season, decade and the SEASONS group');
+  ok(M.activeSuffix(model) === '', 'clearAll → no suffix (plain movie / show poster)');
 }
 
 // ---- MM2K ----
@@ -228,6 +232,16 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(built.items.every((it) => typeof it.key === 'string'), 'items carry their tag key');
   const only = built.items.filter((it) => B.parseTagFilter('c')[it.key]);
   ok(only.length === 1 && only[0].collection === true, 'filtering items by "c" leaves just the collection export');
+}
+
+// ---- the three panels report the same version ----
+{
+  const fs = require('fs'), path = require('path');
+  const ps = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'manifest.json'), 'utf8')).version;
+  ['photopea-posterflow/photopea-posterflow.html', 'frontend/public/photopea-plugin.html'].forEach((f) => {
+    const m = fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8').match(/PANEL_VERSION = '([^']+)'/);
+    ok(!!m && m[1] === ps, f + ' PANEL_VERSION ' + (m ? m[1] : '(missing)') + ' should match the Photoshop manifest ' + ps);
+  });
 }
 
 console.log((fail === 0 ? 'PASS' : 'FAIL') + ' — ' + pass + ' checks passed, ' + fail + ' failed');

@@ -8,6 +8,10 @@ Posterflow, no login, no network.
 
 - **Season / Specials / Sequel chips** — toggles the matching layers on/off, mutually
   exclusive the way the poster templates expect.
+- **Tag a layer from a chip** — **Alt-click** a chip to rename the selected layer to its export
+  tag (`SP` → `s0`, `3` → `s3`, `2015` → `s2015`, `C` → `c`, `CLS` → `cls`, `MOVIE` → `main`,
+  `SHOW` → `show`). Alt-click **Logo** renames the visible logo layer to `<title> - Logo`.
+  `MOVIE` / `SHOW` on a plain click hide every season / Specials / Collection layer.
 - **Style badge** — shows `CL2K` or `MM2K`, detected from the layer structure (a `LOGO`
   group ⇒ CL2K; a `SEQUEL` group ⇒ MM2K; otherwise `—`).
 - **Place Logo / Fit Poster** — resize + position the **selected** layer with the poster
@@ -70,8 +74,9 @@ can also point them at the install page:
 
 ### Panel size
 
-`manifest.json` sets `"w": 184, "h": 420` so the panel opens at the same narrow width as the
-in-app plugin (184px fits the 5-chip season rows). **Heads-up:** unlike the HTML (fetched live from
+`manifest.json` sets `"w": 224, "h": 600` so the panel opens at the same size as the in-app
+plugin (224px fits the SP · C · CLS · MOVIE · SHOW row on one line; the panel keeps a two-line
+fallback for narrower hosts). **Heads-up:** unlike the HTML (fetched live from
 `url`), Photopea copies `name` / `icon` / `w` / `h` into its gallery record **when you publish**.
 So changing the size means **re-publishing / updating the gallery entry** — editing `manifest.json`
 alone won't resize an already-published plugin.
@@ -92,6 +97,9 @@ full-color logo, so there is **no** `===` theme-recolor prefix.
 
 ## Notes
 
+- The panel reports its version (`PANEL_VERSION` near the top of the script) in a note when it opens
+  and as the style badge's tooltip. Keep it in step with the Photoshop plugin's `manifest.json`
+  version — `node photoshop-posterflow/test/smoke.js` fails if the three disagree.
 - The panel loads inside top-level Photopea, so a PSD you **drag in / File ▸ Open** keeps a
   writable file handle — that's why Ctrl+S saves in place.
 - The Place Logo / Fit Poster math targets the 1000×1500 poster canvas with a 25px border,

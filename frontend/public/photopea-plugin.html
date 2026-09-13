@@ -41,11 +41,11 @@
   .btn.bolt-tags:hover { background: #a06a24; }
   .btn.bolt-seasons { background: #2b5c9e; }
   .btn.bolt-seasons:hover { background: #356ec0; }
-  .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px; padding: 8px; border-bottom: 1px solid #3a3a42; }
+  .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; padding: 8px 4px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
-  .tools { display: flex; gap: 5px; padding: 6px; border-bottom: 1px solid #3a3a42; }
-  .tools .btn { flex: 1; }
+  /* Below .list so the batch panel opens directly under the bolts that spawn it. */
+  .tools { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .batchbar { padding: 8px; background: #23232a; border-bottom: 1px solid #3a3a42; }
   .batchbar.hidden { display: none; }
   .batchmsg { color: #cfcfcf; font-size: 11px; margin-bottom: 6px; }
@@ -68,18 +68,23 @@
   .chip.grp { font-weight: 700; flex-basis: 100%; }
   .chip.grp.on { background: #3b6bd6; border-color: #5a86f0; }
   .chip.num { width: 28px; padding-left: 2px; padding-right: 2px; }
+  /* Tag chips (SP / C / CLS / MOVIE / SHOW) match the season number chips' height and 28px minimum. */
+  .singles .chip { padding: 3px 5px; min-width: 28px; }
+  .singles .break { flex-basis: 100%; height: 0; }
+  /* At the full panel width (224px) all five tag chips fit on one line and the season rows get roomier chips;
+     narrower hosts (a gallery entry published at the old 196px) keep the two-line layout. */
+  @media (min-width: 216px) { .singles .break { display: none; } .chip.num { width: 32px; } }
+  /* MOVIE / SHOW toggle nothing: plain click clears the season text, Alt-click tags a layer. After .chip.off so the tint wins. */
+  .chip.tagonly { background: rgba(90, 130, 200, 0.22); }
   .msg { padding: 8px; color: #9aa; }
   .trimbar { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
-  /* Shared width for Trim/Logo (direct children only) — lines up with the Crop/✕ pair below. */
-  .trimbar > .btn { width: 66px; box-sizing: border-box; padding: 4px 0; text-align: center; }
+  /* One width for every bottom-bar pair: Place Logo / Fit Poster, Trim / Logo, Poster / Square Art, Crop / ✕. */
+  .tools .btn, .trimbar > .btn, .sqrow .btn { width: 88px; box-sizing: border-box; padding: 4px 0; text-align: center; }
   /* Fixed height: the preset row's space is reserved, so arming expands DOWN, not up. */
   .sqbar { flex-direction: column; align-items: center; height: 68px; box-sizing: border-box; }
   .sqrow { display: flex; gap: 6px; justify-content: center; }
-  .sqrow .btn { width: 86px; box-sizing: border-box; padding: 4px 0; text-align: center; }
   .pexbtn.hidden { display: none; }
-  /* Armed: Crop and ✕ match Trim/Logo's width; idle keeps natural width (label fits). */
-  .sqrow:has(.sqcancel:not(.hidden)) .btn { width: 66px; box-sizing: border-box; padding: 4px 0; text-align: center; }
   .sqcancel.hidden { display: none; }
   /* Message strip — fixed height (fits a couple of notes; extras scroll), never grows or moves. */
   .notes { height: 96px; flex: none; box-sizing: border-box; overflow-y: auto; padding: 5px 8px; background: #1b1b20;
@@ -99,10 +104,6 @@
     <button class="btn bolt-seasons" data-act="batch-seasons" title="Seasons from one poster — pick a range and export Season 1…N (+ Specials) from a single poster">⚡</button>
     <button class="btn" data-act="refresh" title="Reload layers from the active document">⟳</button>
   </div>
-  <div class="tools">
-    <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo, using Maker Tools' formula (keeps the logo's colors)">Place Logo</button>
-    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</button>
-  </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
     <div class="batchrow hidden">
@@ -117,9 +118,13 @@
   <div class="singles hidden"></div>
   <div class="sequels hidden"></div>
   <div class="list"><div class="msg">Loading…</div></div>
+  <div class="tools">
+    <button class="btn" data-act="logo" title="Resize &amp; place the SELECTED layer as a logo, using Maker Tools' formula (keeps the logo's colors)">Place Logo</button>
+    <button class="btn" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</button>
+  </div>
   <div class="trimbar">
     <button class="btn" data-act="trim" title="Trim off-canvas pixels from ALL layers — shrinks the saved file, no visible change. Save after.">Trim</button>
-    <button class="btn" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG (to the logo folder, or download)">Logo</button>
+    <button class="btn" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG (to the logo folder, or download).  ·  Alt-click: rename the visible logo layer to &quot;&lt;title&gt; - Logo&quot;">Logo</button>
   </div>
   <div class="trimbar sqbar">
     <div class="sqrow">
@@ -142,6 +147,7 @@
 (function () {
   'use strict';
 
+  const PANEL_VERSION = '1.2.0';   // keep in step with photoshop-posterflow/manifest.json (its smoke test checks)
   const PP      = window.parent;                 // top-level Photopea hosts this panel
   const singles = document.querySelector('.singles');
   const sequels = document.querySelector('.sequels');
@@ -197,7 +203,7 @@
   const send = (script) => PP.postMessage(script, '*');
 
   const FETCH = `try{
-    if(app.documents.length===0){app.echoToOE('PFL:'+JSON.stringify({singles:[],seasons:[]}));}
+    if(app.documents.length===0){app.echoToOE('PFL:'+JSON.stringify({singles:[],seasons:[],nodoc:true}));}
     else{
       var d=app.activeDocument;
       var SING=[{re:/^specials$/i,lab:'SP'},{re:/^collection$/i,lab:'C'},{re:/^complete limited/i,lab:'CLS'}];
@@ -396,6 +402,53 @@
     commit(changes);
   };
 
+  // Hide every season / single / sequel / year layer — the plain movie or show poster state.
+  const clearAll = () => {
+    const changes = [];
+    model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+    byRole('season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+    byRole('decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+    if (main()) changes.push({ p: main().p, v: false });
+    changes.push(...yearsOff(), ...seqOff(), ...seqGroupOff());
+    commit(changes);
+  };
+
+  // ---- Tagging: rename the selected layer to a Posterflow export tag ----
+  // Same vocabulary as the batch scan: s0 = Specials, s{N} = Season N (1-4 digits, so year seasons
+  // like s1985 work), c = Collection, cls = Complete Limited Series, main / show = the main export.
+  // Chips rename on Alt-click. MOVIE / SHOW have no layer to toggle: plain click clears every
+  // season / single layer, Alt-click renames.
+  const cleanTitle = (s_) => String(s_ || '').replace(/\s*\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
+  const SINGLE_TAG = { SP: 's0', C: 'c', CLS: 'cls' };
+  const MAIN_TAGS = [{ lab: 'MOVIE', tag: 'main' }, { lab: 'SHOW', tag: 'show' }];
+  const chipTag = (N) => {
+    if (N.r !== 'season' && N.r !== 'year') return null;
+    const lab = label(N.n);
+    return /^\d{1,4}$/.test(lab) ? 's' + parseInt(lab, 10) : null;
+  };
+  const tagTitle = (base, tag) => base + '  \u00b7  Alt-click: rename the selected layer to "' + tag + '"';
+  let renameBusy = false;
+  const renameSelectedTo = (tag) => {
+    if (renameBusy || placeBusy || batchBusy || logoExpBusy || posterExpBusy || squareArtBusy) return;
+    renameBusy = true;
+    const t = JSON.stringify(tag);
+    send('try{if(app.documents.length===0){app.echoToOE("PFLRENAME:"+JSON.stringify({err:"nodoc"}));}' +
+      'else{var L=app.activeDocument.activeLayer,from=L.name;' +
+      'if(from==' + t + '){app.echoToOE("PFLRENAME:"+JSON.stringify({err:"same",from:from}));}' +
+      'else{L.name=' + t + ';app.echoToOE("PFLRENAME:"+JSON.stringify({from:from,to:L.name}));}}' +
+      '}catch(e){app.echoToOE("PFLERR:"+e);}');
+  };
+  const onRenamed = (json) => {
+    renameBusy = false;
+    let o = null; try { o = JSON.parse(json); } catch (_) {}
+    if (!o) { note('Rename failed.'); return; }
+    if (o.err === 'nodoc') note('No document open.');
+    else if (o.err === 'same') note('That layer is already named "' + o.from + '".');
+    else if (o.err === 'changed') note('The logo layer changed before it could be renamed — try again.');
+    else if (o.err) note('Rename failed.');
+    else note('Renamed "' + o.from + '" \u2192 "' + o.to + '"' + (o.vis > 1 ? '  (' + o.vis + ' visible \u2014 only the topmost was renamed)' : '') + '.');
+  };
+
   // ---- render --------------------------------------------------------------
   const chip = (text, on, folder) => {
     const c = document.createElement('div');
@@ -408,11 +461,21 @@
     singles.innerHTML = '';
     model.singles.forEach((SI) => {
       const c = chip(SI.lab, SI.v, false);
-      c.title = SI.n;
-      c.addEventListener('click', () => clickSingle(SI));
+      const tag = SINGLE_TAG[SI.lab] || null;
+      c.title = tag ? tagTitle(SI.n, tag) : SI.n;
+      c.addEventListener('click', (ev) => { if (tag && ev.altKey) renameSelectedTo(tag); else clickSingle(SI); });
       singles.appendChild(c);
     });
-    singles.classList.toggle('hidden', model.singles.length === 0);
+    // MOVIE / SHOW are always available, on their own line (the panel is too narrow for five chips).
+    if (model.singles.length) { const br = document.createElement('span'); br.className = 'break'; singles.appendChild(br); }
+    MAIN_TAGS.forEach((MT) => {
+      const c = chip(MT.lab, false, false);
+      c.classList.add('tagonly');
+      c.title = 'Clear all season / Specials / Collection / CLS layers.  \u00b7  Alt-click: rename the selected layer to "' + MT.tag + '"';
+      c.addEventListener('click', (ev) => { if (ev.altKey) renameSelectedTo(MT.tag); else clearAll(); });
+      singles.appendChild(c);
+    });
+    singles.classList.toggle('hidden', !!model.nodoc);
 
     // Sequels (MM2K): a labeled row of numbered toggle chips, above the season list.
     sequels.innerHTML = '';
@@ -435,18 +498,23 @@
       list.innerHTML = '<div class="msg">No SEASONS / SPECIALS layers found. Press ⟳ once the PSD is open.</div>';
       return;
     }
+    // With no decade or YEARS group open, still show the first decade's season chips (unselected)
+    // so a layer can be Alt-click tagged without switching SEASONS on first. Display only.
+    const anyOpen = model.seasons.some((n) => (n.r === 'decade' || n.r === 'years') && n.v);
+    const firstDecade = model.seasons.filter((n) => n.r === 'decade')[0] || null;
     let decadeOpen = true, yearsOpen = true;
     model.seasons.forEach((N) => {
       if (N.r === 'other' || N.r === 'group' || N.r === 'otherLeaf') return;
-      if (N.r === 'decade') decadeOpen = N.v;
+      if (N.r === 'decade') decadeOpen = N.v || (!anyOpen && N === firstDecade);
       if (N.r === 'years') yearsOpen = N.v;
       if (N.r === 'season' && !decadeOpen) return;
       if (N.r === 'year' && !yearsOpen) return;
       const folder = (N.r === 'main' || N.r === 'decade' || N.r === 'years');
       const c = chip(label(N.n), N.v, folder);
-      c.title = N.n;
-      if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', () => clickSeason(N)); }
-      else if (N.r === 'year')   c.addEventListener('click', () => clickYear(N));
+      const sTag = chipTag(N);
+      c.title = sTag ? tagTitle(N.n, sTag) : N.n;
+      if (N.r === 'season')      { c.classList.add('num'); c.addEventListener('click', (ev) => { if (sTag && ev.altKey) renameSelectedTo(sTag); else clickSeason(N); }); }
+      else if (N.r === 'year')   c.addEventListener('click', (ev) => { if (sTag && ev.altKey) renameSelectedTo(sTag); else clickYear(N); });
       else if (N.r === 'decade') c.addEventListener('click', () => clickDecade(N));
       else if (N.r === 'years')  c.addEventListener('click', () => clickYearsGroup(N));
       else                       c.addEventListener('click', () => clickMain(N));   // main
@@ -737,7 +805,8 @@
   // to the logo's alpha bounding box HERE in a browser canvas. PUT to the logo folder, else download.
   const flashLogoExp = (m) => { logoExpBusy = false; logoExpBtn.textContent = m; setTimeout(() => { logoExpBtn.textContent = 'Logo'; }, 1400); };
   const restoreLogoVis = () => { if (logoRestore && logoRestore.length) setVis(logoRestore); logoRestore = null; };
-  const exportLogo = () => {
+  const exportLogo = (ev) => {
+    if (ev && ev.altKey) { renameLogoLayer(); return; }
     if (logoExpBusy || saving || jpgBusy || placeBusy || batchBusy || trimBusy || posterExpBusy || squareArtBusy) return;
     logoExpBusy = true; logoExpBtn.textContent = '…';
     // Same per-doc context resolution as the JPG path (names the PNG after the poster), then:
@@ -758,6 +827,48 @@
       'cont=cont.layers[pth[k]];pref=pref.concat(pth[k]);}' +
       'app.echoToOE("PFLLOGOVIS:"+JSON.stringify(chg));' +
       'd.saveToOE("png");}' +
+      '}catch(e){app.echoToOE("PFLERR:"+e);}');
+  };
+
+  // ---- Alt-click Logo: rename the visible layer inside the LOGO group to "<title> - Logo" ----
+  // Two round trips: read the topmost visible logo layer (+ the doc name), then rename it by name.
+  const renameLogoLayer = () => {
+    if (renameBusy || logoExpBusy || jpgBusy || placeBusy || batchBusy || trimBusy || posterExpBusy || squareArtBusy) return;
+    renameBusy = true;
+    send('try{if(app.documents.length===0){app.echoToOE("PFLLOGOLAYER:"+JSON.stringify({err:"nodoc"}));}' +
+      'else{var d=app.activeDocument,s=(""+(d.source||""));' + DETECT +
+      'if(s.indexOf("pflctx:")==0){app.echoToOE("PFLEXP:"+s.slice(7));}' +
+      'else if(s.indexOf("/psd-exports/")>=0){app.echoToOE("PFLURL:"+s);}' +
+      'else if(' + JSON.stringify(cfg.name) + '&&' + JSON.stringify(posterDocName) + '&&d.name==' + JSON.stringify(posterDocName) + '){app.echoToOE("PFLEXP:"+' + cfgCtxJson + ');}' +
+      'else if(st){app.echoToOE("PFLDOC:"+JSON.stringify({style:st,name:d.name}));}' +
+      'else{app.echoToOE("PFLEXP:"+JSON.stringify({raw:d.name}));}' +
+      'app.echoToOE("PFLNAME:"+d.name);' +
+      'function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+      'var g=fg(d.layers);' +
+      'if(!g){app.echoToOE("PFLLOGOLAYER:"+JSON.stringify({err:"nologo"}));}' +
+      'else if(!g.layers.length){app.echoToOE("PFLLOGOLAYER:"+JSON.stringify({err:"empty"}));}' +
+      'else{var vis=[];for(var i=0;i<g.layers.length;i++){if(g.layers[i].visible)vis.push(g.layers[i]);}' +
+      'if(!vis.length){app.echoToOE("PFLLOGOLAYER:"+JSON.stringify({err:"novis"}));}' +
+      'else{app.echoToOE("PFLLOGOLAYER:"+JSON.stringify({from:vis[0].name,vis:vis.length}));}}}' +
+      '}catch(e){app.echoToOE("PFLERR:"+e);}');
+  };
+  const onLogoLayer = (json) => {
+    let o = null; try { o = JSON.parse(json); } catch (_) {}
+    if (!o || o.err) {
+      renameBusy = false;
+      note(!o ? 'Rename failed.' : o.err === 'nodoc' ? 'No document open.' : o.err === 'nologo' ? 'No LOGO group in this document.'
+        : o.err === 'empty' ? 'The LOGO group is empty.' : 'No visible layer in the LOGO group.');
+      return;
+    }
+    const ex = pendingExport || {}; pendingExport = null;
+    const base = ex.name ? ex.name : (ex.raw || pendingDocName).replace(/\.(psd|psb|jpe?g|png|webp|gif|bmp|tiff?)$/i, '');
+    const target = cleanTitle(base) + ' - Logo';
+    if (o.from === target) { renameBusy = false; note('The logo layer is already named "' + target + '".'); return; }
+    const from = JSON.stringify(o.from), to = JSON.stringify(target);
+    send('try{var d=app.activeDocument;function fg(ls){for(var i=0;i<ls.length;i++){var L=ls[i];if(L.typename=="LayerSet"){if(/^\\s*logos?\\s*$/i.test(L.name))return L;var f=fg(L.layers);if(f)return f;}}return null;}' +
+      'var g=fg(d.layers),L=null;if(g){for(var i=0;i<g.layers.length;i++){if(g.layers[i].visible){L=g.layers[i];break;}}}' +
+      'if(!L||L.name!=' + from + '){app.echoToOE("PFLRENAME:"+JSON.stringify({err:"changed"}));}' +
+      'else{L.name=' + to + ';app.echoToOE("PFLRENAME:"+JSON.stringify({from:' + from + ',to:L.name,vis:' + (o.vis | 0) + '}));}' +
       '}catch(e){app.echoToOE("PFLERR:"+e);}');
   };
 
@@ -1528,6 +1639,8 @@
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
     else if (d.startsWith('PFLPLACED:')){ finishPlace(true); }
     else if (d.startsWith('PFLTRIM:'))  { flashTrim('✓'); }
+    else if (d.startsWith('PFLRENAME:')) { onRenamed(d.slice(10)); }
+    else if (d.startsWith('PFLLOGOLAYER:')) { onLogoLayer(d.slice(13)); }
     else if (d.startsWith('PFLLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(11)); } catch (_) { logoRestore = null; } }
     else if (d.startsWith('PFLNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
     else if (d.startsWith('PFLSQSET:')) { const s = d.slice(9); note('Placed a ' + s + '×' + s + ' selection — drag inside it to position, then press Crop.'); }
@@ -1568,7 +1681,7 @@
     else if (d.startsWith('PFLSQNOPOSTER:')) { flashSquare('✗'); note('No POSTER group in this document.'); }
     else if (d.startsWith('PFLSQEMPTY:')) { restorePosterVis(); flashSquare('✗'); note('The POSTER group has no visible variant.'); }
     else if (d.startsWith('PFLNOSAVE:')){ saving = false; saveBtn.textContent = '⚠'; setTimeout(() => { saveBtn.textContent = '💾'; }, 1800); note('"' + d.slice(10) + '" isn\'t the poster — use Ctrl+S to save it.'); }
-    else if (d.startsWith('PFLERR:'))   { if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); note('Poster export failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
+    else if (d.startsWith('PFLERR:'))   { if (renameBusy) { renameBusy = false; note('Rename failed: ' + d.slice(7)); } else if (squareArtBusy) { restorePosterVis(); flashSquare('✗'); note('Square Art failed: ' + d.slice(7)); } else if (posterExpBusy) { restorePexVis(); pexQueue = []; flashPex('✗'); note('Poster export failed: ' + d.slice(7)); } else if (logoExpBusy) { restoreLogoVis(); flashLogoExp('✗'); note('Logo export failed: ' + d.slice(7)); } else if (trimBusy) { flashTrim('✗'); note('Trim failed: ' + d.slice(7)); } else if (batchBusy) { batchAbort(d.slice(7)); } else if (placeBusy) { finishPlace(false, 'Photopea error: ' + d.slice(7)); } else { note('Error: ' + d.slice(7)); flashSave('💾'); flashJpg('JPG'); } }
     // PFLVIS: ack handled optimistically in commit().
   });
 
@@ -1645,6 +1758,8 @@
     + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
   setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) send(POLL); }, 1200);
 
+  styleName.title = 'PosterFlow panel v' + PANEL_VERSION;
+  note('PosterFlow panel v' + PANEL_VERSION + '.');
   fetchLayers();   // read the document Photopea loaded from the launch URL (press ⟳ to reload)
 })();
 </script>

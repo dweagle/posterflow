@@ -138,7 +138,20 @@ const clickYearsGroup = (model, YG) => {
   return changes;
 };
 
+// Hide every season / single / sequel / year layer — the "this is a plain movie or show poster,
+// no season text at all" state. Mirrors the off-branches of clickSingle plus the SEASONS group.
+const clearAll = (model) => {
+  const changes = [];
+  model.singles.forEach((si) => changes.push({ p: si.p, v: false }));
+  byRole(model, 'season').forEach((sn) => changes.push({ p: sn.p, v: false }));
+  byRole(model, 'decade').forEach((dn) => changes.push({ p: dn.p, v: false }));
+  if (main(model)) changes.push({ p: main(model).p, v: false });
+  changes.push(...yearsOff(model), ...seqOff(model), ...seqGroupOff(model));
+  return changes;
+};
+
 module.exports = {
   key, seqs, allNodes, byRole, main, seqOff, seqGroupOff, yearsOff, firstSeason,
   clickSeason, clickSingle, clickSequel, clickMain, clickDecade, clickYear, clickYearsGroup,
+  clearAll,
 };
