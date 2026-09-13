@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-09-13
+### Added
+- Photopea/Photoshop Plugins: Alt-click a layer to rename/tag it with season/show/movie, plus new MOVIE/SHOW chips — in both panels. (Photoshop plugin 1.2.0 - reinstall the .ccx to pick it up.) Thank you Bostafari for the legwork on this!
+- Maker Tools: TMDB collection cards now borrow the logo from the collection's first movie when the collection itself has none.
+
 ## [0.15.4] - 2026-09-11
 ### Fixed
 - Maker Tools: request/list titles with only a TheTVDB id — or a dead TMDB id correctly get an image gallery instead of an empty card.
