@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-09-14
+### Fixed
+- Photoshop Plugin: Alt-click tagging no longer sticks (Photoshop plugin 1.2.1 - reinstall the .ccx to pick it up.)
+
 ## [0.15.5] - 2026-09-13
 ### Added
 - Photopea/Photoshop Plugins: Alt-click a layer to rename/tag it with season/show/movie, plus new MOVIE/SHOW chips — in both panels. (Photoshop plugin 1.2.0 - reinstall the .ccx to pick it up.) Thank you Bostafari for the legwork on this!
