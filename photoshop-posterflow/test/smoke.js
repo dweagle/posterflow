@@ -7,6 +7,7 @@ const T = require('../toggle');
 const M = require('../model');
 const B = require('../batch');
 const G = require('../geometry');
+const A = require('../altkey');
 
 // --- mock photoshop constants + layer factory ---
 const constants = { LayerKind: { GROUP: 'group' } };
@@ -232,6 +233,28 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(built.items.every((it) => typeof it.key === 'string'), 'items carry their tag key');
   const only = built.items.filter((it) => B.parseTagFilter('c')[it.key]);
   ok(only.length === 1 && only[0].collection === true, 'filtering items by "c" leaves just the collection export');
+}
+
+// ---- Alt-click tracking (altkey.js): read from the pointer press, one-shot, never sticks ----
+{
+  const alt = A.createAltTracker();
+  ok(alt.consume({ altKey: false }) === false, 'plain click is not an Alt-click');
+  ok(alt.consume({ altKey: true }) === true, 'a click carrying altKey is an Alt-click');
+  ok(alt.consume({ altKey: false }) === false, 'altKey on one click does not carry over to the next');
+
+  alt.press({ altKey: true });
+  ok(alt.consume({ altKey: false }) === true, 'altKey on the pointer press + click without it (UXP on Windows) is an Alt-click');
+  ok(alt.consume({ altKey: false }) === false, 'the next plain click is NOT an Alt-click (stuck-Alt regression)');
+
+  alt.press({ altKey: true }); alt.press({ altKey: false });
+  ok(alt.consume({ altKey: false }) === true, 'pointerdown + mousedown of one press: either carrying Alt counts');
+  alt.press({ altKey: false });
+  ok(alt.consume({ altKey: false }) === false, 'a press without Alt is a plain click');
+
+  alt.press({ altKey: true }); alt.release();
+  ok(alt.consume({ altKey: false }) === false, 'release() (document click after the handler) clears a stranded press');
+  alt.press(undefined);
+  ok(alt.consume(undefined) === false, 'missing events are tolerated');
 }
 
 // ---- the three panels report the same version ----

@@ -12,6 +12,7 @@ const B = require('./batch');
 const TL = require('./tools');
 const FS = require('./fs');
 const R = require('./remote');
+const A = require('./altkey');
 
 // ---- DOM refs ----
 const styleEl   = document.querySelector('[data-el="style"]');
@@ -52,13 +53,12 @@ let sqArmed = false, sqBusy = false;      // Square Art: crop tab open / op in f
 let sqTemp = null, sqHome = null;         // { doc, width, height } crop doc + the PSD to return to
 let sqCtx = null, sqWant = 0;             // remote ctx captured at start + last preset size
 
-// UXP widget click events don't reliably carry modifier flags (altKey is false on Windows), so track
-// the Alt key ourselves as a fallback signal for the "re-pick folder" gestures.
-let altDown = false;
-window.addEventListener('keydown', (e) => { if (e.key === 'Alt') altDown = true; });
-window.addEventListener('keyup', (e) => { if (e.key === 'Alt') altDown = false; });
-window.addEventListener('blur', () => { altDown = false; });
-const wantsRepick = (ev) => !!(ev && ev.altKey) || altDown;
+// Alt comes from the pointer press (widget click events drop altKey on Windows); read it once per click.
+const alt = A.createAltTracker();
+document.addEventListener('pointerdown', (e) => alt.press(e), true);
+document.addEventListener('mousedown', (e) => alt.press(e), true);
+document.addEventListener('click', () => alt.release());
+const wantsRepick = (ev) => alt.consume(ev);
 
 // ---- serialized modal queue: one document edit at a time, no dropped clicks ----
 let chain = Promise.resolve();
@@ -311,6 +311,7 @@ async function onSave() {
 // ---- Export JPG (remote docs upload to the server's image folder; local docs use the picked folder) ----
 async function onJpg(ev) {
   if (!hasDoc()) { note('No document open.'); return; }
+  const repick = wantsRepick(ev);
   const ctx = remoteCtx();
   jpgBtn.textContent = '…';
   try {
@@ -324,10 +325,10 @@ async function onJpg(ev) {
       } catch (e) {
         if (!/HTTP 400/.test(String(e && e.message))) throw e;
         note('Server has no image export folder — saving locally instead.');
-        res = await runExclusive(() => S.exportJpg(app.activeDocument, ctx.style, base, M.activeSuffix(model), { forcePick: wantsRepick(ev) }));
+        res = await runExclusive(() => S.exportJpg(app.activeDocument, ctx.style, base, M.activeSuffix(model), { forcePick: repick }));
       }
     } else {
-      res = await runExclusive(() => S.exportJpg(app.activeDocument, curStyle, base, M.activeSuffix(model), { forcePick: wantsRepick(ev) }));
+      res = await runExclusive(() => S.exportJpg(app.activeDocument, curStyle, base, M.activeSuffix(model), { forcePick: repick }));
     }
     if (res.ok) { flash(jpgBtn, '✓', 'JPG'); note('Saved "' + res.filename + '" → ' + res.folderName); }
     else { jpgBtn.textContent = 'JPG'; if (res.reason === 'cancelled') note('JPG cancelled — no folder chosen.'); }
@@ -443,10 +444,11 @@ const pexSuffix = (nm) => {
 };
 async function onPosterExport(ev) {
   if (!hasDoc()) { note('No document open.'); return; }
+  const repick = wantsRepick(ev);
   const ctx = remoteCtx();
   posterExpBtn.textContent = '…';
   try {
-    const folder = ctx ? await R.tempFolder() : await FS.getPosterFolder({ forcePick: wantsRepick(ev) });
+    const folder = ctx ? await R.tempFolder() : await FS.getPosterFolder({ forcePick: repick });
     if (!folder) { posterExpBtn.textContent = 'Poster'; note('Poster export cancelled — no folder chosen.'); return; }
     const base = (ctx && ctx.name) || baseName();
     const n = (app.activeDocument.activeLayers || []).length;
@@ -504,6 +506,7 @@ const flashSq = (m) => {
 };
 async function onSquareArt(ev) {
   if (sqBusy) return;
+  const repick = wantsRepick(ev);
   if (!sqArmed) {
     if (!hasDoc()) { note('No document open.'); return; }
     sqBusy = true; squareArtBtn.textContent = '…';
@@ -546,7 +549,7 @@ async function onSquareArt(ev) {
     // Upscale to the wanted preset size ONLY when the art itself capped the selection.
     const want = (sqWant > side && side >= Math.min(sqTemp.width, sqTemp.height)) ? sqWant : 0;
     const ctx = sqCtx;
-    const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: wantsRepick(ev) });
+    const folder = ctx ? await R.tempFolder() : await FS.getSquareartFolder({ forcePick: repick });
     if (!folder) { sqBusy = false; squareArtBtn.textContent = 'Crop'; note('Square Art cancelled — no folder chosen.'); return; }
     const filename = ((ctx && ctx.name) || baseName(sqHome)) + ' - squareart.jpg';
     const res = await runExclusive(() => TL.cropSaveSquare(sqTemp.doc, folder, filename, { x, y, side }, want));
