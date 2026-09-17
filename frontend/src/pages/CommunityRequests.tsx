@@ -619,7 +619,7 @@ export default function CommunityRequests() {
                 <span>IDarr drive</span>
                 <select value={idarrTarget} onChange={(e) => setIdarrTarget(e.target.value)}>
                   {idarrTargets.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
+                    <option key={t.index} value={t.value}>{t.label}</option>
                   ))}
                 </select>
               </label>

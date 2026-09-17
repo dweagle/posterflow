@@ -145,7 +145,7 @@
   /* Left-pack the filter groups (tabs → dropdowns → Claimed → owner-toggle); the
      action buttons get pushed to the right via margin-left:auto below. */
   gap: 1rem;
-  margin-bottom: 2rem;
+  margin-bottom: 0.75rem;
   padding: 0.75rem;
   background-color: #3D4556;
   border-radius: 8px;
@@ -496,6 +496,9 @@
 }
 
 /* List */
+/* Sticks while the list scrolls so the IDarr quick-add toggle + drive picker (and the
+   Lists search) stay reachable. The scrolling .content has 2rem padding and Chrome pins
+   sticky boxes inside that padding, so the negative top lands it flush with the top edge. */
 .community-list-header {
   display: flex;
   align-items: center;
@@ -503,6 +506,12 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+  position: sticky;
+  top: -2rem;
+  z-index: 25;
+  background: #121212;
+  border-bottom: 1px solid #2a2a2a;
+  padding-bottom: 0.35rem;
 }
 
 .community-count {
@@ -1287,12 +1296,14 @@
   color: #64b5f6;
 }
 
+/* Opens downward: the header is pinned at the top of the scroll area, so a tooltip
+   above it would be clipped. */
 .maker-idarr-tooltip {
   opacity: 0;
   visibility: hidden;
   position: absolute;
   right: 0;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
   width: 280px;
   padding: 0.6rem 0.75rem;
   background: #1a1a2e;
@@ -1433,6 +1444,13 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.75rem;
+  }
+
+  /* The header wraps to several rows on a phone; pinning it would eat the viewport. */
+  .community-list-header {
+    position: static;
+    border-bottom: none;
+    padding-bottom: 0;
   }
 
   .community-tab-btn {

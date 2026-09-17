@@ -38,25 +38,22 @@ import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './IDarr.css'
 import Toolbar from '../components/Toolbar'
+import {
+  useIdarrSyncTarget,
+  getSyncTargetStorageValue,
+  readStoredSyncTarget,
+  writeStoredSyncTarget,
+  resolveSyncTargetIndex,
+  setIdarrSyncTargets,
+  refreshIdarrSyncTargets,
+} from '../hooks/useIdarrSyncTarget'
 
 const IDARR_TAB_STORAGE_KEY = 'posterflow.idarr.activeTab'
-const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
 // Pending matches are paginated
 const PENDING_PAGE_SIZE = 25
 
 const isIDarrTab = (value: string): value is IDarrTab => {
   return ['IDarr', 'settings'].includes(value)
-}
-
-const getSyncTargetStorageValue = (target: { personal_drive_id?: string; source_dir?: string; label?: string; scope_token?: string }): string => {
-  const scopeToken = String(target.scope_token || '').trim()
-  if (scopeToken) {
-    return `scope:${scopeToken}`
-  }
-  const driveId = String(target.personal_drive_id || '').trim()
-  const sourceDir = String(target.source_dir || '').trim()
-  const label = String(target.label || '').trim()
-  return `${driveId}::${sourceDir}::${label}`
 }
 
 const DEFAULT_IDARR_CONFIG: MakerIdarrConfig = {
@@ -251,6 +248,8 @@ function IDarr() {
   const [running, setRunning] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [selectedSyncTargetIndex, setSelectedSyncTargetIndex] = useState(0)
+  // Shared with the sidebar scope picker and the community quick-add pickers.
+  const { storedValue: sharedSyncTargetValue } = useIdarrSyncTarget()
   const [frequencyDaysInput, setFrequencyDaysInput] = useState(String(DEFAULT_IDARR_CONFIG.frequency_days))
   const [tvdbFrequencyInput, setTvdbFrequencyInput] = useState(String(DEFAULT_IDARR_CONFIG.tvdb_frequency))
   const [duplicatesRetentionInput, setDuplicatesRetentionInput] = useState(String(DEFAULT_IDARR_CONFIG.duplicates_retention_days))
@@ -343,8 +342,18 @@ function IDarr() {
       return
     }
 
-    localStorage.setItem(IDARR_SYNC_TARGET_STORAGE_KEY, getSyncTargetStorageValue(selectedTarget))
+    writeStoredSyncTarget(getSyncTargetStorageValue(selectedTarget))
   }, [config.sync_targets, selectedSyncTargetIndex])
+
+  // Follow a scope change made elsewhere (sidebar picker, community pickers). Only the
+  // shared value is a dependency: the local index and the store update on different renders,
+  // so re-running on the index would read a stale shared value and undo the page's own change.
+  useEffect(() => {
+    if (!hasCompletedInitialLoadRef.current) return
+    const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
+    const index = resolveSyncTargetIndex(syncTargets, sharedSyncTargetValue)
+    if (index >= 0 && index !== selectedSyncTargetIndex) setSelectedSyncTargetIndex(index)
+  }, [sharedSyncTargetValue])
 
   const getCandidateTmdbUrl = (tmdbId: number, mediaType: 'movie' | 'show' | 'collection'): string => {
     const tmdbPath = mediaType === 'show' ? 'tv' : mediaType
@@ -622,19 +631,11 @@ function IDarr() {
       setHasUnsavedSettings(false)
       requestAnimationFrame(() => { setConfigLoaded(true) })
       const resolvedTargets = Array.isArray(mergedConfig.sync_targets) ? mergedConfig.sync_targets : []
+      setIdarrSyncTargets(resolvedTargets)
       let resolvedIndex = 0
       if (resolvedTargets.length > 0) {
-        const storedTargetValue = localStorage.getItem(IDARR_SYNC_TARGET_STORAGE_KEY)
-        if (storedTargetValue) {
-          const storedIndex = resolvedTargets.findIndex((target) => getSyncTargetStorageValue(target) === storedTargetValue)
-          if (storedIndex >= 0) {
-            resolvedIndex = storedIndex
-          } else {
-            resolvedIndex = Math.min(selectedSyncTargetIndex, resolvedTargets.length - 1)
-          }
-        } else {
-          resolvedIndex = Math.min(selectedSyncTargetIndex, resolvedTargets.length - 1)
-        }
+        const storedIndex = resolveSyncTargetIndex(resolvedTargets, readStoredSyncTarget())
+        resolvedIndex = storedIndex >= 0 ? storedIndex : Math.min(selectedSyncTargetIndex, resolvedTargets.length - 1)
       }
 
       setSelectedSyncTargetIndex(resolvedIndex)
@@ -941,6 +942,8 @@ function IDarr() {
   const handleConfigPersisted = () => {
     originalConfigRef.current = cloneIdarrConfig(config)
     setHasUnsavedSettings(false)
+    // The server assigns scope tokens on save; refetch so the sidebar picker lists the saved targets.
+    void refreshIdarrSyncTargets()
   }
 
   const displayedResolverCandidates = useMemo(() => (

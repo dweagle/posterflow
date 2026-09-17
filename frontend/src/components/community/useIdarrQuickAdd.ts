@@ -1,72 +1,63 @@
-import { useState, useEffect, useCallback } from 'react'
-import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings, type MakerIdarrSyncTarget } from '../../api/client'
+import { useEffect, useCallback, useSyncExternalStore } from 'react'
+import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings } from '../../api/client'
 import { notifyIdarrTargetedRun } from '../../utils/idarrTargetedRun'
+import { useIdarrSyncTarget, resolveSyncTargetIndex, readStoredSyncTarget, type IdarrSyncTargetOption } from '../../hooks/useIdarrSyncTarget'
 
-const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
+export type IdarrTargetOption = IdarrSyncTargetOption
 
-// Same stable identifier IDarr uses to persist the selected sync target, so the
-// community picker stays in sync with the IDarr page / sidebar.
-function syncTargetStorageValue(target: MakerIdarrSyncTarget): string {
-  const scopeToken = String(target.scope_token || '').trim()
-  if (scopeToken) return `scope:${scopeToken}`
-  const driveId = String(target.personal_drive_id || '').trim()
-  const sourceDir = String(target.source_dir || '').trim()
-  const label = String(target.label || '').trim()
-  return `${driveId}::${sourceDir}::${label}`
+// The toggle lives in the page-level bar while the drop handlers live in each tab, so the
+// on/off state is shared across hook instances instead of loaded per instance.
+let quickAddEnabled = false
+let quickAddLoaded = false
+let quickAddInflight: Promise<void> | null = null
+const listeners = new Set<() => void>()
+
+function publishEnabled(next: boolean) {
+  quickAddEnabled = next
+  listeners.forEach((listener) => listener())
 }
 
-export interface IdarrTargetOption {
-  value: string
-  label: string
+function loadEnabled() {
+  if (quickAddLoaded || quickAddInflight) return
+  quickAddInflight = Promise.resolve()
+    .then(() => getSettings())
+    .then((s) => {
+      quickAddLoaded = true
+      publishEnabled((s.idarr_quick_add_community || '').trim().toLowerCase() === 'true')
+    })
+    .catch(() => {})
+    .finally(() => {
+      quickAddInflight = null
+    })
 }
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+const getEnabled = () => quickAddEnabled
 
 /**
  * Shared "Image Drop also adds to IDarr" behaviour for the community cards.
  * Used by both the Requests and Lists tabs so the maker's local IDarr pipeline
  * works identically whichever tab a poster is dropped on. Also exposes the IDarr
  * sync targets + the selected one, so makers can pick the destination drive/scope
- * without leaving the page (shared with IDarr via the same localStorage key).
+ * without leaving the page (the same selection the sidebar picker and IDarr page use).
  */
 export function useIdarrQuickAdd() {
-  const [enabled, setEnabledState] = useState(false)
-  const [targetOptions, setTargetOptions] = useState<IdarrTargetOption[]>([])
-  const [selectedTargetValue, setSelectedTargetValueState] = useState<string>('')
+  const enabled = useSyncExternalStore(subscribe, getEnabled, getEnabled)
+  const { options: targetOptions, selectedValue: selectedTargetValue, setSelectedValue: setSelectedTarget } = useIdarrSyncTarget()
 
   useEffect(() => {
-    getSettings()
-      .then((s) => setEnabledState((s.idarr_quick_add_community || '').trim().toLowerCase() === 'true'))
-      .catch(() => {})
-  }, [])
-
-  // Load the available IDarr sync targets and resolve the current selection.
-  useEffect(() => {
-    getMakerIdarrConfig()
-      .then((config) => {
-        const targets = Array.isArray(config.sync_targets) ? config.sync_targets : []
-        setTargetOptions(
-          targets.map((t, i) => ({
-            value: syncTargetStorageValue(t),
-            label: t.label || t.source_dir || `Target ${i + 1}`,
-          })),
-        )
-        const stored = localStorage.getItem(IDARR_SYNC_TARGET_STORAGE_KEY)
-        const storedExists = stored != null && targets.some((t) => syncTargetStorageValue(t) === stored)
-        setSelectedTargetValueState(
-          storedExists ? (stored as string) : targets[0] ? syncTargetStorageValue(targets[0]) : '',
-        )
-      })
-      .catch(() => {})
+    loadEnabled()
   }, [])
 
   const setEnabled = useCallback((next: boolean) => {
-    setEnabledState(next)
+    publishEnabled(next)
     void saveSettings({ idarr_quick_add_community: String(next) })
-  }, [])
-
-  // Persist the chosen target to the shared key so it matches the IDarr page.
-  const setSelectedTarget = useCallback((value: string) => {
-    setSelectedTargetValueState(value)
-    localStorage.setItem(IDARR_SYNC_TARGET_STORAGE_KEY, value)
   }, [])
 
   const doIdarrUpload = useCallback(async (files: File[]) => {
@@ -75,11 +66,7 @@ export function useIdarrQuickAdd() {
       const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
       if (!syncTargets.length) return
 
-      const storedValue = localStorage.getItem(IDARR_SYNC_TARGET_STORAGE_KEY)
-      let resolvedIndex = -1
-      if (storedValue) {
-        resolvedIndex = syncTargets.findIndex((t) => syncTargetStorageValue(t) === storedValue)
-      }
+      const resolvedIndex = resolveSyncTargetIndex(syncTargets, readStoredSyncTarget())
       const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
 
       const response = await uploadMakerIdarrFiles(syncTargetIndex, files)

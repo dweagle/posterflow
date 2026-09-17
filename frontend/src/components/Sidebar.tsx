@@ -6,6 +6,7 @@ import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
 import { notifyIdarrTargetedRun } from '../utils/idarrTargetedRun'
+import { useIdarrSyncTarget, resolveSyncTargetIndex, readStoredSyncTarget } from '../hooks/useIdarrSyncTarget'
 import ConfirmDialog from './ConfirmDialog'
 import { useToast } from './Toast'
 import posterFlowIcon from '../assets/PosterFlow.webp'
@@ -77,9 +78,9 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   // Requester's own active-request counts (pending + in progress) for the sidebar badges.
   const [myReqCounts, setMyReqCounts] = useState<{ pending: number; in_progress: number }>({ pending: 0, in_progress: 0 })
   const [isDragOverIdarr, setIsDragOverIdarr] = useState(false)
-  const [idarrPickerFiles, setIdarrPickerFiles] = useState<File[] | null>(null)
-  const [idarrPickerConfig, setIdarrPickerConfig] = useState<MakerIdarrConfig | null>(null)
-  const [idarrPickerSelectedIndex, setIdarrPickerSelectedIndex] = useState(0)
+  // Shared IDarr scope: the picker under the IDarr item, drops onto it, the IDarr page and the
+  // community quick-add pickers all read and write this one selection.
+  const idarrScope = useIdarrSyncTarget()
   const [version, setVersion] = useState<string>('0.1.0')
   // Sidebar customization
   const [isCustomizing, setIsCustomizing] = useState(false)
@@ -157,28 +158,9 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
           return
         }
 
-        // Use stored sync target index preference if available
-        const storedKey = 'posterflow.idarr.selectedSyncTarget'
-        const storedValue = localStorage.getItem(storedKey)
-        let resolvedIndex = -1
-        if (storedValue) {
-          resolvedIndex = syncTargets.findIndex((t) => {
-            const scopeToken = String(t.scope_token || '').trim()
-            if (scopeToken) return `scope:${scopeToken}` === storedValue
-            return `${String(t.personal_drive_id || '')}::${String(t.source_dir || '')}::${String(t.label || '')}` === storedValue
-          })
-        }
-
-        // If no stored preference matched and there are multiple targets, show picker
-        if (resolvedIndex < 0 && syncTargets.length > 1) {
-          setIdarrPickerConfig(config)
-          setIdarrPickerFiles(files)
-          setIdarrPickerSelectedIndex(0)
-          return
-        }
-
-        const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
-        await performIdarrUpload(config, syncTargetIndex, files)
+        // Drops go to the scope shown in the sidebar picker (first target when nothing is stored).
+        const resolvedIndex = resolveSyncTargetIndex(syncTargets, readStoredSyncTarget())
+        await performIdarrUpload(config, resolvedIndex >= 0 ? resolvedIndex : 0, files)
       } catch (error) {
         showToast(getApiErrorMessage(error, 'Failed to upload files to IDarr'), 'error')
       }
@@ -455,23 +437,42 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                 if (!def) return null
 
                 if (def.isIdarr) {
+                  const hasScopes = idarrScope.options.length > 0
+                  const dropHint = 'Drag & drop images here to add them to IDarr'
+                  // The collapsed rail hides the picker and the hover hint, so its tooltip carries both.
+                  const railLabel = `${hasScopes ? `${def.label} · ${idarrScope.selectedLabel}` : def.label} · drop images here to add them`
                   return (
-                    <NavLink
-                      key={def.id}
-                      to={def.to}
-                      className={({ isActive }) =>
-                        [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')
-                      }
-                      data-label={def.label}
-                      aria-label={def.label}
-                      onDragOver={handleIdarrDragOver}
-                      onDragLeave={handleIdarrDragLeave}
-                      onDrop={handleIdarrDrop}
-                    >
-                      <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
-                      <span className="nav-label">{def.label}</span>
-                      {idarrPendingCount > 0 && <span className="sidebar-badge">{idarrPendingCount}</span>}
-                    </NavLink>
+                    <div key={def.id} className="sidebar-idarr-item">
+                      <NavLink
+                        to={def.to}
+                        className={({ isActive }) =>
+                          [isActive ? 'active' : '', isDragOverIdarr ? 'idarr-drop-active' : ''].filter(Boolean).join(' ')
+                        }
+                        data-label={railLabel}
+                        data-drop-hint={dropHint}
+                        aria-label={def.label}
+                        onDragOver={handleIdarrDragOver}
+                        onDragLeave={handleIdarrDragLeave}
+                        onDrop={handleIdarrDrop}
+                      >
+                        <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
+                        <span className="nav-label">{def.label}</span>
+                        {idarrPendingCount > 0 && <span className="sidebar-badge">{idarrPendingCount}</span>}
+                      </NavLink>
+                      {hasScopes && (
+                        <select
+                          className="sidebar-idarr-scope"
+                          aria-label="IDarr scope"
+                          title="IDarr scope used by sidebar drops, quick add and the IDarr page"
+                          value={idarrScope.selectedValue}
+                          onChange={(e) => idarrScope.setSelectedValue(e.target.value)}
+                        >
+                          {idarrScope.options.map((option) => (
+                            <option key={option.index} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                   )
                 }
 
@@ -643,67 +644,6 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
       }}
       onCancel={() => setStopConfirmOpen(false)}
     />
-
-      {idarrPickerFiles && idarrPickerConfig && (() => {
-        const pickerConfig = idarrPickerConfig
-        return (
-        <div className="modal-overlay" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>
-          <div className="modal-content schedule-modal idarr-target-picker-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Select IDarr Sync Target</h2>
-              <button className="modal-close" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ color: '#ccc', marginBottom: '1rem' }}>Choose which sync target to upload the dropped file(s) to:</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {(pickerConfig.sync_targets ?? []).map((target, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setIdarrPickerSelectedIndex(i)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.65rem 0.9rem',
-                      background: idarrPickerSelectedIndex === i ? '#1a2a3a' : '#252525',
-                      border: `1px solid ${idarrPickerSelectedIndex === i ? '#64b5f6' : '#424242'}`,
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      color: idarrPickerSelectedIndex === i ? '#64b5f6' : '#ccc',
-                      fontWeight: idarrPickerSelectedIndex === i ? 600 : 400,
-                      fontSize: '0.9rem',
-                      textAlign: 'left',
-                      transition: 'border-color 0.15s, background 0.15s, color 0.15s',
-                    }}
-                  >
-                    <span>{target.label || target.source_dir || `Target ${i + 1}`}</span>
-                    {idarrPickerSelectedIndex === i && (
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#64b5f6', flexShrink: 0 }} />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => { setIdarrPickerFiles(null); setIdarrPickerConfig(null) }}>Cancel</button>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  const files = idarrPickerFiles
-                  const index = idarrPickerSelectedIndex
-                  setIdarrPickerFiles(null)
-                  setIdarrPickerConfig(null)
-                  void performIdarrUpload(pickerConfig, index, files)
-                }}
-              >
-                Upload
-              </button>
-            </div>
-          </div>
-        </div>
-        )
-      })()}
     </>
   )
 }

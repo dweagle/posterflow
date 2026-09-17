@@ -501,30 +501,110 @@
   cursor: default;
 }
 
-.idarr-target-picker-modal {
-  max-width: 360px;
+/* IDarr item: nav link + inline scope picker in one row. The row, not the link, carries the
+   hover/active/drop highlight so the picker reads as part of the item. */
+.sidebar-idarr-item {
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s;
 }
 
-.idarr-target-picker-modal .modal-header {
-  padding: 1rem 1.25rem;
+.sidebar-idarr-item:hover {
+  background-color: #2a2a2a;
 }
 
-.idarr-target-picker-modal .modal-header h2 {
-  font-size: 1rem;
+.sidebar-idarr-item:hover > a {
+  color: #fff;
 }
 
-.idarr-target-picker-modal .modal-body {
-  padding: 1rem 1.25rem;
+.sidebar-idarr-item:has(> a.active) {
+  background-color: rgba(100, 181, 246, 0.2);
 }
 
-.idarr-target-picker-modal .modal-footer {
-  padding: 0.75rem 1.25rem;
+.sidebar-idarr-item:has(> a.idarr-drop-active) {
+  background-color: rgba(102, 187, 106, 0.15);
+  box-shadow: inset 2px 0 0 #66bb6a;
 }
 
-@media (max-width: 550px) {
-  .idarr-target-picker-modal {
-    max-width: 100%;
-  }
+/* The link keeps its content width (icon, label, pending badge); the picker gives way. */
+.sidebar-idarr-item > a {
+  flex: 1 0 auto;
+  padding-right: 0.75rem;
+}
+
+.sidebar-idarr-item > a .nav-label {
+  flex-shrink: 0;
+}
+
+/* Hover hint that the link is a drop target. Sits below the link, inside the sidebar's width,
+   because the nav clips anything hanging outside it. Also shown while files hover over it. */
+.sidebar-idarr-item > a::before {
+  content: attr(data-drop-hint);
+  position: absolute;
+  top: calc(100% - 0.35rem);
+  left: 1.5rem;
+  /* Size to the text, not to the link, which is narrower than the row. */
+  width: max-content;
+  max-width: 12rem;
+  background-color: #202020;
+  color: #f1f1f1;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  white-space: normal;
+  z-index: 25;
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease 0.35s, visibility 0.12s ease 0.35s;
+}
+
+.sidebar-idarr-item > a:hover::before,
+.sidebar-idarr-item > a.idarr-drop-active::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sidebar-idarr-item > a:hover,
+.sidebar-idarr-item > a.active,
+.sidebar-idarr-item > a.idarr-drop-active {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* Scope picker to the right of the IDarr label: shows (and switches) the sync target that
+   sidebar drops, community quick add and the IDarr page all use. */
+.sidebar-idarr-scope {
+  flex: 0 1 7rem;
+  min-width: 3.5rem;
+  margin-right: 1.5rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.sidebar-idarr-scope:hover {
+  border-color: #66bb6a;
+  color: #fff;
+}
+
+.sidebar-idarr-scope:focus {
+  outline: none;
+  border-color: #66bb6a;
+}
+
+.sidebar-idarr-scope option {
+  background: #2a2a2a;
+  color: #fff;
 }
 
 @media (max-width: 1200px) {
@@ -544,10 +624,13 @@
     display: none;
   }
 
-  /* Hide customize controls in compact icon-only mode */
+  /* Hide customize controls, the scope picker and the drop hint in compact icon-only mode
+     (the rail's own label tooltip carries the scope + hint text instead) */
   .sidebar-customize-btn-row,
   .sidebar-customize-header,
-  .sidebar-customize-list {
+  .sidebar-customize-list,
+  .sidebar-idarr-scope,
+  .sidebar-idarr-item > a::before {
     display: none;
   }
 
@@ -709,8 +792,14 @@
   }
 
   .sidebar-customize-header,
-  .sidebar-customize-list {
+  .sidebar-customize-list,
+  .sidebar-idarr-scope,
+  .sidebar-idarr-item > a::before {
     display: block;
+  }
+
+  .sidebar-idarr-item > a {
+    padding-right: 0.75rem;
   }
 
   .sidebar-header .release-notes-popover {
