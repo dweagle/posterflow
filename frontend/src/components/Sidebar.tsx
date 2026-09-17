@@ -3,9 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { HardDriveDownload, LayoutDashboard, Logs, Settings, Image, Search, Fingerprint, Wrench, Globe, GripVertical, Eye, EyeOff, SlidersHorizontal, CircleStop, UploadCloud } from 'lucide-react'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
-import { formatJobType, getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
+import { formatJobType, getMakerIdarrConfig, cancelJob, getApiErrorMessage, getMyCommunityRequestCounts, type MakerIdarrConfig } from '../api/client'
 import { getSettings, saveSettings } from '../api/settings'
-import { notifyIdarrTargetedRun } from '../utils/idarrTargetedRun'
+import { quickAddFilesToIdarr } from '../utils/idarrQuickAdd'
 import { useIdarrSyncTarget, resolveSyncTargetIndex, readStoredSyncTarget } from '../hooks/useIdarrSyncTarget'
 import ConfirmDialog from './ConfirmDialog'
 import { useToast } from './Toast'
@@ -175,17 +175,12 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
       return
     }
     try {
-      const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
-      const skippedMessage = response.skipped_count > 0 ? `, ${response.skipped_count} skipped` : ''
-      showToast(`IDarr: uploaded ${response.uploaded_count} file(s)${skippedMessage}`, 'success')
-      if (config.auto_rename_quick_add && response.uploaded_count > 0) {
-        try {
-          const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
-          showToast(`IDarr auto-rename started (Job ID: ${job.id})`, 'success')
-          void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add), syncTargetIndex)
-        } catch (error) {
-          showToast(getApiErrorMessage(error, 'Files uploaded, but failed to start IDarr auto-rename'), 'error')
-        }
+      const result = await quickAddFilesToIdarr(syncTargetIndex, files, config)
+      const skippedMessage = result.skippedCount > 0 ? `, ${result.skippedCount} skipped` : ''
+      showToast(`IDarr: uploaded ${result.uploadedCount} file(s)${skippedMessage}`, 'success')
+      if (result.jobId !== null) showToast(`IDarr auto-rename started (Job ID: ${result.jobId})`, 'success')
+      if (result.autoRenameError) {
+        showToast(getApiErrorMessage(result.autoRenameError, 'Files uploaded, but failed to start IDarr auto-rename'), 'error')
       }
       window.dispatchEvent(new CustomEvent('idarr-sidebar-upload-complete', { detail: { syncTargetIndex } }))
     } catch (error) {

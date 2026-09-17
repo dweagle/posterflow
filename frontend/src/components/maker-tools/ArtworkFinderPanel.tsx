@@ -13,6 +13,7 @@ import ArtworkFinderCard from './ArtworkFinderCard'
 import BatchPullPanel from './BatchPullPanel'
 import DriveItemsPanel from './DriveItemsPanel'
 import { useArtworkScopes } from './useArtworkScopes'
+import MakerScopeRow from './MakerScopeRow'
 
 type ItemSource = {
   key: string
@@ -71,24 +72,27 @@ export default function ArtworkFinderPanel() {
     }
   }, [])
 
+  // The scope picker rides on the sticky mode row above the results, so it stays reachable
+  // however far the list scrolls (same idea as the Requests page header).
+  const scopeControl = scopes.length > 0 ? (
+    <div className="artwork-scope-control">
+      <HardDrive size={15} />
+      <span className="artwork-scope-label">Artwork scope:</span>
+      <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
+        {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+      </select>
+    </div>
+  ) : scopesLoaded ? (
+    <button type="button" className="btn-toolbar" onClick={() => navigate('/IDarr')} title='Add an artwork scope — enable the "Assets Drive" toggle on an IDarr sync target'>
+      <HardDrive size={15} /> Add artwork scope
+    </button>
+  ) : null
+
   return (
     <div className="maker-tools-panel">
       <Toolbar
         title="Artwork Finder"
         description="Find logos, backgrounds, and square art from TMDB and Plex, then add them to a chosen IDarr artwork scope — IDarr renames and uploads them to your drive."
-        titleControl={scopes.length > 0 ? (
-          <div className="artwork-scope-control">
-            <HardDrive size={15} />
-            <span className="artwork-scope-label">Artwork scope:</span>
-            <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
-              {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </div>
-        ) : scopesLoaded ? (
-          <button type="button" className="btn-toolbar" style={{ marginLeft: 12 }} onClick={() => navigate('/IDarr')} title='Add an artwork scope — enable the "Assets Drive" toggle on an IDarr sync target'>
-            <HardDrive size={15} /> Add artwork scope
-          </button>
-        ) : null}
       >
         {mode === 'batch' && (
           <button
@@ -113,6 +117,7 @@ export default function ArtworkFinderPanel() {
         )}
       </Toolbar>
 
+      <MakerScopeRow control={scopeControl}>
       <div className="pf-subtabs">
         <button type="button" className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>Find &amp; Add</button>
         <button type="button" className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch Pull</button>
@@ -137,6 +142,7 @@ export default function ArtworkFinderPanel() {
           </>
         )}
       </div>
+      </MakerScopeRow>
 
       {mode === 'drive' ? (
         <DriveItemsPanel

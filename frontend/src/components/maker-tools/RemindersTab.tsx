@@ -8,6 +8,8 @@ import Toolbar from '../Toolbar'
 import TmdbItemCard, { type PsdConfig } from './TmdbItemCard'
 import ArtworkFinderCard from './ArtworkFinderCard'
 import { useArtworkScopes } from './useArtworkScopes'
+import IdarrScopePicker from './IdarrScopePicker'
+import MakerScopeRow from './MakerScopeRow'
 
 type Props = {
   psdConfig: PsdConfig
@@ -71,8 +73,9 @@ export default function RemindersTab({ psdConfig }: Props) {
     }
   }
 
-  // Artwork cards add into an IDarr artwork scope, so the picker rides on the toolbar like the Artwork tab.
-  const scopeControl = kind !== 'artwork' ? null
+  // Cards drop into an IDarr scope, so the picker rides on the sticky row above the list: the
+  // artwork scope for artwork cards (like the Artwork tab), the shared IDarr drive for poster cards.
+  const scopeControl = kind !== 'artwork' ? <IdarrScopePicker />
     : scopes.length > 0 ? (
       <div className="artwork-scope-control">
         <HardDrive size={15} />
@@ -92,13 +95,13 @@ export default function RemindersTab({ psdConfig }: Props) {
       <Toolbar
         title="Reminders"
         description="Items you flagged with the bell on a maker, artwork, request or list card, each with your note about what still needs doing. Fix it right here on the card, then remove the reminder (here or via the bell)."
-        titleControl={scopeControl}
       >
         <button type="button" className="btn-toolbar" onClick={() => void ctx?.refresh()} disabled={!ctx} title="Reload the reminder list">
           <RefreshCw size={16} /> Refresh
         </button>
       </Toolbar>
 
+      <MakerScopeRow control={scopeControl}>
       <div className="pf-subtabs" role="tablist" aria-label="Reminder kinds">
         {(['poster', 'artwork'] as ReminderKind[]).map((k) => (
           <button
@@ -114,6 +117,7 @@ export default function RemindersTab({ psdConfig }: Props) {
           </button>
         ))}
       </div>
+      </MakerScopeRow>
 
       {ctx?.error && <p className="tmdb-error">{ctx.error}</p>}
 

@@ -204,6 +204,7 @@ export default function RequestItemCard({
                 hidePoster
                 hideTitle
                 hideOverview
+                idarrDrop={false}
                 galleryPortalId={`gallery-portal-${id}`}
               />
               <div className={`request-drop-zone${dragOver ? ' drop-active' : ''}`}>

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react'
-import { getMakerIdarrConfig, uploadMakerIdarrFiles, startIdarr, getSettings, saveSettings } from '../../api/client'
-import { notifyIdarrTargetedRun } from '../../utils/idarrTargetedRun'
+import { getMakerIdarrConfig, getSettings, saveSettings } from '../../api/client'
+import { quickAddFilesToIdarr } from '../../utils/idarrQuickAdd'
 import { useIdarrSyncTarget, resolveSyncTargetIndex, readStoredSyncTarget, type IdarrSyncTargetOption } from '../../hooks/useIdarrSyncTarget'
 
 export type IdarrTargetOption = IdarrSyncTargetOption
@@ -67,14 +67,8 @@ export function useIdarrQuickAdd() {
       if (!syncTargets.length) return
 
       const resolvedIndex = resolveSyncTargetIndex(syncTargets, readStoredSyncTarget())
-      const syncTargetIndex = resolvedIndex >= 0 ? resolvedIndex : 0
-
-      const response = await uploadMakerIdarrFiles(syncTargetIndex, files)
-      if (config.auto_rename_quick_add && response.uploaded_count > 0) {
-        const job = await startIdarr(false, syncTargetIndex, response.uploaded, config.auto_upload_quick_add)
-        // The maker is on the requests page, not IDarr — pop a notice if anything went pending.
-        void notifyIdarrTargetedRun(job.id, Boolean(config.auto_upload_quick_add), syncTargetIndex)
-      }
+      // Silent on purpose: a best-effort side channel next to the Discord post.
+      await quickAddFilesToIdarr(resolvedIndex >= 0 ? resolvedIndex : 0, files, config)
     } catch {
       // Silently ignore — best-effort maker convenience
     }

@@ -27,6 +27,8 @@ import { TMDB_IMAGE_LANGUAGES } from './TmdbItemCard'
 import { useEnabledImageSources } from '../../hooks/useImageSources'
 import ServiceLinks from './ServiceLinks'
 import ReminderToggle from './ReminderToggle'
+import IdarrDropZone from './IdarrDropZone'
+import { useIdarrDrop } from '../../hooks/useIdarrDrop'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import { useAppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
@@ -125,6 +127,7 @@ function shapeFitsRole(key: ArtworkListType, c: ArtworkCandidate): boolean {
 type ArtworkPreview = { src: string; download: string; filename: string; isLogo: boolean; white: boolean; dims: string }
 
 export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, missing, infoExtra }: Props) {
+  const dropTarget = useIdarrDrop({ syncTargetIndex })
   const { showToast } = useToast()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -361,7 +364,7 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
 
   return (
     <div className="tmdb-result-wrapper artwork-finder-card" style={{ marginBottom: 16 }}>
-      <div className="tmdb-result-card">
+      <div className={`tmdb-result-card${dropTarget.dragOver ? ' drag-over' : ''}`} {...dropTarget.dropProps}>
         <div className="tmdb-poster">
           {item.poster_url
             ? <img src={item.poster_url} alt={item.title} loading="lazy" />
@@ -453,6 +456,15 @@ export default function ArtworkFinderCard({ item, syncTargetIndex, scopeLabel, m
             </button>
           </div>
         </div>
+        {dropTarget.enabled && (
+          <IdarrDropZone
+            active={dropTarget.dragOver}
+            state={dropTarget.state}
+            targetLabel={dropTarget.targetLabel}
+            what="artwork"
+            hint="Files are sorted by name: logo, background or squareart."
+          />
+        )}
       </div>
 
       {open && (

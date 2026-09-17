@@ -54,6 +54,8 @@ import PosterDriveSearchModal from '../PosterDriveSearchModal'
 import SquareCropModal from './SquareCropModal'
 import ServiceLinks from './ServiceLinks'
 import ReminderToggle from './ReminderToggle'
+import IdarrDropZone from './IdarrDropZone'
+import { useIdarrDrop } from '../../hooks/useIdarrDrop'
 import { useCardOverview } from '../../hooks/useCardOverview'
 import tmdbIcon from '../../assets/service-icons/tmdb.png'
 import tvdbIcon from '../../assets/service-icons/tvdb.png'
@@ -186,6 +188,8 @@ export type TmdbItemCardProps = {
   posterStyle?: 'CL2K' | 'MM2K'
   hidePoster?: boolean
   hideTitle?: boolean
+  /** Off when a host card handles drops itself (the community request card). */
+  idarrDrop?: boolean
   hideOverview?: boolean
   galleryPortalId?: string
   /** Bump this (e.g. when the parent request is completed) to auto-close the image gallery. */
@@ -196,7 +200,8 @@ export type TmdbItemCardProps = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal, idarrDrop = true }: TmdbItemCardProps) {
+  const dropTarget = useIdarrDrop({ enabled: idarrDrop })
   const { showToast } = useToast()
 
   // No TMDB match (sentinel tmdb_id 0/null): hide the TMDB-only chrome (id chip, TMDB tab) but
@@ -865,7 +870,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
   return (
     <div className="tmdb-result-wrapper">
-      <div className="tmdb-result-card">
+      <div className={`tmdb-result-card${dropTarget.dragOver ? ' drag-over' : ''}`} {...dropTarget.dropProps}>
         {!hidePoster && (
           <div
             className={`tmdb-poster${posterUrl ? ' tmdb-poster--clickable' : ''}`}
@@ -999,6 +1004,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             </div>
           )}
           </div>
+          {dropTarget.enabled && (
+            <IdarrDropZone active={dropTarget.dragOver} state={dropTarget.state} targetLabel={dropTarget.targetLabel} />
+          )}
       </div>
 
       {/* Gallery panel */}

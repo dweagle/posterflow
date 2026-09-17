@@ -31,6 +31,8 @@ import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './MakerTools.css'
 import Toolbar from '../components/Toolbar'
+import IdarrScopePicker from '../components/maker-tools/IdarrScopePicker'
+import MakerScopeRow from '../components/maker-tools/MakerScopeRow'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
@@ -676,6 +678,7 @@ function MakerTools() {
 
         {result && (
           <div className="maker-results">
+            <MakerScopeRow control={<IdarrScopePicker />}>
             <div className="pf-subtabs" role="tablist" aria-label="Monitor result tabs">
               {sortedLibraryResults.map((libraryResult) => {
                 const tabKey = `lib-${libraryResult.library_name}-${libraryResult.library_type}`
@@ -701,6 +704,7 @@ function MakerTools() {
                 </button>
               )}
             </div>
+            </MakerScopeRow>
 
             {sortedLibraryResults.map((libraryResult) => {
               const tabKey = `lib-${libraryResult.library_name}-${libraryResult.library_type}`
@@ -935,6 +939,7 @@ function MakerTools() {
               </button>
             </div>
 
+            <MakerScopeRow control={<IdarrScopePicker />}>
             <div className="tmdb-filter-bar">
               {(['all', 'movie', 'tv', 'collection'] as TmdbSearchFilter[]).map((f) => (
                 <button
@@ -950,6 +955,7 @@ function MakerTools() {
                 </button>
               ))}
             </div>
+            </MakerScopeRow>
 
             {tmdbError && <p className="tmdb-error">{tmdbError}</p>}
 

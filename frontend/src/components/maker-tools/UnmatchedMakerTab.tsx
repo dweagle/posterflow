@@ -15,6 +15,8 @@ import { useToast } from '../Toast'
 import Toolbar from '../Toolbar'
 import ArtworkUnmatchedMakerPanel from './ArtworkUnmatchedMakerPanel'
 import { useArtworkScopes } from './useArtworkScopes'
+import IdarrScopePicker from './IdarrScopePicker'
+import MakerScopeRow from './MakerScopeRow'
 
 type Category = 'movie' | 'series' | 'season' | 'collection'
 type FilterTab = 'all' | Category
@@ -346,6 +348,22 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
 
   const filterTabs: FilterTab[] = ['all', 'movie', 'series', 'season', 'collection']
 
+  const scopeControl = scope === 'posters' ? <IdarrScopePicker /> : (
+    scopes.length > 0 ? (
+      <div className="artwork-scope-control">
+        <HardDrive size={15} />
+        <span className="artwork-scope-label">Artwork scope:</span>
+        <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
+          {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+      </div>
+    ) : scopesLoaded ? (
+      <span style={{ fontSize: '0.82rem', color: '#ffb74d' }}>
+        No artwork scope configured — enable "Assets Drive" on an IDarr sync target to add artwork.
+      </span>
+    ) : null
+  )
+
   return (
     <div className="maker-tools-panel">
       <Toolbar
@@ -357,8 +375,9 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
         </button>
       </Toolbar>
 
-      {/* Posters | Artwork sub-tabs, with the artwork scope picker pushed to the right. */}
-      <div className="unmatched-scope-row">
+      {/* Posters | Artwork sub-tabs; the active kind's scope picker rides on the right and the row
+          sticks while the list scrolls. */}
+      <MakerScopeRow control={scopeControl}>
         <div className="maker-subtabs pf-subtabs" role="tablist" aria-label="Unmatched scope">
           <button type="button" role="tab" aria-selected={scope === 'posters'} className={scope === 'posters' ? 'active' : ''} onClick={() => selectScope('posters')}>
             Posters
@@ -367,22 +386,7 @@ export default function UnmatchedMakerTab({ unmatchedStats, psdConfig }: Unmatch
             Artwork
           </button>
         </div>
-        {scope === 'artwork' && (
-          scopes.length > 0 ? (
-            <div className="artwork-scope-control">
-              <HardDrive size={15} />
-              <span className="artwork-scope-label">Artwork scope:</span>
-              <select value={selectedValue} onChange={(e) => onSelectScope(e.target.value)}>
-                {scopes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-          ) : scopesLoaded ? (
-            <span style={{ fontSize: '0.82rem', color: '#ffb74d' }}>
-              No artwork scope configured — enable "Assets Drive" on an IDarr sync target to add artwork.
-            </span>
-          ) : null
-        )}
-      </div>
+      </MakerScopeRow>
 
       {scope === 'artwork' ? (
         <ArtworkUnmatchedMakerPanel selected={selected} />
