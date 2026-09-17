@@ -271,6 +271,9 @@ def _merge_recent_missing_items(
 
             if air_date and air_date < retention_cutoff:
                 continue
+            # A premiere still ahead is the fresh check's call: absent from this run, the source moved or dropped it.
+            if air_date and air_date > reference_today:
+                continue
 
             external_sources_raw = previous_show.get("external_sources")
             external_sources = []

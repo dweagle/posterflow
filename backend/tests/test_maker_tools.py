@@ -3064,6 +3064,21 @@ def test_merge_still_retains_sequential_show_missing_from_current_run():
     assert len(current[0].shows) == 2
 
 
+def test_merge_drops_a_carried_item_whose_premiere_is_still_ahead():
+    """Tulsa King: the saved result said Sep 20, the source now says Oct 16 (outside the window). Not re-carried."""
+    current, previous = _merge_fixture()
+    previous["libraries"][0]["shows"].append({
+        "tmdb_id": "1234", "name": "Tulsa King", "season_number": 4,
+        "date": "2026-08-10", "poster_exists": False, "tvdb_id": 999,
+    })
+    with patch("services.tvdb.fetch_series_seasons", return_value=_tvdb_year_rows(1, 2, 3, 4)):
+        _, items_added = _merge_recent_missing_items(
+            **_merge_kwargs(current, previous, {"3959": {1988, 1989, 2025}, "1234": {1, 2, 3}}))
+
+    assert items_added == 0
+    assert [show.tmdb_id for show in current[0].shows] == ["3959"]
+
+
 # ---------------------------------------------------------------------------
 # Photoshop open queue
 # ---------------------------------------------------------------------------
