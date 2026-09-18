@@ -18,7 +18,7 @@ delete, re-clone freely) while your data is never touched.
 
 ## Requirements
 
-- Python 3.12 or 3.13
+- Python 3.12, 3.13 or 3.14
 - Node.js 22+ (only to build the web UI; not needed at runtime)
 - rclone on the PATH
 - git

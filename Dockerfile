@@ -11,7 +11,7 @@ COPY VERSION /VERSION
 RUN npm run build
 
 # Stage 2: Final image with backend + frontend
-FROM python:3.13-slim-trixie
+FROM python:3.14-slim-trixie
 
 ARG BRANCH
 
@@ -29,7 +29,7 @@ RUN apt-get update && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy rclone binary from official image (multi-arch aware)
-COPY --from=rclone/rclone:1.75.0 /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --from=rclone/rclone:1.75.1 /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Set default timezone (can be overridden by docker-compose)
 ENV TZ=UTC
@@ -48,7 +48,7 @@ WORKDIR /app
 
 # Copy requirements and install as root
 COPY backend/requirements.txt backend/requirements-dev.txt ./
-RUN python -m pip install --no-cache-dir "pip==26.1.2" && \
+RUN python -m pip install --no-cache-dir "pip==26.2.1" && \
     pip install --no-cache-dir -r requirements.txt && \
     pip uninstall -y pip
 
