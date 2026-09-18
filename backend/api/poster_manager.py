@@ -731,9 +731,27 @@ class PosterOverrideInput(BaseModel):
     season: Optional[int] = None  # poster domain only
     slot: Optional[str] = None  # artwork domain only: logo | background | square
     drive_id: str
+    file: Optional[str] = None  # slot scope only: absolute path of one file on that drive
 
 
-def _override_dict(ov) -> Dict[str, Any]:
+def _override_drive_roots(db: Session) -> Dict[str, Dict[str, Path]]:
+    """Local roots per domain: poster drives and artwork drives are separate tables."""
+    from models.artwork_drive import ArtworkDrive
+
+    return {
+        "poster": {d.drive_id: Path(d.get_local_path(validate=False)) for d in db.query(Drive).all()},
+        "artwork": {d.drive_id: Path(d.get_local_path(validate=False)) for d in db.query(ArtworkDrive).all()},
+    }
+
+
+def _override_file_path(ov, roots: Dict[str, Dict[str, Path]]) -> Optional[str]:
+    """Absolute path of a file-level override, or None (stored relative to the drive root)."""
+    domain = getattr(ov, "domain", None) or "poster"
+    root = roots.get(domain, {}).get(ov.drive_id) if ov.file else None
+    return str(root / ov.file) if root else None
+
+
+def _override_dict(ov, roots: Optional[Dict[str, Dict[str, Path]]] = None) -> Dict[str, Any]:
     return {
         "id": ov.id,
         "media_type": ov.media_type,
@@ -747,23 +765,24 @@ def _override_dict(ov) -> Dict[str, Any]:
         "season": ov.season,
         "slot": ov.slot,
         "drive_id": ov.drive_id,
+        "file": _override_file_path(ov, roots or {}),
     }
 
 
 @router.get("/overrides")
 def list_poster_overrides(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     from models.poster_override import PosterOverride
-    return [_override_dict(ov) for ov in db.query(PosterOverride).order_by(PosterOverride.id).all()]
+    roots = _override_drive_roots(db)
+    return [_override_dict(ov, roots) for ov in db.query(PosterOverride).order_by(PosterOverride.id).all()]
 
 
 @router.post("/overrides")
 def upsert_poster_override(payload: PosterOverrideInput, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Create an override, or repoint the existing one for the same target (item + scope +
-    season) at a different drive."""
+    season) at a different drive, or at one specific file on a drive."""
     from models.poster_override import PosterOverride
 
-    from models.artwork_drive import ArtworkDrive
-
+    roots = _override_drive_roots(db)
     if payload.scope not in ("slot", "set"):
         raise HTTPException(status_code=400, detail="scope must be 'slot' or 'set'")
     if payload.media_type not in ("movie", "show", "collection"):
@@ -773,10 +792,23 @@ def upsert_poster_override(payload: PosterOverrideInput, db: Session = Depends(g
     if payload.domain == "artwork":
         if payload.scope == "slot" and payload.slot not in ("logo", "background", "square"):
             raise HTTPException(status_code=400, detail="slot must be logo, background or square")
-        if not db.query(ArtworkDrive).filter(ArtworkDrive.drive_id == payload.drive_id).first():
+        if payload.drive_id not in roots["artwork"]:
             raise HTTPException(status_code=404, detail="Unknown artwork drive")
-    elif not db.query(Drive).filter(Drive.drive_id == payload.drive_id).first():
+    elif payload.drive_id not in roots["poster"]:
         raise HTTPException(status_code=404, detail="Unknown drive")
+
+    rel_file: Optional[str] = None
+    if payload.file:
+        if payload.scope != "slot":
+            raise HTTPException(status_code=400, detail="file picks apply to one slot (poster, season or artwork piece)")
+        root = roots[payload.domain][payload.drive_id].resolve()
+        try:
+            target = Path(payload.file).resolve()
+            rel_file = str(target.relative_to(root))
+        except (OSError, ValueError):
+            raise HTTPException(status_code=400, detail="File is not inside that drive's folder")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found on that drive")
 
     def _same_item(ov) -> bool:
         if payload.tmdb_id and ov.tmdb_id:
@@ -793,6 +825,7 @@ def upsert_poster_override(payload: PosterOverrideInput, db: Session = Depends(g
     )
     if existing:
         existing.drive_id = payload.drive_id
+        existing.file = rel_file
         ov = existing
     else:
         ov = PosterOverride(
@@ -807,11 +840,12 @@ def upsert_poster_override(payload: PosterOverrideInput, db: Session = Depends(g
             season=season,
             slot=slot,
             drive_id=payload.drive_id,
+            file=rel_file,
         )
         db.add(ov)
     db.commit()
     db.refresh(ov)
-    return _override_dict(ov)
+    return _override_dict(ov, roots)
 
 
 @router.delete("/overrides/{override_id}")
@@ -824,6 +858,19 @@ def delete_poster_override(override_id: int, db: Session = Depends(get_db)) -> D
     db.delete(ov)
     db.commit()
     return {"success": True}
+
+
+@router.get("/library-search")
+def search_library_items(q: str = "", limit: int = 50, refresh: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Title search over the library the poster renamer places for, for the "Use for…" poster
+    pick. Blocking on purpose: the first hit fetches the media sources, later ones hit a cache."""
+    from services.library_search import search_library
+
+    try:
+        return search_library(db, q, limit=max(1, min(limit, 200)), refresh=refresh)
+    except Exception as e:
+        log_error(LogTags.API, f"Library search failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Library search failed")
 
 
 @router.get("/priority")

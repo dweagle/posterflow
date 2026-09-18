@@ -3,8 +3,10 @@ import { Trash2 } from 'lucide-react'
 import {
   PosterOverride,
   deletePosterOverride,
+  getDriveImageUrl,
   getPosterOverrides,
 } from '../../api/posterManager'
+import { fileBaseName } from '../../utils/posterOverrideTarget'
 import { useToast } from '../Toast'
 import ConfirmDialog from '../ConfirmDialog'
 
@@ -84,6 +86,7 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
     const badgeLabel = ov.media_type === 'movie' ? 'Movie' : ov.media_type === 'collection' ? 'Collection' : 'Show'
     return (
       <div key={ov.id} className="unmatched-item drive-usage-item">
+        {ov.file && <img src={getDriveImageUrl(ov.file)} alt="" className="drive-usage-thumb" loading="lazy" />}
         <div className="drive-usage-item-body">
           <div className="unmatched-item-top">
             <div className="unmatched-item-meta">
@@ -99,6 +102,11 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
               >
                 {info?.name ?? ov.drive_id}
               </span>
+              {ov.file && (
+                <span className="unmatched-cat-badge unmatched-cat-badge--season override-file-badge" title={ov.file}>
+                  {fileBaseName(ov.file)}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -128,8 +136,9 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
 
           <div className="modal-body">
             <p className="style-fallback-modal-subtitle">
-              Items pinned to a specific drive instead of the priority order. Overrides apply on
-              every rename and fall back to normal priority if the drive stops offering the file.
+              Items pinned to a specific drive, or to one exact file found by search, instead of the
+              priority order. Overrides apply on every rename and fall back to normal priority if the
+              drive stops offering the file.
             </p>
 
             <div className="drive-usage-view-tabs">
@@ -154,7 +163,8 @@ export default function PosterOverridesModal({ driveInfo, onClose }: PosterOverr
               {overrides !== null && tabOverrides.length === 0 && (
                 <p className="drive-usage-hint">
                   No {tabNoun} overrides yet - use the View or compare
-                  buttons on a drive's {tab === 'poster' ? 'posters' : 'artwork'} to pin one.
+                  buttons on a drive's {tab === 'poster' ? 'posters' : 'artwork'} to pin one
+                  {tab === 'poster' ? ', or search any poster from Asset Search and use it for an item' : ''}.
                 </p>
               )}
               {tabOverrides.map(renderOverride)}

@@ -5,6 +5,7 @@ import {
   CompareTarget,
   DriveUsage,
   FallbackItem,
+  OverrideArtSlot,
   PosterOverride,
   deletePosterOverride,
   getDriveImageUrl,
@@ -12,6 +13,9 @@ import {
   savePosterOverride,
 } from '../../api/posterManager'
 import SortControls from './SortControls'
+import PosterDriveSearchModal, { type InUseFile } from '../PosterDriveSearchModal'
+import { useFloatTip } from '../FloatTip'
+import { OverrideTarget, fileBaseName } from '../../utils/posterOverrideTarget'
 import { SLOT_LABELS, SLOT_ORDER, sortItems, useSortPrefs } from './itemSort'
 import { useToast } from '../Toast'
 
@@ -59,6 +63,21 @@ type GroupedItem = FallbackItem & {
   slotFiles: { slot: string; file: string; driveName: string | null }[]
   previewFiles: PreviewEntry[]
   driveSources: { name: string; style: string | null }[]
+}
+
+// The item (and poster/season slot, or artwork pieces) the "pick any file" search pins to.
+function targetFor(g: GroupedItem, season: number | null, domain: 'poster' | 'artwork' = 'poster'): OverrideTarget {
+  return {
+    domain,
+    media_type: g.type,
+    tmdb_id: g.tmdb_id ?? null,
+    tvdb_id: g.tvdb_id ?? null,
+    imdb_id: g.imdb_id ?? null,
+    title: g.year ? g.title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : g.title,
+    year: g.year ?? null,
+    season: domain === 'poster' && g.type === 'show' ? season : null,
+    seasons: domain === 'poster' && g.type === 'show' ? g.seasons : undefined,
+  }
 }
 
 function matchesItem(ov: PosterOverride, g: GroupedItem): boolean {
@@ -250,7 +269,7 @@ export default function DriveUsageModal({
       matchesItem(o, entry.group))
     setOverrideBusy(true)
     try {
-      if (existing && existing.drive_id === driveId) {
+      if (existing && existing.drive_id === driveId && !existing.file) {
         await deletePosterOverride(existing.id)
         setOverrides((prev) => prev.filter((o) => o.id !== existing.id))
       } else {
@@ -265,7 +284,8 @@ export default function DriveUsageModal({
           domain: overrideDomain,
           scope,
           season: overrideDomain === 'poster' && scope === 'slot' ? entry.season ?? null : null,
-          slot: overrideDomain === 'artwork' && scope === 'slot' ? entry.slot ?? null : null,
+          // Stats payload slots are plain strings; the API only ever stores the three art slots.
+          slot: overrideDomain === 'artwork' && scope === 'slot' ? ((entry.slot ?? null) as OverrideArtSlot | null) : null,
           drive_id: driveId,
         })
         setOverrides((prev) => [...prev.filter((o) => o.id !== saved.id), saved])
@@ -279,6 +299,48 @@ export default function DriveUsageModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drive.drive_id, overrideDomain, showToast, onOverridesChange])
 
+  const removeOverride = useCallback(async (ov: PosterOverride) => {
+    setOverrideBusy(true)
+    try {
+      await deletePosterOverride(ov.id)
+      setOverrides((prev) => prev.filter((o) => o.id !== ov.id))
+      onOverridesChange?.()
+    } catch {
+      showToast('Failed to remove poster override', 'error')
+    } finally {
+      setOverrideBusy(false)
+    }
+  }, [onOverridesChange, showToast])
+
+  // "Pick any file": the drive search with this item as the pin target. The picker also
+  // gets the item's current file per slot so those hits read "In use".
+  const [pickTarget, setPickTarget] = useState<OverrideTarget | null>(null)
+  const [pickInUse, setPickInUse] = useState<InUseFile[]>([])
+  const openPicker = useCallback((g: GroupedItem, season: number | null, domain: 'poster' | 'artwork' = 'poster') => {
+    const used = (target: CompareTarget, fallback: string | null | undefined) =>
+      compareForItem ? compareForItem(g, target).find((c) => c.used)?.file ?? null : (view === 'used' ? fallback ?? null : null)
+    const inUse: InUseFile[] = []
+    if (domain === 'artwork') {
+      for (const s of SLOT_ORDER) {
+        const file = used({ season: null, slot: s }, g.slotFiles.find((f) => f.slot === s)?.file)
+        if (file) inUse.push({ file, season: null, slot: s as InUseFile['slot'] })
+      }
+    } else {
+      const main = used({ season: null, slot: null }, g.mainFile)
+      if (main) inUse.push({ file: main, season: null, slot: null })
+      for (const s of g.seasons) {
+        const file = used({ season: s, slot: null }, g.seasonFiles.find((f) => f.season === s)?.file)
+        if (file) inUse.push({ file, season: s, slot: null })
+      }
+    }
+    setPickInUse(inUse)
+    setPickTarget(targetFor(g, season, domain))
+  }, [compareForItem, view])
+  const refreshOverrides = useCallback(() => {
+    getPosterOverrides().then(setOverrides).catch(() => {})
+    onOverridesChange?.()
+  }, [onOverridesChange])
+
   // Side-by-side compare: this item's used file next to every drive's unused candidate.
   const [compare, setCompare] = useState<{ item: GroupedItem; season: number | null; slot: string | null } | null>(null)
   // Big preview for a clicked compare image; Escape closes it before the compare modal.
@@ -286,6 +348,7 @@ export default function DriveUsageModal({
   useEffect(() => {
     if (!compare) return
     const onKey = (e: KeyboardEvent) => {
+      if (pickTarget) return  // the stacked search modal owns Escape
       if (e.key === 'Escape') {
         if (comparePreview) setComparePreview(null)
         else setCompare(null)
@@ -293,35 +356,12 @@ export default function DriveUsageModal({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [compare, comparePreview])
+  }, [compare, comparePreview, pickTarget])
   useEffect(() => setCompare(null), [drive.drive_id])
   useEffect(() => setComparePreview(null), [compare])
 
-  // Imperative fixed-position tooltip: delayed, mouse-only, no row re-renders.
-  const rowTipRef = useRef<HTMLDivElement | null>(null)
-  const rowTipTimer = useRef<number | null>(null)
-  const showRowTip = useCallback((e: React.PointerEvent<HTMLElement>, text: string) => {
-    if (e.pointerType !== 'mouse') return
-    const rect = e.currentTarget.getBoundingClientRect()
-    if (rowTipTimer.current) window.clearTimeout(rowTipTimer.current)
-    rowTipTimer.current = window.setTimeout(() => {
-      const el = rowTipRef.current
-      if (!el) return
-      el.textContent = text
-      const below = window.innerHeight - rect.bottom > 96
-      el.style.top = below ? `${rect.bottom + 6}px` : 'auto'
-      el.style.bottom = below ? 'auto' : `${window.innerHeight - rect.top + 6}px`
-      el.style.right = `${window.innerWidth - rect.right}px`
-      el.style.display = 'block'
-    }, 600)
-  }, [])
-  const hideRowTip = useCallback(() => {
-    if (rowTipTimer.current) {
-      window.clearTimeout(rowTipTimer.current)
-      rowTipTimer.current = null
-    }
-    if (rowTipRef.current) rowTipRef.current.style.display = 'none'
-  }, [])
+  // Viewport-clamped hover tip on <body>: delayed, mouse-only, no row re-renders.
+  const { show: showRowTip, hide: hideRowTip, tip: rowTip } = useFloatTip()
   useEffect(() => hideRowTip(), [view, drive.drive_id, hideRowTip])
 
   const stepPreview = (delta: number) => {
@@ -386,7 +426,7 @@ export default function DriveUsageModal({
               const rowScope: 'slot' | 'set' = overrideDomain === 'artwork' || item.type === 'show' ? 'set' : 'slot'
               const rowEntry = { group: item, season: null, slot: null }
               const rowOv = rowScope === 'set' ? setOverrideFor(rowEntry) : slotOverrideFor(rowEntry)
-              const rowOnDrive = rowOv?.drive_id === drive.drive_id
+              const rowOnDrive = rowOv?.drive_id === drive.drive_id && !rowOv?.file
               const showRowBtn = !isAllDrives && overridableRow && (view === 'outranked' || rowOnDrive)
               return (
                 <div key={`${item.type}::${item.title}::${item.year}`} className="unmatched-item drive-usage-item">
@@ -510,6 +550,24 @@ export default function DriveUsageModal({
                           : rowScope === 'set' ? 'Use set' : 'Use'}
                       </button>
                     )}
+                    {(overrideDomain === 'artwork' ? isArtworkRow : isPosterRow) && (
+                      <button
+                        type="button"
+                        className="drive-usage-view-tab drive-usage-row-use drive-usage-compare-btn"
+                        onClick={() => {
+                          hideRowTip()
+                          if (overrideDomain === 'artwork') openPicker(item, null, 'artwork')
+                          else openPicker(item, item.mainFile != null ? null : item.seasonFiles[0]?.season ?? null)
+                        }}
+                        onPointerEnter={(e) => showRowTip(e, overrideDomain === 'artwork'
+                          ? 'Search the synced artwork drives and use any logo, background or square for this item'
+                          : 'Search the synced drives and use any poster for this item')}
+                        onPointerLeave={hideRowTip}
+                        aria-label={overrideDomain === 'artwork' ? 'Pick any artwork' : 'Pick any poster'}
+                      >
+                        <Search size={13} />
+                      </button>
+                    )}
                     {compareForItem && (overrideDomain === 'artwork' ? isArtworkRow : isPosterRow) && (() => {
                       // Artwork opens the whole-set view; posters open on main/first season.
                       const isArt = overrideDomain === 'artwork'
@@ -540,7 +598,7 @@ export default function DriveUsageModal({
               )
             })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [sortedItems, visibleCount, overrides, overrideBusy, view, isAllDrives, previewSequence, drive.drive_id, drive.name, compareForItem, availableCountFor, overrideDomain, noun, showRowTip, hideRowTip, toggleOverride])
+  ), [sortedItems, visibleCount, overrides, overrideBusy, view, isAllDrives, previewSequence, drive.drive_id, drive.name, compareForItem, availableCountFor, overrideDomain, noun, showRowTip, hideRowTip, toggleOverride, openPicker])
 
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
@@ -766,7 +824,7 @@ export default function DriveUsageModal({
         </div>
       )}
 
-      <div className="drive-usage-float-tip" ref={rowTipRef} style={{ display: 'none' }} />
+      {rowTip}
 
       {compare && compareForItem && (() => {
         const cleanTitle = compare.item.year
@@ -818,6 +876,22 @@ export default function DriveUsageModal({
                   {slotLabel ? ` - ${slotLabel}` : ''}
                 </span>
                 {typeBadge(compare.item.type)}
+                <button
+                  type="button"
+                  className="drive-usage-view-tab drive-usage-row-use drive-usage-compare-btn"
+                  onClick={() => {
+                    hideRowTip()
+                    if (overrideDomain === 'artwork') openPicker(compare.item, null, 'artwork')
+                    else openPicker(compare.item, compare.season)
+                  }}
+                  onPointerEnter={(e) => showRowTip(e, overrideDomain === 'artwork'
+                    ? 'Search the synced artwork drives and use any file for this item'
+                    : 'Search the synced drives and use any poster for this slot')}
+                  onPointerLeave={hideRowTip}
+                >
+                  <Search size={13} />
+                  Search drives
+                </button>
                 <button className="modal-close" onClick={() => setCompare(null)}>×</button>
               </div>
               {overrideDomain === 'artwork' && compare.item.slots.length > 0 && (
@@ -876,7 +950,8 @@ export default function DriveUsageModal({
                         {SLOT_ORDER.map((s) => {
                           const piece = col.pieces.get(s)
                           const pieceEntry = { group: compare.item, season: null, slot: s }
-                          const pieceActive = slotOverrideFor(pieceEntry)?.drive_id === col.drive_id
+                          const pieceOv = slotOverrideFor(pieceEntry)
+                          const pieceActive = pieceOv?.drive_id === col.drive_id && !pieceOv?.file
                           return (
                             <div key={s} className="drive-usage-compare-piece">
                               <span className="drive-usage-compare-piece-label">
@@ -937,6 +1012,38 @@ export default function DriveUsageModal({
                 </div>
               ) : (
               <div className="drive-usage-compare-row">
+                {slotOv?.file && (() => {
+                  // A file picked by search: shown first, beside the drives' matched candidates.
+                  const pinned = slotOv
+                  const file = pinned.file as string
+                  const name = fileBaseName(file)
+                  const driveName = candidates.find((c) => c.drive_id === pinned.drive_id)?.drive_name
+                    ?? (pinned.drive_id === drive.drive_id ? drive.name : pinned.drive_id)
+                  return (
+                    <div className="drive-usage-compare-col drive-usage-compare-pinned">
+                      <img
+                        src={getDriveImageUrl(file)}
+                        alt=""
+                        className={`drive-usage-compare-img${compare.slot ? ` compare-img-${compare.slot}` : ''}`}
+                        loading="lazy"
+                        onClick={() => setComparePreview({ file, label: `${driveName} - ${name}`, slot: compare.slot })}
+                      />
+                      <div className="drive-usage-compare-label" title={`${driveName}: ${name}`}>{name}</div>
+                      <div className="drive-usage-compare-actions">
+                        <button
+                          type="button"
+                          className="drive-usage-view-tab drive-usage-override-btn active"
+                          onClick={() => { hideRowTip(); removeOverride(pinned) }}
+                          disabled={overrideBusy}
+                          onPointerEnter={(e) => showRowTip(e, `Picked from ${driveName} by search - click to remove and go back to normal priority`)}
+                          onPointerLeave={hideRowTip}
+                        >
+                          ✓ Using file - Remove
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
                 {(overrideDomain === 'artwork'
                   ? setColumns.map((col) => ({
                       key: col.drive_id,
@@ -945,7 +1052,7 @@ export default function DriveUsageModal({
                     }))
                   : candidates.map((c) => ({ key: c.drive_id, name: c.drive_name, c: c as CompareCandidate | null }))
                 ).map(({ key, name, c }) => {
-                  const slotActive = c != null && slotOv?.drive_id === c.drive_id
+                  const slotActive = c != null && slotOv?.drive_id === c.drive_id && !slotOv?.file
                   const setActive = c != null && setOv?.drive_id === c.drive_id
                   return (
                     <div key={key} className="drive-usage-compare-col">
@@ -1000,7 +1107,7 @@ export default function DriveUsageModal({
                     </div>
                   )
                 })}
-                {candidates.length === 0 && (overrideDomain !== 'artwork' || setColumns.length === 0) && (
+                {candidates.length === 0 && (overrideDomain !== 'artwork' || setColumns.length === 0) && !slotOv?.file && (
                   <p className="drive-usage-hint">No {noun}s found for this slot on the last rename.</p>
                 )}
               </div>
@@ -1047,6 +1154,17 @@ export default function DriveUsageModal({
           </>
         )
       })()}
+
+      {pickTarget && (
+        <PosterDriveSearchModal
+          initialQuery={pickTarget.title}
+          target={pickTarget}
+          inUse={pickInUse}
+          stacked
+          onOverrideChange={refreshOverrides}
+          onClose={() => setPickTarget(null)}
+        />
+      )}
     </div>
   )
 }

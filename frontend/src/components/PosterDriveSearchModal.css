@@ -66,3 +66,237 @@
   border: 0;
   padding: 0;
 }
+
+/* Opened on top of another modal (Drive Usage compare sits at 1100). */
+.drive-search-modal-overlay--stacked {
+  z-index: 1150;
+}
+
+/* Targeted picker: who the pick is for on one line, season chips always on the line below
+   so a long title can't push them somewhere unexpected. */
+.drive-search-modal-target {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid #333;
+  color: #ccc;
+  font-size: 0.88rem;
+  flex-shrink: 0;
+}
+
+.drive-search-modal-target-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.drive-search-modal-target svg {
+  color: #64b5f6;
+  flex-shrink: 0;
+}
+
+.drive-search-modal-target strong {
+  color: #fff;
+}
+
+.drive-search-modal-seasons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.season-slot-chips-note {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+/* "Use for…" item picker (Asset Search page). */
+.override-target-modal {
+  max-width: 640px;
+}
+
+.override-target-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.override-target-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.override-target-pick-thumb {
+  width: 48px;
+  height: 72px;
+  object-fit: contain;
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.override-target-pick-meta {
+  min-width: 0;
+}
+
+.override-target-pick-name {
+  color: #fff;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.override-target-pick-drive {
+  color: #aaa;
+  font-size: 0.82rem;
+}
+
+.override-target-hint {
+  color: #aaa;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.override-target-body .poster-search-toolbar,
+.override-target-body .poster-search-filter-row {
+  margin-bottom: 0;
+}
+
+.override-target-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 38vh;
+  overflow-y: auto;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.4rem;
+  background: #1e1e1e;
+}
+
+.override-target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  color: #e5e7eb;
+}
+
+.override-target-row:hover {
+  background: #252525;
+}
+
+.override-target-row.active {
+  background: rgba(91, 137, 196, 0.16);
+  border-color: rgba(91, 137, 196, 0.45);
+}
+
+.override-target-thumb {
+  width: 32px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #121212;
+  flex-shrink: 0;
+}
+
+.override-target-thumb--empty {
+  border: 1px dashed #444;
+}
+
+.override-target-row-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.override-target-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #888;
+  font-style: italic;
+  padding: 0.6rem;
+}
+
+.override-target-error {
+  color: #ef5350;
+  font-style: normal;
+}
+
+.override-target-slot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.override-target-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.9rem 1.25rem;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.override-target-footer .poster-search-button:disabled {
+  opacity: 0.5;
+}
+
+/* Secondary buttons are only styled inside .poster-manager / .modal-footer elsewhere. */
+.override-target-footer .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: #2a2a2a;
+  border: 1px solid #424242;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.override-target-footer .btn-secondary:hover {
+  background: #333;
+  border-color: #555;
+}
+
+.override-target-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.override-target-row-source {
+  color: #888;
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+
+@keyframes override-target-spin {
+  to { transform: rotate(360deg); }
+}
+
+.override-target-spin {
+  animation: override-target-spin 1s linear infinite;
+}

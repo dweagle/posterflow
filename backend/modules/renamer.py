@@ -550,7 +550,7 @@ def _run_artwork_only_pass(db, job, config_data, media_dict, artwork_boxes, artw
     progress("renaming", 50, 100, "Renaming and organizing artwork...")
 
     from services.poster_renamer import apply_poster_overrides
-    apply_poster_overrides(db, matched)
+    apply_poster_overrides(db, matched, media_dict, domains=("artwork",))
 
     def _rename_progress(current: int, total: int, message: str) -> None:
         progress("renaming", 50 + int((current / total) * 50), 100, message)

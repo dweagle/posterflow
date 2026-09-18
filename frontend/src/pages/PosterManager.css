@@ -1872,24 +1872,6 @@ img.drive-usage-compare-piece-img {
   }
 }
 
-/* Fixed-position variant for buttons inside scroll containers, where ::after tips clip. */
-.drive-usage-float-tip {
-  position: fixed;
-  z-index: 1200;
-  width: max-content;
-  max-width: 240px;
-  padding: 0.35rem 0.55rem;
-  background: #1a1a1a;
-  color: #ddd;
-  border: 1px solid #404040;
-  border-radius: 4px;
-  font-size: 0.72rem;
-  font-weight: 400;
-  line-height: 1.35;
-  text-align: left;
-  white-space: normal;
-  pointer-events: none;
-}
 
 .drive-usage-season-badge {
   cursor: zoom-in;
@@ -7113,4 +7095,23 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   .border-style-layout {
     flex-direction: column;
   }
+}
+
+/* Compare view: the file the user pinned by search, shown beside the drives' candidates. */
+.drive-usage-compare-pinned .drive-usage-compare-img {
+  border-color: #2e6641;
+}
+
+.drive-usage-compare-pinned .drive-usage-compare-label {
+  color: #4caf50;
+}
+
+/* Overrides list: the pinned file's name (full path in the tooltip). */
+.override-file-badge {
+  display: inline-block;
+  max-width: 16rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }

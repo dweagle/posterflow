@@ -9,6 +9,8 @@ class PosterOverride(Base):
     every season; scope 'slot' covers just the main poster (season NULL) or one season.
     Applied at rename time only when that drive actually offers a matching candidate, so a
     stale override degrades back to normal priority instead of blanking the slot.
+    A slot override may instead name one specific ``file`` on the drive (any poster the user
+    searched for, matched to the item or not); it applies while that file exists.
     """
     __tablename__ = "poster_overrides"
 
@@ -24,4 +26,5 @@ class PosterOverride(Base):
     season = Column(Integer, nullable=True)  # poster slot scope: NULL = main poster, N = that season
     slot = Column(String, nullable=True)  # artwork slot scope: logo | background | square
     drive_id = Column(String, nullable=False)  # Drive/ArtworkDrive drive_id to prefer
+    file = Column(String, nullable=True)  # slot scope: one exact file on that drive, relative to its root
     created_at = Column(DateTime(timezone=True), server_default=func.now())

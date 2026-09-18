@@ -984,3 +984,183 @@ def test_artwork_stat_counts_files_written_not_matched_slots(test_db, tmp_path):
     # Broken down like the poster counts (by media type) plus by artwork type.
     assert first_written["by_media"] == {"movies": 0, "series": 2, "collections": 0}
     assert first_written["by_type"] == {"logo": 1, "background": 0, "squareart": 1}
+
+
+def _file_pick(root, name, **fields):
+    """An on-disk poster plus the override row that pins it (relative to the drive root)."""
+    from models.poster_override import PosterOverride
+
+    path = root / name
+    path.write_bytes(b"x")
+    row = PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                         scope="slot", drive_id="cl-1", file=name, **fields)
+    return str(path), row
+
+
+def test_apply_poster_overrides_file_pick_swaps_exact_file(test_db, tmp_path):
+    """A file pick drops that exact file into its slot even though no drive matched it to the
+    show; the priority winner and the other drives' candidates all become runners. A season
+    pick may fill a season no drive offered."""
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    poster_path, poster_row = _file_pick(tmp_path / "cl", "Unrelated Name (1999).jpg", season=None)
+    season_path, season_row = _file_pick(tmp_path / "cl", "Whatever - Season 3.jpg", season=3)
+    test_db.add_all([poster_row, season_row])
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 2
+    assert box["slots"]["poster"] == poster_path
+    assert box["slot_runners"]["poster"] == [mm("Show One (2020).jpg"), cl("Show One (2020).jpg")]
+    assert box["slots"]["seasons"][3] == season_path
+    assert box["slots"]["seasons"][1] == mm("S1.jpg")  # untouched
+
+
+def test_apply_poster_overrides_file_pick_missing_file_keeps_override(test_db, tmp_path):
+    """A pick whose file vanished from the drive leaves the slot on normal priority and is
+    kept (the file may come back on the next sync)."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    test_db.add(PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                               scope="slot", season=None, drive_id="cl-1", file="gone.jpg"))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 0
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
+    assert test_db.query(PosterOverride).count() == 1
+
+
+def test_apply_poster_overrides_file_pick_is_never_pruned(test_db, tmp_path):
+    """Unlike a drive pin, a file pick that already wins by priority stays put."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    winner = tmp_path / "mm" / "Show One (2020).jpg"
+    winner.write_bytes(b"x")
+    test_db.add(PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020,
+                               scope="slot", season=None, drive_id="mm-1", file=winner.name))
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 0
+    assert box["slots"]["poster"] == str(winner)
+    assert test_db.query(PosterOverride).count() == 1
+
+
+def test_apply_poster_overrides_file_pick_fills_unmatched_item(test_db, tmp_path):
+    """With the live media given, a pick for an item no drive matched synthesizes an entry so
+    the file still places; a season the show lacks is skipped."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    _, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    matched["series"] = []  # nothing matched Show One this run
+    media = {"type": "series", "title": "Show One", "year": 2020, "tmdb_id": 77,
+             "folder": "/lib/Show One (2020)", "seasons": [{"season_number": 1}]}
+    media_dict = {"collections": [], "movies": [], "series": [media]}
+    poster_path, poster_row = _file_pick(tmp_path / "cl", "Any Poster.jpg", season=None)
+    s1_path, s1_row = _file_pick(tmp_path / "cl", "Any - Season 1.jpg", season=1)
+    s2_path, s2_row = _file_pick(tmp_path / "cl", "Any - Season 2.jpg", season=2)
+    test_db.add_all([poster_row, s1_row, s2_row])
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched, media_dict) == 2
+    assert len(matched["series"]) == 1
+    entry = matched["series"][0]
+    assert entry["media_ref"] is media and entry["folder"] == media["folder"]
+    assert entry["asset_ref"]["slots"]["poster"] == poster_path
+    assert entry["asset_ref"]["slots"]["seasons"] == {1: s1_path}
+    assert entry["files"] == [poster_path, s1_path]
+    assert test_db.query(PosterOverride).count() == 3
+
+    # Already matched items never get a second, synthesized entry.
+    matched["series"][0]["media_ref"] = media
+    before = len(matched["series"])
+    apply_poster_overrides(test_db, matched, media_dict)
+    assert len(matched["series"]) == before
+
+
+def test_apply_poster_overrides_domains_filter_keeps_posters_out_of_artwork_pass(test_db, tmp_path):
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    _, row = _file_pick(tmp_path / "cl", "Any Poster.jpg", season=None)
+    test_db.add(row)
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched, domains=("artwork",)) == 0
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
+
+
+def _artwork_pick(test_db, tmp_path, slot, name, **fields):
+    """An artwork drive (seeded once), an on-disk file under it, and the artwork override row."""
+    from models.artwork_drive import ArtworkDrive
+    from models.poster_override import PosterOverride
+
+    root = tmp_path / "art"
+    if not test_db.query(ArtworkDrive).filter(ArtworkDrive.drive_id == "art-a").first():
+        root.mkdir(exist_ok=True)
+        test_db.add(ArtworkDrive(name="Art A", drive_id="art-a", subscribed=True, custom_path=str(root)))
+        test_db.commit()
+    path = root / name
+    path.write_bytes(b"x")
+    row = PosterOverride(media_type="show", tmdb_id=77, title="Show One", year=2020, domain="artwork",
+                         scope="slot", slot=slot, drive_id="art-a", file=name, **fields)
+    return str(path), row
+
+
+def test_apply_artwork_file_pick_fills_a_piece_no_drive_offered(test_db, tmp_path):
+    """An artwork file pick lands in its slot even when the matched box has no such piece,
+    and the poster slots are untouched."""
+    from services.poster_renamer import apply_poster_overrides
+
+    box, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    logo_path, logo_row = _artwork_pick(test_db, tmp_path, "logo", "Any Logo.png")
+    test_db.add(logo_row)
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched) == 1
+    assert box["slots"]["logo"] == logo_path
+    assert box["slots"]["poster"] == mm("Show One (2020).jpg")
+
+
+def test_apply_artwork_file_pick_synthesizes_in_the_artwork_only_pass(test_db, tmp_path):
+    """With the live media and artwork-only domains, an unmatched show gets an entry carrying
+    just the picked pieces; a poster pick for the same show is left out of that pass."""
+    from models.poster_override import PosterOverride
+    from services.poster_renamer import apply_poster_overrides
+
+    _, matched, mm, cl = _override_fixture(test_db, tmp_path)
+    matched["series"] = []
+    media = {"type": "series", "title": "Show One", "year": 2020, "tvdb_id": 5, "tmdb_id_ref": 77,
+             "folder": "/lib/Show One (2020)", "seasons": [{"season_number": 1}]}
+    media_dict = {"collections": [], "movies": [], "series": [media]}
+    bg_path, bg_row = _artwork_pick(test_db, tmp_path, "background", "Any Backdrop.jpg")
+    sq_path, sq_row = _artwork_pick(test_db, tmp_path, "square", "Any Square.png")
+    poster_path = tmp_path / "cl" / "Any Poster.jpg"
+    poster_path.write_bytes(b"x")
+    test_db.add_all([bg_row, sq_row, PosterOverride(
+        media_type="show", tmdb_id=77, title="Show One", year=2020, scope="slot", drive_id="cl-1", file="Any Poster.jpg")])
+    test_db.commit()
+
+    assert apply_poster_overrides(test_db, matched, media_dict, domains=("artwork",)) == 2
+    entry = matched["series"][0]
+    slots = entry["asset_ref"]["slots"]
+    assert slots["background"] == bg_path and slots["square"] == sq_path
+    assert slots["poster"] is None and slots["logo"] is None
+    assert entry["files"] == [bg_path, sq_path]
+
+
+def test_sourced_types_by_media_counts_artwork_file_picks(test_db, tmp_path):
+    """Standalone cleanup sees a picked piece as sourced, so it never prunes what the rename places."""
+    from services.artwork_scan import sourced_types_by_media
+
+    logo_path, logo_row = _artwork_pick(test_db, tmp_path, "logo", "Any Logo.png")
+    test_db.add(logo_row)
+    test_db.commit()
+    media = {"type": "series", "title": "Show One", "year": 2020, "tmdb_id_ref": 77, "folder": "/lib/Show One (2020)"}
+
+    sourced = sourced_types_by_media(test_db, {"collections": [], "movies": [], "series": [media]}, boxes=[])
+    assert sourced == {id(media): {"logo": {".png"}}}

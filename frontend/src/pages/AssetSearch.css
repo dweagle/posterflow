@@ -268,6 +268,8 @@
   display: block;
   width: 100%;
   height: 320px;
+  box-sizing: border-box;
+  padding: 8px 8px 0;
   object-fit: contain;
   background: #0f0f0f;
 }
@@ -288,4 +290,151 @@
     min-height: 0;
     max-height: none;
   }
+}
+
+/* "Use" / "Use for…" on a result: green once that file is the pinned override, red on hover to remove. */
+.result-use-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.result-use-btn.active {
+  background: #1a3a2e;
+  color: #4caf50;
+  border-color: #2e6641;
+}
+
+.result-use-btn.active:hover {
+  background: #ef5350;
+  border-color: #ef5350;
+  color: #fff;
+}
+
+/* Posters / Artwork switch above the search box. */
+.asset-kind-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.asset-kind-tab {
+  background: transparent;
+  color: #aaa;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.asset-kind-tab:hover {
+  color: #fff;
+}
+
+.asset-kind-tab.active {
+  background: rgba(100, 181, 246, 0.18);
+  color: #fff;
+}
+
+.drive-group-type.artwork {
+  background: rgba(236, 64, 122, 0.14);
+  border-color: rgba(236, 64, 122, 0.32);
+  color: #e5e7eb;
+}
+
+/* Artwork rows carry their kind next to the name. */
+.asset-type-badge {
+  flex: 0 0 auto;
+  border-radius: 6px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e5e7eb;
+}
+
+.asset-type-badge--logo {
+  background: rgba(255, 193, 7, 0.14);
+  border-color: rgba(255, 193, 7, 0.35);
+}
+
+.asset-type-badge--background {
+  background: rgba(100, 181, 246, 0.14);
+  border-color: rgba(100, 181, 246, 0.35);
+}
+
+.asset-type-badge--squareart {
+  background: rgba(76, 175, 80, 0.14);
+  border-color: rgba(76, 175, 80, 0.35);
+}
+
+/* Per-file notes on a result: the item's current file, or a file another override pins. */
+.asset-file-badge {
+  flex: 0 0 auto;
+  border-radius: 3px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid;
+  max-width: 16rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-file-badge--inuse {
+  background: #1a3a2e;
+  color: #4caf50;
+  border-color: #2e6641;
+}
+
+/* Stands where the Use button would be, so it reads like the compare view's "In use". */
+.asset-inuse-pill {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+}
+
+.asset-file-badge--pinned {
+  background: rgba(100, 181, 246, 0.14);
+  color: #90caf9;
+  border-color: rgba(100, 181, 246, 0.4);
+}
+
+/* Artwork previews take the shape of the artwork instead of the poster box. */
+.poster-search .hover-preview-popup.preview-background {
+  width: 340px;
+}
+
+.poster-search .hover-preview-popup.preview-background .hover-preview-image {
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+.poster-search .hover-preview-popup.preview-logo {
+  width: 320px;
+}
+
+.poster-search .hover-preview-popup.preview-logo .hover-preview-image {
+  height: auto;
+  aspect-ratio: 5 / 2;
+  padding: 14px;
+  background: #3a3a3a;
+}
+
+.poster-search .hover-preview-popup.preview-squareart {
+  width: 260px;
+}
+
+.poster-search .hover-preview-popup.preview-squareart .hover-preview-image {
+  height: auto;
+  aspect-ratio: 1 / 1;
 }

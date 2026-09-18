@@ -1,0 +1,17 @@
+.float-tip {
+  position: fixed;
+  z-index: 1300;
+  width: max-content;
+  max-width: 240px;
+  padding: 0.35rem 0.55rem;
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}

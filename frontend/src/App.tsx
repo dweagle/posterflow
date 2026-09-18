@@ -9,7 +9,7 @@ import Settings from './pages/Settings'
 import PosterManager from './pages/PosterManager'
 import IDarr from './pages/IDarr'
 import MakerTools from './pages/MakerTools'
-import PosterSearch from './pages/PosterSearch'
+import AssetSearch from './pages/AssetSearch'
 import PlexUpload from './pages/PlexUpload'
 import CommunityRequests from './pages/CommunityRequests'
 import { CommunityClaimStatusProvider } from './hooks/useCommunityClaimStatus'
@@ -150,7 +150,8 @@ function AppContent() {
                 <Route path="IDarr" element={<IDarr />} />
                 <Route path="maker-tools" element={<MakerTools />} />
                 <Route path="plex-upload" element={<PlexUpload />} />
-                <Route path="poster-search" element={<PosterSearch />} />
+                <Route path="asset-search" element={<AssetSearch />} />
+                <Route path="poster-search" element={<Navigate to="/asset-search" replace />} />
                 <Route path="logs" element={<Logs />} />
                 <Route path="community-requests" element={<CommunityClaimStatusProvider><CommunityRequests /></CommunityClaimStatusProvider>} />
                 <Route path="settings" element={<Settings />} />

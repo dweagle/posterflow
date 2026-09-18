@@ -48,6 +48,24 @@ def _normalize_for_search(text: str) -> str:
     return cleaned.replace(" ", "").lower().strip()
 
 
+_ID_TAG_RE = re.compile(r"\{[^}]*\}")
+_ID_QUERY_RE = re.compile(r"tmdb|tvdb|imdb|\btt\d", re.IGNORECASE)
+
+
+def _stem_matches(normalized_query: str, raw_query: str, stem: str) -> bool:
+    """Precise match for a search hit: the title part of the file name matches anywhere; the
+    {tmdb-…}/{tvdb-…}/{imdb-…} tags only as a whole id, or when the query names the id source.
+    Otherwise a numeric title like "1883" drags in every file whose id contains those digits."""
+    if normalized_query in _normalize_for_search(_ID_TAG_RE.sub("", stem)):
+        return True
+    tags = _ID_TAG_RE.findall(stem)
+    if not tags:
+        return False
+    if _ID_QUERY_RE.search(raw_query):
+        return normalized_query in _normalize_for_search(" ".join(tags))
+    return normalized_query in {_normalize_for_search(tag.strip("{}").split("-", 1)[-1]) for tag in tags}
+
+
 def _like_pattern(anchor: str) -> str:
     """Escape LIKE wildcards so a title's %/_ don't act as wildcards."""
     escaped = anchor.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -117,28 +135,10 @@ def search_posters(
     for poster, drive in rows:
         poster_name = Path(poster.file_name).stem
         # Precise, accent/punctuation-insensitive match (the SQL prefilter is loose).
-        if normalized_query not in _normalize_for_search(poster_name):
+        if not _stem_matches(normalized_query, query, poster_name):
             continue
 
-        drive_root: Path | None = None
-        poster_path: Path | None = None
-        try:
-            drive_root = drive.get_local_path(validate=False).resolve()
-            poster_path = Path(poster.file_path).resolve()
-        except Exception:
-            drive_root = None
-            poster_path = None
-
-        if drive_root is None or poster_path is None:
-            continue
-
-        # Strict guard: only include files physically inside the drive's local folder.
-        if not _is_path_within(drive_root, poster_path):
-            continue
-
-        # Extra guard for explicit temp/asset folder names anywhere in path.
-        path_parts = {part.lower() for part in poster_path.parts}
-        if "assets" in path_parts or "tmp" in path_parts or "temp" in path_parts:
+        if _searchable_file(drive, poster.file_path) is None:
             continue
 
         group_key = poster_name.casefold()
@@ -160,6 +160,7 @@ def search_posters(
                 "is_custom": drive.is_custom,
                 "poster_id": poster.id,
                 "image_url": f"/api/stats/posters/{poster.id}/image",
+                "file_path": poster.file_path,
             }
 
     items = []
@@ -181,6 +182,77 @@ def search_posters(
         "count": len(items),
         "items": items,
     }
+
+@router.get("/artwork-search")
+def search_artwork(
+    q: str,
+    types: Optional[str] = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Search synced artwork records (logos / backgrounds / square art) by filename and return
+    matches grouped by name + type with every drive that offers them. Mirrors /poster-search,
+    including its inside-the-drive-folder guard. `types` narrows to a comma list of artwork types."""
+    query = q.strip()
+    if not query:
+        return {"query": "", "count": 0, "items": []}
+
+    normalized_query = _normalize_for_search(query)
+    if not normalized_query:
+        return {"query": query, "count": 0, "items": []}
+
+    wanted = [t.strip() for t in (types or "").split(",") if t.strip() in ARTWORK_TYPES] or list(ARTWORK_TYPES)
+    safe_limit = max(1, min(limit, 500))
+    raw_limit = min(safe_limit * 8, 4000)
+
+    prefilter = and_(
+        *[Artwork.file_name.ilike(_like_pattern(a), escape="\\") for a in _search_anchors(query)]
+    )
+    rows = (
+        db.query(Artwork, ArtworkDrive)
+        .join(ArtworkDrive, Artwork.artwork_drive_id == ArtworkDrive.drive_id)
+        .filter(prefilter, Artwork.artwork_type.in_(wanted))
+        .order_by(Artwork.file_name.asc(), ArtworkDrive.name.asc())
+        .limit(raw_limit)
+        .all()
+    )
+
+    grouped: Dict[tuple, Dict[str, Any]] = {}
+    for artwork, drive in rows:
+        name = Path(artwork.file_name).stem
+        if not _stem_matches(normalized_query, query, name):
+            continue
+        if _searchable_file(drive, artwork.file_path) is None:
+            continue
+
+        group = grouped.setdefault(
+            (name.casefold(), artwork.artwork_type),
+            {"artwork_name": name, "artwork_type": artwork.artwork_type, "drives": {}},
+        )
+        group["drives"].setdefault(drive.drive_id, {
+            "drive_id": drive.drive_id,
+            "drive_name": drive.display_name or drive.name,
+            "drive_type": "custom" if drive.is_custom else "artwork",
+            "is_custom": bool(drive.is_custom),
+            "artwork_id": artwork.id,
+            "image_url": f"/api/stats/artwork/{artwork.id}/image",
+            "file_path": artwork.file_path,
+        })
+
+    items = []
+    for group in grouped.values():
+        drives = sorted(group["drives"].values(), key=lambda item: item["drive_name"].casefold())
+        items.append({
+            "artwork_name": group["artwork_name"],
+            "artwork_type": group["artwork_type"],
+            "drives": drives,
+            "drive_count": len(drives),
+        })
+    items.sort(key=lambda item: (item["artwork_name"].casefold(), ARTWORK_TYPES.index(item["artwork_type"])))
+    items = items[:safe_limit]
+
+    return {"query": query, "count": len(items), "items": items}
+
 
 @router.get("/")
 def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
@@ -264,6 +336,22 @@ def _local_file_within_drive(drive: Drive | ArtworkDrive, file_path: str) -> Opt
     except Exception:
         return None
     if not _is_path_within(drive_root, path) or not path.is_file():
+        return None
+    return path
+
+
+def _searchable_file(drive, file_path: str) -> Optional[Path]:
+    """The indexed file when it sits inside its drive's local folder and not under a temp or
+    assets folder — the only files the searches may expose."""
+    try:
+        drive_root = drive.get_local_path(validate=False).resolve()
+        path = Path(file_path).resolve()
+    except Exception:
+        return None
+    if not _is_path_within(drive_root, path):
+        return None
+    parts = {part.lower() for part in path.parts}
+    if "assets" in parts or "tmp" in parts or "temp" in parts:
         return None
     return path
 

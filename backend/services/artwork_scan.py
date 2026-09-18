@@ -244,6 +244,9 @@ def sourced_types_by_media(
     # media_source_refs: it flips collections to ID-matched while the renamer title-matches them, so cleanup would prune artwork the rename just placed.
     index = build_artwork_index(scan_artwork_drive_boxes(db) if boxes is None else boxes)
     matched = match_assets_to_media(media_dict, index, label="artwork drive sources", report_near_misses=False)
+    # Same override swaps the rename applies (file picks included) — keeps place/prune parity.
+    from services.poster_renamer import apply_poster_overrides
+    apply_poster_overrides(db, matched, media_dict, domains=("artwork",))
     return sourced_types_from_matched(matched)
 
 

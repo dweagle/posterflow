@@ -41,7 +41,7 @@ const NAV_ITEM_DEFS: NavItemDef[] = [
   { id: 'dashboard', label: 'Dashboard', to: '/', iconColor: '#ff8800', isEnd: true },
   { id: 'poster-manager', label: 'Asset Manager', to: '/poster-manager', iconColor: '#a855f7', badge: 'unmatched' },
   { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4' },
-  { id: 'poster-search', label: 'Poster Search', to: '/poster-search', iconColor: '#64b5f6' },
+  { id: 'poster-search', label: 'Asset Search', to: '/asset-search', iconColor: '#64b5f6' },
   { id: 'plex-upload', label: 'Asset Upload', to: '/plex-upload', iconColor: '#e5a00d' },
   { id: 'community-requests', label: 'Requests', to: '/community-requests', iconColor: '#64b5f6', badge: 'community' },
   { id: 'idarr', label: 'IDarr', to: '/IDarr', iconColor: '#66bb6a', badge: 'idarr', isIdarr: true },

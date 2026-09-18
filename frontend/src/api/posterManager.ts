@@ -60,6 +60,8 @@ export interface PosterSearchDrive {
   is_custom: boolean
   poster_id: number
   image_url: string
+  // Absolute path on disk, so a hit can be pinned as a poster override.
+  file_path: string
 }
 
 export interface PosterSearchItem {
@@ -72,6 +74,31 @@ export interface PosterSearchResponse {
   query: string
   count: number
   items: PosterSearchItem[]
+}
+
+export type ArtworkSearchType = 'logo' | 'background' | 'squareart'
+
+export interface ArtworkSearchDrive {
+  drive_id: string
+  drive_name: string
+  drive_type: 'artwork' | 'custom'
+  is_custom: boolean
+  artwork_id: number
+  image_url: string
+  file_path: string
+}
+
+export interface ArtworkSearchItem {
+  artwork_name: string
+  artwork_type: ArtworkSearchType
+  drives: ArtworkSearchDrive[]
+  drive_count: number
+}
+
+export interface ArtworkSearchResponse {
+  query: string
+  count: number
+  items: ArtworkSearchItem[]
 }
 
 export const getPosterConfig = async (): Promise<PosterConfig> => {
@@ -454,6 +481,16 @@ export const searchPosters = async (query: string, limit: number = 200): Promise
   })
 }
 
+export const searchArtwork = async (
+  query: string,
+  types?: ArtworkSearchType[],
+  limit: number = 200,
+): Promise<ArtworkSearchResponse> => {
+  return getData('/api/stats/artwork-search', {
+    params: { q: query, limit, ...(types && types.length ? { types: types.join(',') } : {}) },
+  })
+}
+
 // Flow types and functions
 export interface FlowJobConfig {
   enabled: boolean
@@ -584,6 +621,8 @@ export interface FallbackItem {
 export const getDriveImageUrl = (path: string): string =>
   `${API_URL}/api/posterflow/drive-image?path=${encodeURIComponent(path)}`
 
+export type OverrideArtSlot = 'logo' | 'background' | 'square'
+
 export interface PosterOverride {
   id: number
   media_type: 'movie' | 'show' | 'collection'
@@ -595,8 +634,42 @@ export interface PosterOverride {
   domain?: 'poster' | 'artwork'
   scope: 'slot' | 'set'
   season?: number | null
-  slot?: string | null
+  slot?: OverrideArtSlot | null
   drive_id: string
+  // Slot-scope poster picks: the exact drive file to use (absolute path); null = the whole drive.
+  file?: string | null
+}
+
+// A library item the poster renamer places for (from its configured media sources).
+export interface LibraryItem {
+  media_type: 'movie' | 'show' | 'collection'
+  title: string
+  year: number | null
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  seasons: number[]
+  // The instance/library that supplied it, e.g. "Radarr" or "Plex (Movies)".
+  source: string
+  poster_url?: string | null
+  thumb_url?: string | null
+}
+
+export interface LibrarySearchResponse {
+  query: string
+  count: number
+  total: number
+  items: LibraryItem[]
+}
+
+// First call on a cold cache fetches the media sources (seconds); refresh forces that.
+export const searchLibraryItems = async (
+  query: string,
+  opts: { limit?: number; refresh?: boolean } = {},
+): Promise<LibrarySearchResponse> => {
+  return getData('/api/posterflow/library-search', {
+    params: { q: query, limit: opts.limit ?? 50, ...(opts.refresh ? { refresh: 'true' } : {}) },
+  })
 }
 
 // One slot of an item for compare/override lookups: a season (posters) or an artwork slot.
