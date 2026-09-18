@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-18
+### Added
+- Asset Search: the Poster Search page is now Asset Search, with an artwork mode.
+- Any drive file can be pinned as a poster/artwork override via "Use for…" in Asset Search or Drive Usage. Pinned overrides stick until you remove them.
+- Maker Tools: maker and artwork cards now have IDarr drop targets, with a sticky scope picker on every Maker Tools view. Drop an image on a card to quick-add it to the selected scope.
+- Sidebar (IDarr): an IDarr scope picker sits right on the sidebar for a quick view of the selected scope. The Community Requests page gets a sticky scope picker that slides while scrolling.
+
+### Changed
+- Dependencies: Python 3.14 base image, rclone 1.75.1 (rclone security advisories), and latest backend/frontend packages.
+
+### Fixed
+- Maker Monitor: items whose premiere dates changed after a run now update correctly or fall off the list.
+
 ## [0.15.6] - 2026-09-14
 ### Fixed
 - Photoshop Plugin: Alt-click tagging no longer sticks (Photoshop plugin 1.2.1 - reinstall the .ccx to pick it up.)
