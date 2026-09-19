@@ -504,8 +504,12 @@
 /* IDarr item: nav link + inline scope picker in one row. The row, not the link, carries the
    hover/active/drop highlight so the picker reads as part of the item. */
 .sidebar-idarr-item {
+  position: relative;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+  /* The row, not the link, owns the right edge so the picker and badge end where other items' badges do. */
+  padding-right: 1.5rem;
   transition: background-color 0.2s;
 }
 
@@ -526,10 +530,16 @@
   box-shadow: inset 2px 0 0 #66bb6a;
 }
 
-/* The link keeps its content width (icon, label, pending badge); the picker gives way. */
+/* The link keeps its content width (icon, label); its right padding + the row gap keep the picker off the label. */
 .sidebar-idarr-item > a {
   flex: 1 0 auto;
   padding-right: 0.75rem;
+}
+
+/* Pending badge is a row sibling (after the picker), right-aligned like the other items' badges. */
+.sidebar-idarr-item > .sidebar-badge {
+  margin-left: 0;
+  flex-shrink: 0;
 }
 
 .sidebar-idarr-item > a .nav-label {
@@ -580,7 +590,6 @@
 .sidebar-idarr-scope {
   flex: 0 1 7rem;
   min-width: 3.5rem;
-  margin-right: 1.5rem;
   background: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 4px;
@@ -632,6 +641,11 @@
   .sidebar-idarr-scope,
   .sidebar-idarr-item > a::before {
     display: none;
+  }
+
+  .sidebar-idarr-item {
+    gap: 0;
+    padding-right: 0;
   }
 
   .sidebar-nav a {
@@ -796,6 +810,11 @@
   .sidebar-idarr-scope,
   .sidebar-idarr-item > a::before {
     display: block;
+  }
+
+  .sidebar-idarr-item {
+    gap: 0.5rem;
+    padding-right: 1.5rem;
   }
 
   .sidebar-idarr-item > a {

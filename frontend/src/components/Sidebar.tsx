@@ -452,7 +452,6 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                       >
                         <span className="icon">{getNavIcon(def.id, def.iconColor)}</span>
                         <span className="nav-label">{def.label}</span>
-                        {idarrPendingCount > 0 && <span className="sidebar-badge">{idarrPendingCount}</span>}
                       </NavLink>
                       {hasScopes && (
                         <select
@@ -467,6 +466,8 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                           ))}
                         </select>
                       )}
+                      {/* Sits after the picker so it lines up with the other items' badges on the right edge. */}
+                      {idarrPendingCount > 0 && <span className="sidebar-badge" title="Pending IDarr items">{idarrPendingCount}</span>}
                     </div>
                   )
                 }
