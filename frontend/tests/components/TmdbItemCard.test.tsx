@@ -251,6 +251,11 @@ describe('TmdbItemCard seasons tab', () => {
     const tab = await open(333001)
     expect(tab.disabled).toBe(true)
     expect(tab.getAttribute('title')).toBe('No season posters on TMDB')
+    // Every empty tab says what's missing and where; a live one carries no tip.
+    const tip = (name: RegExp) => screen.getByRole('button', { name }).getAttribute('title')
+    expect(tip(/^Backdrops/)).toBe('No backdrops on TMDB')
+    expect(tip(/^Logos/)).toBe('No logos on TMDB')
+    expect(tip(/^Posters/)).toBeNull()
   })
 
   it('keeps the tab live and dims only the chips without posters', async () => {

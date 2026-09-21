@@ -1049,24 +1049,28 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 ))}
               </div>
             )}
-            {galleryTabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`tmdb-gallery-tab${activeGalleryTab === t.id ? ' active' : ''}`}
-                onClick={() => {
-                  if (t.id === 'season-posters') {
-                    setActiveGalleryTab('season-posters')
-                  } else if (t.count != null && t.count > 0) {
-                    setActiveGalleryTab(t.id)
-                  }
-                }}
-                disabled={t.id === 'season-posters' ? !seasonsAvailable : (t.count == null || t.count === 0)}
-                title={t.id === 'season-posters' && !seasonsAvailable ? `No season posters on ${SOURCE_LABEL[imageSource]}` : undefined}
-              >
-                {t.label}{t.count != null && <span className="tmdb-gallery-tab-count">{t.count}</span>}
-              </button>
-            ))}
+            {galleryTabs.map((t) => {
+              const empty = t.id === 'season-posters' ? !seasonsAvailable : (t.count == null || t.count === 0)
+              const what = t.id === 'season-posters' ? 'season posters' : t.label.toLowerCase()
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`tmdb-gallery-tab${activeGalleryTab === t.id ? ' active' : ''}`}
+                  onClick={() => {
+                    if (t.id === 'season-posters') {
+                      setActiveGalleryTab('season-posters')
+                    } else if (t.count != null && t.count > 0) {
+                      setActiveGalleryTab(t.id)
+                    }
+                  }}
+                  disabled={empty}
+                  title={empty ? `No ${what} on ${SOURCE_LABEL[imageSource]}` : undefined}
+                >
+                  {t.label}{t.count != null && <span className="tmdb-gallery-tab-count">{t.count}</span>}
+                </button>
+              )
+            })}
             <div className="tmdb-gallery-lang-wrapper">
               <Globe size={13} className="tmdb-gallery-lang-icon" />
               <select
