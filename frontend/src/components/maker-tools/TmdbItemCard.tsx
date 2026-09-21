@@ -722,9 +722,12 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // (or from an older server, which can't). A season outside the list gets a dimmed chip.
   const seasonPosters = galleryImages?.season_posters ?? null
   const hasSeasonPosters = (n: number) => seasonPosters == null || seasonPosters.includes(n)
+  // A non-TMDB source with nothing at all for this title: the panel says so in place of any tab.
+  const sourceHasNothing = imageSource !== 'tmdb' && !!galleryImages
+    && galleryImages.posters.length === 0 && galleryImages.backdrops.length === 0 && galleryImages.logos.length === 0
   // The Seasons tab dims like the others when nothing is behind it: no season posters from this
   // source, or no seasons once the details are in.
-  const seasonsAvailable = !galleryEmptyFallback
+  const seasonsAvailable = !galleryEmptyFallback && !sourceHasNothing
     && (seasonPosters == null || seasonPosters.length > 0)
     && (!tvDetails || seasonList.length > 0)
   useEffect(() => {
@@ -1154,8 +1157,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
             ? <p className="tmdb-gallery-empty">Loading {SOURCE_LABEL[imageSource]} images…</p>
             : galleryEmptyFallback
             ? <p className="tmdb-gallery-empty">No images could be loaded for this title.</p>
-            : imageSource !== 'tmdb' && galleryImages.posters.length === 0
-              && galleryImages.backdrops.length === 0 && galleryImages.logos.length === 0
+            : sourceHasNothing
             // Common for movies — plenty aren't in TVDB or fanart.tv at all, so say that rather
             // than showing an empty tab the user has to interpret.
             ? <p className="tmdb-gallery-empty">No {SOURCE_LABEL[imageSource]} artwork for this title.</p>

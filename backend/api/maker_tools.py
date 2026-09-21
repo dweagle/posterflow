@@ -2131,7 +2131,7 @@ def tvdb_images(media_type: str, tvdb_id: int = 0, imdb_id: str = "", language: 
     if mt not in ("movie", "tv", "collection"):
         raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
 
-    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[], season_posters=[] if mt == "tv" else None)
     if mt == "collection":
         return empty  # TVDB has no collection entity
 
@@ -2206,7 +2206,7 @@ def fanart_images(media_type: str, tmdb_id: int = 0, tvdb_id: int = 0, imdb_id: 
     if mt not in ("movie", "tv", "collection"):
         raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
 
-    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[], season_posters=[] if mt == "tv" else None)
     if mt == "collection":
         return empty  # fanart.tv has no collection entity
 
@@ -2273,7 +2273,7 @@ def apple_images(media_type: str, title: str, year: int = 0, tmdb_id: int = 0, l
     if mt not in ("movie", "tv", "collection"):
         raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
 
-    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[])
+    empty = TmdbImagesResponse(posters=[], backdrops=[], logos=[], season_posters=[] if mt == "tv" else None)
     if mt == "collection":
         return empty
 

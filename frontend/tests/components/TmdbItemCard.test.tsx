@@ -281,4 +281,18 @@ describe('TmdbItemCard seasons tab', () => {
     const tab = await open(333004)
     await waitFor(() => expect(tab.disabled).toBe(true))
   })
+
+  it('dims the tab when a source has nothing at all for the title, even from an older server', async () => {
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    mockedAppleImages.mockReset()
+    mockedAppleImages.mockResolvedValue(noImages)   // no season_posters field at all
+    const { container } = render(<TmdbItemCard item={item({ tmdb_id: 333005 })} psdConfig={{ ...EMPTY_PSD_CONFIG, appleEnabled: true }} hideTitle hideOverview />)
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+    await waitFor(() => expect(container.querySelector('.tmdb-gallery-panel')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Browse Apple TV images' }))
+    await waitFor(() => expect(screen.getByText('No Apple TV artwork for this title.')).toBeTruthy())
+    const tab = screen.getByRole('button', { name: 'Seasons' }) as HTMLButtonElement
+    expect(tab.disabled).toBe(true)
+    expect(tab.getAttribute('title')).toBe('No season posters on Apple TV')
+  })
 })

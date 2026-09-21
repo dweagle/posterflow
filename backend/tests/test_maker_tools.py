@@ -1291,7 +1291,7 @@ def test_apple_images_returns_empty_when_no_store_lists_the_title(client, monkey
     monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: None)
     response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "BNA", "year": 2020})
     assert response.status_code == 200
-    assert response.json() == {"posters": [], "backdrops": [], "logos": [], "season_posters": None}
+    assert response.json() == {"posters": [], "backdrops": [], "logos": [], "season_posters": []}
 
 
 def test_apple_images_maps_a_listing_into_the_gallery_shape(client, monkeypatch):

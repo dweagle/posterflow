@@ -57,6 +57,10 @@ def test_tvdb_images_returns_empty_when_the_title_has_no_tvdb_entry(client, test
     response = client.get("/api/maker-tools/tvdb/images", params={"media_type": "movie"})
     assert response.status_code == 200
     assert response.json()["posters"] == []
+    assert response.json()["season_posters"] is None
+    # A show TVDB doesn't have has no season posters either.
+    response = client.get("/api/maker-tools/tvdb/images", params={"media_type": "tv"})
+    assert response.json()["season_posters"] == []
 
 
 def test_tvdb_images_maps_artwork_into_the_gallery_shape(client, test_db, monkeypatch):
