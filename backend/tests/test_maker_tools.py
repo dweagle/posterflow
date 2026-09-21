@@ -568,6 +568,43 @@ def test_tmdb_images_returns_sorted_results(client, test_db):
     assert data["logos"] == []
 
 
+def test_tmdb_images_reports_the_seasons_with_a_poster(client, test_db):
+    """Shows carry the seasons TMDB has a poster for, read off the show record's per-season
+    primary poster (the same cached call tv-details makes)."""
+    _seed_tmdb_key(test_db)
+
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = _FAKE_IMAGES_RESPONSE if url.endswith("/images") else _FAKE_TV_DETAILS
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get):
+        show = client.get("/api/maker-tools/tmdb/images?tmdb_id=1399&media_type=tv")
+        movie = client.get("/api/maker-tools/tmdb/images?tmdb_id=603&media_type=movie")
+
+    assert show.status_code == 200
+    assert show.json()["season_posters"] == [0, 1]      # season 2 has no poster_path
+    assert movie.json()["season_posters"] is None
+
+
+def test_tmdb_images_leaves_the_season_hint_unknown_when_the_show_record_fails(client, test_db):
+    _seed_tmdb_key(test_db)
+
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        resp.status_code = 200 if url.endswith("/images") else 500
+        resp.json.return_value = _FAKE_IMAGES_RESPONSE
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1398&media_type=tv")
+
+    assert response.status_code == 200
+    assert len(response.json()["posters"]) == 2
+    assert response.json()["season_posters"] is None
+
+
 def test_tmdb_images_invalid_media_type_returns_400(client, test_db):
     _seed_tmdb_key(test_db)
     response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=podcast&language=en")
@@ -1247,17 +1284,18 @@ def test_apple_images_returns_empty_for_collections_without_a_search(client, mon
     monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: (_ for _ in ()).throw(AssertionError("no search")))
     response = client.get("/api/maker-tools/apple/images", params={"media_type": "collection", "title": "Alien Collection"})
     assert response.status_code == 200
-    assert response.json() == {"posters": [], "backdrops": [], "logos": []}
+    assert response.json() == {"posters": [], "backdrops": [], "logos": [], "season_posters": None}
 
 
 def test_apple_images_returns_empty_when_no_store_lists_the_title(client, monkeypatch):
     monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: None)
     response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "BNA", "year": 2020})
     assert response.status_code == 200
-    assert response.json() == {"posters": [], "backdrops": [], "logos": []}
+    assert response.json() == {"posters": [], "backdrops": [], "logos": [], "season_posters": None}
 
 
 def test_apple_images_maps_a_listing_into_the_gallery_shape(client, monkeypatch):
+    monkeypatch.setattr(apple_tv, "fetch_seasons", lambda item_id, storefront: [])
     seen = {}
 
     def fake_fetch(**kwargs):
@@ -1292,6 +1330,38 @@ def test_apple_images_maps_a_listing_into_the_gallery_shape(client, monkeypatch)
     response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence", "language": "de"})
     assert seen["locale"] == "de-DE"
     assert [(l["language"], l["width"]) for l in response.json()["logos"]] == [("de", 4000)]
+
+
+def test_apple_images_reports_the_seasons_with_art(client, monkeypatch):
+    """A show's product page lists its seasons with their art; the gallery gates its Seasons tab
+    and chips on which ones have any."""
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: _apple_found("GB"))
+    seen = {}
+    monkeypatch.setattr(apple_tv, "fetch_seasons", lambda item_id, storefront: seen.update(item_id=item_id, storefront=storefront) or [
+        {"type": "Season", "seasonNumber": 1, "images": {"coverArt": {"url": _APPLE_TMPL, "width": 3000, "height": 3000}}},
+        {"type": "Season", "seasonNumber": 2, "images": {}},
+    ])
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence"})
+    assert response.status_code == 200, response.text
+    assert seen == {"item_id": "umc.cmc.1", "storefront": apple_tv.STOREFRONTS["GB"]}
+    assert response.json()["season_posters"] == [1]
+
+    # A failed product page leaves the hint unknown rather than failing the show's own art.
+    def boom(item_id, storefront):
+        raise apple_tv.AppleTvError("Apple TV product page failed (HTTP 503).")
+
+    monkeypatch.setattr(apple_tv, "fetch_seasons", boom)
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "tv", "title": "Deca-Dence"})
+    assert response.status_code == 200
+    assert len(response.json()["posters"]) == 1 and response.json()["season_posters"] is None
+
+    # Movies have no seasons to ask about.
+    monkeypatch.setattr(apple_tv, "fetch_seasons",
+                        lambda item_id, storefront: (_ for _ in ()).throw(AssertionError("no season lookup for a movie")))
+    monkeypatch.setattr(apple_tv, "fetch_artwork", lambda **k: apple_tv.Found(
+        item={**_apple_show(), "type": "Movie"}, iso="GB", storefront=apple_tv.STOREFRONTS["GB"]))
+    response = client.get("/api/maker-tools/apple/images", params={"media_type": "movie", "title": "Deca-Dence"})
+    assert response.status_code == 200 and response.json()["season_posters"] is None
 
 
 def test_apple_images_maps_apple_failures_to_http_errors(client, monkeypatch):

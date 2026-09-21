@@ -171,6 +171,7 @@ export interface TmdbImagesResponse {
   posters: TmdbImage[]
   backdrops: TmdbImage[]
   logos: TmdbImage[]
+  season_posters?: number[] | null   // shows: seasons this source has a poster for; null/absent = it couldn't say
 }
 
 export const getTmdbImages = async (tmdb_id: number, media_type: string, language: string = 'en'): Promise<TmdbImagesResponse> => {

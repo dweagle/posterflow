@@ -447,6 +447,24 @@ def fetch_season_episodes(*, tvdb_id: int, season_number: int, api_key: str, pin
     return rows
 
 
+def fetch_season_numbers(*, tvdb_id: int, api_key: str, pin: str) -> dict[int, int]:
+    """Official season id -> number, from the cached season list when a card already fetched it,
+    else a light outline call (no episode list)."""
+    cached = _cached_seasons(tvdb_id)
+    if cached:
+        return {s["id"]: s["number"] for s in cached}
+    data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"}, what="series outline")
+    numbers: dict[int, int] = {}
+    for season in (data or {}).get("seasons") or []:
+        if not _is_official_season(season):
+            continue
+        try:
+            numbers[int(season.get("id"))] = int(season.get("number"))
+        except (TypeError, ValueError):
+            continue
+    return numbers
+
+
 def fetch_season_artwork(*, tvdb_id: int, season_number: int, api_key: str, pin: str) -> list[dict]:
     """Artwork for one season — needs the series' season list first to turn a number into an id."""
     seasons = fetch_series_seasons(tvdb_id=tvdb_id, api_key=api_key, pin=pin)
@@ -502,6 +520,40 @@ def is_tvdb_image_url(url: str) -> bool:
     return parsed.scheme == "https" and (host == TVDB_ARTWORK_HOST or host.endswith(".thetvdb.com"))
 
 
+def _record_language(record: dict, language: str) -> tuple[str | None, bool]:
+    """A record's gallery language (None = textless) and whether the language filter keeps it."""
+    lang = normalize_language(record.get("language"))
+    if record.get("includesText") is False:
+        lang = None
+    if language == "all":
+        return lang, True
+    if language == "en+textless":
+        return lang, lang is None or lang == "en"
+    return lang, lang == language
+
+
+def season_poster_numbers(records: list[dict], types: dict[int, tuple[str, str]], language: str,
+                          numbers_by_id: dict[int, int]) -> list[int]:
+    """Official season numbers with at least one season poster passing the language filter.
+
+    The series' /artworks route carries season posters inline, keyed by seasonId; ids from the
+    DVD/alternate orders map to nothing and are skipped."""
+    numbers: set[int] = set()
+    for record in records:
+        try:
+            entry = types.get(int(record.get("type")))
+        except (TypeError, ValueError):
+            continue
+        if not entry or entry[0] != "poster" or "season" not in entry[1]:
+            continue
+        if not absolute_image_url(record.get("image")) or not _record_language(record, language)[1]:
+            continue
+        number = numbers_by_id.get(record.get("seasonId"))
+        if number is not None:
+            numbers.add(number)
+    return sorted(numbers)
+
+
 def group_artwork(records: list[dict], types: dict[int, tuple[str, str]], language: str,
                   *, title_only: bool = True) -> dict[str, list[dict]]:
     """Bucket raw records into {'posters', 'backdrops', 'logos'}, honouring the language filter.
@@ -530,17 +582,8 @@ def group_artwork(records: list[dict], types: dict[int, tuple[str, str]], langua
         if not image_url:
             continue
 
-        lang = normalize_language(record.get("language"))
-        textless = record.get("includesText") is False or lang is None
-        if textless:
-            lang = None
-
-        if language == "all":
-            pass
-        elif language == "en+textless":
-            if lang is not None and lang != "en":
-                continue
-        elif lang != language:
+        lang, keep = _record_language(record, language)
+        if not keep:
             continue
 
         thumb = absolute_image_url(record.get("thumbnail")) or image_url

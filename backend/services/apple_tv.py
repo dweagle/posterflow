@@ -486,12 +486,22 @@ def artwork_for(found: Found, language: Optional[str], wanted: Optional[set]) ->
     return buckets
 
 
+def _season_art(season: dict, wanted: Optional[set], language: str) -> list[dict]:
+    """A season's own artwork in the one grid the season picker has: its square cover first,
+    then its heroes and any 16:9 art."""
+    groups = group_artwork(season, wanted, language)
+    return groups["squareart"] + groups["posters"] + groups["backgrounds"]
+
+
 def season_posters(seasons: list[dict], season_number: int, wanted: Optional[set], language: str) -> list[dict]:
-    """One season's own artwork shaped like the show's, in the one grid the season picker has:
-    its square cover first, then its heroes and any 16:9 art."""
+    """One season's own artwork shaped like the show's."""
     for season in seasons:
-        if season.get("seasonNumber") != season_number:
-            continue
-        groups = group_artwork(season, wanted, language)
-        return groups["squareart"] + groups["posters"] + groups["backgrounds"]
+        if season.get("seasonNumber") == season_number:
+            return _season_art(season, wanted, language)
     return []
+
+
+def season_poster_numbers(seasons: list[dict], wanted: Optional[set], language: str) -> list[int]:
+    """Season numbers that have any art in the picker's language set, sorted."""
+    return sorted({s["seasonNumber"] for s in seasons
+                   if isinstance(s.get("seasonNumber"), int) and _season_art(s, wanted, language)})

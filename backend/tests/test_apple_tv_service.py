@@ -210,6 +210,8 @@ def test_season_posters_pick_one_seasons_cover_and_heroes():
     assert [(p["width"], p["height"]) for p in apple.season_posters(seasons, 1, None, "en")] == [(3000, 3000), (4320, 3240)]
     assert apple.season_posters(seasons, 2, None, "en") == []
     assert apple.season_posters(seasons, 3, None, "en") == []
+    assert apple.season_poster_numbers(seasons, None, "en") == [1]
+    assert apple.season_poster_numbers(seasons + [{"type": "Season", "images": {}}], None, "en") == [1]
     # Textless-only keeps the hero and drops the titled cover.
     assert [p["width"] for p in apple.season_posters(seasons, 1, {None}, "en")] == [4320]
 

@@ -718,11 +718,25 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       ? (imageSource === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons)
       : tvDetails.seasons
 
-  // Landing on the Seasons tab loads the first real season straight away (Specials only when
-  // that's all there is) instead of showing bare chips. The pick is cleared by a source or
-  // language change, so this also refills it for the new source / language.
-  const firstSeasonNumber = seasonList.find((sn) => sn.season_number >= 1)?.season_number
-    ?? seasonList[0]?.season_number ?? null
+  // Seasons the active source holds posters for, per its images response; null until it says
+  // (or from an older server, which can't). A season outside the list gets a dimmed chip.
+  const seasonPosters = galleryImages?.season_posters ?? null
+  const hasSeasonPosters = (n: number) => seasonPosters == null || seasonPosters.includes(n)
+  // The Seasons tab dims like the others when nothing is behind it: no season posters from this
+  // source, or no seasons once the details are in.
+  const seasonsAvailable = !galleryEmptyFallback
+    && (seasonPosters == null || seasonPosters.length > 0)
+    && (!tvDetails || seasonList.length > 0)
+  useEffect(() => {
+    if (activeGalleryTab !== 'season-posters' || seasonsAvailable || !galleryImages) return
+    setActiveGalleryTab(galleryImages.posters.length > 0 ? 'posters' : galleryImages.backdrops.length > 0 ? 'backdrops' : 'logos')
+  }, [activeGalleryTab, seasonsAvailable, galleryImages])
+
+  // Landing on the Seasons tab loads the first real season with posters straight away (Specials
+  // only when that's all there is) instead of showing bare chips. The pick is cleared by a source
+  // or language change, so this also refills it for the new source / language.
+  const firstSeasonNumber = seasonList.find((sn) => sn.season_number >= 1 && hasSeasonPosters(sn.season_number))?.season_number
+    ?? seasonList.find((sn) => hasSeasonPosters(sn.season_number))?.season_number ?? null
   useEffect(() => {
     if (!galleryOpen || activeGalleryTab !== 'season-posters' || selectedSeason != null || firstSeasonNumber == null) return
     void fetchSeasonImages(firstSeasonNumber)
@@ -1044,7 +1058,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                     setActiveGalleryTab(t.id)
                   }
                 }}
-                disabled={t.id !== 'season-posters' && (t.count == null || t.count === 0)}
+                disabled={t.id === 'season-posters' ? !seasonsAvailable : (t.count == null || t.count === 0)}
+                title={t.id === 'season-posters' && !seasonsAvailable ? `No season posters on ${SOURCE_LABEL[imageSource]}` : undefined}
               >
                 {t.label}{t.count != null && <span className="tmdb-gallery-tab-count">{t.count}</span>}
               </button>
@@ -1160,7 +1175,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                               type="button"
                               className={`tmdb-season-chip${selectedSeason === s.season_number ? ' active' : ''}`}
                               onClick={() => void fetchSeasonImages(s.season_number)}
-                              disabled={seasonImagesLoading[seasonKey(imageSource, s.season_number)]}
+                              disabled={seasonImagesLoading[seasonKey(imageSource, s.season_number)] || !hasSeasonPosters(s.season_number)}
+                              title={hasSeasonPosters(s.season_number) ? undefined : `No ${SOURCE_LABEL[imageSource]} posters for this season`}
                             >
                               {s.season_number === 0 ? 'Specials' : `S${String(s.season_number).padStart(2, '0')}`}
                             </button>

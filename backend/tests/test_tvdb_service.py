@@ -231,6 +231,42 @@ def test_fetch_series_seasons_sorts_unordered_input(monkeypatch):
     assert [s["number"] for s in seasons] == [0, 1, 2, 3]
 
 
+def test_fetch_season_numbers_serves_the_cached_list_without_a_call(monkeypatch):
+    tvdb._store_seasons(1, [{"id": 5, "number": 1}, {"id": 6, "number": 2}])
+    monkeypatch.setattr(tvdb, "_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no call expected")))
+    assert tvdb.fetch_season_numbers(tvdb_id=1, api_key="k", pin="") == {5: 1, 6: 2}
+
+
+def test_fetch_season_numbers_falls_back_to_the_light_outline(monkeypatch):
+    """No cached list (or a cached failure) → the outline call, official order only."""
+    tvdb._store_seasons(1, [], ttl=60)
+    seen = {}
+    monkeypatch.setattr(tvdb, "_get", lambda path, *a, **k: seen.update(path=path, params=k.get("params")) or {"seasons": [
+        {"id": 5, "number": 1, "type": {"type": "official"}},
+        {"id": 9, "number": 1, "type": {"type": "dvd"}},
+        {"id": "junk", "number": 2, "type": {"type": "official"}},
+    ]})
+    assert tvdb.fetch_season_numbers(tvdb_id=1, api_key="k", pin="") == {5: 1}
+    assert seen == {"path": "/series/1/extended", "params": {"short": "true"}}
+
+
+def test_season_poster_numbers_maps_season_posters_through_the_official_ids():
+    types = {2: ("poster", "series"), 7: ("poster", "season"), 8: ("background", "season")}
+    art = {"image": "https://artworks.thetvdb.com/x.jpg"}
+    records = [
+        {"type": 2, "language": "eng", **art},
+        {"type": 7, "language": "eng", "seasonId": 5, **art},
+        {"type": 7, "language": "deu", "seasonId": 6, **art},
+        {"type": 7, "language": "eng", "seasonId": 6, "image": ""},   # imageless
+        {"type": 8, "language": None, "seasonId": 6, **art},          # background
+        {"type": 7, "language": None, "seasonId": 99, **art},         # DVD-order id
+        {"type": "junk"},
+    ]
+    assert tvdb.season_poster_numbers(records, types, "en+textless", {5: 1, 6: 2}) == [1]
+    assert tvdb.season_poster_numbers(records, types, "all", {5: 1, 6: 2}) == [1, 2]
+    assert tvdb.season_poster_numbers(records, types, "de", {5: 1, 6: 2}) == [2]
+
+
 def test_fetch_series_seasons_keeps_seasons_with_no_order_type(monkeypatch):
     """An untyped season is kept rather than dropped — same fail-safe stance as record types."""
     monkeypatch.setattr(tvdb, "_get", lambda *a, **k: {"seasons": [{"id": 5, "number": 1}]})

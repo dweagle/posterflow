@@ -54,7 +54,7 @@ def test_fanart_images_returns_empty_for_collections(client, test_db):
     response = client.get("/api/maker-tools/fanart/images",
                           params={"media_type": "collection", "tmdb_id": 5})
     assert response.status_code == 200
-    assert response.json() == {"posters": [], "backdrops": [], "logos": []}
+    assert response.json() == {"posters": [], "backdrops": [], "logos": [], "season_posters": None}
 
 
 def test_fanart_images_returns_empty_without_a_usable_id(client, test_db, monkeypatch):
@@ -112,6 +112,29 @@ def test_fanart_images_surfaces_a_fanart_failure_with_its_status(client, test_db
 
 
 # ---------------------------------------------------------------- /fanart/season-images
+
+def test_fanart_images_reports_the_seasons_with_posters(client, test_db, monkeypatch):
+    """The gallery's Seasons tab and chips are gated on which seasons fanart.tv has posters for."""
+    _set_key(test_db)
+    record = _record()
+    record["seasonposter"] += [
+        {"url": "https://assets.fanart.tv/fanart/bb-s3.jpg", "lang": "de", "likes": "1", "season": "3"},
+        {"url": "https://assets.fanart.tv/fanart/bb-any.jpg", "lang": "en", "likes": "1", "season": "all"},
+    ]
+    monkeypatch.setattr(fanart, "fetch_artwork", lambda **kwargs: record)
+
+    response = client.get("/api/maker-tools/fanart/images", params={"media_type": "tv", "tvdb_id": 81189})
+    assert response.status_code == 200
+    # German season 3 is outside the default preference; the any-season poster belongs to no season.
+    assert response.json()["season_posters"] == [1, 2]
+
+    response = client.get("/api/maker-tools/fanart/images", params={"media_type": "tv", "tvdb_id": 81189, "language": "all"})
+    assert response.json()["season_posters"] == [1, 2, 3]
+
+    monkeypatch.setattr(fanart, "fetch_artwork", lambda **kwargs: {"movieposter": []})
+    response = client.get("/api/maker-tools/fanart/images", params={"media_type": "movie", "tmdb_id": 603})
+    assert response.json()["season_posters"] is None
+
 
 def test_fanart_season_images_returns_empty_without_a_series_id(client, test_db):
     _set_key(test_db)

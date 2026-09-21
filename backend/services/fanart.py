@@ -202,3 +202,19 @@ def season_posters(record: dict, season_number: int, wanted: Optional[set] = Non
         shaped for e in (record.get("seasonposter") or [])
         if isinstance(e, dict) and str(e.get("season") or "").strip() == str(season_number)
         and (shaped := _shape(e, "seasonposter", wanted))])
+
+
+def season_poster_numbers(record: dict, wanted: Optional[set] = None) -> list[int]:
+    """Season numbers with at least one poster in the wanted languages, sorted. fanart's
+    any-season ("all") posters belong to no season the picker can offer."""
+    numbers: set[int] = set()
+    for e in record.get("seasonposter") or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            number = int(str(e.get("season")).strip())
+        except ValueError:
+            continue
+        if _shape(e, "seasonposter", wanted):
+            numbers.add(number)
+    return sorted(numbers)

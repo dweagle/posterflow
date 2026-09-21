@@ -1737,6 +1737,8 @@ class TmdbImagesResponse(BaseModel):
     posters: list[TmdbImage]
     backdrops: list[TmdbImage]
     logos: list[TmdbImage]
+    # Shows only: the seasons this source holds a poster for; None when it couldn't say.
+    season_posters: list[int] | None = None
 
 
 class TmdbSeasonInfo(BaseModel):
@@ -1847,7 +1849,20 @@ def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session
     for group in (posters, backdrops, logos):
         group.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))
 
-    return TmdbImagesResponse(posters=posters, backdrops=backdrops, logos=logos)
+    season_posters = _tmdb_season_poster_numbers(tmdb_id, api_key) if mt == "tv" else None
+    return TmdbImagesResponse(posters=posters, backdrops=backdrops, logos=logos, season_posters=season_posters)
+
+
+def _tmdb_season_poster_numbers(tmdb_id: int, api_key: str) -> list[int] | None:
+    """Seasons TMDB holds a poster for, per the show record's per-season primary poster (any
+    language; same cached call as tv-details). None when the record can't be read."""
+    try:
+        data = _tmdb_fetch_json(f"https://api.themoviedb.org/3/tv/{tmdb_id}", {"api_key": api_key, "language": "en-US"},
+                                "TV details", cache_ttl=_TMDB_DETAIL_TTL)
+    except TmdbUpstreamError:
+        return None
+    return sorted({int(s.get("season_number") or 0) for s in (data.get("seasons") or [])
+                   if isinstance(s, dict) and s.get("poster_path")})
 
 
 @router.get("/tmdb/image-proxy")
@@ -2127,11 +2142,19 @@ def tvdb_images(media_type: str, tvdb_id: int = 0, imdb_id: str = "", language: 
         if not resolved:
             return empty
         records = tvdb.fetch_artwork(tvdb_id=resolved, media_type=mt, api_key=api_key, pin=pin)
-        buckets = tvdb.group_artwork(records, tvdb.artwork_types(api_key, pin), _tvdb_language(language))
+        types = tvdb.artwork_types(api_key, pin)
+        buckets = tvdb.group_artwork(records, types, _tvdb_language(language))
     except tvdb.TvdbError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
 
-    return _tvdb_images_response(buckets)
+    response = _tvdb_images_response(buckets)
+    if mt == "tv":
+        try:
+            numbers = tvdb.fetch_season_numbers(tvdb_id=resolved, api_key=api_key, pin=pin)
+            response.season_posters = tvdb.season_poster_numbers(records, types, _tvdb_language(language), numbers)
+        except tvdb.TvdbError:
+            pass  # the gallery itself loaded; the season hint stays unknown
+    return response
 
 
 @router.get("/tvdb/season-images", response_model=TmdbImagesResponse)
@@ -2194,11 +2217,13 @@ def fanart_images(media_type: str, tmdb_id: int = 0, tvdb_id: int = 0, imdb_id: 
                                       tvdb_id=tvdb_id or None, api_key=key)
     except fanart.FanartError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
-    buckets = fanart.group_artwork(record, mt, fanart.wanted_languages(_tvdb_language(language)))
+    wanted = fanart.wanted_languages(_tvdb_language(language))
+    buckets = fanart.group_artwork(record, mt, wanted)
     return TmdbImagesResponse(
         posters=[_fanart_image(i) for i in buckets["posters"]],
         backdrops=[_fanart_image(i) for i in buckets["backgrounds"]],
         logos=[_fanart_image(i) for i in buckets["logos"]],
+        season_posters=fanart.season_poster_numbers(record, wanted) if mt == "tv" else None,
     )
 
 
@@ -2255,15 +2280,23 @@ def apple_images(media_type: str, title: str, year: int = 0, tmdb_id: int = 0, l
     found = _apple_find(db, mt, title, year, tmdb_id)
     if not found:
         return empty
+    wanted = fanart.wanted_languages(_tvdb_language(language))
     try:
-        buckets = apple_tv.artwork_for(found, _tvdb_language(language), fanart.wanted_languages(_tvdb_language(language)))
+        buckets = apple_tv.artwork_for(found, _tvdb_language(language), wanted)
     except apple_tv.AppleTvError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
-    return TmdbImagesResponse(
+    response = TmdbImagesResponse(
         posters=[_fanart_image(i) for i in buckets["posters"] + buckets["squareart"]],
         backdrops=[_fanart_image(i) for i in buckets["backgrounds"]],
         logos=[_fanart_image(i) for i in buckets["logos"]],
     )
+    if mt == "tv":
+        try:
+            seasons = apple_tv.fetch_seasons(str(found.item.get("id") or ""), found.storefront)
+            response.season_posters = apple_tv.season_poster_numbers(seasons, wanted, apple_tv.storefront_language(found.iso))
+        except apple_tv.AppleTvError:
+            pass  # the show's own art loaded; the season hint stays unknown
+    return response
 
 
 @router.get("/apple/season-images", response_model=TmdbImagesResponse)

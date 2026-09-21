@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import TmdbItemCard, { EMPTY_PSD_CONFIG } from '../../src/components/maker-tools/TmdbItemCard'
-import { getAppleImages, getTmdbImages, getTmdbOverview, getTvDetails, getTvdbImages } from '../../src/api/client'
+import { getAppleImages, getSeasonImages, getTmdbImages, getTmdbOverview, getTvDetails, getTvdbImages } from '../../src/api/client'
 
 vi.mock('../../src/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/api/client')>()),
@@ -9,6 +9,7 @@ vi.mock('../../src/api/client', async (importOriginal) => ({
   getTvDetails: vi.fn(),
   getSettings: vi.fn(),
   getTmdbImages: vi.fn(),
+  getSeasonImages: vi.fn(),
   getTvdbImages: vi.fn(),
   getFanartImages: vi.fn(),
   getAppleImages: vi.fn(),
@@ -216,5 +217,68 @@ describe('TmdbItemCard gallery sources', () => {
     await waitFor(() => expect(container.querySelector('.tmdb-gallery-panel')).not.toBeNull())
     const tabs = [...container.querySelectorAll('.tmdb-gallery-source')].map((el) => el.getAttribute('aria-label'))
     expect(tabs).toEqual(['Browse TheTVDB images', 'Browse Apple TV images'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Seasons tab — gated on the seasons the active source has posters for
+// ---------------------------------------------------------------------------
+
+const mockedSeasonImages = vi.mocked(getSeasonImages)
+const twoSeasons = [1, 2].map((n) => ({ season_number: n, name: `Season ${n}`, episode_count: 10, air_date: '2020-01-01', poster_url: null, has_air_date: true }))
+
+describe('TmdbItemCard seasons tab', () => {
+  beforeEach(() => {
+    mockedOverview.mockReset()
+    mockedTvDetails.mockReset()
+    mockedTmdbImages.mockReset()
+    mockedSeasonImages.mockReset()
+    mockedTvDetails.mockResolvedValue({ season_count: 2, seasons: twoSeasons, series_type: null, season_source: 'tmdb', tmdb_seasons: twoSeasons, tvdb_seasons: [] })
+    mockedSeasonImages.mockResolvedValue(noImages)
+  })
+  afterEach(() => { cleanup() })
+
+  // Fresh ids per test: tv-details are cached per id across mounts.
+  const open = async (tmdb_id: number) => {
+    const { container } = render(<TmdbItemCard item={item({ tmdb_id })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview />)
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+    await waitFor(() => expect(container.querySelector('.tmdb-gallery-panel')).not.toBeNull())
+    return screen.getByRole('button', { name: 'Seasons' }) as HTMLButtonElement
+  }
+
+  it('dims the Seasons tab when the source has no season posters', async () => {
+    mockedTmdbImages.mockResolvedValue({ ...tvdbPoster, season_posters: [] })
+    const tab = await open(333001)
+    expect(tab.disabled).toBe(true)
+    expect(tab.getAttribute('title')).toBe('No season posters on TMDB')
+  })
+
+  it('keeps the tab live and dims only the chips without posters', async () => {
+    mockedTmdbImages.mockResolvedValue({ ...tvdbPoster, season_posters: [2] })
+    const tab = await open(333002)
+    expect(tab.disabled).toBe(false)
+    fireEvent.click(tab)
+    // The auto-load skips straight to the first season that has posters.
+    await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333002, 2, 'en+textless'))
+    const s1 = screen.getByRole('button', { name: 'S01' }) as HTMLButtonElement
+    expect(s1.disabled).toBe(true)
+    expect(s1.getAttribute('title')).toBe('No TMDB posters for this season')
+    await waitFor(() => expect((screen.getByRole('button', { name: 'S02' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('stays clickable when the server cannot say', async () => {
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    const tab = await open(333003)
+    expect(tab.disabled).toBe(false)
+    fireEvent.click(tab)
+    await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333003, 1, 'en+textless'))
+    expect((screen.getByRole('button', { name: 'S02' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('dims the tab once the details say the show has no seasons', async () => {
+    mockedTvDetails.mockResolvedValue({ season_count: 0, seasons: [], series_type: null, season_source: 'tmdb', tmdb_seasons: [], tvdb_seasons: [] })
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    const tab = await open(333004)
+    await waitFor(() => expect(tab.disabled).toBe(true))
   })
 })
