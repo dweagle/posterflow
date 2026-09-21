@@ -281,9 +281,22 @@ def item_year(item: dict) -> Optional[int]:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).year
 
 
-def find_title(items: list[dict], title: str, year: Optional[int], media_type: str) -> Optional[dict]:
+def show_year(item_id: str, storefront: str) -> Optional[int]:
+    """A show's premiere year, from its product page — the search listing carries none. None when
+    the page can't be read or has no date."""
+    try:
+        return item_year(fetch_product_view(item_id, storefront).get("content") or {})
+    except AppleTvError:
+        return None
+
+
+def find_title(items: list[dict], title: str, year: Optional[int], media_type: str,
+               storefront: Optional[str] = None) -> Optional[dict]:
     """The listed item that is our title: same normalized name (a trailing parenthetical on
-    Apple's side is ignored), same kind, and for a dated movie a release year within one."""
+    Apple's side is ignored), same kind, and for a dated title a release year within one. A movie
+    is dated in its listing; a show's premiere date is on its product page, asked per candidate
+    when there's a storefront to ask in — a same-named show may be another one entirely, so with
+    a year to judge by the name alone isn't trusted here (fetch_artwork settles for it last)."""
     want = normalize_title(title)
     kind = _ITEM_TYPE.get(str(media_type or ""))
     if not want or not kind:
@@ -306,6 +319,12 @@ def find_title(items: list[dict], title: str, year: Optional[int], media_type: s
             if dated:
                 return dated[0]
             continue
+        if year and storefront:
+            dated = [it for it in pool
+                     if (y := show_year(str(it.get("id") or ""), storefront)) is None or abs(y - int(year)) <= 1]
+            if dated:
+                return dated[0]
+            continue
         return pool[0]
     return None
 
@@ -318,14 +337,18 @@ class Found:
 
 
 def fetch_artwork(*, media_type: str, title: str, year: Optional[int], plan: StorefrontPlan) -> Optional[Found]:
-    """Search the plan's storefronts in turn; the first that lists the title wins."""
+    """Search the plan's storefronts in turn; the first that lists the title wins. A show is sought
+    by name and premiere year across every store first, then by name alone: Apple's date can be
+    off (Popeye the Sailor is dated by its theatrical shorts), and a lone same-named show is still
+    likelier ours than nothing. Searches and product pages are cached, so the second pass is free."""
     query = clean_query(title)
     if not query or media_type not in _ITEM_TYPE:
         return None
-    for iso, sf in plan.search_order:
-        item = find_title(search(query, sf), title, year, media_type)
-        if item:
-            return Found(item=item, iso=iso, storefront=sf)
+    for want_year in ([year, None] if year and media_type == "tv" else [year]):
+        for iso, sf in plan.search_order:
+            item = find_title(search(query, sf), title, want_year, media_type, sf)
+            if item:
+                return Found(item=item, iso=iso, storefront=sf)
     return None
 
 

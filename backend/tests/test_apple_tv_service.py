@@ -131,6 +131,42 @@ def test_find_title_checks_a_movies_year_within_one():
     assert apple.find_title([undated], "Alien", 1979, "movie") is undated
 
 
+def test_find_title_tells_same_named_shows_apart_by_their_premiere_year(monkeypatch):
+    """Show listings carry no date, so each candidate's product page is asked — given a year and a
+    storefront to ask in. A lone show is checked too: the name-only fallback is fetch_artwork's."""
+    cbc = {**_show("Allegiance"), "id": "umc.cmc.cbc"}
+    nbc = {**_show("Allegiance"), "id": "umc.cmc.nbc"}
+    premieres = {"umc.cmc.cbc": 1707264000000, "umc.cmc.nbc": 1423094400000}   # 2024, 2015
+    asked = []
+
+    def fake_view(item_id, storefront, locale="en-US"):
+        asked.append((item_id, storefront))
+        return {"content": {"releaseDate": premieres[item_id]}}
+
+    monkeypatch.setattr(apple, "fetch_product_view", fake_view)
+    assert apple.find_title([cbc, nbc], "Allegiance", 2015, "tv", "143444") is nbc
+    assert apple.find_title([cbc, nbc], "Allegiance", 2024, "tv", "143444") is cbc
+    assert apple.find_title([cbc, nbc], "Allegiance", 2016, "tv", "143444") is nbc   # within one
+    assert apple.find_title([cbc, nbc], "Allegiance", 1999, "tv", "143444") is None
+    assert asked and all(sf == "143444" for _, sf in asked)
+
+    assert apple.find_title([cbc], "Allegiance", 2015, "tv", "143444") is None
+    # The exact name loses to a parenthesised one when only the latter fits the year.
+    classic = {**_show("Doctor Who (1963–1996)"), "id": "umc.cmc.nbc"}
+    assert apple.find_title([cbc | {"title": "Doctor Who"}, classic], "Doctor Who", 2015, "tv", "143444") is classic
+
+    # No year or no storefront to judge by: the listing is taken as is, no page asked.
+    asked.clear()
+    assert apple.find_title([cbc, nbc], "Allegiance", None, "tv", "143444") is cbc
+    assert apple.find_title([cbc, nbc], "Allegiance", 2015, "tv") is cbc
+    assert asked == []
+
+    # An unreadable page or an undated show is kept, as an undated movie is.
+    monkeypatch.setattr(apple, "fetch_product_view", lambda item_id, storefront, locale="en-US": (
+        (_ for _ in ()).throw(apple.AppleTvError("down")) if item_id == "umc.cmc.cbc" else {"content": {}}))
+    assert apple.find_title([cbc, nbc], "Allegiance", 2015, "tv", "143444") is cbc
+
+
 def test_item_year():
     assert apple.item_year(_movie()) == 1979
     assert apple.item_year({"releaseDate": -631152000000}) == 1950
@@ -336,6 +372,30 @@ def test_fetch_artwork_walks_the_plan_until_a_store_lists_the_title(monkeypatch)
     plan = apple.plan_storefronts([], ["JP"])
     assert apple.fetch_artwork(media_type="tv", title="Deca-Dence", year=2020, plan=plan) is None
     assert apple.fetch_artwork(media_type="collection", title="Alien Collection", year=None, plan=plan) is None
+
+
+def test_fetch_artwork_seeks_a_shows_premiere_year_in_every_store_before_settling_for_the_name(monkeypatch):
+    cbc = {**_show("Allegiance"), "id": "umc.cmc.cbc"}
+    nbc = {**_show("Allegiance"), "id": "umc.cmc.nbc"}
+    monkeypatch.setattr(apple, "fetch_product_view", lambda item_id, storefront, locale="en-US": {
+        "content": {"releaseDate": 1423094400000 if item_id == "umc.cmc.nbc" else 1707264000000}})
+    plan = apple.plan_storefronts(["GB"], ["JP"])   # GB, then the US fallback
+
+    # Both listed in one store: the year decides.
+    monkeypatch.setattr(apple, "search", lambda q, sf: [cbc, nbc])
+    found = apple.fetch_artwork(media_type="tv", title="Allegiance", year=2015, plan=plan)
+    assert found.item is nbc and found.storefront == "143444"
+
+    # The first store has only the other show: the one that fits the year is taken from the next.
+    listings = {"143444": [cbc], "143441": [nbc]}
+    monkeypatch.setattr(apple, "search", lambda q, sf: listings.get(sf, []))
+    found = apple.fetch_artwork(media_type="tv", title="Allegiance", year=2015, plan=plan)
+    assert found.item is nbc and found.storefront == "143441"
+
+    # No store fits the year (Apple's date is off): the first same-named show still wins.
+    found = apple.fetch_artwork(media_type="tv", title="Allegiance", year=1999, plan=plan)
+    assert found.item is cbc and found.storefront == "143444"
+    assert apple.fetch_artwork(media_type="tv", title="Allegiance", year=None, plan=plan).item is cbc
 
 
 def test_fetch_seasons_reads_the_product_page(monkeypatch):
