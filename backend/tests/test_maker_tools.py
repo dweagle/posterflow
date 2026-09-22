@@ -27,6 +27,7 @@ from api.maker_tools import (
     _content_disposition,
     _extract_name,
     _merge_recent_missing_items,
+    _place_poster,
     _translate_year_season,
     MAKER_MONITOR_ENDED_RECHECK_DAYS,
     SETTING_MAKER_MONITOR_STATUS_CACHE,
@@ -1715,6 +1716,19 @@ def test_compute_poster_fit_geometry_cover_fits_to_bottom_bound():
     assert h == 1350 and top == 25
     assert w == 1125 and left == (1000 - 1125) // 2
     assert top + h == 1375   # bottom lands exactly on the guide
+
+
+def test_place_poster_default_fills_canvas_without_cropping():
+    from PIL import Image
+    # 2:3 art fills the canvas edge to edge, as it always has.
+    img, left, top = _place_poster(Image.new("RGB", (200, 300)), 1000, 1500, False)
+    assert (img.size, left, top) == ((1000, 1500), 0, 0)
+    # Tall art (Apple's phone hero) keeps its full height: top-aligned, overhanging the bottom.
+    img, left, top = _place_poster(Image.new("RGB", (1680, 3636)), 1000, 1500, False)
+    assert (img.size, left, top) == ((1000, 2164), 0, 0)
+    # Wide art keeps its full width, centered (left goes negative) — never cut.
+    img, left, top = _place_poster(Image.new("RGB", (1600, 900)), 1000, 1500, False)
+    assert img.size == (2667, 1500) and left == (1000 - 2667) // 2 and top == 0
 
 
 def test_find_bottom_guide_y_reads_bundled_templates():

@@ -2651,12 +2651,10 @@ def _place_poster(pil: Image.Image, canvas_w: int, canvas_h: int, fit_within_bor
         bottom = bottom_y if bottom_y else canvas_h - 25
         new_w, new_h, pos_left, pos_top = compute_poster_fit_geometry(pil.width, pil.height, canvas_w, bottom)
         return pil.resize((new_w, new_h), Image.LANCZOS), pos_left, pos_top
-    # Default behavior: cover-fill to full canvas, then center-crop.
+    # Default: cover-fill the full canvas, top-aligned and centered, never cropping (overhang is kept).
     scale = max(canvas_w / pil.width, canvas_h / pil.height)
-    new_w, new_h = round(pil.width * scale), round(pil.height * scale)
-    pil = pil.resize((new_w, new_h), Image.LANCZOS)
-    crop_left, crop_top = (new_w - canvas_w) // 2, (new_h - canvas_h) // 2
-    return pil.crop((crop_left, crop_top, crop_left + canvas_w, crop_top + canvas_h)), 0, 0
+    new_w, new_h = max(1, round(pil.width * scale)), max(1, round(pil.height * scale))
+    return pil.resize((new_w, new_h), Image.LANCZOS), (canvas_w - new_w) // 2, 0
 
 
 def _place_backdrop(pil: Image.Image, canvas_w: int, canvas_h: int) -> tuple[Image.Image, int]:
@@ -2723,10 +2721,10 @@ def _build_psd(
     Scratch mode (fallback when no template):
       - Creates a blank PSD with poster layers at the bottom and LOGO on top.
 
-    Each poster is cover-filled to the canvas dimensions by default. When
-    fit_within_border=True, posters are resized to the bordered width
-    (canvas width minus 25px on each side), preserving ratio and top-aligning
-    at y=25. The logo is bottom-anchored.
+    Each poster cover-fills the canvas by default (top-aligned, centered, never cropped —
+    non-2:3 art overhangs the canvas). When fit_within_border=True, posters are cover-fit
+    into the bordered box (25px sides, top y=25) down to the bottom guide instead.
+    The logo is bottom-anchored.
     Backdrop images are scaled to fit the canvas height (no crop) and centred horizontally.
     """
     try:

@@ -1007,7 +1007,8 @@ function MakerTools() {
                       <div>
                         <span style={{ fontWeight: 500 }}>Fit Poster Inside Border</span>
                         <InfoTip>
-                          Default export fills the full canvas. Enable this to cover-fit posters into the
+                          Default export fills the full canvas, top-aligned and never cropped (tall or wide
+                          art overhangs the canvas). Enable this to cover-fit posters into the
                           bordered area (25px side borders, top-aligned) down to the template&apos;s bottom
                           guide — the line where the bottom fade begins — scaling up so the art always
                           reaches it (non-2:3 posters may overhang the side borders slightly, centered).
