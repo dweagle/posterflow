@@ -6,6 +6,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-22
+
+### Fixed
+- Sidebar: improved IDarr item spacing and badge alignment.
+- Maker Tools: the gallery's tabs have hover tips on all tabs.
+- Maker Tools: the gallery's Seasons tab now dims when a source has no season images — or doesn't carry the show at all.
+- Maker Tools: Apple TV picks the right show among same-named titles by premiere year.
+- Maker Tools: poster fitting keeps top alignment without cropping.
+
 ## [0.16.0] - 2026-09-18
 ### Added
 - Asset Search: the Poster Search page is now Asset Search, with an artwork mode.
