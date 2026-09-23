@@ -38,6 +38,7 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/api/auth/",
     "/ws",
     "/api/stats/posters/",
+    "/api/stats/artwork/",
     "/api/idarr/pending-matches/source-image",
     "/api/artwork-finder/local-image",
     "/api/posterflow/plex-upload/source-image",

@@ -298,3 +298,23 @@ def test_artwork_local_image_exempt_from_password(client):
         _cache.hash_val = ""
         _cache.salt_val = ""
         _cache.loaded_at = 0.0
+
+
+def test_stats_image_routes_exempt_from_password(client):
+    """The dashboard carousel and Asset Search load poster/artwork thumbnails through <img> tags,
+    which can't send the Bearer header, so both image routes are auth-exempt (the record lookup
+    plus drive-root containment is their guard). With a password enforced they must reach the
+    endpoint — a 404 for an unknown id, never a 401 — while the sibling search endpoints
+    under the same segment stay behind the password."""
+    salt_hex, hash_hex = hash_password("testpass")
+    _cache.hash_val = hash_hex
+    _cache.salt_val = salt_hex
+    _cache.loaded_at = time.monotonic()
+    try:
+        assert client.get("/api/stats/posters/999999/image").status_code == 404
+        assert client.get("/api/stats/artwork/999999/image").status_code == 404
+        assert client.get("/api/stats/artwork-search", params={"q": "x", "type": "logo"}).status_code == 401
+    finally:
+        _cache.hash_val = ""
+        _cache.salt_val = ""
+        _cache.loaded_at = 0.0
