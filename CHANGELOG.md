@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-09-22
+### Fixed
+- Dashboard: artwork thumbnails now load when an app password is set. The artwork image route is exempt from the password like the poster routes already were.
+
 ## [0.16.1] - 2026-09-22
 
 ### Fixed
