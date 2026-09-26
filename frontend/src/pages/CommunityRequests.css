@@ -351,7 +351,7 @@
   background-color: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  padding: 0.35rem 0.75rem;
   flex: 1 1 0%;
   min-width: 0;
   overflow: hidden;
@@ -361,14 +361,19 @@
   border-color: #64b5f6;
 }
 
-.new-creq-search-input {
+/* Scoped under .modal-body to outrank DriveEditModal.css's leaking `.modal-body input`/`select` rules. */
+.community-req-modal .modal-body input.new-creq-search-input {
   flex: 1;
+  width: auto;
   min-width: 0;
+  padding: 0;
   background: transparent;
   border: none;
+  border-radius: 0;
   outline: none;
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.2;
 }
 
 .new-creq-search-input::placeholder {
@@ -381,15 +386,15 @@
   align-items: center;
 }
 
-.new-creq-type-select {
+.community-req-modal .modal-body select.new-creq-type-select {
   flex: 0 0 100px;
   width: 100px;
   background: #2a2a2a;
   border: 1px solid #424242;
   border-radius: 6px;
   color: #fff;
-  font-size: 0.875rem;
-  padding: 0.5rem 0.4rem;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.4rem;
   cursor: pointer;
   align-self: center;
 }
@@ -403,12 +408,12 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.5rem 1rem;
+  padding: 0.35rem 0.85rem;
   background: #5B89C4;
   border: none;
   border-radius: 6px;
   color: #fff;
-  font-size: 0.875rem;
+  font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s;

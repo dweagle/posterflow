@@ -5821,7 +5821,25 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 .request-style-tags {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
+}
+
+/* Poster style + optional preferences share one row, split by a thin rule */
+.request-style-tags-sep {
+  width: 1px;
+  align-self: stretch;
+  background: #3a3a3a;
+  margin: 0 0.25rem;
+}
+
+.request-style-tags-hint {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 .request-style-tag {
@@ -5871,6 +5889,36 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 
 .request-notes-textarea::placeholder {
   color: #555;
+}
+
+/* Request modals grow as results load or the type changes; pin the top edge so the box
+   extends downward instead of re-centering and jumping. */
+.modal-overlay > .community-req-modal {
+  align-self: flex-start;
+  margin-top: 5vh;
+  max-height: calc(95vh - 2rem);
+  scrollbar-gutter: stable;
+}
+
+/* Keep the scrollbar's width reserved so content doesn't reflow when it appears. */
+.community-req-modal .modal-body {
+  scrollbar-gutter: stable;
+}
+
+/* Request modals: fields sized to the style-tag chips. Scoped under .modal-body to outrank
+   DriveEditModal.css's leaking `.modal-body input` padding/radius. */
+.community-req-modal .modal-body .request-notes-textarea {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.community-req-modal .modal-body input.request-single-input {
+  resize: none;
+  height: auto;
+  line-height: 1.2;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
 }
 
 .request-discord-input {

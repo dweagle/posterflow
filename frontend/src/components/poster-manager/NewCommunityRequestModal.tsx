@@ -339,8 +339,7 @@ export default function NewCommunityRequestModal({
                   </label>
                   <input
                     type="text"
-                    className="request-notes-textarea"
-                    style={{ resize: 'none', height: 'auto', padding: '0.5rem 0.75rem' }}
+                    className="request-notes-textarea request-single-input"
                     placeholder="Title of the movie, show, or collection"
                     value={customTitle}
                     onChange={(e) => setCustomTitle(e.target.value)}
@@ -353,8 +352,7 @@ export default function NewCommunityRequestModal({
                   </label>
                   <input
                     type="text"
-                    className="request-notes-textarea"
-                    style={{ resize: 'none', height: 'auto', padding: '0.5rem 0.75rem' }}
+                    className="request-notes-textarea request-single-input"
                     placeholder="e.g. 2024"
                     value={customYear}
                     onChange={(e) => setCustomYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -418,20 +416,8 @@ export default function NewCommunityRequestModal({
                 {s.label}
               </button>
             ))}
-          </div>
-
-          {alreadyMade && (
-            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
-              <AlertCircle size={14} />
-              <span>{alreadyMade}</span>
-            </div>
-          )}
-
-          {/* Extra style preferences — optional */}
-          <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
-            Style preferences <span className="request-optional">(optional)</span>
-          </div>
-          <div className="request-style-tags">
+            <span className="request-style-tags-sep" aria-hidden="true" />
+            <span className="request-style-tags-hint">Preferences <span className="request-optional">(optional)</span></span>
             {EXTRA_TAGS.map((tag) => (
               <button
                 key={tag}
@@ -443,6 +429,13 @@ export default function NewCommunityRequestModal({
               </button>
             ))}
           </div>
+
+          {alreadyMade && (
+            <div className="tmdb-candidates-warning" role="alert" style={{ marginTop: '0.5rem' }}>
+              <AlertCircle size={14} />
+              <span>{alreadyMade}</span>
+            </div>
+          )}
 
           {/* Discord identity */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>
@@ -477,8 +470,7 @@ export default function NewCommunityRequestModal({
           </div>
           <input
             type="text"
-            className="request-notes-textarea"
-            style={{ resize: 'none', height: 'auto', padding: '0.5rem 0.75rem' }}
+            className="request-notes-textarea request-single-input"
             placeholder="Discord username (e.g. dweagle79)"
             value={pingDiscordId}
             onChange={(e) => setPingDiscordId(e.target.value.slice(0, 32))}
