@@ -147,7 +147,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '1.2.1';   // keep in step with photoshop-posterflow/manifest.json (its smoke test checks)
+  const PANEL_VERSION = '1.2.2';   // keep in step with photoshop-posterflow/manifest.json (its smoke test checks)
   const PP      = window.parent;                 // top-level Photopea hosts this panel
   const singles = document.querySelector('.singles');
   const sequels = document.querySelector('.sequels');
@@ -255,11 +255,16 @@
 
   const fetchLayers = () => send(FETCH);
 
+  // Each change carries the layer name the list expects at that path: a mismatch means the doc
+  // changed under the panel, so nothing is applied and the list is re-read instead.
+  const nameAt = (p) => { const k = key(p); const n = allNodes().find((x) => key(x.p) === k); return n ? n.n : null; };
   const setVis = (changes) => send(
-    `try{var dd=app.activeDocument;var ch=${JSON.stringify(changes)};` +
-    `for(var j=0;j<ch.length;j++){var c=dd,L=null,p=ch[j].p;` +
-    `for(var i=0;i<p.length;i++){L=c.layers[p[i]];c=L;}L.visible=ch[j].v;}` +
-    `app.echoToOE('PFLVIS:ok');}catch(e){app.echoToOE('PFLERR:'+e);}`
+    `try{var dd=app.activeDocument;var ch=${JSON.stringify(changes.map((c) => ({ p: c.p, v: c.v, n: nameAt(c.p) })))};var Ls=[],stale=false;` +
+    `for(var j=0;j<ch.length&&!stale;j++){var c=dd,L=null,p=ch[j].p;` +
+    `for(var i=0;i<p.length;i++){L=(c&&c.layers)?c.layers[p[i]]:null;c=L;}` +
+    `if(!L||(ch[j].n!=null&&L.name!==ch[j].n))stale=true;else Ls.push(L);}` +
+    `if(stale){app.echoToOE('PFLSTALE:');}else{for(var j=0;j<ch.length;j++){Ls[j].visible=ch[j].v;}app.echoToOE('PFLVIS:ok');}` +
+    `}catch(e){app.echoToOE('PFLERR:'+e);}`
   );
 
   // ---- helpers -------------------------------------------------------------
@@ -1634,6 +1639,8 @@
     }
     else if (d.startsWith('PFLCLEAN:')) { /* collection logo restored — ack only */ }
     else if (d.startsWith('PFLACT:'))   { const sig = d.slice(7); if (sig !== lastActiveSig && !saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) { lastActiveSig = sig; fetchLayers(); } }
+    else if (d.startsWith('PFLOPENED:')) { pollBurst(1000, 3000); }   // the opener added a doc (same-tab mode): heal its name + re-read once it has loaded
+    else if (d.startsWith('PFLSTALE:')) { fetchLayers(); note('The document changed under the panel — list refreshed, click again.'); }
     else if (d.startsWith('PFL:'))      { try { model = JSON.parse(d.slice(4)); model.sequels = model.sequels || []; const ORD = { SP: 0, C: 1, CLS: 2 }; model.singles.sort((a, b) => ORD[a.lab] - ORD[b.lab]); model.sequels.sort((a, b) => (parseInt(seqLabel(a.n), 10) || 0) - (parseInt(seqLabel(b.n), 10) || 0)); render(); } catch (_) {} }
     else if (d.startsWith('PFLGEO:'))   { onGeo(d.slice(7)); }
     else if (d.startsWith('PFLRSZ:'))   { const p = d.slice(7).split(','); placeTranslate(parseFloat(p[0]), parseFloat(p[1])); }
@@ -1742,6 +1749,9 @@
   // export of the SAME title (same filename; style rides in ?style=, and the self-heal below even
   // normalizes both to that same name) — so the badge stayed stale until the plugin was reopened.
   // Paused while a save/JPG/place op is mid-flight.
+  // Polls only on a click in the panel (plus once when its tab comes to the front): any script
+  // Photopea runs commits an in-progress text edit, and the pointer crosses this panel on the way
+  // from Layers to the canvas, so hovering can't trigger it either.
   // It also SELF-HEALS tab titles: Photopea names a URL-opened doc from the %-encoded, truncated
   // URL basename (e.g. "Mr. and Mrs. (1996) …" → "Mr."), so decode the real filename from each doc's
   // Document.source and set it back — EVERY open doc, not just the active one, so background tabs
@@ -1756,7 +1766,11 @@
     + 'var stt=hg(ad.layers,/^\\s*logos?\\s*$/i)?"CL2K":(hg(ad.layers,/^\\s*sequels?\\s*$/i)?"MM2K":"");'
     + 'sig=ad.name+"\\u0001"+(""+(ad.source||""))+"\\u0001"+stt;}'
     + 'app.echoToOE("PFLACT:"+sig);}catch(e){}';
-  setInterval(() => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) send(POLL); }, 1200);
+  const poll = () => { if (!saving && !jpgBusy && !placeBusy && !batchBusy && !logoExpBusy && !posterExpBusy && !squareArtBusy) send(POLL); };
+  const pollBurst = (...delays) => delays.forEach((ms) => setTimeout(poll, ms));
+  document.documentElement.addEventListener('pointerdown', poll, true);   // lands before the click's own script, so a switched doc is noticed first
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') poll(); });
+  pollBurst(1500, 3500);   // fresh launch: the doc loads during boot and Photopea can clobber the launch script's rename
 
   styleName.title = 'PosterFlow panel v' + PANEL_VERSION;
   note('PosterFlow panel v' + PANEL_VERSION + '.');

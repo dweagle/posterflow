@@ -844,7 +844,7 @@ export const openPhotopeaWithPsd = (
     // Saves route off Photopea's own Document.source (the URL, holding the full filename + style), so
     // we don't set source. The name set here is BEST-EFFORT — app.open fetches async, so the doc often
     // isn't loaded yet, and Photopea re-derives the name from the %-encoded URL basename as it loads.
-    // The plugin's ~1.2s watcher re-asserts the real name from Document.source; that's the reliable fix.
+    // The plugin's watcher re-asserts the real name from Document.source when it hears PFLOPENED; that's the reliable fix.
     const openScript = `try{`
       + `var nm=${JSON.stringify(docName)};`
       + `var d=app.open(${JSON.stringify(psdUrl)},null,false);`
@@ -869,12 +869,13 @@ export const openPhotopeaWithPsd = (
   // Photopea fetches the PSD itself (files:[url]) and opens it during startup — it loads as the
   // editor boots. Photopea names the doc from the URL basename (trimmed + now %-encoded since the path
   // is quoted), so the launch `script` renames it to the full filename. That set is BEST-EFFORT
-  // (Photopea can re-derive/clobber the name post-load); the plugin's ~1.2s watcher re-asserts the real
-  // name from Document.source, which is what reliably fixes the tab (Photopea-side timers can't loop a
-  // rename past the clobber). Save routing rides on Photopea's own Document.source (the URL), so we
-  // don't set source here. Requires the user to ALLOW Photopea's "local network access" prompt + CORS
-  // on the PSD GET (we send it). On a password-protected instance psd_url carries a signed, file-scoped
-  // ?token= the GET validates, since Photopea can't send the app Bearer header.
+  // (Photopea can re-derive/clobber the name post-load); the plugin's watcher re-asserts the real
+  // name from Document.source in a short burst after launch, which is what reliably fixes the tab
+  // (Photopea-side timers can't loop a rename past the clobber). Save routing rides on Photopea's
+  // own Document.source (the URL), so we don't set source here. Requires the user to ALLOW Photopea's
+  // "local network access" prompt + CORS on the PSD GET (we send it). On a password-protected instance
+  // psd_url carries a signed, file-scoped ?token= the GET validates, since Photopea can't send the app
+  // Bearer header.
   const config = {
     files: [psdUrl],
     script: `try{var d=app.activeDocument;if(d&&d.name!==${JSON.stringify(docName)})d.name=${JSON.stringify(docName)};}catch(e){}`,
