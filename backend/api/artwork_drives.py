@@ -18,6 +18,7 @@ from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
 from services.artwork_drive_loader import get_artwork_drive_descriptions, load_artwork_drives_data
+from services.new_drives import forget_new_drives, record_new_drives
 from services.artwork_sync import ArtworkSyncService
 from modules.artwork_sync import run_artwork_sync_job
 from modules.sync import run_sync_all_job
@@ -329,6 +330,7 @@ def subscribe_artwork_drive(
         raise HTTPException(status_code=404, detail="Artwork drive not found")
 
     drive.subscribed = True
+    forget_new_drives(db, "artwork", [drive.drive_id])
     # No explicit selection (bulk subscribe) keeps what the drive already had, so a re-subscribe
     # doesn't quietly re-download types the user turned off earlier.
     requested_types = request.synced_types if request else None
@@ -668,6 +670,10 @@ def load_artwork_drives_from_json(db: Session, drives_data: Optional[Dict[str, A
     updated_count = 0
     reactivated_count = 0
 
+    # Only flag "new" drives once the list has been seeded; a fresh install's first load is not news.
+    had_presets = db.query(ArtworkDrive.id).filter(ArtworkDrive.is_custom == False).first() is not None
+    newly_listed: List[tuple[str, str]] = []
+
     for drive_data in drives_data.get("drives", []):
         drive_id = drive_data["drive_id"]
         preset_drive_ids.add(drive_id)
@@ -683,6 +689,7 @@ def load_artwork_drives_from_json(db: Session, drives_data: Optional[Dict[str, A
                 is_deprecated=False,
             ))
             added_count += 1
+            newly_listed.append((drive_id, drive_data.get("display_name") or drive_data["name"]))
         else:
             changed = False
             new_display_name = drive_data.get("display_name")
@@ -694,6 +701,7 @@ def load_artwork_drives_from_json(db: Session, drives_data: Optional[Dict[str, A
                 existing.is_deprecated = False
                 reactivated_count += 1
                 changed = True
+                newly_listed.append((drive_id, existing.display_name or existing.name))
             if changed:
                 updated_count += 1
 
@@ -702,11 +710,19 @@ def load_artwork_drives_from_json(db: Session, drives_data: Optional[Dict[str, A
         ArtworkDrive.is_custom == False,
         ArtworkDrive.is_deprecated == False,
     ).all()
+    obsolete_ids: List[str] = []
     for drive in all_preset_drives:
         if drive.drive_id not in preset_drive_ids:
             log_warning(LogTags.DRIVES, f"Marking preset artwork drive as deprecated: {drive.name}")
             drive.is_deprecated = True
             deprecated_count += 1
+            obsolete_ids.append(drive.drive_id)
+
+    if had_presets and newly_listed:
+        record_new_drives(db, "artwork", [drive_id for drive_id, _ in newly_listed])
+        log_info(LogTags.DRIVES, f"Flagged {len(newly_listed)} new artwork drive(s) for the sidebar: {', '.join(name for _, name in newly_listed)}")
+    if obsolete_ids:
+        forget_new_drives(db, "artwork", obsolete_ids)
 
     db.commit()
 

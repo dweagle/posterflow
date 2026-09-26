@@ -7,7 +7,7 @@ import GDrives from '../../src/pages/GDrives'
 
 const renderWithRouter = (ui: ReactElement) =>
   render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       {ui}
     </MemoryRouter>,
   )
@@ -16,13 +16,38 @@ const mockShowToast = vi.fn()
 const mockGetDrives = vi.fn()
 const mockSubscribeDrive = vi.fn()
 const mockUnsubscribeDrive = vi.fn()
+const mockMarkNewDrivesSeen = vi.fn()
+const mockDismissNewDrives = vi.fn()
+const mockRefreshNewDrives = vi.fn()
+
+type NewDriveEntry = {
+  id: number
+  drive_id: string
+  name: string
+  display_name: string | null
+  style_type: string | null
+  added_at: string
+  seen: boolean
+}
+const EMPTY_NEW_DRIVES = { poster: [] as NewDriveEntry[], artwork: [] as NewDriveEntry[], unseen_count: 0 }
+let mockNewDrives = EMPTY_NEW_DRIVES
+const buildNewDrive = (overrides?: Partial<NewDriveEntry>): NewDriveEntry => ({
+  id: 7,
+  drive_id: 'new-drive',
+  name: 'Fresh Drive',
+  display_name: null,
+  style_type: 'MM2K',
+  added_at: '2026-09-25T00:00:00+00:00',
+  seen: false,
+  ...overrides,
+})
 
 vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
 vi.mock('../../src/contexts/AppEventsContext', () => ({
-  useAppEvents: () => ({ jobs: [] }),
+  useAppEvents: () => ({ jobs: [], newDrives: mockNewDrives, refreshNewDrives: mockRefreshNewDrives }),
 }))
 
 vi.mock('../../src/api/client', () => ({
@@ -35,6 +60,8 @@ vi.mock('../../src/api/client', () => ({
   createCustomDrive: vi.fn(),
   deleteDrive: vi.fn(),
   reloadDrives: vi.fn(),
+  markNewDrivesSeen: (...args: unknown[]) => mockMarkNewDrivesSeen(...args),
+  dismissNewDrives: (...args: unknown[]) => mockDismissNewDrives(...args),
   getApiErrorMessage: vi.fn(() => 'error'),
 }))
 
@@ -101,6 +128,58 @@ describe('GDrives', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    mockNewDrives = EMPTY_NEW_DRIVES
+  })
+
+  it('shows no new-drive notice when nothing is new', async () => {
+    mockGetDrives.mockResolvedValue([buildDrive({ name: 'Old Drive', drive_id: 'old-drive' })])
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Old Drive')
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(document.getElementById('drive-card-poster-old-drive')?.classList.contains('is-new')).toBe(false)
+    expect(mockMarkNewDrivesSeen).not.toHaveBeenCalled()
+  })
+
+  it('tags new community drives, lists them in the notice, and marks them seen on open', async () => {
+    mockNewDrives = { poster: [buildNewDrive()], artwork: [], unseen_count: 1 }
+    mockGetDrives.mockResolvedValue([
+      buildDrive({ id: 7, name: 'Fresh Drive', drive_id: 'new-drive', style_type: 'MM2K' }),
+      buildDrive({ id: 8, name: 'Old Drive', drive_id: 'old-drive' }),
+    ])
+    mockMarkNewDrivesSeen.mockResolvedValue(undefined)
+    mockRefreshNewDrives.mockResolvedValue(undefined)
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Old Drive')
+    expect(screen.getByText('New community drive:')).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Fresh Drive/ })).not.toBeNull()
+    expect(document.getElementById('drive-card-poster-new-drive')?.classList.contains('is-new')).toBe(true)
+    expect(document.getElementById('drive-card-poster-old-drive')?.classList.contains('is-new')).toBe(false)
+    // Opening the page acknowledges the sidebar badge; the tags themselves stay.
+    await waitFor(() => expect(mockMarkNewDrivesSeen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockRefreshNewDrives).toHaveBeenCalled())
+  })
+
+  it('Dismiss clears the new-drive flags without re-marking seen ones', async () => {
+    const user = userEvent.setup()
+    mockNewDrives = { poster: [buildNewDrive({ seen: true })], artwork: [buildNewDrive({ id: 9, drive_id: 'art-drive', name: 'Art Drive', style_type: null, seen: true })], unseen_count: 0 }
+    mockGetDrives.mockResolvedValue([buildDrive({ id: 8, name: 'Old Drive', drive_id: 'old-drive' })])
+    mockDismissNewDrives.mockResolvedValue(undefined)
+    mockRefreshNewDrives.mockResolvedValue(undefined)
+
+    renderWithRouter(<GDrives />)
+
+    await screen.findByText('Old Drive')
+    expect(screen.getByText('2 new community drives:')).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Art Drive/ }).textContent).toContain('Artwork')
+    await user.click(screen.getByRole('button', { name: /Dismiss/ }))
+
+    await waitFor(() => expect(mockDismissNewDrives).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockRefreshNewDrives).toHaveBeenCalled())
+    expect(mockMarkNewDrivesSeen).not.toHaveBeenCalled()
   })
 
   it('loads and renders drives', async () => {

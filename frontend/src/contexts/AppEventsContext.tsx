@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
-import { getUnmatchedStats, getMakerIdarrPendingCount, getMakerMonitorNeededCount, getCommunityRequestCount, getWebSocketUrl, Job, UnmatchedStats } from '../api/client'
+import { getUnmatchedStats, getMakerIdarrPendingCount, getMakerMonitorNeededCount, getCommunityRequestCount, getNewDrives, getWebSocketUrl, EMPTY_NEW_DRIVES, Job, NewDrives, UnmatchedStats } from '../api/client'
 
 interface JobUpdate {
   id: number
@@ -17,8 +17,10 @@ interface AppEventsContextType {
   idarrPendingCount: number
   makerMonitorNeededCount: number
   communityRequestCount: number
+  newDrives: NewDrives
   jobs: Job[]
   refreshStats: () => Promise<void>
+  refreshNewDrives: () => Promise<void>
   refreshIdarrPendingCount: () => Promise<void>
   refreshMakerMonitorNeededCount: () => Promise<void>
   refreshCommunityRequestCount: () => Promise<void>
@@ -32,7 +34,9 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
   const [idarrPendingCount, setIdarrPendingCount] = useState<number>(0)
   const [makerMonitorNeededCount, setMakerMonitorNeededCount] = useState<number>(0)
   const [communityRequestCount, setCommunityRequestCount] = useState<number>(0)
+  const [newDrives, setNewDrives] = useState<NewDrives>(EMPTY_NEW_DRIVES)
   const [jobs, setJobs] = useState<Job[]>([])
+  const hasConnectedRef = useRef<boolean>(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastJobStatusRef = useRef<{ [key: string]: string }>({})
@@ -79,6 +83,14 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const refreshNewDrives = async () => {
+    try {
+      setNewDrives(await getNewDrives())
+    } catch {
+      // silent - sidebar badge is best-effort
+    }
+  }
+
   const connectWebSocket = () => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return
@@ -92,6 +104,13 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
     const wsUrl = getWebSocketUrl()
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
+
+    // Drives join the community list when the backend (re)starts, so a reconnect is the
+    // moment to re-check for new ones.
+    ws.onopen = () => {
+      if (hasConnectedRef.current) void refreshNewDrives()
+      hasConnectedRef.current = true
+    }
 
     ws.onmessage = (event) => {
       try {
@@ -161,6 +180,7 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
     void refreshIdarrPendingCount()
     void refreshMakerMonitorNeededCount()
     void refreshCommunityRequestCount()
+    void refreshNewDrives()
     
     // Poll community request count every 60 seconds so new requests from
     // external users are reflected without a full page reload — but only while
@@ -205,7 +225,7 @@ export function AppEventsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AppEventsContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs, refreshStats, refreshIdarrPendingCount, refreshMakerMonitorNeededCount, refreshCommunityRequestCount }}>
+    <AppEventsContext.Provider value={{ unmatchedStats, unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, newDrives, jobs, refreshStats, refreshIdarrPendingCount, refreshMakerMonitorNeededCount, refreshCommunityRequestCount, refreshNewDrives }}>
       {children}
     </AppEventsContext.Provider>
   )

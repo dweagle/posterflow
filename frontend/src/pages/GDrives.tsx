@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, updateDrive, createCustomDrive, deleteDrive, reloadDrives, Drive, getApiErrorMessage } from '../api/client'
+import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, updateDrive, createCustomDrive, deleteDrive, reloadDrives, markNewDrivesSeen, dismissNewDrives, Drive, NewDriveEntry, getApiErrorMessage } from '../api/client'
 import DriveEditModal from '../components/DriveEditModal'
 import AddCustomDriveModal from '../components/AddCustomDriveModal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GdriveStorageModal from '../components/GdriveStorageModal'
 import ArtworkDrivesPanel from '../components/ArtworkDrivesPanel'
-import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink, Image, Layers, BookOpen } from 'lucide-react'
+import { HardDriveDownload, RefreshCw, Settings as SettingsIcon, Settings2, BookmarkMinus, Trash2, RotateCw, Plus, Info, Copy, Check, ExternalLink, Image, Layers, BookOpen, Sparkles, X } from 'lucide-react'
 import { useToast } from '../components/Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import './GDrives.css'
@@ -56,7 +56,7 @@ function GDrives() {
   const [unsubscribeDeleteFiles, setUnsubscribeDeleteFiles] = useState(false)
   const [showStorageModal, setShowStorageModal] = useState(false)
   const { showToast } = useToast()
-  const { jobs } = useAppEvents()
+  const { jobs, newDrives, refreshNewDrives } = useAppEvents()
   const prevJobStatusRef = useRef<Record<number, string>>({})
   const jobsInitializedRef = useRef(false)
   const [idTooltip, setIdTooltip] = useState<number | null>(null)
@@ -85,6 +85,40 @@ function GDrives() {
   useEffect(() => {
     fetchDrives()
   }, [])
+
+  // Opening this page is the acknowledgement: the sidebar badge clears, the New tags stay.
+  useEffect(() => {
+    if (newDrives.unseen_count === 0) return
+    void markNewDrivesSeen().then(() => refreshNewDrives()).catch(() => {})
+  }, [newDrives.unseen_count])
+
+  const newPosterIds = new Set(newDrives.poster.map(d => d.drive_id))
+  const allNewDrives = [
+    ...newDrives.poster.map(d => ({ ...d, domain: 'poster' as const })),
+    ...newDrives.artwork.map(d => ({ ...d, domain: 'artwork' as const })),
+  ]
+
+  const jumpToDrive = (entry: NewDriveEntry, domain: 'poster' | 'artwork') => {
+    const nextScope = domain === 'artwork' ? 'artwork' : 'posters'
+    if (scope !== nextScope) {
+      setScope(nextScope)
+      localStorage.setItem('posterflow.gdrives.scope', nextScope)
+    }
+    if (domain === 'poster') setFilter('all')
+    // Let the tab/filter switch render before scrolling to the card.
+    window.setTimeout(() => {
+      document.getElementById(`drive-card-${domain}-${entry.drive_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 50)
+  }
+
+  const handleDismissNewDrives = async () => {
+    try {
+      await dismissNewDrives()
+      await refreshNewDrives()
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to dismiss new drive notices'), 'error')
+    }
+  }
 
   // Sync/workflow jobs run in the background and update poster/file counts
   // server-side, so refresh the drive list whenever one finishes.
@@ -161,6 +195,7 @@ function GDrives() {
     await fetchWithLogging(async () => {
       const result = await subscribeDrive(driveId, addToPriority)
       fetchDrives()
+      void refreshNewDrives()
       if (result.restored_to_priority) {
         showToast('Subscribed. This drive was restored to its previous position in Asset Manager → Drive Priority.', 'info')
       } else if (result.added_to_priority) {
@@ -230,6 +265,7 @@ function GDrives() {
       const restoredCount = results.filter(result => result.restored_to_priority).length
       const addedCount = results.filter(result => result.added_to_priority).length
       fetchDrives()
+      void refreshNewDrives()
       showToast(`Subscribed to ${driveIds.length} ${styleType} drives`)
       if (restoredCount > 0) {
         showToast(`${restoredCount} drive(s) restored to their previous spot in Asset Manager → Drive Priority`, 'info')
@@ -416,6 +452,7 @@ function GDrives() {
 
           showToast(message)
           fetchDrives()
+          void refreshNewDrives()
         } else {
           showToast(`Failed to reload drives: ${result.error || 'Unknown error'}`, 'error')
         }
@@ -492,6 +529,37 @@ function GDrives() {
           Artwork
         </button>
       </div>
+
+      {allNewDrives.length > 0 && (
+        <div className="new-drives-notice" role="status">
+          <Sparkles size={14} className="new-drives-notice-icon" />
+          <span className="new-drives-notice-label">
+            {allNewDrives.length === 1 ? 'New community drive:' : `${allNewDrives.length} new community drives:`}
+          </span>
+          <span className="new-drives-notice-list">
+            {allNewDrives.map(entry => (
+              <button
+                key={`${entry.domain}-${entry.drive_id}`}
+                type="button"
+                className="new-drives-notice-drive"
+                onClick={() => jumpToDrive(entry, entry.domain)}
+                title="Show this drive"
+              >
+                {entry.display_name || entry.name}
+                <span className="new-drives-notice-kind">{entry.domain === 'artwork' ? 'Artwork' : entry.style_type}</span>
+              </button>
+            ))}
+          </span>
+          <button
+            type="button"
+            className="new-drives-notice-dismiss"
+            onClick={() => void handleDismissNewDrives()}
+            title="Remove the New tags now (they fade on their own after two weeks)"
+          >
+            <X size={13} /> Dismiss
+          </button>
+        </div>
+      )}
 
       {scope === 'artwork' ? (
         <ArtworkDrivesPanel />
@@ -650,7 +718,8 @@ function GDrives() {
                 </h2>
                 <div className="drives-grid">
                   {typeDrives.map(drive => (
-                    <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+                    <div key={drive.id} id={`drive-card-poster-${drive.drive_id}`} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} ${newPosterIds.has(drive.drive_id) ? 'is-new' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+                      {newPosterIds.has(drive.drive_id) && <span className="drive-new-tag" title="Recently added to the community list">New</span>}
                       {drive.is_deprecated && (
                         <div className="deprecated-overlay">
                           <div className="deprecated-badge">⚠️ DEPRECATED</div>
@@ -798,7 +867,8 @@ function GDrives() {
         // Show ungrouped filtered drives
         <div className="drives-grid">
           {sortedDrives.map(drive => (
-            <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+            <div key={drive.id} id={`drive-card-poster-${drive.drive_id}`} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} ${newPosterIds.has(drive.drive_id) ? 'is-new' : ''} drive-type-${drive.is_custom ? 'custom' : drive.style_type.toLowerCase()}`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+                      {newPosterIds.has(drive.drive_id) && <span className="drive-new-tag" title="Recently added to the community list">New</span>}
               {drive.is_deprecated && (
                 <div className="deprecated-overlay">
                   <div className="deprecated-badge">⚠️ DEPRECATED</div>

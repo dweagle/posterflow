@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from database import get_db
 from models.drive import Drive
+from models.artwork_drive import ArtworkDrive
 from models.job import Job, JOB_STATUS_PENDING
 from models.poster import Poster
 from models.schedule import Schedule
@@ -20,6 +21,9 @@ from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
 from services.drive_loader import get_drive_descriptions
+from services.new_drives import (
+    clear_new_drives, forget_new_drives, load_new_drives, mark_new_drives_seen, record_new_drives,
+)
 from util.drive_priority import restore_drive_position, stash_drive_position
 
 router = APIRouter(prefix="/api/drives", tags=["drives"])
@@ -248,6 +252,57 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
     
     return drive_schemas
 
+def _new_drive_items(db: Session, domain: str, model) -> List[Dict[str, Any]]:
+    """Flagged drives that are still on the community list, oldest flag first."""
+    entries = load_new_drives(db, domain)
+    if not entries:
+        return []
+    rows = db.query(model).filter(model.drive_id.in_(list(entries)), model.is_deprecated == False).all()
+    items = [
+        {
+            "id": row.id,
+            "drive_id": row.drive_id,
+            "name": row.name,
+            "display_name": row.display_name,
+            "style_type": getattr(row, "style_type", None),
+            "added_at": entries[row.drive_id]["added_at"],
+            "seen": entries[row.drive_id]["seen"],
+        }
+        for row in rows
+    ]
+    items.sort(key=lambda item: (item["added_at"], item["name"]))
+    return items
+
+
+@router.get("/new")
+def list_new_drives(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Preset poster + artwork drives that recently joined the community lists.
+    Feeds the sidebar badge (unseen_count) and the New tags on the GDrives page."""
+    poster = _new_drive_items(db, "poster", Drive)
+    artwork = _new_drive_items(db, "artwork", ArtworkDrive)
+    unseen_count = sum(1 for item in poster + artwork if not item["seen"])
+    return {"poster": poster, "artwork": artwork, "unseen_count": unseen_count}
+
+
+@router.post("/new/seen")
+def mark_new_drives_seen_route(db: Session = Depends(get_db)) -> Dict[str, bool]:
+    """The user opened the GDrives page: clear the sidebar badge, keep the New tags."""
+    for domain in ("poster", "artwork"):
+        mark_new_drives_seen(db, domain)
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/new/dismiss")
+def dismiss_new_drives(db: Session = Depends(get_db)) -> Dict[str, bool]:
+    """Drop every new-drive flag (badge and tags) at the user's request."""
+    for domain in ("poster", "artwork"):
+        clear_new_drives(db, domain)
+    db.commit()
+    log_user_action("Dismissed new community drive notices")
+    return {"success": True}
+
+
 @router.post("/{drive_id}/subscribe")
 def subscribe_drive(drive_id: int, add_to_priority: bool = False, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Subscribe to a drive for syncing"""
@@ -256,6 +311,7 @@ def subscribe_drive(drive_id: int, add_to_priority: bool = False, db: Session = 
         raise HTTPException(status_code=404, detail="Drive not found")
 
     drive.subscribed = True
+    forget_new_drives(db, "poster", [drive.drive_id])
     with _PRIORITY_LOCK:
         restored_to_priority = _restore_drive_to_priority(db, drive.id)
         added_to_priority = False
@@ -628,7 +684,11 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
     
     total_drives_in_source = len(drives_data.get("drives", []))
     log_info(LogTags.DRIVES, f"Processing {total_drives_in_source} drives from source")
-    
+
+    # Only flag "new" drives once the list has been seeded; a fresh install's first load is not news.
+    had_presets = db.query(Drive.id).filter(Drive.is_custom == False).first() is not None
+    newly_listed: List[tuple[str, str]] = []
+
     for drive_data in drives_data.get("drives", []):
         drive_id = drive_data["drive_id"]
         preset_drive_ids.add(drive_id)
@@ -648,6 +708,7 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
             )
             db.add(drive)
             added_count += 1
+            newly_listed.append((drive_id, drive_data.get("display_name") or drive_data["name"]))
         else:
             # Update existing drive
             changed = False
@@ -666,6 +727,7 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
                 log_info(LogTags.DRIVES, f"Reactivating previously deprecated drive: {existing.name}")
                 reactivated_count += 1
                 changed = True
+                newly_listed.append((drive_id, existing.display_name or existing.name))
             
             if changed:
                 updated_count += 1
@@ -688,7 +750,13 @@ def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = N
         log_warning(LogTags.DRIVES, f"Marking preset drive as deprecated: {drive.name} ({drive.drive_id})")
         drive.is_deprecated = True
         deprecated_count += 1
-    
+
+    if had_presets and newly_listed:
+        record_new_drives(db, "poster", [drive_id for drive_id, _ in newly_listed])
+        log_info(LogTags.DRIVES, f"Flagged {len(newly_listed)} new poster drive(s) for the sidebar: {', '.join(name for _, name in newly_listed)}")
+    if obsolete_drives:
+        forget_new_drives(db, "poster", [d.drive_id for d in obsolete_drives])
+
     db.commit()
     
     log_info(LogTags.DRIVES, f"Sync complete: {added_count} added, {updated_count} updated, {deprecated_count} deprecated, {reactivated_count} reactivated")

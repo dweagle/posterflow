@@ -60,7 +60,8 @@ function ArtworkDrivesPanel() {
   const [bulkPriorityPrompt, setBulkPriorityPrompt] = useState<{ show: boolean; driveIds: number[] }>({ show: false, driveIds: [] })
   const [typeRemoval, setTypeRemoval] = useState<{ driveId: number; driveName: string; updates: DriveUpdates; removed: ArtworkType[]; fileCount: number } | null>(null)
   const { showToast } = useToast()
-  const { jobs } = useAppEvents()
+  const { jobs, newDrives, refreshNewDrives } = useAppEvents()
+  const newArtworkIds = new Set(newDrives.artwork.map(d => d.drive_id))
   const navigate = useNavigate()
   const prevJobStatusRef = useRef<Record<number, string>>({})
   const jobsInitializedRef = useRef(false)
@@ -140,6 +141,7 @@ function ArtworkDrivesPanel() {
     try {
       const result = await subscribeArtworkDrive(driveId, addToPriority, types)
       fetchDrives()
+      void refreshNewDrives()
       if (result?.restored_to_priority) {
         showToast('Subscribed. This drive was restored to its previous position in Asset Manager → Drive Priority (Artwork).', 'info')
       } else {
@@ -199,6 +201,7 @@ function ArtworkDrivesPanel() {
       const restoredCount = results.filter(r => r?.restored_to_priority).length
       const addedCount = results.filter(r => r?.added_to_priority).length
       fetchDrives()
+      void refreshNewDrives()
       showToast(`Subscribed to ${driveIds.length} artwork drive(s)`)
       if (restoredCount > 0) {
         showToast(`${restoredCount} drive(s) restored to their previous spot in Asset Manager → Drive Priority (Artwork)`, 'info')
@@ -377,6 +380,7 @@ function ArtworkDrivesPanel() {
         if (result.reactivated) changes.push(`${result.reactivated} reactivated`)
         showToast(changes.length > 0 ? `Artwork drives reloaded! ${changes.join(', ')}` : 'Artwork drives reloaded - no changes detected')
         fetchDrives()
+        void refreshNewDrives()
       } else {
         showToast(`Failed to reload: ${result.error || 'Unknown error'}`, 'error')
       }
@@ -416,7 +420,8 @@ function ArtworkDrivesPanel() {
   const subscribedCount = drives.filter(d => d.subscribed).length
 
   const renderDriveCard = (drive: ArtworkDrive) => (
-    <div key={drive.id} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} drive-type-artwork`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+    <div key={drive.id} id={`drive-card-artwork-${drive.drive_id}`} className={`drive-card ${drive.subscribed ? 'subscribed' : ''} ${drive.is_deprecated ? 'deprecated' : ''} ${newArtworkIds.has(drive.drive_id) ? 'is-new' : ''} drive-type-artwork`} style={idTooltip === drive.id ? { zIndex: 50 } : undefined}>
+      {newArtworkIds.has(drive.drive_id) && <span className="drive-new-tag" title="Recently added to the community list">New</span>}
       {drive.is_deprecated && (
         <div className="deprecated-overlay">
           <div className="deprecated-badge">⚠️ DEPRECATED</div>

@@ -26,7 +26,7 @@ type NavItemDef = {
   label: string
   to: string
   iconColor: string
-  badge?: 'unmatched' | 'idarr' | 'community' | 'maker-monitor'
+  badge?: 'unmatched' | 'idarr' | 'community' | 'maker-monitor' | 'drives'
   isIdarr?: boolean
   isEnd?: boolean
 }
@@ -40,7 +40,7 @@ type SidebarItemConfig = {
 const NAV_ITEM_DEFS: NavItemDef[] = [
   { id: 'dashboard', label: 'Dashboard', to: '/', iconColor: '#ff8800', isEnd: true },
   { id: 'poster-manager', label: 'Asset Manager', to: '/poster-manager', iconColor: '#a855f7', badge: 'unmatched' },
-  { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4' },
+  { id: 'drives', label: 'GDrives', to: '/drives', iconColor: '#4285F4', badge: 'drives' },
   { id: 'poster-search', label: 'Asset Search', to: '/asset-search', iconColor: '#64b5f6' },
   { id: 'plex-upload', label: 'Asset Upload', to: '/plex-upload', iconColor: '#e5a00d' },
   { id: 'community-requests', label: 'Requests', to: '/community-requests', iconColor: '#64b5f6', badge: 'community' },
@@ -72,7 +72,7 @@ function getNavIcon(id: string, color: string, size = 20) {
 
 function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
   const location = useLocation()
-  const { unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, jobs } = useAppEvents()
+  const { unmatchedCount, idarrPendingCount, makerMonitorNeededCount, communityRequestCount, newDrives, jobs } = useAppEvents()
   const { isConnected, isMaker, discordUserId } = useDiscordAuth()
   const { showToast } = useToast()
   // Requester's own active-request counts (pending + in progress) for the sidebar badges.
@@ -478,6 +478,15 @@ function Sidebar({ isOpen = false }: { isOpen?: boolean }) {
                 const itemBadges: ReactNode[] = []
                 if (def.badge === 'unmatched' && unmatchedCount > 0) {
                   itemBadges.push(<span key="unmatched" className="sidebar-badge">{unmatchedCount}</span>)
+                }
+                if (def.badge === 'drives' && newDrives.unseen_count > 0) {
+                  // Unseen community drives; opening the GDrives page clears this.
+                  const names = [...newDrives.poster, ...newDrives.artwork].filter(d => !d.seen).map(d => d.display_name || d.name)
+                  itemBadges.push(
+                    <span key="new-drives" className="sidebar-new-badge" title={`New community drive${names.length > 1 ? 's' : ''}: ${names.join(', ')}`}>
+                      {newDrives.unseen_count > 1 ? `${newDrives.unseen_count} new` : 'New'}
+                    </span>
+                  )
                 }
                 if (def.badge === 'maker-monitor' && makerMonitorNeededCount > 0) {
                   itemBadges.push(<span key="maker-monitor" className="sidebar-badge" title="Monitored items needing posters">{makerMonitorNeededCount}</span>)

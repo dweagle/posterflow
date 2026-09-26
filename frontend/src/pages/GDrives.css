@@ -762,3 +762,104 @@
   border-radius: 3px;
   font-size: 0.85em;
 }
+
+/* ── New community drives ─────────────────────────────────── */
+
+/* Strip under the Posters | Artwork tabs listing drives that recently joined the community
+   list. Names jump to the card; Dismiss clears the tags early (they expire on their own). */
+.new-drives-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin: -0.5rem 0 1.25rem;
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(76, 175, 80, 0.08);
+  border: 1px solid rgba(76, 175, 80, 0.35);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+.new-drives-notice-icon {
+  color: #81c784;
+  flex-shrink: 0;
+}
+
+.new-drives-notice-label {
+  color: #e5e7eb;
+  font-weight: 600;
+}
+
+.new-drives-notice-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.new-drives-notice-drive {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  background-color: #252525;
+  border: 1px solid #424242;
+  border-radius: 999px;
+  color: #e8f3ff;
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.new-drives-notice-drive:hover {
+  border-color: #81c784;
+  background-color: #2a2a2a;
+}
+
+.new-drives-notice-kind {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aa0a6;
+}
+
+.new-drives-notice-dismiss {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  background: none;
+  border: 1px solid #424242;
+  border-radius: 5px;
+  color: #aaa;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.new-drives-notice-dismiss:hover {
+  color: #fff;
+  border-color: #666;
+}
+
+/* Tag riding the top border of a card whose drive recently joined the list. */
+.drive-card.is-new {
+  border-color: rgba(76, 175, 80, 0.6);
+}
+
+.drive-new-tag {
+  position: absolute;
+  top: -0.6rem;
+  left: 0.6rem;
+  padding: 0.05rem 0.45rem;
+  background-color: #1e1e1e;
+  border: 1px solid rgba(76, 175, 80, 0.6);
+  border-radius: 999px;
+  color: #81c784;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  z-index: 2;
+}

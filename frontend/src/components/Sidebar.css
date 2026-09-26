@@ -322,6 +322,22 @@
   border-color: rgba(38, 198, 218, 0.4);
 }
 
+/* "New" pill on the GDrives item while unseen community drives are waiting. */
+.sidebar-new-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background-color: rgba(76, 175, 80, 0.16);
+  color: #81c784;
+  border: 1px solid rgba(76, 175, 80, 0.45);
+  white-space: nowrap;
+}
+
 /* ── Sidebar Customize Mode ─────────────────────────────────── */
 
 .sidebar-customize-header {
@@ -716,6 +732,11 @@
     font-size: 0.58rem;
   }
 
+  .sidebar-new-badge {
+    padding: 0.02rem 0.3rem;
+    font-size: 0.55rem;
+  }
+
   .sidebar-job-mini {
     display: none;
   }
@@ -792,6 +813,11 @@
   .sidebar-req-badge {
     padding: 0.1rem 0.4rem !important;
     min-width: 1.4rem;
+    font-size: 0.65rem;
+  }
+
+  .sidebar-new-badge {
+    padding: 0.1rem 0.45rem;
     font-size: 0.65rem;
   }
 

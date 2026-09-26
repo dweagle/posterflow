@@ -73,3 +73,35 @@ export const reloadDrives = async (): Promise<{
 }> => {
   return postData('/api/drives/reload')
 }
+
+// Preset drives that recently joined the community list (poster + artwork). The sidebar
+// badge counts the unseen ones; the GDrives page tags all of them until they expire.
+export interface NewDriveEntry {
+  id: number
+  drive_id: string
+  name: string
+  display_name: string | null
+  style_type: DriveStyleType | null
+  added_at: string
+  seen: boolean
+}
+
+export interface NewDrives {
+  poster: NewDriveEntry[]
+  artwork: NewDriveEntry[]
+  unseen_count: number
+}
+
+export const EMPTY_NEW_DRIVES: NewDrives = { poster: [], artwork: [], unseen_count: 0 }
+
+export const getNewDrives = async (): Promise<NewDrives> => {
+  return getData('/api/drives/new')
+}
+
+export const markNewDrivesSeen = async (): Promise<void> => {
+  await postData('/api/drives/new/seen')
+}
+
+export const dismissNewDrives = async (): Promise<void> => {
+  await postData('/api/drives/new/dismiss')
+}
