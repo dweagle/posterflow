@@ -8,6 +8,7 @@ import { useAppEvents } from '../contexts/AppEventsContext'
 import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
 import { hasCollectionMoviesNote, hasRequestFlag, ORIGINAL_LANGUAGE_NOTE } from '../components/community/posterStyles'
+import CollectionMoviesPanel from '../components/community/CollectionMoviesPanel'
 import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
 import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
@@ -835,6 +836,15 @@ export default function CommunityRequests() {
                 posterAvailability={posterAvailability[posterCheckKey(req) ?? '']}
                 posterAvailabilityChecked={posterAvailabilityChecked}
                 collapseSignal={collapseSignals.get(req.id) ?? 0}
+                below={showMakerTools && req.tmdb_id != null && req.tmdb_id > 0 && hasCollectionMoviesNote(req.media_type, req.notes) ? (
+                  <CollectionMoviesPanel
+                    tmdbId={req.tmdb_id}
+                    psdConfig={psdConfig}
+                    posterStyle={getStyleLabel(req.style_tags) ?? undefined}
+                    collapseSignal={collapseSignals.get(req.id) ?? 0}
+                    toggleSlotId={`request-card-footer-${req.id}`}
+                  />
+                ) : null}
                 dragOver={dragOverId === req.id}
                 onDragEnter={() => setDragOverId(req.id)}
                 onDragLeave={() => setDragOverId(null)}

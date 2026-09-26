@@ -156,6 +156,10 @@ export const searchTmdb = async (q: string, type: TmdbSearchFilter = 'all', ids?
   return getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/search?${params.toString()}`)
 }
 
+// Movies in a TMDB collection, oldest first — the request card's "Movies in this collection" fold.
+export const getCollectionMovies = async (tmdb_id: number): Promise<TmdbSearchResult[]> =>
+  getData<TmdbSearchResult[]>(`/api/maker-tools/tmdb/collection-movies?tmdb_id=${tmdb_id}`)
+
 export interface TmdbImage {
   file_path: string
   width: number

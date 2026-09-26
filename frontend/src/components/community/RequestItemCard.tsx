@@ -54,6 +54,8 @@ type RequestItemCardProps = {
   status: string
   /** Small badges shown in the title row after the status badge (overlap chips). */
   titleExtras?: ReactNode
+  /** Rendered under the card, after the gallery portal (e.g. the collection movies list). */
+  below?: ReactNode
   /** Optional whole-card accent, e.g. 'available' → green (poster is in a drive). */
   accent?: 'available' | null
   notes?: string | null
@@ -98,6 +100,7 @@ export default function RequestItemCard({
   styleLabel,
   status,
   titleExtras,
+  below,
   accent,
   notes,
   createdAt,
@@ -224,10 +227,14 @@ export default function RequestItemCard({
 
           <div className="request-actions">{actions}</div>
         </div>
+
+        {/* Footer slot: the collection movies toggle portals in here (hidden while empty) */}
+        <div className="request-card-footer" id={`request-card-footer-${id}`} />
       </div>
 
       {/* Gallery panel portals here when Browse Images is open */}
       <div id={`gallery-portal-${id}`} />
+      {below}
     </div>
   )
 }

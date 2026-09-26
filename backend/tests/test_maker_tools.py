@@ -2584,6 +2584,40 @@ def test_tmdb_search_pins_id_match_and_dedupes(client, test_db):
     assert results[1]["auto_matched"] is False
 
 
+def test_tmdb_collection_movies_lists_parts_oldest_first(client, test_db):
+    """A collection's parts come back as movie cards sorted by release date, with external ids."""
+    _seed_tmdb_key(test_db)
+    parts = [
+        {"id": 302, "title": "Alien 3", "release_date": "1992-05-22", "poster_path": "/a3.jpg", "overview": ""},
+        {"id": 301, "title": "Alien", "release_date": "1979-05-25", "poster_path": "/a1.jpg", "overview": ""},
+        {"id": 303, "title": "Alien: Untitled", "release_date": "", "poster_path": "", "overview": ""},
+    ]
+
+    def fake_get(url, params=None, timeout=None):
+        if url.rstrip("/").endswith("/collection/8091"):
+            return _tmdb_resp({"id": 8091, "name": "Alien Collection", "parts": parts})
+        if url.endswith("/external_ids"):
+            return _tmdb_resp({"imdb_id": "tt" + url.split("/")[-2], "tvdb_id": None})
+        return _tmdb_resp({})
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get):
+        response = client.get("/api/maker-tools/tmdb/collection-movies?tmdb_id=8091")
+
+    assert response.status_code == 200
+    results = response.json()
+    assert [r["tmdb_id"] for r in results] == [301, 302, 303]
+    assert all(r["media_type"] == "movie" for r in results)
+    assert results[0]["year"] == "1979"
+    assert results[0]["imdb_id"] == "tt301"
+    assert results[0]["poster_url"].endswith("/a1.jpg")
+    assert results[2]["year"] == ""
+
+
+def test_tmdb_collection_movies_requires_key(client):
+    response = client.get("/api/maker-tools/tmdb/collection-movies?tmdb_id=8091")
+    assert response.status_code == 400
+
+
 # ---------------------------------------------------------------------------
 # _translate_year_season / monitor year-numbered seasons (Shark Week)
 # ---------------------------------------------------------------------------

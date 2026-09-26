@@ -1393,6 +1393,54 @@ def _resolve_tmdb_by_id(filter_type: str, tmdb_id: int | None, tvdb_id: int | No
     return None
 
 
+def _search_result_from_item(item: dict[str, Any], media_type: str) -> TmdbSearchResult | None:
+    """Normalize a raw TMDB search/detail object into a TmdbSearchResult (external ids not filled)."""
+    tmdb_id = int(item.get("id") or 0)
+    if not tmdb_id:
+        return None
+    if media_type == "movie":
+        title = str(item.get("title") or item.get("original_title") or "Unknown")
+        raw_date = str(item.get("release_date") or "")
+        homepage = f"https://www.themoviedb.org/movie/{tmdb_id}"
+    elif media_type == "tv":
+        title = str(item.get("name") or item.get("original_name") or "Unknown")
+        raw_date = str(item.get("first_air_date") or "")
+        homepage = f"https://www.themoviedb.org/tv/{tmdb_id}"
+    else:  # collection
+        title = str(item.get("name") or item.get("original_name") or "Unknown")
+        raw_date = ""
+        homepage = f"https://www.themoviedb.org/collection/{tmdb_id}"
+    poster_path = str(item.get("poster_path") or "")
+    return TmdbSearchResult(
+        tmdb_id=tmdb_id,
+        media_type=media_type,
+        title=title,
+        year=raw_date[:4] if len(raw_date) >= 4 else "",
+        overview=str(item.get("overview") or ""),
+        poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else "",
+        homepage=homepage,
+    )
+
+
+def _enrich_external_ids(results: list[TmdbSearchResult], api_key: str) -> None:
+    """Fill imdb/tvdb ids for movie and tv results in parallel (in place, best-effort)."""
+    targets = [(i, r) for i, r in enumerate(results) if r.media_type in ("movie", "tv")]
+    if not targets:
+        return
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        future_map = {
+            pool.submit(_fetch_external_ids, r.tmdb_id, r.media_type, api_key): i
+            for i, r in targets
+        }
+        for future in as_completed(future_map):
+            idx = future_map[future]
+            try:
+                ext_imdb, ext_tvdb = future.result()
+                results[idx] = results[idx].model_copy(update={"imdb_id": ext_imdb, "tvdb_id": ext_tvdb})
+            except Exception as e:
+                log_debug(LogTags.MODULE, f"Failed to enrich external IDs for result idx={idx}: {e}")
+
+
 @router.get("/tmdb/search", response_model=list[TmdbSearchResult])
 def tmdb_search(q: str, type: str = "all", tmdb_id: int | None = None, tvdb_id: int | None = None,
                 imdb_id: str | None = None, db: Session = Depends(get_db)) -> list[TmdbSearchResult]:
@@ -1419,7 +1467,7 @@ def tmdb_search(q: str, type: str = "all", tmdb_id: int | None = None, tvdb_id: 
     if filter_type not in ("all", "movie", "tv", "collection"):
         filter_type = "all"
 
-    # Snapshot the carried *arr ids before the result-building loop reuses these names.
+    # Carried *arr ids, kept for the pin step at the end.
     req_tmdb_id, req_tvdb_id = tmdb_id, tvdb_id
     req_imdb_id = imdb_id.strip() if isinstance(imdb_id, str) and imdb_id.strip() else None
 
@@ -1476,53 +1524,11 @@ def tmdb_search(q: str, type: str = "all", tmdb_id: int | None = None, tvdb_id: 
     # Build base results
     results: list[TmdbSearchResult] = []
     for item in raw_items:
-        media_type = str(item.get("media_type") or "")
-        tmdb_id = int(item.get("id") or 0)
-        if not tmdb_id:
-            continue
+        result = _search_result_from_item(item, str(item.get("media_type") or ""))
+        if result:
+            results.append(result)
 
-        if media_type == "movie":
-            title = str(item.get("title") or item.get("original_title") or "Unknown")
-            raw_date = str(item.get("release_date") or "")
-            homepage = f"https://www.themoviedb.org/movie/{tmdb_id}"
-        elif media_type == "tv":
-            title = str(item.get("name") or item.get("original_name") or "Unknown")
-            raw_date = str(item.get("first_air_date") or "")
-            homepage = f"https://www.themoviedb.org/tv/{tmdb_id}"
-        else:  # collection
-            title = str(item.get("name") or item.get("original_name") or "Unknown")
-            raw_date = ""
-            homepage = f"https://www.themoviedb.org/collection/{tmdb_id}"
-
-        year = raw_date[:4] if len(raw_date) >= 4 else ""
-        poster_path = str(item.get("poster_path") or "")
-        poster_url = f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path else ""
-
-        results.append(TmdbSearchResult(
-            tmdb_id=tmdb_id,
-            media_type=media_type,
-            title=title,
-            year=year,
-            overview=str(item.get("overview") or ""),
-            poster_url=poster_url,
-            homepage=homepage,
-        ))
-
-    # Fetch external IDs in parallel for movie and tv items
-    ext_id_targets = [(i, r) for i, r in enumerate(results) if r.media_type in ("movie", "tv")]
-    if ext_id_targets:
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            future_map = {
-                pool.submit(_fetch_external_ids, r.tmdb_id, r.media_type, api_key): i
-                for i, r in ext_id_targets
-            }
-            for future in as_completed(future_map):
-                idx = future_map[future]
-                try:
-                    ext_imdb, ext_tvdb = future.result()
-                    results[idx] = results[idx].model_copy(update={"imdb_id": ext_imdb, "tvdb_id": ext_tvdb})
-                except Exception as e:
-                    log_debug(LogTags.MODULE, f"Failed to enrich external IDs for result idx={idx}: {e}")
+    _enrich_external_ids(results, api_key)
 
     # Pin the exact id-resolved entity (from carried *arr refs) to the top so the UI
     # surfaces it first; drop any duplicate from the fuzzy title results.
@@ -1534,6 +1540,23 @@ def tmdb_search(q: str, type: str = "all", tmdb_id: int | None = None, tvdb_id: 
                 if not (r.tmdb_id == id_match.tmdb_id and r.media_type == id_match.media_type)
             ]
 
+    return results
+
+
+@router.get("/tmdb/collection-movies", response_model=list[TmdbSearchResult])
+def tmdb_collection_movies(tmdb_id: int, db: Session = Depends(get_db)) -> list[TmdbSearchResult]:
+    """The movies in a TMDB collection, oldest release first, as maker-card items."""
+    if tmdb_id <= 0:
+        raise HTTPException(status_code=400, detail="tmdb_id is required")
+    api_key = _get_monitor_tmdb_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured. Add it in Settings → General → API Keys.")
+    detail = _tmdb_get_json(f"https://api.themoviedb.org/3/collection/{tmdb_id}",
+                            {"api_key": api_key, "language": "en-US"}, "collection movies", cache_ttl=_TMDB_DETAIL_TTL)
+    parts = [p for p in (detail.get("parts") or []) if isinstance(p, dict)]
+    parts.sort(key=lambda p: str(p.get("release_date") or "9999"))
+    results = [r for r in (_search_result_from_item(p, "movie") for p in parts) if r]
+    _enrich_external_ids(results, api_key)
     return results
 
 
