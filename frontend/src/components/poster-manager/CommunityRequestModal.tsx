@@ -265,7 +265,7 @@ export default function CommunityRequestModal({
                     key={i}
                     type="button"
                     className={`creq-candidate${isSelected ? ' selected' : ''}`}
-                    onClick={() => setSelected(isSelected ? null : c)}
+                    onClick={() => { setSelected(isSelected ? null : c); setIsCustomRequest(false) }}
                   >
                     {c.poster_url ? (
                       <img src={c.poster_url} alt="" className="creq-candidate-poster" loading="lazy" />
@@ -306,7 +306,7 @@ export default function CommunityRequestModal({
           )}
 
           {/* Custom request checkbox — shown when there are results but nothing selected, or always when no results */}
-          {tmdbApiKeyConfigured && !loading && (
+          {tmdbApiKeyConfigured && !loading && !selected && (
             <label className="creq-custom-request-label">
               <input
                 type="checkbox"

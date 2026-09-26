@@ -255,6 +255,22 @@ describe('CommunityRequestModal', () => {
       })
     })
 
+    it('hides the custom-request box while a TMDB match is selected', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({
+        candidates: [
+          { tmdb_id: 27205, title: 'Inception', year: 2010, media_type: 'movie', poster_url: null, imdb_id: null, tvdb_id: null },
+        ],
+      })
+      const user = userEvent.setup()
+      renderModal({ tmdbApiKeyConfigured: true })
+      await waitFor(() => expect(screen.getByRole('button', { name: /inception/i }).className.includes('selected')).toBe(true))
+      expect(screen.queryByLabelText(/custom request/i)).toBeNull()
+      // Deselecting brings the box back, unchecked.
+      await user.click(screen.getByRole('button', { name: /inception/i }))
+      const box = screen.getByLabelText(/custom request/i) as HTMLInputElement
+      expect(box.checked).toBe(false)
+    })
+
     it('asks the backend for the TVDB fallback and handles a TVDB-only row', async () => {
       mockSearchUnmatchedTmdb.mockResolvedValue({
         candidates: [
