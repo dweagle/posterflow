@@ -251,6 +251,46 @@ describe('NewCommunityRequestModal', () => {
       await user.click(screen.getByRole('button', { name: /request poster/i }))
       await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Failed to submit request', 'error'))
     })
+
+    it('offers the all-movies box once a collection match is selected', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({
+        candidates: [candidate({ tmdb_id: 8091, title: 'Alien Collection', year: null, media_type: 'collection' })],
+      })
+      const user = userEvent.setup()
+      renderModal()
+      expect(screen.queryByLabelText(/every movie in this collection/i)).toBeNull()
+      await user.type(screen.getByPlaceholderText(/search tmdb/i), 'Alien')
+      await user.click(screen.getByRole('button', { name: /^search$/i }))
+      await waitFor(() => expect(screen.getByLabelText(/every movie in this collection/i)).toBeTruthy())
+    })
+
+    it('prepends the all-movies line to a custom collection request when checked', async () => {
+      const user = userEvent.setup()
+      renderModal()
+      await user.selectOptions(screen.getByRole('combobox'), 'collection')
+      await user.type(screen.getByPlaceholderText(/title of the movie/i), 'Alien Collection')
+      await user.click(screen.getByLabelText(/every movie in this collection/i))
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ media_type: 'collection', notes: 'Includes: all movies in the collection' }),
+      )
+    })
+
+    it('prepends the original-language line to a custom request when checked', async () => {
+      const user = userEvent.setup()
+      renderModal()
+      await user.type(screen.getByPlaceholderText(/title of the movie/i), 'Oldboy')
+      await user.click(screen.getByLabelText(/original-language poster/i))
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Oldboy', notes: 'Includes: original-language poster/logo' }),
+      )
+    })
+
   })
 
   // ── Close behaviour ─────────────────────────────────────────────────────────

@@ -29,6 +29,44 @@ export function isValidDiscordUsername(value: string): boolean {
   return v.length >= 2 && v.length <= 32 && !/^@?(everyone|here)$/i.test(v)
 }
 
+// ── Request flags ────────────────────────────────────────────────────────────
+// Extra asks ride as leading "Includes: …" lines of the notes, after any season-set
+// "Seasons: 1, 2, 3" line (no schema/RPC change); notify-discord lifts them into the
+// thread title and the request card shows a chip per flag.
+export const COLLECTION_ALL_MOVIES_NOTE = 'Includes: all movies in the collection'
+export const ORIGINAL_LANGUAGE_NOTE = 'Includes: original-language poster/logo'
+
+export type RequestFlags = { allCollectionMovies?: boolean; originalLanguage?: boolean }
+
+const isFlagLine = (line: string) => line.startsWith('Includes: ') || line.startsWith('Seasons: ')
+
+export function withRequestFlags(notes: string | null, flags: RequestFlags): string | null {
+  const lines = [
+    ...(flags.allCollectionMovies ? [COLLECTION_ALL_MOVIES_NOTE] : []),
+    ...(flags.originalLanguage ? [ORIGINAL_LANGUAGE_NOTE] : []),
+  ]
+  if (lines.length === 0) return notes
+  const rest = (notes ?? '').split('\n')
+  // The season parsers read only the first line, so a "Seasons:" line stays first.
+  const seasonLine = rest[0].startsWith('Seasons: ') ? rest.shift() : null
+  const head = [seasonLine, ...lines].filter(Boolean).join('\n')
+  const body = rest.join('\n').trim()
+  return body ? `${head}\n\n${body}` : head
+}
+
+export function hasRequestFlag(notes: string | null | undefined, flag: string): boolean {
+  for (const raw of (notes ?? '').split('\n')) {
+    const line = raw.trim()
+    if (line === flag) return true
+    if (!isFlagLine(line)) return false
+  }
+  return false
+}
+
+export function hasCollectionMoviesNote(mediaType: string | null | undefined, notes: string | null | undefined): boolean {
+  return mediaType === 'collection' && hasRequestFlag(notes, COLLECTION_ALL_MOVIES_NOTE)
+}
+
 // ── Remembered poster-style choice ───────────────────────────────────────────
 // The last CL2K/MM2K the user picked, kept in localStorage so it sticks across
 // modal opens and page reloads instead of resetting each time.

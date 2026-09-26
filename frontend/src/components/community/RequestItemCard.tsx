@@ -45,6 +45,10 @@ type RequestItemCardProps = {
   title: string
   year: number | null
   seasonLabels?: string[]
+  /** Collection request that also asks for every movie in it. */
+  allMovies?: boolean
+  /** Request also asks for an original-language poster/logo. */
+  originalLanguage?: boolean
   mediaType: CardMediaType
   styleLabel: 'CL2K' | 'MM2K' | null
   status: string
@@ -88,6 +92,8 @@ export default function RequestItemCard({
   title,
   year,
   seasonLabels,
+  allMovies,
+  originalLanguage,
   mediaType,
   styleLabel,
   status,
@@ -163,6 +169,8 @@ export default function RequestItemCard({
             <span className="request-title">{title}</span>
             {year && <span className="request-year">({year})</span>}
             {(seasonLabels ?? []).map((lbl, i) => <span key={i} className="request-season">{lbl}</span>)}
+            {allMovies && <span className="request-all-movies">+ all movies</span>}
+            {originalLanguage && <span className="request-orig-language">+ original language</span>}
             <span className={`request-type-badge type-${mediaType}`}>{mediaType}</span>
             {styleLabel && <span className={`request-style-badge style-${styleLabel.toLowerCase()}`}>{styleLabel}</span>}
             <span className={`request-status-badge status-${status}`}>

@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning } from '../community/posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from '../community/posterStyles'
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
@@ -53,6 +53,8 @@ export default function CommunityRequestModal({
   const [extraTags, setExtraTags] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [pingDiscordId, setPingDiscordId] = useState('')
+  const [includeCollectionMovies, setIncludeCollectionMovies] = useState(false)
+  const [wantOriginalLanguage, setWantOriginalLanguage] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   // Set when the user hits submit without picking a TMDB match (and not custom);
@@ -109,6 +111,8 @@ export default function CommunityRequestModal({
   // Non-blocking notice when this item was already fulfilled in the chosen style.
   // Mirrors the submit payload: 'season' only carries a number when single-season.
   const isSeasonRequest = seasonNumbers != null && seasonNumbers.length > 0
+  const isCollectionRequest = !isSeasonRequest && (selected?.media_type ?? tmdbType) === 'collection'
+  const canWantOriginalLanguage = (selected?.media_type ?? tmdbType) !== 'person'
   const alreadyMade = useAlreadyMadeWarning(
     {
       tmdb_id: selected?.tmdb_id ?? null,
@@ -152,6 +156,10 @@ export default function CommunityRequestModal({
           notesValue = notesValue ? `${seasonsStr}\n\n${notesValue}` : seasonsStr
         }
       }
+      notesValue = withRequestFlags(notesValue, {
+        allCollectionMovies: isCollectionRequest && includeCollectionMovies,
+        originalLanguage: canWantOriginalLanguage && wantOriginalLanguage,
+      })
       // Use TMDB match if selected, otherwise fall back to the original asset title/year
       const trimmedPingId = pingDiscordId.trim()
       const validPingId = trimmedPingId && isValidDiscordUsername(trimmedPingId) ? trimmedPingId : null
@@ -188,7 +196,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired, isCollectionRequest, includeCollectionMovies, canWantOriginalLanguage, wantOriginalLanguage])
 
   // Auto-close shortly after a successful submit. Cleared on unmount so a pending
   // close can't fire after the modal is gone (which leaked stray onClose calls into tests).
@@ -314,6 +322,28 @@ export default function CommunityRequestModal({
                 onChange={(e) => setIsCustomRequest(e.target.checked)}
               />
               This is a custom request — no matching TMDB item available
+            </label>
+          )}
+
+          {isCollectionRequest && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={includeCollectionMovies}
+                onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
+              />
+              Also request posters for every movie in this collection
+            </label>
+          )}
+
+          {canWantOriginalLanguage && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={wantOriginalLanguage}
+                onChange={(e) => setWantOriginalLanguage(e.target.checked)}
+              />
+              Also request an original-language poster/logo
             </label>
           )}
 

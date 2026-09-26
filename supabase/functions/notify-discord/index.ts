@@ -125,9 +125,22 @@ Deno.serve(async (req) => {
     seasonsLabel = notes.split('\n')[0] // e.g. "Seasons: 1, 2, 3"
   }
 
-  const displayTitle = seasonsLabel != null
+  // Request flags: leading "Includes: …" note lines (after any Seasons line).
+  // Mirrors the constants in the app's posterStyles.ts.
+  const COLLECTION_ALL_MOVIES_NOTE = 'Includes: all movies in the collection'
+  const ORIGINAL_LANGUAGE_NOTE = 'Includes: original-language poster/logo'
+  const flagLines = new Set<string>()
+  for (const raw of (typeof notes === 'string' ? notes : '').split('\n')) {
+    const line = raw.trim()
+    if (!line.startsWith('Includes: ') && !line.startsWith(SEASONS_PREFIX)) break
+    flagLines.add(line)
+  }
+
+  let displayTitle = seasonsLabel != null
     ? (year ? `${title} (${year}) — ${seasonsLabel}` : `${title} — ${seasonsLabel}`)
     : year ? `${title} (${year})` : title
+  if (media_type === 'collection' && flagLines.has(COLLECTION_ALL_MOVIES_NOTE)) displayTitle += ' + all movies'
+  if (flagLines.has(ORIGINAL_LANGUAGE_NOTE)) displayTitle += ' + original language'
 
   const embed: Record<string, unknown> = {
     description: linksDescription,

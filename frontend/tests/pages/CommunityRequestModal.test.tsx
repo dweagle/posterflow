@@ -395,6 +395,79 @@ describe('CommunityRequestModal', () => {
         expect.objectContaining({ tmdb_id: 2, title: 'Inception: Encore' }),
       )
     })
+
+    it('hides the all-movies box for non-collection requests', () => {
+      renderModal()
+      expect(screen.queryByLabelText(/every movie in this collection/i)).toBeNull()
+    })
+
+    it('leaves collection notes alone when the all-movies box is unchecked', async () => {
+      const user = userEvent.setup()
+      renderModal({ title: 'Alien Collection', year: null, tmdbType: 'collection' })
+      expect(screen.getByLabelText(/every movie in this collection/i)).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ media_type: 'collection', notes: null }),
+      )
+    })
+
+    it('prepends the all-movies line to collection notes when the box is checked', async () => {
+      const user = userEvent.setup()
+      renderModal({ title: 'Alien Collection', year: null, tmdbType: 'collection' })
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByLabelText(/every movie in this collection/i))
+      await user.type(screen.getByPlaceholderText(/any special instructions/i), 'Textless please')
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media_type: 'collection',
+          notes: 'Includes: all movies in the collection\n\nTextless please',
+        }),
+      )
+    })
+
+    it('prepends the original-language line when that box is checked', async () => {
+      const user = userEvent.setup()
+      renderModal()
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByLabelText(/original-language poster/i))
+      await user.type(screen.getByPlaceholderText(/any special instructions/i), 'Korean logo please')
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: 'Includes: original-language poster/logo\n\nKorean logo please' }),
+      )
+    })
+
+    it('keeps the seasons line first, ahead of the original-language flag', async () => {
+      const user = userEvent.setup()
+      renderModal({ tmdbType: 'show', seasonNumbers: [1, 2] })
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByLabelText(/original-language poster/i))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ media_type: 'season', notes: 'Seasons: 1, 2\nIncludes: original-language poster/logo' }),
+      )
+    })
+
+    it('stacks both flags on a collection request', async () => {
+      const user = userEvent.setup()
+      renderModal({ title: 'Alien Collection', year: null, tmdbType: 'collection' })
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByLabelText(/every movie in this collection/i))
+      await user.click(screen.getByLabelText(/original-language poster/i))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notes: 'Includes: all movies in the collection\nIncludes: original-language poster/logo',
+        }),
+      )
+    })
   })
 
   // ── Close behaviour ───────────────────────────────────────────────────────

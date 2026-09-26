@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { AlertCircle, Loader2, Send } from 'lucide-react'
 import { type CommunityListItem } from '../../api/community'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning } from './posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from './posterStyles'
 
 export type MoveToRequestValues = {
   styleTags: string[]
@@ -44,6 +44,9 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
   const [extraTags, setExtraTags] = useState<string[]>(seed.extras)
   const [notes, setNotes] = useState(freeNotes)
   const [pingDiscordId, setPingDiscordId] = useState('')
+  const [includeCollectionMovies, setIncludeCollectionMovies] = useState(false)
+  const [wantOriginalLanguage, setWantOriginalLanguage] = useState(false)
+  const isCollectionRequest = item.media_type === 'collection'
 
   const toggleExtra = (tag: string) =>
     setExtraTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
@@ -60,7 +63,10 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
     const trimmedPing = pingDiscordId.trim()
     onConfirm({
       styleTags: [posterStyle, ...extraTags],
-      notes: combined || null,
+      notes: withRequestFlags(combined || null, {
+        allCollectionMovies: isCollectionRequest && includeCollectionMovies,
+        originalLanguage: wantOriginalLanguage,
+      }),
       pingDiscordId: trimmedPing && isValidDiscordUsername(trimmedPing) ? trimmedPing : null,
     })
   }
@@ -78,6 +84,26 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
             <strong>{item.title}{item.year ? ` (${item.year})` : ''}</strong> will be posted as a community poster
             request — with a Discord thread makers can claim — and removed from this list.
           </p>
+
+          {isCollectionRequest && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={includeCollectionMovies}
+                onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
+              />
+              Also request posters for every movie in this collection
+            </label>
+          )}
+
+          <label className="creq-custom-request-label">
+            <input
+              type="checkbox"
+              checked={wantOriginalLanguage}
+              onChange={(e) => setWantOriginalLanguage(e.target.checked)}
+            />
+            Also request an original-language poster/logo
+          </label>
 
           {/* Poster style — required, single choice */}
           <div className="creq-section-label" style={{ marginTop: '0.75rem' }}>

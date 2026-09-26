@@ -7,6 +7,7 @@ import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
+import { hasCollectionMoviesNote, hasRequestFlag, ORIGINAL_LANGUAGE_NOTE } from '../components/community/posterStyles'
 import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
 import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
@@ -815,6 +816,8 @@ export default function CommunityRequests() {
                 title={req.title}
                 year={req.year}
                 seasonLabels={getSeasonLabel(req) ? [getSeasonLabel(req) as string] : []}
+                allMovies={hasCollectionMoviesNote(req.media_type, req.notes)}
+                originalLanguage={hasRequestFlag(req.notes, ORIGINAL_LANGUAGE_NOTE)}
                 mediaType={req.media_type as CardMediaType}
                 styleLabel={getStyleLabel(req.style_tags)}
                 status={req.status}

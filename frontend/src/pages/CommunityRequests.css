@@ -783,6 +783,28 @@
   padding: 0.1rem 0.35rem;
 }
 
+.request-all-movies {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(186, 104, 200, 0.24);
+  color: #e1bee7;
+  border: 1px solid rgba(206, 147, 216, 0.6);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+.request-orig-language {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(38, 166, 154, 0.22);
+  color: #80cbc4;
+  border: 1px solid rgba(77, 182, 172, 0.6);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
 .request-type-badge {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;

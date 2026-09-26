@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning } from '../community/posterStyles'
+import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from '../community/posterStyles'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -50,6 +50,8 @@ export default function NewCommunityRequestModal({
   const [extraTags, setExtraTags] = useState<string[]>([])
   const [notes, setNotes] = useState('')
   const [pingDiscordId, setPingDiscordId] = useState('')
+  const [includeCollectionMovies, setIncludeCollectionMovies] = useState(false)
+  const [wantOriginalLanguage, setWantOriginalLanguage] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   // Set when a search returned matches but the user submitted without picking one
@@ -95,6 +97,8 @@ export default function NewCommunityRequestModal({
   // Derive effective title/year for submission
   const effectiveTitle = selected?.title ?? customTitle.trim()
   const effectiveYear = selected?.year ?? (customYear.trim() ? parseInt(customYear.trim(), 10) : null)
+  const isCollectionRequest = (selected?.media_type ?? searchType) === 'collection'
+  const canWantOriginalLanguage = (selected?.media_type ?? searchType) !== 'person'
 
   // Non-blocking notice when this item was already fulfilled in the chosen style.
   const alreadyMade = useAlreadyMadeWarning(
@@ -143,7 +147,10 @@ export default function NewCommunityRequestModal({
         poster_path: selected?.poster_url ?? null,
         imdb_id: selected?.imdb_id ?? null,
         tvdb_id: selected?.tvdb_id ?? null,
-        notes: notes.trim() || null,
+        notes: withRequestFlags(notes.trim() || null, {
+          allCollectionMovies: isCollectionRequest && includeCollectionMovies,
+          originalLanguage: canWantOriginalLanguage && wantOriginalLanguage,
+        }),
         style_tags: styleTags.length > 0 ? styleTags : undefined,
         requested_by: effectiveName.trim(),
         ping_discord_id: validPingId,
@@ -168,6 +175,7 @@ export default function NewCommunityRequestModal({
   }, [
     canSubmit, tmdbSelectionMissed, selected, searchType, effectiveTitle, effectiveYear,
     notes, posterStyle, extraTags, pingDiscordId, effectiveName, token, showToast,
+    isCollectionRequest, includeCollectionMovies, canWantOriginalLanguage, wantOriginalLanguage,
   ])
 
   // Auto-close shortly after a successful submit. Cleared on unmount so a pending
@@ -368,6 +376,28 @@ export default function NewCommunityRequestModal({
                 {selected.media_type}
               </span>
             </div>
+          )}
+
+          {isCollectionRequest && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={includeCollectionMovies}
+                onChange={(e) => setIncludeCollectionMovies(e.target.checked)}
+              />
+              Also request posters for every movie in this collection
+            </label>
+          )}
+
+          {canWantOriginalLanguage && (
+            <label className="creq-custom-request-label">
+              <input
+                type="checkbox"
+                checked={wantOriginalLanguage}
+                onChange={(e) => setWantOriginalLanguage(e.target.checked)}
+              />
+              Also request an original-language poster/logo
+            </label>
           )}
 
           {/* Poster style — required, single choice */}
