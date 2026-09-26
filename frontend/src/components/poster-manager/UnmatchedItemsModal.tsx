@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, FileQuestion, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import { type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, type ListItemInput } from '../../api/client'
+import { type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, tmdbCandidateLink, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
@@ -69,10 +69,9 @@ function getTmdbSearchType(modalType: UnmatchedModalType): TmdbSearchType {
   return 'show'
 }
 
+// TMDB rows link to TMDB; TVDB fallback rows (show not on TMDB) link to TheTVDB.
 function getTmdbLink(candidate: TmdbCandidate): string {
-  if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
-  if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
-  return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
+  return tmdbCandidateLink(candidate).url
 }
 
 // hasSeasons mirrors UnmatchedTab's heading logic — "Main" only distinguishes anything
@@ -339,6 +338,7 @@ function UnmatchedItemsModal({
           tmdb_id: item.tmdb_id,
           tvdb_id: item.tvdb_id,
           imdb_id: item.imdb_id,
+          tvdb_fallback: true,
         })
         setCandidatesMap((prev) => ({ ...prev, [key]: result.candidates }))
       } catch {
@@ -669,7 +669,7 @@ function UnmatchedItemsModal({
                           target="_blank"
                           rel="noopener noreferrer"
                           className="tmdb-icon-btn"
-                          title="Open in TMDB"
+                          title={`Open in ${tmdbCandidateLink(candidate).label}`}
                         >
                           <ExternalLink size={13} />
                           <span>Open</span>

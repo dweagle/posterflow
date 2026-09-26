@@ -306,6 +306,24 @@ def resolve_movie_tvdb_id(imdb_id: str, api_key: str, pin: str) -> int | None:
     return None
 
 
+# ------------------------------------------------------------------ series lookup
+
+def search_series(*, title: str, year: Optional[int], api_key: str, pin: str) -> list[dict]:
+    """Title search limited to series; the year narrows it when known. Rows carry tvdb_id
+    (string), name, year, image_url, overview and remote_ids."""
+    params: dict[str, Any] = {"query": title, "type": "series", "limit": 10}
+    if year:
+        params["year"] = year
+    rows = _get("/search", api_key, pin, params=params, what="series search") or []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def fetch_series(*, tvdb_id: int, api_key: str, pin: str) -> dict | None:
+    """The series record for an exact id (name, year, image, remoteIds), or None if unknown."""
+    data = _get(f"/series/{tvdb_id}/extended", api_key, pin, params={"short": "true"}, what="series record")
+    return data if isinstance(data, dict) else None
+
+
 # ------------------------------------------------------------------ artwork fetch
 
 def fetch_artwork(*, tvdb_id: int, media_type: str, api_key: str, pin: str) -> list[dict]:

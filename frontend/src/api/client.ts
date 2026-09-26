@@ -189,6 +189,8 @@ export {
   startAssetRename,
   startPosterRename,
   startUnmatchedDetection,
+  tmdbCandidateKey,
+  tmdbCandidateLink,
   updateWorkflow,
 } from './posterManager'
 

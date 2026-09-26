@@ -245,7 +245,8 @@ export const removeUnmatchedIgnoreItem = async (item: UnmatchedIgnoreItem): Prom
 }
 
 export interface TmdbCandidate {
-  tmdb_id: number
+  // null for a TVDB fallback row (source 'tvdb'): the show isn't on TMDB at all.
+  tmdb_id: number | null
   tvdb_id: number | null
   imdb_id: string | null
   title: string
@@ -258,6 +259,23 @@ export interface TmdbCandidate {
   // True when this candidate was resolved directly from a carried *arr id
   // (exact, language-independent) rather than from the fuzzy title search.
   auto_matched?: boolean
+  source?: 'tmdb' | 'tvdb'
+}
+
+// Identity and link for a candidate: TMDB rows key on tmdb_id; TVDB fallback rows
+// (tmdb_id null) key on tvdb_id and link to TheTVDB.
+export const tmdbCandidateKey = (c: TmdbCandidate): string =>
+  c.tmdb_id != null ? `${c.media_type}:tmdb-${c.tmdb_id}` : `${c.media_type}:tvdb-${c.tvdb_id ?? 0}`
+
+export const tmdbCandidateLink = (c: TmdbCandidate): { url: string; label: 'TMDB' | 'TVDB' } => {
+  if (c.tmdb_id == null && c.tvdb_id) {
+    return { url: `https://thetvdb.com/dereferrer/series/${c.tvdb_id}`, label: 'TVDB' }
+  }
+  const seg = c.media_type === 'movie' ? 'movie'
+    : c.media_type === 'collection' ? 'collection'
+    : c.media_type === 'person' ? 'person'
+    : 'tv'
+  return { url: `https://www.themoviedb.org/${seg}/${c.tmdb_id}`, label: 'TMDB' }
 }
 
 export const searchUnmatchedTmdb = async (params: {
@@ -269,6 +287,8 @@ export const searchUnmatchedTmdb = async (params: {
   tmdb_id?: number | null
   tvdb_id?: number | null
   imdb_id?: string | null
+  // Shows TMDB doesn't know fall through to TheTVDB when a key is configured.
+  tvdb_fallback?: boolean
 }): Promise<{ candidates: TmdbCandidate[] }> => {
   return postData('/api/posterflow/unmatched-tmdb-search', params)
 }

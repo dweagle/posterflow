@@ -30,7 +30,8 @@ vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
-vi.mock('../../src/api/client', () => ({
+vi.mock('../../src/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/api/client')>()),
   submitCommunityRequest: (...args: unknown[]) => mockSubmitCommunityRequest(...args),
   searchUnmatchedTmdb: (...args: unknown[]) => mockSearchUnmatchedTmdb(...args),
 }))
@@ -252,6 +253,27 @@ describe('CommunityRequestModal', () => {
       await waitFor(() => {
         expect(screen.getByText('Inception')).toBeTruthy()
       })
+    })
+
+    it('asks the backend for the TVDB fallback and handles a TVDB-only row', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({
+        candidates: [
+          { tmdb_id: null, tvdb_id: 361753, title: 'Foute Vrienden', year: 2015, media_type: 'show', poster_url: null, imdb_id: null, source: 'tvdb' },
+        ],
+      })
+      mockDiscordAuth = { ...mockDiscordAuth, isConnected: true, username: 'testuser', token: 'test-discord-token' }
+      const user = userEvent.setup()
+      renderModal({ title: 'Foute Vrienden', year: 2015, tmdbType: 'show', tmdbApiKeyConfigured: true })
+      await waitFor(() => expect(screen.getByRole('button', { name: /foute vrienden/i }).className.includes('selected')).toBe(true))
+      expect(mockSearchUnmatchedTmdb).toHaveBeenCalledWith(expect.objectContaining({ type: 'show', tvdb_fallback: true }))
+      const link = screen.getByRole('link', { name: /tvdb/i }) as HTMLAnchorElement
+      expect(link.href).toContain('thetvdb.com/dereferrer/series/361753')
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      expect(mockSubmitCommunityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ tmdb_id: null, tvdb_id: 361753, media_type: 'show', title: 'Foute Vrienden' }),
+      )
     })
 
     it('auto-selects the only candidate', async () => {

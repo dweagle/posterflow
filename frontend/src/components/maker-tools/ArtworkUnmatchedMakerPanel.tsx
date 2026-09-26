@@ -5,6 +5,7 @@ import {
   getApiErrorMessage,
   getArtworkUnmatchedStats,
   searchUnmatchedTmdb,
+  tmdbCandidateKey,
   type ArtworkType,
   type ArtworkUnmatchedStats,
   type TmdbCandidate,
@@ -159,9 +160,12 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
   const handleResolve = async () => {
     setLoading(true)
     try {
-      const { candidates: found } = await searchUnmatchedTmdb({ title: item.title, year: item.year, type: item.tmdbType })
+      const { candidates: found } = await searchUnmatchedTmdb({
+        title: item.title, year: item.year, type: item.tmdbType,
+        tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, imdb_id: item.imdb_id, tvdb_fallback: true,
+      })
       setCandidates(found)
-      if (found.length === 0) showToast('No TMDB matches found for this title', 'info')
+      if (found.length === 0) showToast('No matches found for this title', 'info')
     } catch {
       setCandidates([])
       showToast('TMDB search failed', 'error')
@@ -179,15 +183,16 @@ export function ArtworkUnmatchedCard({ item, syncTargetIndex, scopeLabel }: {
       {loading ? 'Searching…' : 'Find on TMDB'}
     </button>
   ) : candidates.length === 0 ? (
-    <p className="muted">No TMDB matches found.</p>
+    <p className="muted">No matches found.</p>
   ) : (
     <div className="unmatched-maker-candidates">
       {candidates.map((c) => (
-        <button key={`${c.media_type}-${c.tmdb_id}`} type="button" className="unmatched-maker-candidate" onClick={() => setPicked(buildResult(item, c.tmdb_id, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))}>
+        <button key={tmdbCandidateKey(c)} type="button" className="unmatched-maker-candidate" onClick={() => setPicked(buildResult(item, c.tmdb_id ?? 0, c.poster_url, c.imdb_id, c.tvdb_id, c.overview))}>
           {c.poster_url ? <img src={c.poster_url} alt="" loading="lazy" /> : <span className="unmatched-maker-candidate-placeholder"><Search size={14} /></span>}
           <span className="unmatched-maker-candidate-meta">
             <span className="unmatched-maker-candidate-title">{c.title}</span>
             {c.year && <span className="tmdb-result-year">{c.year}</span>}
+            {c.source === 'tvdb' && <span className="tmdb-result-year">TVDB</span>}
           </span>
         </button>
       ))}

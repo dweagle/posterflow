@@ -1160,6 +1160,89 @@ class UnmatchedTmdbSearchRequest(BaseModel):
     tmdb_id: Optional[int] = None
     tvdb_id: Optional[int] = None
     imdb_id: Optional[str] = None
+    # Shows TMDB doesn't know: fall through to TheTVDB (when configured). Opt-in — the
+    # request modals send it; other callers still expect TMDB-backed candidates only.
+    tvdb_fallback: bool = False
+
+
+# Match reasons that mean TMDB really knows the title; anything looser leaves room for TVDB.
+_CONFIDENT_REASONS = {"exact", "exact_title", "fuzzy_title_year", "fuzzy_title"}
+_REASON_RANK = {
+    "exact": 0, "exact_title": 1, "fuzzy_title_year": 2, "fuzzy_title": 3,
+    "token_overlap_year": 4, "year_match_only": 5, "rank_fallback": 6,
+}
+
+
+def _rank_candidates(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Id-resolved rows first, then by match reason; stable, so TMDB rows stay ahead of TVDB on ties."""
+    return sorted(rows, key=lambda c: (0 if c.get("auto_matched") else 1, _REASON_RANK.get(str(c.get("match_reason")), 9)))
+
+
+def _tvdb_show_candidates(db: Session, title: str, year: Optional[int], tvdb_id: Optional[int], *,
+                          search: bool) -> list[Dict[str, Any]]:
+    """Show candidates from TheTVDB: a carried tvdb_id resolves the exact series (auto-matched);
+    ``search`` adds a title search scored like the TMDB rows. Empty when TVDB isn't configured or fails."""
+    from services import tvdb
+
+    api_key, pin = tvdb.get_tvdb_credentials(db)
+    if not api_key:
+        return []
+
+    def candidate(row: Dict[str, Any], *, exact: bool) -> Optional[Dict[str, Any]]:
+        try:
+            sid = int(row.get("tvdb_id") or row.get("id") or 0)
+        except (TypeError, ValueError):
+            return None
+        name = str(row.get("name") or "").strip()
+        if not sid or not name:
+            return None
+        year_text = str(row.get("year") or row.get("firstAired") or row.get("first_air_time") or "").strip()
+        imdb = None
+        for rid in row.get("remote_ids") or row.get("remoteIds") or []:
+            if isinstance(rid, dict) and str(rid.get("sourceName") or "").upper() == "IMDB":
+                imdb = str(rid.get("id") or "").strip() or None
+                break
+        image = tvdb.absolute_image_url(row.get("image_url") or row.get("image"))
+        return {
+            "tmdb_id": None,
+            "tvdb_id": sid,
+            "imdb_id": imdb,
+            "title": name,
+            "year": int(year_text[:4]) if len(year_text) >= 4 and year_text[:4].isdigit() else None,
+            "poster_url": image or None,
+            "overview": str(row.get("overview") or "").strip(),
+            "popularity": 0.0,
+            "media_type": "show",
+            "match_reason": "tvdb_id_exact" if exact else "tvdb_search",
+            "auto_matched": exact,
+            "source": "tvdb",
+        }
+
+    try:
+        if tvdb_id:
+            record = tvdb.fetch_series(tvdb_id=tvdb_id, api_key=api_key, pin=pin)
+            hit = candidate(record, exact=True) if record else None
+            if hit:
+                log_info(LogTags.UNMATCHED, f"TVDB resolved '{title}' by id {tvdb_id} (TMDB has no entry for it)")
+                return [hit]
+        if not search:
+            return []
+        rows = tvdb.search_series(title=title, year=year, api_key=api_key, pin=pin)
+        found = [c for c in (candidate(r, exact=False) for r in rows[:10]) if c]
+        # Score with the TMDB matcher so the merge can rank both sources together.
+        shaped = [{**c, "name": c["title"], "first_air_date": f"{c['year']}-01-01" if c["year"] else ""} for c in found]
+        found = []
+        for entry in _tmdb_score_candidates(title, year, shaped):
+            row = entry["candidate"]
+            row.pop("name", None)
+            row.pop("first_air_date", None)
+            row["match_reason"] = entry["reason"]
+            found.append(row)
+        log_info(LogTags.UNMATCHED, f"TVDB search for '{title}' (no confident TMDB match): {len(found)} candidates", year=year)
+        return found
+    except tvdb.TvdbError as exc:
+        log_warning(LogTags.UNMATCHED, f"TVDB fallback for '{title}' failed: {exc}")
+        return []
 
 
 def _get_unmatched_tmdb_key(db: Session) -> str:
@@ -1505,6 +1588,18 @@ def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Dep
         candidates = [id_candidate] + [c for c in candidates if c.get("tmdb_id") != id_candidate["tmdb_id"]]
 
     log_info(LogTags.UNMATCHED, f"TMDB search for '{title}' ({media_type}): {len(candidates)} candidates", year=year, auto_matched=bool(id_candidate))
+
+    # TVDB fallback for shows: a carried tvdb_id TMDB couldn't resolve is looked up on TVDB even
+    # when loose TMDB rows exist; the title search only runs when TMDB has no confident match.
+    if media_type == "show" and payload.tvdb_fallback and not id_candidate:
+        confident = any(c.get("match_reason") in _CONFIDENT_REASONS for c in candidates)
+        req_tvdb = payload.tvdb_id if isinstance(payload.tvdb_id, int) else None
+        if req_tvdb or not confident:
+            known = {c.get("tvdb_id") for c in candidates if c.get("tvdb_id")}
+            extra = [c for c in _tvdb_show_candidates(db, title, year, req_tvdb, search=not confident)
+                     if c["tvdb_id"] not in known]
+            if extra:
+                candidates = _rank_candidates(candidates + extra)
     return {"candidates": candidates}
 
 

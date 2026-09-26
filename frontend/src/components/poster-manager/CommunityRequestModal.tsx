@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { AlertCircle, Check, ExternalLink, Loader2, Star, LogOut, User } from 'lucide-react'
-import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateKey, tmdbCandidateLink } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -8,13 +8,6 @@ import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle
 import { MATCHED_BY_ID_GENERIC } from '../../utils/mediaServer'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
-
-function getTmdbLink(candidate: TmdbCandidate): string {
-  if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
-  if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
-  if (candidate.media_type === 'person') return `https://www.themoviedb.org/person/${candidate.tmdb_id}`
-  return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
-}
 
 type CommunityRequestModalProps = {
   title: string
@@ -70,8 +63,8 @@ export default function CommunityRequestModal({
   const allCandidates: TmdbCandidate[] = (() => {
     const main = candidates ?? []
     // Only append person results that aren't already in the main list
-    const mainIds = new Set(main.map((c) => `${c.media_type}:${c.tmdb_id}`))
-    const extra = personCandidates.filter((c) => !mainIds.has(`${c.media_type}:${c.tmdb_id}`))
+    const mainIds = new Set(main.map(tmdbCandidateKey))
+    const extra = personCandidates.filter((c) => !mainIds.has(tmdbCandidateKey(c)))
     return [...main, ...extra]
   })()
 
@@ -80,7 +73,7 @@ export default function CommunityRequestModal({
     if (!tmdbApiKeyConfigured) return
     setLoading(true)
     // Run main search + person search in parallel (skip person search if already searching persons)
-    const mainSearch = searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType, tmdb_id: tmdbId, tvdb_id: tvdbId, imdb_id: imdbId })
+    const mainSearch = searchUnmatchedTmdb({ title: cleanTitle, year, type: tmdbType, tmdb_id: tmdbId, tvdb_id: tvdbId, imdb_id: imdbId, tvdb_fallback: true })
     const personSearch = tmdbType !== 'person'
       ? searchUnmatchedTmdb({ title: cleanTitle, year: null, type: 'person' })
       : Promise.resolve({ candidates: [] as TmdbCandidate[] })
@@ -264,9 +257,9 @@ export default function CommunityRequestModal({
           ) : (
             <div className={`creq-candidates${allCandidates.length <= 1 ? ' creq-candidates--single' : ''}${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
               {allCandidates.map((c, i) => {
-                const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
+                const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
                 const isPerson = c.media_type === 'person'
-                const link = getTmdbLink(c)
+                const link = tmdbCandidateLink(c)
                 return (
                   <button
                     key={i}
@@ -295,14 +288,14 @@ export default function CommunityRequestModal({
                         <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>
                       )}
                       <a
-                        href={link}
+                        href={link.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="creq-tmdb-link"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <ExternalLink size={11} />
-                        TMDB
+                        {link.label}
                       </a>
                     </div>
                     {isSelected && <Check size={16} className="creq-selected-check" />}

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { AlertCircle, Check, ExternalLink, Loader2, Search, Star, LogOut, User, X } from 'lucide-react'
-import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateKey, tmdbCandidateLink } from '../../api/client'
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
@@ -15,20 +15,16 @@ const SEARCH_TYPE_OPTIONS: { value: TmdbSearchType; label: string }[] = [
   { value: 'person', label: 'Person' },
 ]
 
-function getTmdbLink(candidate: TmdbCandidate): string {
-  if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
-  if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
-  if (candidate.media_type === 'person') return `https://www.themoviedb.org/person/${candidate.tmdb_id}`
-  return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
-}
-
 type NewCommunityRequestModalProps = {
   tmdbApiKeyConfigured: boolean
+  // Shows the "with TVDB fallback" note on the search heading.
+  tvdbApiKeyConfigured?: boolean
   onClose: () => void
 }
 
 export default function NewCommunityRequestModal({
   tmdbApiKeyConfigured,
+  tvdbApiKeyConfigured = false,
   onClose,
 }: NewCommunityRequestModalProps) {
   const { showToast } = useToast()
@@ -75,7 +71,7 @@ export default function NewCommunityRequestModal({
     setIsCustomRequest(false)
     setPickWarning(false)
     try {
-      const result = await searchUnmatchedTmdb({ title: query, year: null, type: searchType })
+      const result = await searchUnmatchedTmdb({ title: query, year: null, type: searchType, tvdb_fallback: true })
       setCandidates(result.candidates)
       if (result.candidates.length === 1) setSelected(result.candidates[0])
     } catch {
@@ -200,7 +196,10 @@ export default function NewCommunityRequestModal({
 
         <div className="modal-body">
           {/* TMDB search bar */}
-          <div className="creq-section-label">Search TMDB</div>
+          <div className="creq-section-label">
+            Search TMDB
+            {tvdbApiKeyConfigured && <span className="request-optional"> with TVDB fallback</span>}
+          </div>
 
           {!tmdbApiKeyConfigured ? (
             <div className="tmdb-candidates-warning">
@@ -275,9 +274,9 @@ export default function NewCommunityRequestModal({
               ) : (
                 <div className={`creq-candidates${showPickWarning ? ' creq-candidates--warn' : ''}`} ref={candidatesRef}>
                   {candidates.map((c, i) => {
-                    const isSelected = selected?.tmdb_id === c.tmdb_id && selected?.media_type === c.media_type
+                    const isSelected = selected != null && tmdbCandidateKey(selected) === tmdbCandidateKey(c)
                     const isPerson = c.media_type === 'person'
-                    const link = getTmdbLink(c)
+                    const link = tmdbCandidateLink(c)
                     return (
                       <button
                         key={i}
@@ -301,14 +300,14 @@ export default function NewCommunityRequestModal({
                             <span className="tmdb-type-badge tmdb-type-badge--person">Person</span>
                           )}
                           <a
-                            href={link}
+                            href={link.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="creq-tmdb-link"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <ExternalLink size={11} />
-                            TMDB
+                            {link.label}
                           </a>
                         </div>
                         {isSelected && <Check size={16} className="creq-selected-check" />}

@@ -97,6 +97,174 @@ def test_unmatched_tmdb_search_strips_language_region_tags(client, test_db):
     assert candidates[0]["title"] == "Foute Vrienden"
 
 
+def _no_tmdb_results():
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"results": []}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def test_unmatched_tmdb_search_falls_back_to_tvdb_for_shows(client, test_db):
+    """A show TMDB doesn't know comes back from a TVDB title search when the caller opts in."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+    row = {"tvdb_id": "361753", "name": "Foute Vrienden", "year": "2015",
+           "image_url": "https://artworks.thetvdb.com/banners/posters/361753-1.jpg",
+           "overview": "Dutch prank show", "remote_ids": [{"id": "tt4567890", "sourceName": "IMDB"}]}
+
+    with patch("api.poster_manager.http_requests.get", return_value=_no_tmdb_results()), \
+         patch("services.tvdb.search_series", return_value=[row]) as mock_search:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "Foute Vrienden", "year": 2015, "type": "show", "tvdb_fallback": True},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["tmdb_id"] is None
+    assert candidates[0]["tvdb_id"] == 361753
+    assert candidates[0]["imdb_id"] == "tt4567890"
+    assert candidates[0]["year"] == 2015
+    assert candidates[0]["source"] == "tvdb"
+    assert candidates[0]["auto_matched"] is False
+    assert candidates[0]["poster_url"].startswith("https://artworks.thetvdb.com/")
+    assert mock_search.call_args.kwargs["title"] == "Foute Vrienden"
+
+
+def test_unmatched_tmdb_search_tvdb_fallback_pins_carried_id(client, test_db):
+    """A carried tvdb_id resolves the exact series and is pre-selected."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+    record = {"id": 361753, "name": "Foute Vrienden", "year": "2015", "image": "/banners/posters/361753-1.jpg",
+              "remoteIds": [{"id": "tt4567890", "sourceName": "IMDB"}]}
+
+    # The TMDB /find on the tvdb id comes back empty too.
+    with patch("api.poster_manager.http_requests.get", return_value=_no_tmdb_results()), \
+         patch("services.tvdb.fetch_series", return_value=record), \
+         patch("services.tvdb.search_series") as mock_search:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "Foute Vrienden", "year": 2015, "type": "show", "tvdb_id": 361753, "tvdb_fallback": True},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["auto_matched"] is True
+    assert candidates[0]["match_reason"] == "tvdb_id_exact"
+    assert candidates[0]["poster_url"] == "https://artworks.thetvdb.com/banners/posters/361753-1.jpg"
+    mock_search.assert_not_called()
+
+
+def _tmdb_tv_get(results):
+    """TMDB stub: the /search/tv page, empty external ids, and an empty /find."""
+    def fake_get(url, params=None, timeout=None):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock()
+        if "/search/tv" in url:
+            resp.json.return_value = {"results": results}
+        elif url.endswith("/external_ids"):
+            resp.json.return_value = {"imdb_id": None, "tvdb_id": None}
+        else:
+            resp.json.return_value = {"tv_results": [], "movie_results": []}
+        return resp
+    return fake_get
+
+
+LOOSE_TMDB = [{"id": 900, "name": "Zelda's Diary", "first_air_date": "2010-01-01",
+               "poster_path": "/zd.jpg", "overview": "", "popularity": 3.0}]
+
+
+def test_unmatched_tmdb_search_tvdb_rows_join_loose_tmdb_matches(client, test_db):
+    """TMDB only has loose hits → the TVDB title search runs and its exact hit ranks first."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+    row = {"tvdb_id": "77770", "name": "The Legend of Zelda", "year": "1989",
+           "image_url": "https://artworks.thetvdb.com/banners/posters/77770-1.jpg", "overview": ""}
+
+    with patch("api.poster_manager.http_requests.get", side_effect=_tmdb_tv_get(LOOSE_TMDB)), \
+         patch("services.tvdb.search_series", return_value=[row]):
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "The Legend of Zelda", "year": 1989, "type": "show", "tvdb_fallback": True},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert [(c["source"] if c.get("source") else "tmdb", c["title"]) for c in candidates] == [
+        ("tvdb", "The Legend of Zelda"), ("tmdb", "Zelda's Diary"),
+    ]
+    assert candidates[0]["match_reason"] == "exact"
+    assert candidates[0]["auto_matched"] is False
+
+
+def test_unmatched_tmdb_search_carried_tvdb_id_beats_loose_tmdb_matches(client, test_db):
+    """A Sonarr tvdb_id TMDB can't resolve is pinned from TVDB above TMDB's loose rows, no title search."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+    record = {"id": 77770, "name": "The Legend of Zelda", "year": "1989", "image": "/banners/posters/77770-1.jpg"}
+
+    with patch("api.poster_manager.http_requests.get", side_effect=_tmdb_tv_get(LOOSE_TMDB)), \
+         patch("services.tvdb.fetch_series", return_value=record), \
+         patch("services.tvdb.search_series") as mock_search:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "The Legend of Zelda", "year": 1989, "type": "show", "tvdb_id": 77770, "tvdb_fallback": True},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert [c["title"] for c in candidates] == ["The Legend of Zelda", "Zelda's Diary"]
+    assert candidates[0]["auto_matched"] is True
+    assert candidates[0]["tvdb_id"] == 77770
+    mock_search.assert_not_called()
+
+
+def test_unmatched_tmdb_search_skips_tvdb_when_tmdb_match_is_confident(client, test_db):
+    """An exact TMDB title hit is trusted — TVDB is not consulted."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+    exact = [{"id": 901, "name": "The Legend of Zelda", "first_air_date": "1989-09-08",
+              "poster_path": "/lz.jpg", "overview": "", "popularity": 9.0}]
+
+    with patch("api.poster_manager.http_requests.get", side_effect=_tmdb_tv_get(exact)), \
+         patch("services.tvdb.search_series") as mock_search:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "The Legend of Zelda", "year": 1989, "type": "show", "tvdb_fallback": True},
+        )
+
+    assert response.status_code == 200
+    assert [c["tmdb_id"] for c in response.json()["candidates"]] == [901]
+    mock_search.assert_not_called()
+
+
+def test_unmatched_tmdb_search_tvdb_fallback_is_opt_in(client, test_db):
+    """Without the flag (or without a TVDB key) an unknown show is simply no results."""
+    test_db.add(Setting(key="tmdb_api_key", value="fake_key"))
+    test_db.add(Setting(key="tvdb_api_key", value="tvdb-key"))
+    test_db.commit()
+
+    with patch("api.poster_manager.http_requests.get", return_value=_no_tmdb_results()), \
+         patch("services.tvdb.search_series") as mock_search:
+        response = client.post(
+            "/api/posterflow/unmatched-tmdb-search",
+            json={"title": "Foute Vrienden", "year": 2015, "type": "show"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["candidates"] == []
+    mock_search.assert_not_called()
+
+
 def test_unmatched_tmdb_search_returns_scored_candidates(client, test_db):
     """Should return candidates sorted by score with correct fields."""
     test_db.add(Setting(key="tmdb_api_key", value="fake_key"))

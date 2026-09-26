@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'lucide-react'
-import { type TmdbCandidate, searchUnmatchedTmdb } from '../../api/client'
+import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateLink } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
 import { type FallbackItem } from '../../api/posterManager'
@@ -18,10 +18,9 @@ type PosterStyleTmdbSearchProps = {
   claimStatus?: StyleClaimStatus | null
 }
 
+// TMDB rows link to TMDB; TVDB fallback rows (show not on TMDB) link to TheTVDB.
 function getTmdbLink(candidate: TmdbCandidate): string {
-  if (candidate.media_type === 'movie') return `https://www.themoviedb.org/movie/${candidate.tmdb_id}`
-  if (candidate.media_type === 'collection') return `https://www.themoviedb.org/collection/${candidate.tmdb_id}`
-  return `https://www.themoviedb.org/tv/${candidate.tmdb_id}`
+  return tmdbCandidateLink(candidate).url
 }
 
 export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seasons, claimStatus }: PosterStyleTmdbSearchProps) {
@@ -69,6 +68,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
         tmdb_id: item.tmdb_id,
         tvdb_id: item.tvdb_id,
         imdb_id: item.imdb_id,
+        tvdb_fallback: true,
       })
       setCandidates(result.candidates)
     } catch {
@@ -283,7 +283,7 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
                         target="_blank"
                         rel="noopener noreferrer"
                         className="tmdb-icon-btn"
-                        title="Open in TMDB"
+                        title={`Open in ${tmdbCandidateLink(candidate).label}`}
                       >
                         <ExternalLink size={13} />
                         <span>Open</span>

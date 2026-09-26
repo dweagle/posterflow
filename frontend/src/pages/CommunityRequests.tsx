@@ -943,6 +943,7 @@ export default function CommunityRequests() {
     {newRequestModalOpen && (
       <NewCommunityRequestModal
         tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+        tvdbApiKeyConfigured={psdConfig.tvdbEnabled}
         onClose={() => setNewRequestModalOpen(false)}
       />
     )}

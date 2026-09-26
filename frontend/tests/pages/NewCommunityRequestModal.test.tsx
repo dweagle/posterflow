@@ -30,7 +30,8 @@ vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
-vi.mock('../../src/api/client', () => ({
+vi.mock('../../src/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/api/client')>()),
   submitCommunityRequest: (...args: unknown[]) => mockSubmitCommunityRequest(...args),
   searchUnmatchedTmdb: (...args: unknown[]) => mockSearchUnmatchedTmdb(...args),
 }))
@@ -291,6 +292,23 @@ describe('NewCommunityRequestModal', () => {
       )
     })
 
+    it('asks the backend for the TVDB fallback on every search', async () => {
+      mockSearchUnmatchedTmdb.mockResolvedValue({ candidates: [] })
+      const user = userEvent.setup()
+      renderModal()
+      await user.type(screen.getByPlaceholderText(/search tmdb/i), 'Foute Vrienden')
+      await user.click(screen.getByRole('button', { name: /^search$/i }))
+      await waitFor(() => expect(mockSearchUnmatchedTmdb).toHaveBeenCalledOnce())
+      expect(mockSearchUnmatchedTmdb).toHaveBeenCalledWith(expect.objectContaining({ tvdb_fallback: true }))
+    })
+
+    it('notes the TVDB fallback on the heading only when a TVDB key is configured', () => {
+      renderModal({ tvdbApiKeyConfigured: true })
+      expect(screen.getByText(/with tvdb fallback/i)).toBeTruthy()
+      cleanup()
+      renderModal()
+      expect(screen.queryByText(/with tvdb fallback/i)).toBeNull()
+    })
   })
 
   // ── Close behaviour ─────────────────────────────────────────────────────────
