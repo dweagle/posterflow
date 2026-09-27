@@ -6,6 +6,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-09-26
+### Added
+- Community Requests: new "all collection movies" and "original-language" request flags, and a collection's movies now fold into its request card so makers can see what it covers.
+- Community Requests: searches fall back to TheTVDB for shows TMDB can't match.
+- GDrives: new community drives that join the preset list are flagged with a sidebar "New" badge and card tags - cleared when you open the page, subscribe, or dismiss.
+- Maker Plugins: right-click a MOVIE/SHOW chip to run its finish pipeline in Photoshop and both Photopea panels. The Square Art tool now keeps selections pinned at the poster edges. (Photoshop plugin 1.3.0 - reinstall the .ccx to pick it up.)
+
+### Changed
+- Community Requests: the request modal got compact fields, a single style row, and it stays put while you edit.
+- Photoshop Plugin: much snappier buttons and chips.
+
+### Fixed
+- Photopea Plugin: the panel's document watcher no longer kicks you out of text boxes while typing.
+- Community Requests: the custom-request box hides once a TMDB match is selected.
+
 ## [0.16.2] - 2026-09-22
 ### Fixed
 - Dashboard: artwork thumbnails now load when an app password is set. The artwork image route is exempt from the password like the poster routes already were.
