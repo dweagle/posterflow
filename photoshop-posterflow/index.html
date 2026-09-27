@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="style-head"><span class="style-name" data-el="style">—</span></div>
+  <div class="style-head"><span class="style-name" data-el="style">-</span></div>
 
   <div class="head">
     <sp-action-button size="s" data-act="save" title="Save the poster PSD back over the file you opened">💾</sp-action-button>
@@ -17,6 +17,16 @@
     <sp-action-button size="s" class="bolt-tags" data-act="batch" title="Name-tag batch: one JPG per tagged layer (s0/s1/main/show/c)">⚡</sp-action-button>
     <sp-action-button size="s" class="bolt-seasons" data-act="batch-seasons" title="Seasons from one poster: pick a range and export Season 1..N (+ Specials)">⚡</sp-action-button>
     <sp-action-button size="s" data-act="refresh" title="Reload layers from the active document">⟳</sp-action-button>
+    <sp-action-button size="s" data-act="options" title="Finish steps: choose what a right-click MOVIE / SHOW finish does">⚙</sp-action-button>
+  </div>
+
+  <div class="optbar hidden">
+    <div class="optmsg">Right-click finish steps, in run order. Tap a step to skip it (grey) or restore it (green).</div>
+    <div class="opthead">MOVIE · right-click</div>
+    <div class="optrow" data-steps="movie"></div>
+    <div class="opthead">SHOW · right-click = orange ⚡ · Shift+right-click = blue ⚡</div>
+    <div class="optrow" data-steps="show"></div>
+    <div class="linkrow"><sp-action-button size="s" data-act="options-close" title="Close">✕</sp-action-button></div>
   </div>
 
   <div class="batchbar hidden">
@@ -50,19 +60,19 @@
 
   <div class="tools">
     <sp-action-button size="s" data-act="logo" title="Resize and place the SELECTED layer as a logo, using Maker Tools' formula">Place Logo</sp-action-button>
-    <sp-action-button size="s" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered — may overhang the sides)">Fit Poster</sp-action-button>
+    <sp-action-button size="s" data-act="fit" title="Cover-fit the SELECTED poster layer to the template&#039;s bottom guide (25px side borders, top-aligned, centered; may overhang the sides)">Fit Poster</sp-action-button>
   </div>
 
   <div class="trimbar">
     <sp-action-button size="s" data-act="trim" title="Trim off-canvas pixels from ALL layers. Shrinks the saved file, no visible change. Save after.">Trim</sp-action-button>
     <sp-action-button size="s" data-act="logo-export" title="Export the LOGO group as a trimmed transparent PNG.  ·  Alt-click: rename the visible logo layer to &quot;&lt;title&gt; - Logo&quot;">Logo</sp-action-button>
-    <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders — the next JPG / Logo / Poster / Square Art export asks again">📂</sp-action-button>
-    <sp-action-button size="s" data-act="link" title="Posterflow server link — exports queued as 'PS' in the web app open here automatically">🔗</sp-action-button>
+    <sp-action-button size="s" data-act="folders" title="Forget the remembered export folders: the next JPG / Logo / Poster / Square Art export asks again">📂</sp-action-button>
+    <sp-action-button size="s" data-act="link" title="Posterflow server link: exports queued as 'PS' in the web app open here automatically">🔗</sp-action-button>
   </div>
   <div class="trimbar sqbar">
     <div class="sqrow">
       <sp-action-button size="s" class="pexbtn" data-act="poster-export" title="Export the SELECTED poster layer(s) as JPGs named by tag (s1 → Season 1, s0 → Specials, anything else → plain). Alt-click to re-pick the folder.">Poster</sp-action-button>
-      <sp-action-button size="s" data-act="squareart" title="Crop square art: opens the poster art in its own tab with a 1000×1000 selection ready — drag it into place (or pick another preset / drag a marquee square), then press Crop. It saves, closes the tab, and returns to the PSD.">Square Art</sp-action-button>
+      <sp-action-button size="s" data-act="squareart" title="Crop square art: opens the poster art in its own tab with a 1000×1000 selection ready. Drag it into place (or pick another preset / drag a marquee square), then press Crop. It saves, closes the tab, and returns to the PSD.">Square Art</sp-action-button>
       <sp-action-button size="s" class="sqcancel hidden" data-act="sq-cancel" title="Cancel">✕</sp-action-button>
     </div>
     <div class="sqpresets hidden">

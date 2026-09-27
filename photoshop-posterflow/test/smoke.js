@@ -257,6 +257,78 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(alt.consume(undefined) === false, 'missing events are tolerated');
 }
 
+// ---- one-call layer tree (model.js treeFromList): multiGet order + group markers -> the DOM-shaped tree ----
+{
+  const start = (id, name, visible) => ({ layerID: id, name, visible, layerSection: { _enum: 'layerSectionType', _value: 'layerSectionStart' } });
+  const end = (id) => ({ layerID: id, name: '</Layer group>', visible: false, layerSection: { _enum: 'layerSectionType', _value: 'layerSectionEnd' } });
+  const leaf = (id, name, visible) => ({ layerID: id, name, visible, layerSection: { _enum: 'layerSectionType', _value: 'layerSectionContent' } });
+  // Bottom-to-top, as multiGet returns it: [GRADIENT: grad] under [SEASONS: [1990-1999: S1, S2]] under [LOGO: logo art]
+  const list = [
+    end(10), leaf(11, 'grad', true), start(12, 'GRADIENT', true),
+    end(20), end(21), leaf(22, 'Season 2', false), leaf(23, 'Season 1', true), start(24, '1990-1999', true), start(25, 'SEASONS', false),
+    end(30), leaf(31, 'logo art', true), start(32, 'LOGO', true),
+  ];
+  const tree = M.treeFromList(list, constants);
+  ok(tree.length === 3 && tree.map((n) => n.name).join(',') === 'LOGO,SEASONS,GRADIENT', 'top-level order is top-to-bottom like doc.layers (got ' + tree.map((n) => n.name).join(',') + ')');
+  ok(tree[0].kind === 'group' && tree[0].layers.length === 1 && tree[0].layers[0].name === 'logo art', 'LOGO group holds its one leaf');
+  ok(tree[1].layers.length === 1 && tree[1].layers[0].kind === 'group' && tree[1].layers[0].layers.map((n) => n.name).join(',') === 'Season 1,Season 2', 'nested decade keeps child order');
+  ok(tree[1].layers[0].layers[0].id === 23 && tree[1].visible === false && tree[1].layers[0].layers[0].visible === true, 'ids and raw visibility carry through');
+  ok(!JSON.stringify(tree).includes('</Layer group>'), 'end markers never become nodes');
+  const { model, style } = M.readModel({ layers: tree }, constants);
+  ok(style === 'CL2K' && model.seasons.filter((n) => n.r === 'season').length === 2, 'readModel reads the rebuilt tree like a DOM doc');
+  const one = M.treeFromList([leaf(1, 'solo', true)], constants);
+  ok(one.length === 1 && one[0].kind === 'layer' && one[0].layers.length === 0, 'a flat single-layer doc');
+  ok(M.treeFromList([], constants).length === 0, 'an empty list is an empty tree');
+}
+
+// ---- finish tag check (batch.js tagProblems): what an unattended SHOW batch refuses to run on ----
+{
+  const base = 'Show (2020) {tmdb-1}';
+  const probs = (layers) => B.tagProblems(M.scanBatch({ name: base + '.psd', layers }, constants, B.normName(base)), base);
+  const good = probs([grp('POSTER', [lyr('show', true), lyr('s1'), lyr('s2-3')], true), grp('SEASONS', [lyr('Season 1')])]);
+  ok(good.length === 0, 'show + s1 + s2-3 passes clean (got: ' + good.join(' | ') + ')');
+  const untagged = probs([grp('POSTER', [lyr('show', true), lyr('Layer 2')], true)]);
+  ok(untagged.length === 1 && /"Layer 2" is not tagged/.test(untagged[0]), 'an untagged POSTER child is reported (scanBatch alone never sees it)');
+  const dup = probs([grp('POSTER', [lyr('show', true), lyr('s1'), lyr('s1')], true)]);
+  ok(dup.length === 1 && /2 layers are all tagged "s1"/.test(dup[0]), 'two layers both tagged s1 are reported (got: ' + dup.join(' | ') + ')');
+  const overlap = probs([grp('POSTER', [lyr('show', true), lyr('s2'), lyr('s1-3')], true)]);
+  ok(overlap.length === 1 && /"s2" \/ "s1-3"/.test(overlap[0]), 's2 alongside an s1-3 range is reported');
+  const noShow = probs([grp('POSTER', [lyr('s1', true), lyr('s2')], true)]);
+  ok(noShow.length === 1 && /no layer is tagged show/.test(noShow[0]), 'a POSTER group without a show/main layer is reported');
+  ok(probs([grp('ART', [lyr('show', true)], true)])[0] === 'no POSTER group at the top level', 'no root POSTER group is reported');
+  ok(probs([grp('POSTER', [], true)])[0] === 'the POSTER group is empty', 'an empty POSTER group is reported');
+  const alias = probs([grp('POSTER', [lyr('Show (2020) {tmdb-1}', true), lyr('s1')], true)]);
+  ok(alias.length === 0, 'the PSD-name alias counts as the show layer');
+  const both = probs([grp('POSTER', [lyr('main', true), lyr('show')], true)]);
+  ok(both.length === 1 && /"main" \/ "show"/.test(both[0]), 'main + show together is reported once');
+}
+
+// ---- Square Art edge keeper (geometry.js): slide an off-canvas square back, leave the rest alone ----
+{
+  const K = G.keepSquareInside;
+  const sel = (l, t, r, b, cw = 958, ch = 1436) => ({ l, t, r, b, cw, ch });
+  ok(K(sel(0, 100, 958, 1058)) === null, 'the default full-width square sits on the canvas: left alone');
+  const m = K(sel(118, 189, 1076, 1147));   // measured in the panel: dragged right, still a 958 square
+  ok(m && m.side === 958 && m.x === 0 && m.y === 189, 'measured off-right drag resolves to 958 @ 0,189 (keeps its y)');
+  const lft = K(sel(-200, 189, 758, 1147));
+  ok(lft && lft.side === 958 && lft.x === 0 && lft.y === 189, 'off the left pins to x=0');
+  const top = K(sel(0, -50, 958, 908));
+  ok(top && top.x === 0 && top.y === 0, 'off the top pins to y=0');
+  const bot = K(sel(0, 600, 958, 1558));
+  ok(bot && bot.x === 0 && bot.y === 1436 - 958, 'off the bottom pins to the bottom edge');
+  const cor = K(sel(-30, -30, 928, 928));
+  ok(cor && cor.x === 0 && cor.y === 0 && cor.side === 958, 'off a corner pins on both axes');
+  ok(K(sel(129, 100, 829, 800)) === null, 'a 700 preset mid-canvas: left alone');
+  const r7 = K(sel(400, 100, 1100, 800));
+  ok(r7 && r7.side === 700 && r7.x === 258 && r7.y === 100, '700 off the right: x=258, y untouched');
+  const l7 = K(sel(-90, 300, 610, 1000));
+  ok(l7 && l7.side === 700 && l7.x === 0 && l7.y === 300, '700 off the left: x=0, y untouched');
+  const b7 = K(sel(100, 900, 800, 1600));
+  ok(b7 && b7.side === 700 && b7.x === 100 && b7.y === 736, '700 off the bottom: y=736, x untouched');
+  ok(K(sel(50, 50, 650, 650)) === null, 'a freshly drawn 600 inside the canvas: left alone');
+  ok(K(sel(-40, 100, 660, 500)) === null, 'a non-square marquee is left to Crop\'s snap even off-canvas');
+}
+
 // ---- the three panels report the same version ----
 {
   const fs = require('fs'), path = require('path');

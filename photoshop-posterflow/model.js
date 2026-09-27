@@ -134,17 +134,18 @@ function scanBatch(doc, constants, baseNorm) {
   // aliases are unambiguous. Without a POSTER group, fall back to a whole-tree scan — but skip the
   // "poster" alias there, so the template's own POSTER group can never be swallowed as a variant
   // (and then hidden by every export).
-  let pg = -1;
+  let pg = -1, poster = null;
   for (let i = 0; i < doc.layers.length; i++) {
     if (isGroup(doc.layers[i]) && norm(doc.layers[i].name) === 'poster') { pg = i; break; }
   }
   if (pg >= 0) {
     const kids = doc.layers[pg].layers;
+    poster = { count: kids.length, untagged: [] };   // children that aren't tags at all (the finisher's tag check)
     for (let i = 0; i < kids.length; i++) {
       const nm = norm(kids[i].name);
       if (TAG.test(nm) || nm === 'c' || nm === 'cls' || isAlias(nm)) {
         variants.push({ nm: (!!baseNorm && nm === baseNorm) ? 'show' : nm, p: [pg, i], v: kids[i].visible });
-      }
+      } else poster.untagged.push(kids[i].name);
     }
   }
   function sc(layers, pa) {
@@ -164,7 +165,24 @@ function scanBatch(doc, constants, baseNorm) {
     }
   }
   sc(doc.layers, []);
-  return { variants, seasonText, specialsText, clsText, collectionText };
+  return { variants, seasonText, specialsText, clsText, collectionText, poster };
 }
 
-module.exports = { readModel, scanBatch, label, seqLabel, activeSuffix };
+// Rebuild the top-to-bottom layer tree from a multiGet list (bottom-to-top, with the hidden
+// "</Layer group>" end markers). Nodes carry the same name / visible / kind / layers shape as DOM
+// layers, so readModel and scanBatch take them unchanged, plus `id` for batchPlay writes.
+function treeFromList(list, constants) {
+  const root = [], stack = [root];
+  const enumOf = (v) => (v && typeof v === 'object' && '_value' in v) ? v._value : v;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const d = list[i], section = enumOf(d.layerSection);
+    if (section === 'layerSectionEnd') { if (stack.length > 1) stack.pop(); continue; }
+    const group = section === 'layerSectionStart';
+    const node = { id: d.layerID, name: '' + d.name, visible: !!d.visible, kind: group ? constants.LayerKind.GROUP : 'layer', layers: [] };
+    stack[stack.length - 1].push(node);
+    if (group) stack.push(node.layers);
+  }
+  return root;
+}
+
+module.exports = { readModel, scanBatch, treeFromList, label, seqLabel, activeSuffix };

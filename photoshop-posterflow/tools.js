@@ -7,6 +7,7 @@
 
 const { app, core, action } = require('photoshop');
 const G = require('./geometry');
+const { treeFromList } = require('./model');
 const { JPG_QUALITY } = require('./save');
 
 // Neutral density: the export's logo formula has a transparency term that needs the layer's pixels
@@ -96,8 +97,8 @@ async function placeCollectionLogo(doc, constants) {
     let lg = null;
     try {
       lg = findGroupBy(doc.layers, isGroup, /^\s*logos?\s*$/i);
-      if (!lg) { out.warning = 'No LOGO group — the Collection poster was exported without a logo.'; return; }
-      if (!lg.visible) { out.warning = 'The LOGO group is hidden — the Collection poster was exported without a logo.'; return; }
+      if (!lg) { out.warning = 'No LOGO group; the Collection poster was exported without a logo.'; return; }
+      if (!lg.visible) { out.warning = 'The LOGO group is hidden; the Collection poster was exported without a logo.'; return; }
       const manualLayers = [];
       for (let i = 0; i < lg.layers.length; i++) {
         if (/^c\d*$/.test(('' + lg.layers[i].name).trim().toLowerCase())) manualLayers.push(lg.layers[i]);
@@ -131,7 +132,7 @@ async function placeCollectionLogo(doc, constants) {
       if (!(b.right - b.left > 0 && b.bottom - b.top > 0)) {
         await deleteById(doc, out.copyId); out.copyId = null; lg.visible = true;
         out.warning = (manualLayers.length ? 'The manual collection logo (c/c1/c2…) has' : 'The LOGO group has') +
-          ' no visible content — the Collection poster was exported without a logo.';
+          ' no visible content; the Collection poster was exported without a logo.';
         return;
       }
       const H = doc.height;
@@ -144,7 +145,7 @@ async function placeCollectionLogo(doc, constants) {
         const b2 = copy.bounds;   // re-measure and snap to the ruler, keeping the original center
         await copy.translate(((b.left + b.right) / 2) - ((b2.left + b2.right) / 2), targetBottom - b2.bottom);
         out.note = 'Collection: the logo is ' + Math.round(curH) + 'px tall but only ' + Math.round(allowedH) +
-          'px fits above the collection ruler — scaled a temporary copy to ' + (Math.round(pct * 10) / 10) + '% to fit.';
+          'px fits above the collection ruler; scaled a temporary copy to ' + (Math.round(pct * 10) / 10) + '% to fit.';
       } else {
         await copy.translate(0, targetBottom - b.bottom);
       }
@@ -153,7 +154,7 @@ async function placeCollectionLogo(doc, constants) {
       try { if (out.copyId != null) await deleteById(doc, out.copyId); } catch (_) {}
       try { if (lg) lg.visible = true; } catch (_) {}
       out.placed = false; out.copyId = null;
-      out.warning = 'Collection logo placement failed (' + (e && e.message ? e.message : e) + ') — exported without repositioning the logo.';
+      out.warning = 'Collection logo placement failed (' + (e && e.message ? e.message : e) + '); exported without repositioning the logo.';
     }
   }, { commandName: 'Place collection logo' });
   return out;
@@ -407,7 +408,33 @@ async function closeCropDoc(dup, homeDoc) {
   } catch (_) {}
 }
 
+// ---- Layer tree in one call --------------------------------------------------------------
+// Walking the DOM costs a host round-trip per property read (about 1,500 per refresh on a 60-season
+// template, and every click used to trigger one). multiGet fetches name / visibility / id / section
+// marker for every layer in ONE call; treeFromList turns it back into the tree the model code reads.
+// index 1 skips a Background layer (index 0 when present), which no template toggles anyway.
+async function readLayerTree(doc, constants) {
+  const r = await action.batchPlay([{
+    _obj: 'multiGet',
+    _target: { _ref: [{ _ref: 'document', _id: doc.id }] },
+    extendedReference: [['name', 'visible', 'layerID', 'layerSection'], { _obj: 'layer', index: 1, count: -1 }],
+    options: { failOnMissingProperty: false, failOnMissingElement: false },
+  }], {});
+  const list = r && r[0] && r[0].list;
+  if (!Array.isArray(list)) throw new Error('multiGet returned no layer list');
+  return treeFromList(list, constants);
+}
+
+// Show / hide layers by id: one batchPlay in one modal scope, instead of a DOM write per layer.
+async function setLayersVisible(pairs, commandName) {
+  if (!pairs.length) return;
+  await core.executeAsModal(async () => {
+    await action.batchPlay(pairs.map((p) => ({ _obj: p.v ? 'show' : 'hide', null: [{ _ref: 'layer', _id: p.id }] })), {});
+  }, { commandName: commandName || 'Toggle poster layers' });
+}
+
 module.exports = {
+  readLayerTree, setLayersVisible,
   placeSelected, trim, exportLogoPng, placeCollectionLogo, removeCollectionLogo, forceGradientVisible,
   hideManualCollectionLogos, LOGO_DENSITY, makeCropDoc, setSquareSelection, readSelectionBounds,
   selectTool, cropSaveSquare, closeCropDoc, exportSelectedLayersJpg,

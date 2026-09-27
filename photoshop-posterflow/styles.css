@@ -51,6 +51,11 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
    fields, so the field has none. */
 .linkbar sp-textfield.linkinput { display: block; width: 100%; margin: 0 0 3px 0; }
 .linkbar sp-label { display: block; margin: 0; }
+.optbar { flex-shrink: 0; padding: 5px 8px 2px 8px; background: rgba(0, 0, 0, 0.15); border-bottom: 1px solid var(--uxp-host-border-color); }
+.optbar.hidden { display: none; }
+.optmsg { color: var(--uxp-host-text-color); font-size: 10px; margin-bottom: 4px; }
+.opthead { color: var(--uxp-host-text-color); font-size: 10px; font-weight: 700; margin: 3px 0 2px 0; }
+.optrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
 .linkrow { display: flex; justify-content: center; }
 .linkrow sp-action-button { margin: 0 2px; }
 
@@ -92,7 +97,7 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .sqcancel.hidden { display: none; }
 
 /* Hover tip for the div chips (UXP shows `title` tooltips only on Spectrum widgets). */
-.tip { position: absolute; left: 0; top: 0; max-width: 200px; padding: 3px 6px; font-size: 10px; line-height: 1.3; color: var(--uxp-host-text-color); background: var(--uxp-host-background-color); border: 1px solid var(--uxp-host-border-color); border-radius: 4px; }
+.tip { position: absolute; z-index: 100; left: 0; top: 0; max-width: 200px; padding: 3px 6px; font-size: 10px; line-height: 1.3; color: #f0f0f0; background-color: #262626; border: 1px solid #6a6a6a; border-radius: 4px; }
 .tip.hidden { display: none; }
 
 .hidden { display: none; }

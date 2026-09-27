@@ -170,17 +170,17 @@ function buildTagItems(variants, texts, baseName) {
       const names = [];
       cands.forEach((c) => { if (names.indexOf(c.layer.nm) < 0) names.push(c.layer.nm); });
       const combo = names.join('|');
-      if (names.length > 1 && !warnedCombos[combo]) {
+      if (!warnedCombos[combo]) {
         warnedCombos[combo] = true;
-        warnings.push(cands.length + ' layers are tagged "' + names.join('" / "') + '" — exported ' +
-          (vis ? 'the topmost visible one' : 'the topmost one (none were visible)') + ' and ignored the rest.');
+        warnings.push(cands.length + ' layers are ' + (names.length > 1 ? 'tagged "' + names.join('" / "') + '"' : 'all tagged "' + names[0] + '"')
+          + '; exported ' + (vis ? 'the topmost visible one' : 'the topmost one (none were visible)') + ' and ignored the rest.');
       }
     }
     seen[k] = true;
     chosen.push(pick);
   });
   if (seen['cls'] && seen['s1'])
-    warnings.push('Both "s1" and "cls" are tagged — they export to the same " - Season 1" file, so the later one overwrites the other.');
+    warnings.push('Both "s1" and "cls" are tagged; they export to the same " - Season 1" file, so the later one overwrites the other.');
 
   chosen.sort((a, b) => a.tag.sort - b.tag.sort);
   const collectionBase = baseIsCollection(baseName);
@@ -227,7 +227,22 @@ const parseTagFilter = (str) => {
   return keys;
 };
 
+// Pre-flight for an UNATTENDED tag batch (the SHOW finisher): buildTagItems' warnings, plus what it
+// can't see — POSTER children that aren't tags at all (scanBatch never collects them) — and a show
+// layer to lead with. Empty = safe to run.
+function tagProblems(scan, baseName) {
+  if (!scan.poster) return ['no POSTER group at the top level'];
+  if (!scan.poster.count) return ['the POSTER group is empty'];
+  const problems = scan.poster.untagged.map((nm) => '"' + nm + '" is not tagged');
+  const built = buildTagItems(scan.variants,
+    { season: scan.seasonText, specials: scan.specialsText, cls: scan.clsText, collection: scan.collectionText }, baseName);
+  built.warnings.forEach((w) => problems.push(w));
+  if (!built.items.some((it) => it.key === 'show')) problems.push('no layer is tagged show / main');
+  return problems;
+}
+
 module.exports = {
+  tagProblems,
   seasonNumOf, seasonChanges, yearChanges, singleChanges,
   conventionSuffix, buildConventionItems, parseRange, seasonItems, yearItems, isYearRange,
   MAX_RANGE, normName, baseIsCollection, parseTagName, buildTagItems, parseTagFilter,

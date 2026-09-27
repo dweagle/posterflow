@@ -45,4 +45,18 @@ const computePosterFitGeometry = (srcW, srcH, cw, bottomY) => {
   return { width: w, height: h, left: Math.floor((cw - w) / 2), top: border };
 };
 
-module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry };
+// Square Art edge keeper. Photoshop does NOT clip a selection dragged past the canvas edge: it keeps
+// its full size and sits partly outside (measured l=118 r=1076 on a 958-wide canvas, still 958 square),
+// and Crop's x/y clamp would then save a different region than the one on screen. Returns the square to
+// re-select, or null when there is nothing to fix. Clamping the TOP-LEFT pins the square to the edge it
+// crossed and leaves the other axis where the user put it. Non-square marquees are left to Crop's snap.
+const keepSquareInside = (s) => {
+  const w = Math.round(s.r - s.l), h = Math.round(s.b - s.t);
+  if (Math.abs(w - h) > 2) return null;
+  if (s.l >= 0 && s.t >= 0 && s.r <= s.cw && s.b <= s.ch) return null;
+  const side = Math.min(w, s.cw, s.ch);
+  const clamp = (v, hi) => Math.max(0, Math.min(Math.round(v), hi));
+  return { side, x: clamp(s.l, s.cw - side), y: clamp(s.t, s.ch - side) };
+};
+
+module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry, keepSquareInside };
