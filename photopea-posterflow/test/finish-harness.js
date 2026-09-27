@@ -48,7 +48,7 @@ function run(caseName, opts) {
         window.fetch = async () => ({ ok: true, status: 200, json: async () => ({ folder: '/exports' }) });
         window.URL.createObjectURL = () => 'blob:x'; window.URL.revokeObjectURL = () => {};
         window.HTMLAnchorElement.prototype.click = () => {};
-        try { window.localStorage.setItem('posterflow.finishSteps', JSON.stringify(opts.steps || {})); } catch (_) {}
+        try { window.localStorage.setItem('posterflow.finishSteps', JSON.stringify(Object.assign({ v: 2 }, opts.steps || {}))); } catch (_) {}   // v2: the panels ignore older records
       } });
     const w = dom.window;
     const notes = () => Array.from(w.document.querySelectorAll('.notes .msg')).map((n) => n.textContent);

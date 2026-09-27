@@ -60,6 +60,7 @@
   .opthead { color: #cfcfcf; font-size: 10px; font-weight: 700; margin: 4px 0 2px; }
   .optrow { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
   .optrow .chip { font-size: 11px; padding: 2px 5px; }
+  .optrow.optclose { margin-top: 8px; }
   .batchhelp b { color: #cfcfcf; font-weight: 600; }
   .batchhelp.hidden { display: none; }
   .batchinput { flex: 1; min-width: 0; background: #1f1f24; border: 1px solid #3a3a42; color: #e6e6e6;
@@ -78,7 +79,7 @@
   /* Tag chips (SP / C / CLS / MOVIE / SHOW) match the season number chips' height and 28px minimum. */
   .singles .chip { padding: 3px 5px; min-width: 28px; }
   .singles .break { flex-basis: 100%; height: 0; }
-  /* At the full panel width (224px) all five tag chips fit on one line and the season rows get roomier chips;
+  /* At the full panel width (228px) all five tag chips fit on one line and the season rows get roomier chips;
      narrower hosts (a gallery entry published at the old 196px) keep the two-line layout. */
   @media (min-width: 216px) { .singles .break { display: none; } .chip.num { width: 32px; } }
   /* MOVIE / SHOW toggle nothing: plain click clears the season text, Alt-click tags a layer. After .chip.off so the tint wins. */
@@ -118,7 +119,7 @@
     <div class="optrow" data-steps="movie"></div>
     <div class="opthead">SHOW · right-click = orange ⚡ · Shift+right-click = blue ⚡</div>
     <div class="optrow" data-steps="show"></div>
-    <div class="optrow"><button class="btn" data-act="options-close" title="Close">✕</button></div>
+    <div class="optrow optclose"><button class="btn" data-act="options-close" title="Close">✕</button></div>
   </div>
   <div class="batchbar hidden">
     <div class="batchmsg"></div>
@@ -1764,11 +1765,10 @@
   const settleAll = (ok, reason) => Object.keys(finWaits).forEach((k) => settle(k, ok, { reason }));
   const must = (r) => { if (!r.ok) throw new Error(r.reason || 'failed'); return r; };
 
-  // ⚙ finish steps: every step can be unticked; the order never changes. Defaults: everything on
-  // except trim (it deletes off-canvas pixels and the PSD saves right after).
+  // ⚙ finish steps: every step can be unticked; the order never changes. Every step is on by default.
   const STEP_DEFAULTS = {
-    movie: { clear: true, main: true, logoName: true, trim: false, save: true, jpg: true, logoPng: true, squareArt: true },
-    show:  { clear: true, logoName: true, trim: false, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
+    movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
+    show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
   };
   const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     movie: [
@@ -1798,6 +1798,7 @@
     const out = { movie: Object.assign({}, STEP_DEFAULTS.movie), show: Object.assign({}, STEP_DEFAULTS.show) };
     try {
       const saved = JSON.parse(localStorage.getItem('posterflow.finishSteps') || '{}');
+      if (saved.v !== 2) return out;   // choices stored before every step defaulted on are dropped
       ['movie', 'show'].forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
     } catch (_) {}
     return out;
@@ -1813,7 +1814,7 @@
         c.title = why;
         c.addEventListener('click', () => {
           steps[f][k] = !steps[f][k];
-          try { localStorage.setItem('posterflow.finishSteps', JSON.stringify(steps)); } catch (_) {}
+          try { localStorage.setItem('posterflow.finishSteps', JSON.stringify(Object.assign({ v: 2 }, steps))); } catch (_) {}
           renderOptions(); render();   // re-tint here; the MOVIE / SHOW chip tips list whichever steps are on
         });
         row.appendChild(c);

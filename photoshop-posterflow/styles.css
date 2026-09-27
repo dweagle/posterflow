@@ -56,6 +56,7 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .optmsg { color: var(--uxp-host-text-color); font-size: 10px; margin-bottom: 4px; }
 .opthead { color: var(--uxp-host-text-color); font-size: 10px; font-weight: 700; margin: 3px 0 2px 0; }
 .optrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
+.optbar .linkrow { margin-top: 8px; }
 .linkrow { display: flex; justify-content: center; }
 .linkrow sp-action-button { margin: 0 2px; }
 

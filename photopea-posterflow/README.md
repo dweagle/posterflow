@@ -74,8 +74,8 @@ can also point them at the install page:
 
 ### Panel size
 
-`manifest.json` sets `"w": 224, "h": 600` so the panel opens at the same size as the in-app
-plugin (224px fits the SP · C · CLS · MOVIE · SHOW row on one line; the panel keeps a two-line
+`manifest.json` sets `"w": 228, "h": 600` so the panel opens at the same size as the in-app
+plugin (228px fits the SP · C · CLS · MOVIE · SHOW row on one line; the panel keeps a two-line
 fallback for narrower hosts). **Heads-up:** unlike the HTML (fetched live from
 `url`), Photopea copies `name` / `icon` / `w` / `h` into its gallery record **when you publish**.
 So changing the size means **re-publishing / updating the gallery entry** — editing `manifest.json`

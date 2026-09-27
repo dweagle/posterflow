@@ -681,10 +681,10 @@ async function onSqCancel() {
 let finishBusy = false;   // a pipeline is running, or the blue path is waiting on the range box
 let finishWait = null;    // blue: { docId, resume(result) } until Run / ✕ / a bolt click
 // ⚙ finish steps: every step of a right-click finish can be unticked; the order never changes.
-// Defaults: everything on except trim (it deletes off-canvas pixels and the PSD saves right after).
+// Every step is on by default.
 const STEP_DEFAULTS = {
-  movie: { clear: true, main: true, logoName: true, trim: false, save: true, jpg: true, logoPng: true, squareArt: true },
-  show:  { clear: true, logoName: true, trim: false, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
+  movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
+  show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
 };
 const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
   movie: [
@@ -714,6 +714,7 @@ function loadSteps() {
   const out = { movie: Object.assign({}, STEP_DEFAULTS.movie), show: Object.assign({}, STEP_DEFAULTS.show) };
   try {
     const saved = JSON.parse(localStorage.getItem('posterflow.finishSteps') || '{}');
+    if (saved.v !== 2) return out;   // choices stored before every step defaulted on are dropped
     ['movie', 'show'].forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
   } catch (_) {}
   return out;
@@ -729,7 +730,7 @@ function renderOptions() {   // one toggle chip per step, green = runs, grey = s
       tip(c, why);
       c.addEventListener('click', () => {
         steps[f][k] = !steps[f][k];
-        try { localStorage.setItem('posterflow.finishSteps', JSON.stringify(steps)); } catch (_) {}
+        try { localStorage.setItem('posterflow.finishSteps', JSON.stringify(Object.assign({ v: 2 }, steps))); } catch (_) {}
         renderOptions(); refresh();   // re-tint here; the MOVIE / SHOW chip tips list whichever steps are on
       });
       row.appendChild(c);
