@@ -10,5 +10,6 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
+      - UMASK=022
       - TZ=UTC
     restart: unless-stopped

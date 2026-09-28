@@ -79,6 +79,7 @@ services:
     environment:
       - PUID=1000        # Host UID that owns the mount points above.
       - PGID=1000        # Host GID. Both default to 1000 if unset.
+      - UMASK=022        # Optional. Mode mask for files the app creates. 002 makes them group-writable.
       - TZ=America/New_York   # Host timezone. Drives scheduler local-time interpretation.
       - DEBUG=false      # Optional. true forces file logging to DEBUG on startup.
       - LOG_LEVEL=INFO   # Optional. File log level when DEBUG=false.
@@ -114,6 +115,7 @@ docker run -d \
 |----------|---------|-------------|
 | `PUID` | `1000` | User ID for file ownership |
 | `PGID` | `1000` | Group ID for file ownership |
+| `UMASK` | `022` | Permission mask for files and folders the container creates (posters, PSD exports, synced drive files). `022` gives `644`/`755`. Set `002` when other users in the `PGID` group need to save into those files over SMB, e.g. Photoshop on macOS writing in place. Applies to new files only; existing files keep their mode. |
 | `TZ` | `UTC` | Timezone |
 | `DEBUG` | `false` | Enable debug logging on startup (can be toggled in-app) |
 | `LOG_LEVEL` | `INFO` | File log verbosity when debug mode is off |
