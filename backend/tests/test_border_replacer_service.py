@@ -1168,3 +1168,188 @@ def test_gradient_style_without_solid_colors_applies_gradient(test_db, tmp_path)
     ends = (top, bottom)
     assert any(px[0] > px[2] + 50 for px in ends)  # a reddish end
     assert any(px[2] > px[0] + 50 for px in ends)  # a bluish end
+
+
+def test_corner_radius_fills_art_corners_with_band():
+    """A corner radius wider than the band paints the border color into the art's four
+    corners (a rounded inner edge) and leaves the straight edges and center untouched."""
+    source = Image.new("RGB", (1000, 1500), (0, 0, 255))
+    bw = 26
+
+    out = _render_bordered_image(source, bw, (255, 255, 255), {"style": "solid", "corner_radius": 80})
+
+    # The art's square corners are now border color on all four sides.
+    assert out.getpixel((bw, bw)) == (255, 255, 255)
+    assert out.getpixel((999 - bw, bw)) == (255, 255, 255)
+    assert out.getpixel((bw, 1499 - bw)) == (255, 255, 255)
+    assert out.getpixel((999 - bw, 1499 - bw)) == (255, 255, 255)
+    # Edge midpoints, the arc's center and the poster center keep the art.
+    inner_r = 80 - bw
+    assert out.getpixel((500, bw)) == (0, 0, 255)
+    assert out.getpixel((bw, 750)) == (0, 0, 255)
+    assert out.getpixel((bw + inner_r, bw + inner_r)) == (0, 0, 255)
+    assert out.getpixel((500, 750)) == (0, 0, 255)
+
+
+def test_corner_radius_within_band_is_noop():
+    """A radius no wider than the band leaves square corners: byte-identical to no radius."""
+    source = Image.new("RGB", (1000, 1500), (10, 20, 30))
+    plain = _render_bordered_image(source, 26, (200, 100, 50), {"style": "solid"})
+    zero = _render_bordered_image(source, 26, (200, 100, 50), {"style": "solid", "corner_radius": 0})
+    within = _render_bordered_image(source, 26, (200, 100, 50), {"style": "solid", "corner_radius": 26})
+    assert plain.tobytes() == zero.tobytes() == within.tobytes()
+
+
+def test_inner_glow_follows_rounded_corner():
+    """With a corner radius the glow rings hug the rounded inner edge: the art just inside
+    the arc is darkened, while the filled corner stays pure border color."""
+    import math
+
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 30
+    out = _render_bordered_image(
+        source,
+        bw,
+        (255, 255, 255),
+        {"style": "solid", "inner_effect": "glow", "inner_color": "#000000", "inner_opacity": 100, "inner_width": 10, "corner_radius": 90},
+    )
+
+    inner_r = 90 - bw
+    center = bw + inner_r
+    d = (inner_r - 2) / math.sqrt(2)  # 45° point two px inside the arc
+    inside_arc = out.getpixel((round(center - d), round(center - d)))
+    assert sum(inside_arc) < 3 * 200          # darkened by the glow
+    assert out.getpixel((bw + 2, bw + 2)) == (255, 255, 255)  # filled corner, no glow bleed
+    assert out.getpixel((500, bw)) == (0, 0, 0)               # straight edge unchanged
+    assert out.getpixel((500, 750)) == (255, 255, 255)
+
+
+def test_corner_radius_fills_gradient_band_into_corners():
+    """Gradient borders fill the corners with the gradient, not a flat color."""
+    source = Image.new("RGB", (1000, 1500), (0, 255, 0))
+    out = _render_bordered_image(
+        source,
+        26,
+        (0, 0, 0),
+        {"style": "gradient", "gradient_colors": ["#FF0000", "#0000FF"], "gradient_direction": "vertical", "corner_radius": 80},
+    )
+    ear = out.getpixel((26, 26))
+    assert ear[0] > 150 and ear[1] < 50   # reddish top of the gradient, not the green art
+    assert out.getpixel((500, 750)) == (0, 255, 0)
+
+
+def test_corner_radius_applies_with_remove_existing():
+    """The 'remove existing border first' path rounds the corners too."""
+    source = _poster_with_border()
+    out = _render_bordered_image(source, 26, (255, 255, 255), {"style": "solid", "remove_existing": True, "corner_radius": 80})
+    assert out.size == (1000, 1500)
+    assert out.getpixel((26, 26)) == (255, 255, 255)
+    assert out.getpixel((500, 750)) != (255, 255, 255)
+
+
+def test_corner_radius_ignored_for_image_overlay(tmp_path):
+    """Image frames carry their own inner edge, so a corner radius leaves them unchanged."""
+    frame = Image.new("RGBA", (1000, 1500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rectangle([0, 0, 999, 1499], outline=(255, 0, 255, 255), width=26)
+    frame_path = tmp_path / "frame.png"
+    frame.save(frame_path)
+    source = Image.new("RGB", (1000, 1500), (0, 0, 255))
+
+    plain = _render_bordered_image(source, 26, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path)})
+    rounded = _render_bordered_image(source, 26, (0, 0, 0), {"style": "image", "overlay_path": str(frame_path), "corner_radius": 80})
+    assert plain.tobytes() == rounded.tobytes()
+
+
+def test_settings_hash_stable_without_corner_radius_and_changes_with_it(test_db):
+    """corner_radius only joins the hash when set, so upgrading doesn't reprocess every poster."""
+    service = BorderReplacerService(test_db)
+    base = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"style": "solid"})
+    zero = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"style": "solid", "corner_radius": 0})
+    rounded = service.calculate_settings_hash(["#000000"], 26, [], style_opts={"style": "solid", "corner_radius": 60})
+    assert base == zero
+    assert base != rounded
+
+
+def test_build_border_run_settings_reads_corner_radius(test_db):
+    test_db.add(Setting(key="border_replacer_corner_radius", value="64"))
+    test_db.add(Setting(key="border_replacer_season_mode", value="custom"))
+    test_db.add(Setting(key="border_replacer_season_corner_radius", value="40"))
+    test_db.commit()
+
+    kwargs = build_border_run_settings(test_db)
+    assert kwargs["style_opts"]["corner_radius"] == 64
+    assert kwargs["season_style_opts"]["corner_radius"] == 40
+
+
+def test_holiday_style_opts_parse_corner_radius():
+    from services.border_replacer import build_holiday_style_opts
+
+    assert build_holiday_style_opts({"style": "solid", "corner_radius": "72"}, None)["corner_radius"] == 72
+    assert build_holiday_style_opts({"style": "solid"}, None)["corner_radius"] == 0
+
+
+def test_rounded_corner_continues_baked_glow_around_arc():
+    """Rounded corners carry the template's baked-in inner glow around the arc even with no
+    inner effect configured, and leave the straight edges (which already have it) untouched."""
+    import math
+    from services.border_replacer import _baked_glow
+
+    source = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    bw = 26
+    out = _render_bordered_image(source, bw, (255, 255, 255), {"style": "solid", "corner_radius": 90})
+
+    r = 90 - bw
+    c = bw + r                           # arc center
+    d = (r - 3) / math.sqrt(2)           # 45°, three px inside the arc
+    p = out.getpixel((round(c - d), round(c - d)))
+    expected = round(255 * _baked_glow(3))
+    assert p[0] == p[1] == p[2]
+    assert abs(p[0] - expected) <= 12
+    assert out.getpixel((500, bw)) == (255, 255, 255)          # straight edge: nothing added
+    assert out.getpixel((bw + r + 5, bw)) == (255, 255, 255)   # just past the tangent point
+    assert out.getpixel((c, c)) == (255, 255, 255)             # arc center, beyond the glow
+
+
+def test_corner_glow_patch_geometry():
+    """The corner patch darkens only where the arc is nearer than the square edge."""
+    from services.border_replacer import _corner_glow_patch
+
+    patch = _corner_glow_patch(40, 0)
+    assert patch.size == (40, 40)
+    assert patch.getpixel((39, 0)) == 0      # tangent pixel on the top edge
+    assert patch.getpixel((0, 39)) == 0      # tangent pixel on the left edge
+    assert patch.getpixel((39, 39)) == 0     # deep inside, beyond the glow
+    assert patch.getpixel((13, 13)) > 60     # two px inside the arc at 45°
+    # Once the crop already reached past the whole glow there is nothing to continue.
+    assert _corner_glow_patch(40, 30).getpixel((13, 13)) == 0
+
+
+def test_narrow_band_replaces_whole_template_border():
+    """A band thinner than the poster's own 26 px border crops the whole border, so the
+    visible border is exactly the band width on the straight edges AND at rounded corners
+    (no leftover stroke inside the band)."""
+    source = _poster_with_border()  # green 26 px edge, blue-ish gradient interior
+    out = _render_bordered_image(source, 10, (255, 0, 0), {"style": "solid", "corner_radius": 60})
+
+    assert out.getpixel((5, 750)) == (255, 0, 0)                 # the new band
+    for x in (12, 18, 25):                                        # where the old stroke used to sit
+        p = out.getpixel((x, 750))
+        assert p[2] == 255 and p[1] < 100, p                     # interior art, not green
+
+    # Corner: the band ring is 10 px around the arc too (center at 59.5, inner radius 50).
+    in_band = round(59.5 - 53 / 2 ** 0.5)
+    in_art = round(59.5 - 46 / 2 ** 0.5)
+    assert out.getpixel((in_band, in_band)) == (255, 0, 0)
+    art = out.getpixel((in_art, in_art))     # interior art under the corner glow, not the band
+    assert art[0] < 100 and art[2] > 120, art
+
+
+def test_wide_band_still_crops_its_own_width():
+    """Bands at or above the template border keep the DAPS geometry (crop = band, no stretch)."""
+    source = Image.new("RGB", (1000, 1500), (10, 20, 30))
+    bw = 30
+    cropped = _crop_for(source, bw)
+    legacy = Image.new("RGB", (cropped.width + 2 * bw, cropped.height + 2 * bw), (200, 100, 50))
+    legacy.paste(cropped, (bw, bw))
+    legacy = legacy.resize((1000, 1500)).convert("RGB")
+    assert _render_bordered_image(source, bw, (200, 100, 50), {"style": "solid"}).tobytes() == legacy.tobytes()

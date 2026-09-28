@@ -299,6 +299,26 @@ input, textarea, select {
   opacity: 1;
 }
 
+/* Tooltip that carries a picture: sized to the image, caption under it */
+.toolbar-tooltip.tooltip-image {
+  width: max-content;
+  padding: 0.4rem;
+}
+
+.toolbar-tooltip.tooltip-image img {
+  display: block;
+  width: 482px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.toolbar-tooltip.tooltip-image small {
+  display: block;
+  margin-top: 0.35rem;
+  color: #aaa;
+}
+
 .action-buttons {
   display: flex;
   flex-wrap: wrap;

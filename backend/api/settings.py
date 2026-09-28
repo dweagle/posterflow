@@ -108,6 +108,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_inner_opacity",
     "border_replacer_inner_width",
     "border_replacer_fade_width",
+    "border_replacer_corner_radius",
     # Border Replacer — season border style / inner effects
     "border_replacer_season_style",
     "border_replacer_season_overlay_image",
@@ -119,6 +120,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "border_replacer_season_inner_opacity",
     "border_replacer_season_inner_width",
     "border_replacer_season_fade_width",
+    "border_replacer_season_corner_radius",
     # Border Replacer — Plex label/genre/collection rules
     "border_replacer_plex_rules",
     "border_replacer_rule_run_types",

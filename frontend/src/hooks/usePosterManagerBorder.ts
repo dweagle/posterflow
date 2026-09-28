@@ -46,6 +46,8 @@ export interface SeasonStyle {
   innerOpacity: number
   innerWidth: number
   fadeWidth: number
+  // Client corner radius (px on a 1000×1500 poster); 0 = square corners.
+  cornerRadius: number
 }
 
 // Default border-style options — the single source of truth for the main border,
@@ -62,6 +64,7 @@ const DEFAULT_BORDER_STYLE: SeasonStyle = {
   innerOpacity: 70,
   innerWidth: 8,
   fadeWidth: 8,
+  cornerRadius: 0,
 }
 
 // The season/holiday code refers to these same defaults by their SeasonStyle name.
@@ -91,6 +94,7 @@ export interface OriginalBorderSettings {
   innerOpacity: number
   innerWidth: number
   fadeWidth: number
+  cornerRadius: number
   plexRules: PlexBorderRule[]
   ruleRunTypes: RuleRunType[]
   ruleLibraries: string[]
@@ -122,6 +126,7 @@ const styleToSnake = (s: SeasonStyle) => ({
   inner_opacity: s.innerOpacity,
   inner_width: s.innerWidth,
   fade_width: s.fadeWidth,
+  corner_radius: s.cornerRadius,
 })
 
 const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImage?: string): SeasonStyle => {
@@ -141,6 +146,7 @@ const snakeToStyle = (raw: Record<string, unknown> | undefined, legacyBorderImag
     innerOpacity: num(r.inner_opacity, 70),
     innerWidth: num(r.inner_width, 8),
     fadeWidth: num(r.fade_width, 8),
+    cornerRadius: num(r.corner_radius, 0),
   }
 }
 
@@ -218,6 +224,7 @@ export const usePosterManagerBorder = ({
   const [innerOpacity, setInnerOpacity] = useState(DEFAULT_BORDER_STYLE.innerOpacity)
   const [innerWidth, setInnerWidth] = useState(DEFAULT_BORDER_STYLE.innerWidth)
   const [fadeWidth, setFadeWidth] = useState(DEFAULT_BORDER_STYLE.fadeWidth)
+  const [cornerRadius, setCornerRadius] = useState(DEFAULT_BORDER_STYLE.cornerRadius)
   const [plexRules, setPlexRules] = useState<PlexBorderRule[]>([])
   const [ruleRunTypes, setRuleRunTypes] = useState<RuleRunType[]>([...RULE_RUN_TYPES])
   const [ruleLibraries, setRuleLibraries] = useState<Set<string>>(new Set())
@@ -335,6 +342,7 @@ export const usePosterManagerBorder = ({
       loadedSeasonStyle.innerOpacity = parseIntOr(settings['border_replacer_season_inner_opacity'], 70)
       loadedSeasonStyle.innerWidth = parseIntOr(settings['border_replacer_season_inner_width'], 8)
       loadedSeasonStyle.fadeWidth = parseIntOr(settings['border_replacer_season_fade_width'], 8)
+      loadedSeasonStyle.cornerRadius = parseIntOr(settings['border_replacer_season_corner_radius'], 0)
       setSeasonStyle(loadedSeasonStyle)
 
       const styleStr = settings['border_replacer_style'] || 'solid'
@@ -377,6 +385,8 @@ export const usePosterManagerBorder = ({
       setInnerWidth(loadedInnerWidth)
       const loadedFadeWidth = parseIntOr(settings['border_replacer_fade_width'], 8)
       setFadeWidth(loadedFadeWidth)
+      const loadedCornerRadius = parseIntOr(settings['border_replacer_corner_radius'], 0)
+      setCornerRadius(loadedCornerRadius)
 
       const loadedPlexRules = parsePlexRules(settings['border_replacer_plex_rules'])
       setPlexRules(loadedPlexRules)
@@ -426,6 +436,7 @@ export const usePosterManagerBorder = ({
         innerOpacity: loadedInnerOpacity,
         innerWidth: loadedInnerWidth,
         fadeWidth: loadedFadeWidth,
+        cornerRadius: loadedCornerRadius,
         plexRules: loadedPlexRules,
         ruleRunTypes: loadedRuleRunTypes,
         ruleLibraries: loadedRuleLibraries,
@@ -465,6 +476,7 @@ export const usePosterManagerBorder = ({
         border_replacer_season_inner_opacity: seasonStyle.innerOpacity.toString(),
         border_replacer_season_inner_width: seasonStyle.innerWidth.toString(),
         border_replacer_season_fade_width: seasonStyle.fadeWidth.toString(),
+        border_replacer_season_corner_radius: seasonStyle.cornerRadius.toString(),
         border_replacer_style: borderStyle,
         border_replacer_overlay_image: overlayImage,
         border_replacer_overlay_remove_existing: overlayRemoveExisting ? 'true' : 'false',
@@ -475,6 +487,7 @@ export const usePosterManagerBorder = ({
         border_replacer_inner_opacity: innerOpacity.toString(),
         border_replacer_inner_width: innerWidth.toString(),
         border_replacer_fade_width: fadeWidth.toString(),
+        border_replacer_corner_radius: cornerRadius.toString(),
         border_replacer_plex_rules: JSON.stringify(serializePlexRules(plexRules)),
         border_replacer_rule_run_types: ruleRunTypes.join(','),
         border_replacer_rule_libraries: JSON.stringify(Array.from(ruleLibraries)),
@@ -504,6 +517,7 @@ export const usePosterManagerBorder = ({
         innerOpacity,
         innerWidth,
         fadeWidth,
+        cornerRadius,
         plexRules,
         ruleRunTypes,
         ruleLibraries: Array.from(ruleLibraries),
@@ -603,6 +617,7 @@ export const usePosterManagerBorder = ({
     setInnerOpacity(original.innerOpacity)
     setInnerWidth(original.innerWidth)
     setFadeWidth(original.fadeWidth)
+    setCornerRadius(original.cornerRadius)
     setPlexRules([...original.plexRules])
     setRuleRunTypes([...original.ruleRunTypes])
     setRuleLibraries(new Set(original.ruleLibraries))
@@ -635,6 +650,7 @@ export const usePosterManagerBorder = ({
     setInnerOpacity(DEFAULT_BORDER_STYLE.innerOpacity)
     setInnerWidth(DEFAULT_BORDER_STYLE.innerWidth)
     setFadeWidth(DEFAULT_BORDER_STYLE.fadeWidth)
+    setCornerRadius(DEFAULT_BORDER_STYLE.cornerRadius)
     setPlexRules([])
     setRuleRunTypes([...RULE_RUN_TYPES])
     setRuleLibraries(new Set())
@@ -667,6 +683,7 @@ export const usePosterManagerBorder = ({
     innerOpacity,
     innerWidth,
     fadeWidth,
+    cornerRadius,
     plexRules,
     ruleRunTypes,
     ruleLibraries,
@@ -692,6 +709,7 @@ export const usePosterManagerBorder = ({
     setInnerOpacity,
     setInnerWidth,
     setFadeWidth,
+    setCornerRadius,
     setPlexRules,
     toggleRuleRunType,
     toggleRuleLibrary,

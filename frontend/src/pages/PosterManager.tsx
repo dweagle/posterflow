@@ -198,6 +198,7 @@ function PosterManager() {
     innerOpacity,
     innerWidth,
     fadeWidth,
+    cornerRadius,
     setBorderStyle,
     setOverlayImage,
     setOverlayRemoveExisting,
@@ -208,6 +209,7 @@ function PosterManager() {
     setInnerOpacity,
     setInnerWidth,
     setFadeWidth,
+    setCornerRadius,
     addGradientColor,
     removeGradientColor,
     plexRules,
@@ -493,6 +495,7 @@ function PosterManager() {
     innerOpacity,
     innerWidth,
     fadeWidth,
+    cornerRadius,
     plexRules,
     ruleRunTypes,
     ruleLibraries,
@@ -715,6 +718,7 @@ function PosterManager() {
           innerOpacity={innerOpacity}
           innerWidth={innerWidth}
           fadeWidth={fadeWidth}
+          cornerRadius={cornerRadius}
           onSetBorderStyle={setBorderStyle}
           onSetOverlayImage={setOverlayImage}
           onSetOverlayRemoveExisting={setOverlayRemoveExisting}
@@ -727,6 +731,7 @@ function PosterManager() {
           onSetInnerOpacity={setInnerOpacity}
           onSetInnerWidth={setInnerWidth}
           onSetFadeWidth={setFadeWidth}
+          onSetCornerRadius={setCornerRadius}
           plexRules={plexRules}
           ruleRunTypes={ruleRunTypes}
           ruleLibraries={ruleLibraries}

@@ -1,7 +1,8 @@
 import { ReactNode, useRef, useState } from 'react'
-import { Trash2, Upload } from 'lucide-react'
+import { Info, Trash2, Upload } from 'lucide-react'
 import NumberField from './NumberField'
 import AuthedImage from './AuthedImage'
+import roundedCornersHint from '../../assets/rounded-corners-hint.webp'
 import type { BorderStyle, GradientDirection, InnerEffect } from '../../hooks/usePosterManagerBorder'
 import { BorderOverlay, deleteBorderOverlay, fetchBorderPreview, uploadBorderOverlay } from '../../api/posterManager'
 
@@ -18,6 +19,44 @@ export type BorderStyleValue = {
   innerOpacity: number
   innerWidth: number
   fadeWidth: number
+  cornerRadius: number
+}
+
+// Corner fill needs a band to paint with; image frames carry their own inner edge.
+export const supportsRoundedCorners = (style: BorderStyle) => style === 'solid' || style === 'gradient'
+
+// Info icon with the rounded-vs-square player picture. The plain tooltip hangs off the
+// icon's left edge, which runs off screen from the right-hand column, so on hover it is
+// measured and nudged back inside the viewport (and flipped above when there is no room below).
+export function RoundedCornersHint() {
+  const tipRef = useRef<HTMLDivElement>(null)
+  const [style, setStyle] = useState<React.CSSProperties>({})
+
+  const place = () => {
+    const tip = tipRef.current
+    const icon = tip?.parentElement
+    if (!tip || !icon) return
+    const margin = 8
+    const rect = tip.getBoundingClientRect()
+    const anchor = icon.getBoundingClientRect()
+    const naturalLeft = rect.left - (typeof style.left === 'number' ? style.left : 0)
+    let left = 0
+    if (naturalLeft + rect.width > window.innerWidth - margin) left = window.innerWidth - margin - (naturalLeft + rect.width)
+    if (naturalLeft + left < margin) left = margin - naturalLeft
+    const roomBelow = window.innerHeight - anchor.bottom - margin
+    const above = rect.height > roomBelow && anchor.top - margin > rect.height
+    setStyle(above ? { left, top: 'auto', bottom: 'calc(100% + 8px)' } : { left })
+  }
+
+  return (
+    <span className="toolbar-info" tabIndex={0} onMouseEnter={place} onFocus={place}>
+      <Info size={14} />
+      <div ref={tipRef} className="toolbar-tooltip tooltip-image" style={style}>
+        <img src={roundedCornersHint} alt="The same poster on a player that rounds corners and on one that does not" />
+        <small>Same poster and radius on both. The square-corner player shows the filled corners.</small>
+      </div>
+    </span>
+  )
 }
 
 // A style with nothing renderable set leaves posters untouched at runtime, so the
@@ -47,6 +86,7 @@ export function StyleValuePreview({ value, borderWidth }: { value: BorderStyleVa
           inner_opacity: value.innerOpacity,
           inner_width: value.innerWidth,
           fade_width: value.fadeWidth,
+          corner_radius: supportsRoundedCorners(value.style) ? value.cornerRadius : 0,
           passthrough: isBorderPassthrough(value.style, value.colors, value.gradientColors, value.overlayImage),
         })
       }
@@ -328,6 +368,23 @@ function BorderStyleControls({ value, onChange, overlays, refreshOverlays, idPre
           </div>
         )}
       </div>
+      {supportsRoundedCorners(value.style) && (
+      <div className="field-group">
+        <div className="field-label-row">
+          <label>Rounded Corners (pixels)</label>
+          <RoundedCornersHint />
+        </div>
+        {verbose && (
+          <small style={{ marginBottom: '0.5rem', display: 'block' }}>
+            For players that round poster corners. Fills each corner with the border and carries the poster's own
+            inner glow around the curve, so the frame stays one width. Set the radius the player uses on a 1000×1500
+            poster; the preview clips its corners by the same amount. 0 = off. Players that don't round corners show
+            the filled corners as a thicker border there; the preview hides this.
+          </small>
+        )}
+        <NumberField value={value.cornerRadius} onChange={(n) => onChange({ cornerRadius: n })} fallback={0} min={0} max={400} style={{ maxWidth: '120px' }} />
+      </div>
+      )}
       </div>
       </div>
       )}

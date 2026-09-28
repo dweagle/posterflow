@@ -1003,3 +1003,21 @@ def test_save_config_accepts_the_legacy_destination_dir_alias(client, test_db):
 
     assert response.status_code == 200
     assert _saved_destination(test_db) == "/legacy/path"
+
+
+def test_border_preview_corner_radius_clips_outer_corners(client):
+    """corner_radius makes the preview's own corners transparent by that radius (what a client
+    that rounds poster corners shows) and fills the art corners with the band."""
+    import io as _io
+    from PIL import Image
+
+    preview = client.get(
+        "/api/posterflow/border-replacer/preview",
+        params={"style": "solid", "color": "#ffffff", "border_width": 26, "corner_radius": 80},
+    )
+    assert preview.status_code == 200
+    with Image.open(_io.BytesIO(preview.content)) as img:
+        rgba = img.convert("RGBA")
+        assert rgba.getpixel((0, 0))[3] == 0                  # clipped outer corner
+        assert rgba.getpixel((500, 0))[3] == 255              # straight edge stays opaque
+        assert rgba.getpixel((26, 26))[:3] == (255, 255, 255)  # art corner filled with the band

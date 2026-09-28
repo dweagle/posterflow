@@ -178,6 +178,7 @@ export interface BorderPreviewParams {
   inner_opacity?: number
   inner_width?: number
   fade_width?: number
+  corner_radius?: number
   passthrough?: boolean
 }
 
@@ -197,6 +198,7 @@ export const fetchBorderPreview = async (params: BorderPreviewParams): Promise<B
   if (params.inner_opacity != null) query.set('inner_opacity', String(params.inner_opacity))
   if (params.inner_width != null) query.set('inner_width', String(params.inner_width))
   if (params.fade_width != null) query.set('fade_width', String(params.fade_width))
+  if (params.corner_radius) query.set('corner_radius', String(params.corner_radius))
   if (params.passthrough) query.set('passthrough', 'true')
   const resp = await client.get(
     `/api/posterflow/border-replacer/preview?${query.toString()}`,

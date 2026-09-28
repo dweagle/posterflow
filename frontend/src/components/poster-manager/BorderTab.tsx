@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye, Info, Play, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Toolbar from '../Toolbar'
-import BorderStyleControls, { BorderStyleValue, OverlaySelect, StyleValuePreview } from './BorderStyleControls'
+import BorderStyleControls, { BorderStyleValue, OverlaySelect, RoundedCornersHint, StyleValuePreview, supportsRoundedCorners } from './BorderStyleControls'
 import PlexRulesSection from './PlexRulesSection'
 import NumberField from './NumberField'
 import ConfirmDialog from '../ConfirmDialog'
@@ -83,6 +83,7 @@ type BorderTabProps = {
   innerOpacity: number
   innerWidth: number
   fadeWidth: number
+  cornerRadius: number
   plexRules: PlexBorderRule[]
   ruleRunTypes: RuleRunType[]
   ruleLibraries: Set<string>
@@ -117,6 +118,7 @@ type BorderTabProps = {
   onSetInnerOpacity: (value: number) => void
   onSetInnerWidth: (value: number) => void
   onSetFadeWidth: (value: number) => void
+  onSetCornerRadius: (value: number) => void
 }
 
 function BorderTab({
@@ -146,6 +148,7 @@ function BorderTab({
   innerOpacity,
   innerWidth,
   fadeWidth,
+  cornerRadius,
   plexRules,
   ruleRunTypes,
   ruleLibraries,
@@ -180,6 +183,7 @@ function BorderTab({
   onSetInnerOpacity,
   onSetInnerWidth,
   onSetFadeWidth,
+  onSetCornerRadius,
 }: BorderTabProps) {
   const navigate = useNavigate()
 
@@ -242,6 +246,7 @@ function BorderTab({
     innerOpacity,
     innerWidth,
     fadeWidth,
+    cornerRadius,
   }
 
   const openSchedulingSettings = () => {
@@ -548,7 +553,7 @@ function BorderTab({
               <label>Border Width</label>
               <span className="toolbar-info" tabIndex={0}>
                 <Info size={14} />
-                <div className="toolbar-tooltip">How thick the added border is (band, gradient, or frame edge). The width at the top of the page applies only to border removal.</div>
+                <div className="toolbar-tooltip">How thick the added border is (band, gradient, or frame edge). A band thinner than the poster's own 26 px border replaces the whole border, so the visible border is exactly this thick. The width at the top of the page applies only to border removal.</div>
               </span>
             </div>
             <NumberField value={bandWidth} onChange={onSetBandWidth} fallback={26} min={1} max={200} style={{ maxWidth: '120px' }} />
@@ -750,6 +755,24 @@ function BorderTab({
                 <small style={{ display: 'block' }}>The border color fades into the poster over this many pixels.</small>
               </div>
             )}
+          </div>
+          )}
+
+          {!removeBorders && supportsRoundedCorners(borderStyle) && (
+          <div className="field-group">
+            <div className="field-label-row">
+              <label>Rounded Corners (pixels)</label>
+              <RoundedCornersHint />
+            </div>
+            <small style={{ marginBottom: '0.75rem', display: 'block' }}>
+              For players that round poster corners (Plex TV apps, for example). Fills each corner with the border and
+              carries the poster's own inner glow around the curve, so the frame stays one width instead of thinning at the
+              corners. Set the radius the player uses on a 1000×1500 poster. The preview clips its corners by the same
+              amount so you can match it by eye. 0 = off. Image-overlay frames are not affected; draw the rounding into the
+              frame instead. The file itself keeps square corners, so players that don't round them show the filled corners
+              as a thicker border there. The preview hides this.
+            </small>
+            <NumberField value={cornerRadius} onChange={onSetCornerRadius} fallback={0} min={0} max={400} style={{ maxWidth: '120px' }} />
           </div>
           )}
               </div>

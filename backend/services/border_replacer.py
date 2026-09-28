@@ -8,10 +8,12 @@ Adapted from DAPS border_replacerr.py - image processing logic preserved exactly
 import filecmp
 import hashlib
 import json
+import math
 import os
 import shutil
 import tempfile
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -116,8 +118,10 @@ def _apply_inner_effect(
     canvas: "Image.Image",
     border_width: int,
     style_opts: Dict[str, Any],
+    inner_radius: int = 0,
 ) -> "Image.Image":
-    """Composite a dark inner glow or a border-color fade just inside the border edge."""
+    """Composite a dark inner glow or a border-color fade just inside the border edge.
+    With `inner_radius` the rings follow the art's rounded corners (see _round_art_corners)."""
     effect = (style_opts.get("inner_effect") or "none").lower()
     if effect not in ("glow", "fade"):
         return canvas
@@ -154,25 +158,143 @@ def _apply_inner_effect(
     if span == 0 or max_alpha <= 0:
         return canvas
 
-    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    for i in range(span):
-        alpha = int(round(max_alpha * (1 - i / span)))
-        if alpha <= 0:
-            continue
-        left = border_width + i
-        top = border_width + i
-        right = width_px - border_width - i - 1
-        bottom = height_px - border_width - i - 1
-        if right <= left or bottom <= top:
-            break
-        draw.rectangle(
-            (left, top, right, bottom),
-            outline=(color[0], color[1], color[2], alpha),
-            width=1,
-        )
+    # Filled boxes one px apart tile into 1-px rings (rounded outlines would leave gaps); the last fill clears the interior.
+    alpha_mask = Image.new("L", canvas.size, 0)
+    draw = ImageDraw.Draw(alpha_mask)
 
+    def _box(i: int) -> Tuple[int, int, int, int]:
+        return (border_width + i, border_width + i, width_px - border_width - i - 1, height_px - border_width - i - 1)
+
+    def _fill(i: int, alpha: int) -> None:
+        box = _box(i)
+        if box[2] < box[0] or box[3] < box[1]:
+            return
+        ring_radius = inner_radius - i
+        if ring_radius > 0:
+            draw.rounded_rectangle(box, radius=ring_radius, fill=alpha)
+        else:
+            draw.rectangle(box, fill=alpha)
+
+    stop = span
+    for i in range(span):
+        left, top, right, bottom = _box(i)
+        if right <= left or bottom <= top:
+            stop = i
+            break
+        _fill(i, int(round(max_alpha * (1 - i / span))))
+    _fill(stop, 0)
+
+    overlay = Image.new("RGBA", canvas.size, (color[0], color[1], color[2], 0))
+    overlay.putalpha(alpha_mask)
     return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+
+
+# Supersampling factor for the anti-aliased corner arcs.
+_CORNER_SUPERSAMPLE = 8
+
+
+def _inner_corner_radius(style_opts: Dict[str, Any], border_width: int, size: Tuple[int, int]) -> int:
+    """Radius of the art area's rounded corners: the client's corner radius minus the band, so a
+    client that rounds the poster's outer corners shows a frame of one width around the curve.
+    0 (the default, or a radius no larger than the band) keeps square corners."""
+    try:
+        radius = int(style_opts.get("corner_radius") or 0)
+    except (TypeError, ValueError):
+        radius = 0
+    max_radius = (min(size) - 2 * border_width) // 2
+    return max(0, min(radius - border_width, max_radius))
+
+
+@lru_cache(maxsize=16)
+def _quarter_disc(radius: int) -> "Image.Image":
+    """Anti-aliased top-left quarter of a filled disc, `radius` px square (L, 255 inside). Cached; never mutate."""
+    s = _CORNER_SUPERSAMPLE
+    patch = Image.new("L", (radius * s, radius * s), 0)
+    ImageDraw.Draw(patch).ellipse((0, 0, 2 * radius * s - 1, 2 * radius * s - 1), fill=255)
+    return patch.reduce(s)
+
+
+def _rounded_box_mask(size: Tuple[int, int], box: Tuple[int, int, int, int], radius: int) -> "Image.Image":
+    """L mask: 255 inside the inclusive `box`, with anti-aliased rounded corners of `radius`."""
+    left, top, right, bottom = box
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rectangle(box, fill=255)
+    radius = max(0, min(radius, (right - left + 1) // 2, (bottom - top + 1) // 2))
+    if radius <= 0:
+        return mask
+    disc = _quarter_disc(radius)
+    mask.paste(disc, (left, top))
+    mask.paste(disc.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (right - radius + 1, top))
+    mask.paste(disc.transpose(Image.Transpose.FLIP_TOP_BOTTOM), (left, bottom - radius + 1))
+    mask.paste(disc.transpose(Image.Transpose.ROTATE_180), (right - radius + 1, bottom - radius + 1))
+    return mask
+
+
+# The poster template's baked-in inner glow (BORDER LAYER: Multiply black 70%, size 45, choke 50
+# behind a 25 px stroke) as the multiplier it leaves on the art, indexed by px from the border's
+# inner edge; measured on drive posters. 1.0 past the table.
+_BAKED_GLOW = (
+    0.482, 0.533, 0.582, 0.626, 0.667, 0.707, 0.744, 0.779, 0.815, 0.847,
+    0.878, 0.904, 0.926, 0.942, 0.958, 0.972, 0.981, 0.989, 0.994, 0.997,
+)
+
+
+def _baked_glow(d: float) -> float:
+    """Multiplier the baked-in glow leaves on the art `d` px inside the border (interpolated)."""
+    if d <= 0:
+        return _BAKED_GLOW[0]
+    n = len(_BAKED_GLOW)
+    if d >= n:
+        return 1.0
+    i = int(d)
+    t = d - i
+    hi = _BAKED_GLOW[i + 1] if i + 1 < n else 1.0
+    return _BAKED_GLOW[i] * (1 - t) + hi * t
+
+
+@lru_cache(maxsize=16)
+def _corner_glow_patch(radius: int, offset: int) -> "Image.Image":
+    """Top-left corner square (radius px) of darkening that continues the baked-in glow around
+    the arc: extra = baked(distance to arc) / baked(distance to the square edge), so the straight
+    edges (already glowing) get nothing and the arc's inner edge glows exactly like them.
+    `offset` = how far into the original glow the crop already reached."""
+    patch = Image.new("L", (radius, radius), 0)
+    px = patch.load()
+    edge = radius - 0.5
+    for y in range(radius):
+        for x in range(radius):
+            d_arc = max(0.0, edge - math.hypot(x + 0.5 - radius, y + 0.5 - radius))
+            ratio = _baked_glow(d_arc + offset) / _baked_glow(min(x, y) + offset)
+            px[x, y] = max(0, min(255, int(round(255 * (1 - ratio)))))
+    return patch
+
+
+def _round_art_corners(
+    canvas: "Image.Image",
+    band: Optional["Image.Image"],
+    border_width: int,
+    inner_radius: int,
+    glow_offset: int = 0,
+) -> "Image.Image":
+    """Round the border's inner edge to `inner_radius`: continue the template's baked-in glow
+    around each arc (see _corner_glow_patch), then paint the band into the four corners. Runs
+    after the inner effect so both glows sit under the anti-aliased edge."""
+    if inner_radius <= 0 or band is None:
+        return canvas
+    width_px, height_px = canvas.size
+    canvas = canvas.convert("RGB")
+    r = inner_radius
+    patch = _corner_glow_patch(r, max(0, glow_offset))
+    for corner, (x, y) in (
+        (patch, (border_width, border_width)),
+        (patch.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (width_px - border_width - r, border_width)),
+        (patch.transpose(Image.Transpose.FLIP_TOP_BOTTOM), (border_width, height_px - border_width - r)),
+        (patch.transpose(Image.Transpose.ROTATE_180), (width_px - border_width - r, height_px - border_width - r)),
+    ):
+        canvas.paste((0, 0, 0), (x, y, x + r, y + r), mask=corner)
+    box = (border_width, border_width, width_px - border_width - 1, height_px - border_width - 1)
+    mask = _rounded_box_mask(canvas.size, box, inner_radius)
+    return Image.composite(canvas, band.convert("RGB"), mask)
 
 
 def _strip_existing_border(image: "Image.Image", border_width: int, exclude: bool = False) -> "Image.Image":
@@ -201,10 +323,27 @@ def _strip_existing_border(image: "Image.Image", border_width: int, exclude: boo
 # Remove Borders mode. Tunable per-collection via style_opts["glow_trim"].
 _GLOW_TRIM_DEFAULT_PX = 16
 
-# The poster's baked-in border thickness (DAPS default). "Remove existing border first" has to
-# cover this whole border: the new band covers `border_width` of it, so when the band is
-# narrower the trim/black-bar must make up the rest, up to this width. See _remove_existing_base.
+# The poster's baked-in border thickness (DAPS default): the least any band replacement crops, the
+# depth "remove existing border first" must cover (see _remove_existing_base), and where the
+# baked-in glow (_BAKED_GLOW) starts.
 _REMOVE_EXISTING_REF_WIDTH = 26
+
+
+def _remove_existing_trim(style_opts: Dict[str, Any], border_width: int, size: Tuple[int, int]) -> int:
+    """Px trimmed off the left/top/right for 'remove existing border first' (see _remove_existing_base)."""
+    try:
+        base_trim = max(0, int(style_opts.get("glow_trim", _GLOW_TRIM_DEFAULT_PX)))
+    except (TypeError, ValueError):
+        base_trim = _GLOW_TRIM_DEFAULT_PX
+    width, height = size
+    base_trim = min(base_trim, max(0, border_width - 1))  # glow stays tucked behind the band
+    # A band narrower than the baked-in border can't hide all of it, so extend the trim to the
+    # full reference width; the band covers the rest.
+    if border_width < _REMOVE_EXISTING_REF_WIDTH:
+        side_trim = max(base_trim, _REMOVE_EXISTING_REF_WIDTH)
+    else:
+        side_trim = base_trim
+    return min(side_trim, min(width, height) // 2 - 1)  # geometric safety
 
 
 def _remove_existing_base(source_image: "Image.Image", style_opts: Dict[str, Any], border_width: int) -> "Image.Image":
@@ -220,19 +359,7 @@ def _remove_existing_base(source_image: "Image.Image", style_opts: Dict[str, Any
     bar + side crop) is extended to the FULL reference width to cover the rest — otherwise a
     thin line of the old border leaks through just inside the new border. That extra trim may
     exceed the border width (growing the black bottom bar to cover the leftover edge)."""
-    try:
-        base_trim = max(0, int(style_opts.get("glow_trim", _GLOW_TRIM_DEFAULT_PX)))
-    except (TypeError, ValueError):
-        base_trim = _GLOW_TRIM_DEFAULT_PX
-    width, height = source_image.size
-    base_trim = min(base_trim, max(0, border_width - 1))  # glow stays tucked behind the band
-    # A band narrower than the baked-in border can't hide all of it, so extend the trim to the
-    # full reference width; the band covers the rest.
-    if border_width < _REMOVE_EXISTING_REF_WIDTH:
-        side_trim = max(base_trim, _REMOVE_EXISTING_REF_WIDTH)
-    else:
-        side_trim = base_trim
-    side_trim = min(side_trim, min(width, height) // 2 - 1)  # geometric safety
+    side_trim = _remove_existing_trim(style_opts, border_width, source_image.size)
     if side_trim <= 0:
         return source_image.resize((1000, 1500))
     return _strip_existing_border(source_image, side_trim, exclude=False).resize((1000, 1500))
@@ -253,10 +380,15 @@ def _render_bordered_image(
         overlay_path: absolute path to a 1000x1500 transparent-center PNG frame
         inner_effect: "none" | "glow" | "fade"
         inner_color, inner_opacity (0-100), inner_width (px), fade_width (px)
+        corner_radius: px the display client rounds the poster's corners by; the band is
+            painted into the art's corners so the frame stays even (solid/gradient only)
 
     Solid/gradient styles follow DAPS: crop `border_width` off all sides then add a
-    new band (the existing border is replaced). The image-overlay style does NOT crop
-    by default — the premade frame simply sits on top of the full poster.
+    new band (the existing border is replaced). A band thinner than the poster's own
+    border crops the whole reference border instead, so the visible border is exactly
+    `border_width` (otherwise the rest of the old stroke would show inside the band).
+    The image-overlay style does NOT crop by default — the premade frame simply sits
+    on top of the full poster.
 
     If `remove_existing` is set (all styles), the poster is trimmed by border_width +
     `glow_trim` px and stretched to fill, so the preset poster's baked-in edge glow is
@@ -310,13 +442,20 @@ def _render_bordered_image(
         mask = Image.new("L", (1000, 1500), 255)
         mask.paste(Image.new("L", (1000 - 2 * border_width, 1500 - 2 * border_width), 0), (border_width, border_width))
         canvas = Image.composite(band, base, mask)
-        return _apply_inner_effect(canvas, border_width, style_opts).convert("RGB")
+        inner_radius = _inner_corner_radius(style_opts, border_width, canvas.size)
+        canvas = _apply_inner_effect(canvas, border_width, style_opts, inner_radius)
+        # The trim + band already reach this far into the original glow.
+        glow_offset = _remove_existing_trim(style_opts, border_width, source_image.size) + border_width - _REMOVE_EXISTING_REF_WIDTH
+        return _round_art_corners(canvas, band, border_width, inner_radius, glow_offset).convert("RGB")
 
     # Solid/gradient (default): crop the border width off all sides then add a new band.
+    # A thinner band still crops the whole baked-in border, or its leftover stroke would show inside the band.
     src_width, src_height = source_image.size
-    cropped_image = source_image.crop(
-        (border_width, border_width, src_width - border_width, src_height - border_width)
-    )
+    crop = max(border_width, _REMOVE_EXISTING_REF_WIDTH)
+    cropped_image = source_image.crop((crop, crop, src_width - crop, src_height - crop))
+    if crop > border_width:
+        # Stretch the art back so the band and corners land on exact pixels (no resampled edge).
+        cropped_image = cropped_image.resize((src_width - 2 * border_width, src_height - 2 * border_width))
 
     new_width = cropped_image.width + 2 * border_width
     new_height = cropped_image.height + 2 * border_width
@@ -330,8 +469,12 @@ def _render_bordered_image(
     else:
         canvas = Image.new("RGB", (new_width, new_height), border_color)
 
+    inner_radius = _inner_corner_radius(style_opts, border_width, canvas.size)
+    band = canvas.copy() if inner_radius > 0 else None
     canvas.paste(cropped_image, (border_width, border_width))
-    canvas = _apply_inner_effect(canvas, border_width, style_opts)
+    canvas = _apply_inner_effect(canvas, border_width, style_opts, inner_radius)
+    # A band wider than the template's border crops that far into the original glow.
+    canvas = _round_art_corners(canvas, band, border_width, inner_radius, border_width - _REMOVE_EXISTING_REF_WIDTH)
 
     return canvas.resize((1000, 1500)).convert("RGB")
 
@@ -413,6 +556,7 @@ def build_style_opts(db: Session, prefix: str = "") -> Dict[str, Any]:
         "inner_opacity": _as_int("inner_opacity", 70),
         "inner_width": _as_int("inner_width", 8),
         "fade_width": _as_int("fade_width", 8),
+        "corner_radius": _as_int("corner_radius", 0),
     }
 
 
@@ -455,6 +599,7 @@ def build_holiday_style_opts(raw_style: Optional[Dict[str, Any]], border_image: 
         "inner_opacity": _as_int("inner_opacity", 70),
         "inner_width": _as_int("inner_width", 8),
         "fade_width": _as_int("fade_width", 8),
+        "corner_radius": _as_int("corner_radius", 0),
     }
 
 
@@ -554,7 +699,11 @@ class BorderReplacerService:
     def _style_opts_for_hash(style_opts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Normalize style options into a stable, hashable subset (overlay by name)."""
         style = style_opts or {}
-        return {
+        try:
+            corner_radius = int(style.get("corner_radius") or 0)
+        except (TypeError, ValueError):
+            corner_radius = 0
+        hashed = {
             "style": style.get("style") or "solid",
             "gradient_colors": list(style.get("gradient_colors") or []),  # order matters
             "gradient_direction": style.get("gradient_direction"),
@@ -566,6 +715,10 @@ class BorderReplacerService:
             "overlay": os.path.basename(style.get("overlay_path") or "") or None,
             "remove_existing": bool(style.get("remove_existing")),
         }
+        # Only hashed when set, so upgrading doesn't change every existing hash.
+        if corner_radius > 0:
+            hashed["corner_radius"] = corner_radius
+        return hashed
 
     def _rule_signature_from_match(self, match: Optional[Any]) -> Optional[str]:
         """Per-poster fingerprint of the Plex rule applied to it (from a resolved RuleMatch).

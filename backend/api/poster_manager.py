@@ -58,6 +58,7 @@ from services.border_replacer import (
     USER_OVERLAY_DIR,
     resolve_overlay_path,
     _render_bordered_image,
+    _rounded_box_mask,
     _hex_to_rgb,
 )
 
@@ -486,11 +487,14 @@ def border_replacer_preview(
     inner_opacity: int = 70,
     inner_width: int = 8,
     fade_width: int = 8,
+    corner_radius: int = 0,
     remove_existing: bool = False,
     passthrough: bool = False,
     db: Session = Depends(get_db),
 ) -> Response:
-    """Render a sample poster with the given border style/effect for live preview."""
+    """Render a sample poster with the given border style/effect for live preview. With a
+    corner_radius the PNG's outer corners are clipped by that radius too, so the preview shows
+    the poster the way a client that rounds corners will."""
     base = _load_preview_base(db)
 
     if passthrough:
@@ -517,9 +521,15 @@ def border_replacer_preview(
         "inner_opacity": inner_opacity,
         "inner_width": inner_width,
         "fade_width": fade_width,
+        "corner_radius": corner_radius,
     }
 
     rendered = _render_bordered_image(base, bw, _hex_to_rgb(color), style_opts)
+    cr = max(0, min(int(corner_radius or 0), 500))
+    if cr > 0:
+        w, h = rendered.size
+        rendered = rendered.convert("RGBA")
+        rendered.putalpha(_rounded_box_mask(rendered.size, (0, 0, w - 1, h - 1), cr))
     buf = io.BytesIO()
     rendered.save(buf, format="PNG")
     return Response(
