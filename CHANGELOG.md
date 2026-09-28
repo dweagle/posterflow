@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.4] - 2026-09-28
+### Added
+- Border Replacer: rounded corners - set a per-style corner radius to match players that clip poster corners. The border band and the template's inner glow continue around the arc. Solid and gradient borders only.
+- Docker: a UMASK environment variable so container-created files can be group-writable.
+
+### Fixed
+- Native install: numpy version constraints adjusted for FreeBSD compatibility, with build notes added to the install guide.
+
 ## [0.16.3] - 2026-09-26
 ### Added
 - Community Requests: new "all collection movies" and "original-language" request flags, and a collection's movies now fold into its request card so makers can see what it covers.
