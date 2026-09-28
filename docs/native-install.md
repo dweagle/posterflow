@@ -325,5 +325,10 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
 
 - The pip step compiles for a good while — FreeBSD has no prebuilt wheels.
   psd-tools installs from its GitHub tag automatically for the same reason.
+- numpy is the slowest of those builds and can be skipped. FreeBSD packages
+  numpy only for its default Python (3.12 as of this writing, `py312-numpy`),
+  so swap the 313 packages for `python312 py312-sqlite3 py312-numpy` and create
+  the venv with `python3.12 -m venv --system-site-packages .venv`; pip then
+  accepts the packaged numpy (off Linux/macOS the requirement is just `>=2.4`).
 - Linux-only speedup packages (uvloop/httptools) skip automatically.
 - Starting at boot is yours to solve (an rc.d script wrapping the venv python).
