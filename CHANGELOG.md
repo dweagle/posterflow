@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.5] - 2026-09-29
+### Fixed
+- Scheduler: the local timezone is now resolved by name, so scheduled jobs run at the right local time (#11). If the host has no zone name, the scheduler warns and falls back to UTC.
+
 ## [0.16.4] - 2026-09-28
 ### Added
 - Border Replacer: rounded corners - set a per-style corner radius to match players that clip poster corners. The border band and the template's inner glow continue around the arc. Solid and gradient borders only.
