@@ -3,6 +3,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 import json
+from datetime import timezone
 from typing import Optional, Callable, Any
 from database import SessionLocal
 from models.schedule import Schedule
@@ -43,16 +44,17 @@ from tzlocal import get_localzone_name
 from zoneinfo import ZoneInfo
 
 
-def _local_timezone() -> ZoneInfo:
-    """Resolve the local zone by name instead of via get_localzone().
-
-    APScheduler pickles every job into its SQLAlchemy jobstore, so the scheduler
-    timezone has to be picklable. get_localzone() hands back a ZoneInfo built with
-    ZoneInfo.from_file() when TZ names a file or /etc/localtime carries no zone name
-    (both seen on FreeBSD), and those raise "Cannot pickle a ZoneInfo file from a
-    file stream" the moment a job is added.
-    """
-    return ZoneInfo(get_localzone_name() or "UTC")
+def _local_timezone():
+    # by name so APScheduler can pickle jobs; get_localzone() returns an unpicklable file-stream zone when TZ points at a file or the host has no zone name
+    name = get_localzone_name()
+    if name:
+        return ZoneInfo(name)
+    log_warning(
+        LogTags.SCHEDULER,
+        "Local timezone has no zone name, so scheduled times will run in UTC. "
+        "Set TZ to an IANA name such as Europe/Amsterdam (FreeBSD: run tzsetup) and restart.",
+    )
+    return timezone.utc
 
 
 # Create scheduler instance

@@ -332,3 +332,7 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
   accepts the packaged numpy (off Linux/macOS the requirement is just `>=2.4`).
 - Linux-only speedup packages (uvloop/httptools) skip automatically.
 - Starting at boot is yours to solve (an rc.d script wrapping the venv python).
+- Give the scheduler a named timezone: run `tzsetup` (it writes
+  `/var/db/zoneinfo`) or set `TZ=Region/City` in the service environment. A
+  jail whose `/etc/localtime` is a bare copy has no zone name; the scheduler
+  then logs a warning at startup and runs schedules in UTC.

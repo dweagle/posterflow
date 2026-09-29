@@ -1,35 +1,10 @@
-import io
 import pickle
-import zoneinfo
 from datetime import datetime, timezone
-from pathlib import Path
-
-import pytest
 
 
-def _tzif_bytes() -> bytes:
-    """Raw bytes of some TZif file, so tests can build the file-backed ZoneInfo that
-    tzlocal returns on FreeBSD."""
-    for root in zoneinfo.TZPATH:
-        candidate = Path(root) / "UTC"
-        if candidate.is_file():
-            return candidate.read_bytes()
-    pytest.skip("no TZif file available on this host")
-
-
-def test_scheduler_timezone_survives_file_backed_localtime(monkeypatch):
-    """APScheduler pickles every job into its SQLAlchemy jobstore, so the scheduler
-    timezone must be picklable.
-
-    On FreeBSD, get_localzone() returns a ZoneInfo built with ZoneInfo.from_file()
-    when TZ names a file or /etc/localtime carries no zone name. Such an object
-    raises on pickling, which made every add_job() in update_schedules() fail.
-    """
+def test_scheduler_timezone_resolves_by_name(monkeypatch):
+    """A named zone pickles by key, which the SQLAlchemy job store needs for every add_job."""
     import core.scheduler as scheduler_module
-
-    file_backed = zoneinfo.ZoneInfo.from_file(io.BytesIO(_tzif_bytes()), key="localtime")
-    with pytest.raises(pickle.PicklingError):
-        pickle.dumps(file_backed)
 
     monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: "Europe/Amsterdam")
 
@@ -37,6 +12,22 @@ def test_scheduler_timezone_survives_file_backed_localtime(monkeypatch):
 
     assert str(tz) == "Europe/Amsterdam"
     assert pickle.loads(pickle.dumps(tz)) == tz
+
+
+def test_scheduler_timezone_warns_and_uses_utc_when_host_has_no_zone_name(monkeypatch):
+    """No TZ, no /var/db/zoneinfo and a copied /etc/localtime (FreeBSD jail) yields no name; fall back loudly, not silently."""
+    import core.scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: None)
+    warnings = []
+    monkeypatch.setattr(scheduler_module, "log_warning", lambda tag, msg, **k: warnings.append(msg))
+
+    tz = scheduler_module._local_timezone()
+
+    assert tz is timezone.utc
+    assert pickle.loads(pickle.dumps(tz)) is timezone.utc
+    assert len(warnings) == 1
+    assert "TZ" in warnings[0]
 
 
 def test_create_schedule_rejects_invalid_drive_group(client):
