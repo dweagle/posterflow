@@ -39,7 +39,21 @@ from modules.border import run_border_replacer_background_job
 from modules.idarr import run_idarr_background_job
 from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
-from tzlocal import get_localzone
+from tzlocal import get_localzone_name
+from zoneinfo import ZoneInfo
+
+
+def _local_timezone() -> ZoneInfo:
+    """Resolve the local zone by name instead of via get_localzone().
+
+    APScheduler pickles every job into its SQLAlchemy jobstore, so the scheduler
+    timezone has to be picklable. get_localzone() hands back a ZoneInfo built with
+    ZoneInfo.from_file() when TZ names a file or /etc/localtime carries no zone name
+    (both seen on FreeBSD), and those raise "Cannot pickle a ZoneInfo file from a
+    file stream" the moment a job is added.
+    """
+    return ZoneInfo(get_localzone_name() or "UTC")
+
 
 # Create scheduler instance
 scheduler = BackgroundScheduler(
@@ -53,7 +67,7 @@ scheduler = BackgroundScheduler(
         'coalesce': True,
         'max_instances': 3
     },
-    timezone=get_localzone()
+    timezone=_local_timezone()
 )
 
 
