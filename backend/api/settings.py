@@ -12,6 +12,7 @@ from models.setting import Setting, get_setting, upsert_setting
 from util.library_configs import media_libraries_only
 from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
+from core.app_timezone import get_app_timezone
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -68,6 +69,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # App setup
     "setup_complete",
     "poster_destination",
+    "timezone",
     # Media server instances
     "plex_instances",
     "sonarr_instances",
@@ -773,6 +775,9 @@ def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     payload: Dict[str, str] = {}
     for setting in settings:
         payload[setting.key] = setting.value
+    # Computed, not stored: the zone actually in force. A bad stored "timezone" still
+    # resolves to the previous valid zone, and this is where the user sees that.
+    payload["effective_timezone"] = str(get_app_timezone())
     return _mask_settings_payload(payload)
 
 
@@ -902,6 +907,19 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
         db.rollback()
         log_error(LogTags.API, f"Database error saving bulk settings: {e}\n{traceback.format_exc()}", count=len(allowed))
         raise HTTPException(status_code=500, detail="Failed to save settings")
+
+    # A new zone re-interprets every cron expression, so the jobs have to be rebuilt.
+    # set_app_timezone must land first — update_schedules() reads it via get_app_timezone().
+    # Function-local imports: core.scheduler pulls in every job module, and a module-scope
+    # import here would create a startup cycle. On an invalid zone set_app_timezone()
+    # returns False and keeps the old one, so both calls are no-ops against it.
+    if "timezone" in allowed:
+        from core.app_timezone import set_app_timezone
+        from core.scheduler import apply_app_timezone, update_schedules
+
+        set_app_timezone(allowed["timezone"])
+        apply_app_timezone()
+        update_schedules()
 
     return {"message": "Settings saved", "count": len(allowed)}
 

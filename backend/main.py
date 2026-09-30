@@ -296,6 +296,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             log_warning(LogTags.STARTUP, f"Could not restore persisted debug setting: {e}")
 
+        # Restore persisted application timezone (if configured). Must run before
+        # start_scheduler() below, so the scheduler is built from the restored zone.
+        try:
+            from models.setting import get_setting
+            from core.app_timezone import set_app_timezone
+            from core.scheduler import apply_app_timezone
+            tz_db = SessionLocal()
+            try:
+                tz_setting = get_setting(tz_db, "timezone")
+                if tz_setting and tz_setting.value and tz_setting.value.strip():
+                    if set_app_timezone(tz_setting.value):
+                        apply_app_timezone()
+                        log_info(LogTags.STARTUP, f"Application timezone: {tz_setting.value.strip()}")
+            finally:
+                tz_db.close()
+        except Exception as e:
+            log_warning(LogTags.STARTUP, f"Could not restore application timezone setting: {e}")
+
         # Prune Plex library settings orphaned by server renames that predate the
         # rename migration (stale instance_name entries showing in Library Targeting)
         try:
