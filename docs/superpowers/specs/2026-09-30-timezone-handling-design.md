@@ -52,7 +52,7 @@ Two timezones, one resolution path, two consumers.
 
 | | Process TZ | Application TZ |
 |---|---|---|
-| Source | OS env `TZ` | `POSTERFLOW_TIMEZONE` env var, overridden by the DB `timezone` setting |
+| Source | OS env `TZ` | `APP_TIMEZONE` env var, overridden by the DB `timezone` setting |
 | Value | Always `UTC` | IANA name, e.g. `Europe/Amsterdam` |
 | Governs | Storage wall-clock, log wall-clock | Cron interpretation, "what day is today", schedule-editor labels |
 | Default | `UTC` (already in `Dockerfile:35`, `docker-compose.yml:14`) | Falls back to the existing `tzlocal` lookup |
@@ -60,7 +60,7 @@ Two timezones, one resolution path, two consumers.
 Resolution order for the application timezone:
 
 1. DB `timezone` setting (settable from Settings → Scheduling)
-2. `POSTERFLOW_TIMEZONE` environment variable
+2. `APP_TIMEZONE` environment variable
 3. `_local_timezone()` — the existing `tzlocal.get_localzone_name()` lookup, including its
    warn-and-fall-back-to-UTC behaviour for hosts with no zone name
 
@@ -77,13 +77,24 @@ Single cached source of truth, so the scheduler and the API always agree.
 
 ### Wiring
 
-- `backend/core/config.py` — `Settings` gains `app_timezone: str = ""`
+- `backend/core/config.py` — `Settings` gains `app_timezone: str = ""`. `Settings` sets no
+  `env_prefix` (`backend/core/config.py:81`), so this is read from the environment as
+  `APP_TIMEZONE`, matching the existing unprefixed convention (`CONFIG_DIR` ← `config_dir`,
+  `DATABASE_URL` ← `database_url`)
 - `backend/main.py` (~line 282, alongside the existing `gdrive_storage_path` and `debug_enabled`
   restore blocks) — restore the persisted `timezone` key at startup
 - `backend/api/settings.py:61` — add `"timezone"` to `BULK_SETTINGS_ALLOWLIST`
 - `POST /api/settings/bulk` — when `timezone` is written, call `update_schedules()` after commit so
   cron triggers rebuild in the new zone without a container restart. `update_schedules()` already
   tears down and recreates every job (`backend/core/scheduler.py:424-425`).
+
+### Initialisation order
+
+`get_app_timezone()` cannot read the database at import time. It resolves at import from
+`APP_TIMEZONE` / the `tzlocal` fallback; the lifespan then overrides it from the DB setting. The
+existing startup order already satisfies this — setting restoration at `backend/main.py:256-297`
+runs before `start_scheduler()` at `backend/main.py:391-398`, and `start_scheduler()` calls
+`update_schedules()` (`backend/core/scheduler.py:670-676`). Do not reorder these.
 
 ## Component 1 — Storage: `UTCDateTime`
 
@@ -227,8 +238,10 @@ zone abbreviation to the next-run line so the wall-clock time is never ambiguous
 ### Backend read
 
 The editor needs the *resolved* application zone, not the stored string — it may be unset and
-falling back. Expose the effective value from `core/app_timezone.py` as one read-only field on the
-existing settings GET. No new endpoint.
+falling back. Expose the effective value from `core/app_timezone.py` as one read-only field
+(`effective_timezone`) on the existing settings GET, alongside the editable `timezone` key.
+Read-only because writing it is not meaningful; the field exists so the UI can label itself
+correctly on a fresh install. No new endpoint.
 
 ### Unchanged
 
