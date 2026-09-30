@@ -4,13 +4,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import Float, func, and_
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-from datetime import datetime, timezone, timedelta, time as dt_time
+from datetime import timedelta
 import html
 import os
 import re
 import threading
 from unidecode import unidecode
 from PIL import Image, UnidentifiedImageError
+from core.app_timezone import day_bounds_utc, get_app_timezone, now_utc
 from core.config import settings as app_settings
 from database import get_db
 from util.constants import common_words, illegal_chars_regex, remove_special_chars
@@ -511,22 +512,11 @@ def get_artwork_image(
 @router.get("/poster-daily-activity")
 def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get daily and weekly poster activity summary for dashboard card."""
-    # Use local system time to determine day boundaries so "today" matches the
-    # user's calendar day regardless of UTC offset. DB timestamps are UTC-naive,
-    # so we convert local boundaries back to UTC for range comparisons.
-    now_local = datetime.now().astimezone()
-    today_local = now_local.date()
-    local_tz = now_local.tzinfo
-    today_start_utc = (
-        datetime.combine(today_local, dt_time.min, tzinfo=local_tz)
-        .astimezone(timezone.utc)
-        .replace(tzinfo=None)
-    )
-    tomorrow_start_utc = (
-        datetime.combine(today_local + timedelta(days=1), dt_time.min, tzinfo=local_tz)
-        .astimezone(timezone.utc)
-        .replace(tzinfo=None)
-    )
+    # Day boundaries follow the application timezone, so "today" matches the user's
+    # calendar day rather than the server's. Column values are aware UTC after
+    # UTCDateTime, so the bounds stay aware too.
+    tz = get_app_timezone()
+    today_start_utc, tomorrow_start_utc = day_bounds_utc(now_utc(), tz)
     week_ago_start_utc = today_start_utc - timedelta(days=7)
     month_ago_start_utc = today_start_utc - timedelta(days=30)
 

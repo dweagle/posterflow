@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from core.app_timezone import now_in_app_tz
 from core.config import settings as app_settings
 
 from core.logging import (
@@ -1031,7 +1032,7 @@ class BorderReplacerService:
         Returns:
             (is_holiday_active, holiday_name, effective_border_colors, holiday_style_opts)
         """
-        now = datetime.now()
+        now = now_in_app_tz()
         default_colors = list(default_border_colors or [])
         holiday_schedules = self._load_holiday_schedules()
 
