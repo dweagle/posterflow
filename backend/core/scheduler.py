@@ -414,6 +414,9 @@ def update_schedules() -> None:
     Update APScheduler jobs from database schedules.
     Call this whenever schedules are created/updated/deleted.
     """
+    # Re-point the scheduler first: the cron triggers below are built from it, and a
+    # caller that changed the application zone must not have to remember to do this.
+    apply_app_timezone()
     db = SessionLocal()
     try:
         # Remove all existing jobs

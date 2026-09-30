@@ -4,7 +4,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -64,11 +64,11 @@ def _snapshot_database(dest: Path) -> bool:
 def build_backup_zip(dest_dir: Path) -> Path:
     """Create a timestamped backup zip in dest_dir and return its path."""
     dest_dir.mkdir(parents=True, exist_ok=True)
-    backup_path = dest_dir / f"{BACKUP_PREFIX}{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    backup_path = dest_dir / f"{BACKUP_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip"
 
     metadata = {
         "version": "1.0",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "app": "PosterFlow",
     }
 

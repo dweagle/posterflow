@@ -1440,7 +1440,12 @@ function Settings() {
           appTimezone={appTimezone}
           onChangeAppTimezone={setAppTimezone}
           effectiveTimezone={effectiveTimezone}
-          onSaveAppTimezone={handleSaveAppTimezone}
+          onSaveAppTimezone={async (value: string) => {
+            await handleSaveAppTimezone(value)
+            // The server rebuilds every cron job from the new zone, so the next-run times
+            // currently on screen are stale until we read them back.
+            await fetchSchedules()
+          }}
           saving={saving}
         />
       )}

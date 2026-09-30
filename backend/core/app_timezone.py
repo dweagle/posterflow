@@ -25,12 +25,20 @@ def _host_timezone() -> ZoneInfo:
     """Fall back to the host's zone, then UTC. Mirrors the scheduler's tzlocal lookup."""
     from tzlocal import get_localzone_name
 
-    name = get_localzone_name()
-    if name:
-        return ZoneInfo(name)
+    # Every caller routes through here, so this is the one place that has to survive a
+    # host zone we cannot build a ZoneInfo from. tzlocal raises ZoneInfoNotFoundError,
+    # which subclasses KeyError, and get_localzone_name() can also return a name the
+    # system has no tzdata for.
+    try:
+        name = get_localzone_name()
+        if name:
+            return ZoneInfo(name)
+        reason = "the host has no zone name"
+    except (ZoneInfoNotFoundError, KeyError, ValueError) as e:
+        reason = str(e)
     log_warning(
         LogTags.SCHEDULER,
-        "No application timezone configured and the host has no zone name; using UTC. "
+        f"No application timezone configured and {reason}; using UTC. "
         "Set the timezone in Settings → Scheduling.",
     )
     return ZoneInfo("UTC")

@@ -99,3 +99,59 @@ def test_effective_timezone_cannot_be_written(client, test_db):
     assert test_db.query(Setting).filter(Setting.key == "effective_timezone").first() is None
     # The computed value is unaffected by the rejected write.
     assert client.get("/api/settings/").json()["effective_timezone"] == "Europe/Amsterdam"
+
+
+def test_a_failed_rebuild_does_not_500_a_save_that_took(client, test_db, monkeypatch):
+    """The zone is committed and the scheduler re-pointed before the rebuild, so a rebuild
+    failure is not a save failure.
+
+    A stopped scheduler is the realistic trigger: startup can fail and main.py keeps
+    serving, and add_job() on a stopped BackgroundScheduler queues the job as pending
+    without ever setting next_run_time. Reporting 500 there tells the user their change
+    was lost when it was in fact persisted and is already in force.
+    """
+    def boom():
+        raise AttributeError("'Job' object has no attribute 'next_run_time'")
+
+    monkeypatch.setattr(scheduler_module, "update_schedules", boom)
+
+    response = client.post("/api/settings/bulk", json={"timezone": "Asia/Tokyo"})
+
+    assert response.status_code == 200
+    saved = test_db.query(Setting).filter(Setting.key == "timezone").first()
+    assert saved is not None and saved.value == "Asia/Tokyo"
+    assert str(app_timezone.get_app_timezone()) == "Asia/Tokyo"
+
+
+def test_update_schedules_repoints_the_scheduler_by_itself(client, test_db):
+    """The rebuild reads get_app_timezone() to build its cron triggers, so the re-point has
+    to be part of it. Leaving it to the caller means any future caller can forget, and the
+    zone change then silently does nothing to the jobs."""
+    # Drop the scheduler's zone without telling anyone, then run a real rebuild.
+    scheduler_module.scheduler.timezone = None
+    assert app_timezone.set_app_timezone("America/New_York")
+
+    scheduler_module.update_schedules()
+
+    assert str(scheduler_module.scheduler.timezone) == "America/New_York"
+
+
+def test_setting_an_empty_timezone_falls_back_to_the_host(client, test_db):
+    """Clearing the stored value must resolve to the host zone, not blow up.
+
+    _host_timezone() is the single place every fallback routes through, so an unloadable
+    host zone name has to degrade there rather than propagate a ZoneInfoNotFoundError out
+    of a settings write that has already committed.
+    """
+    import tzlocal
+
+    original = tzlocal.get_localzone_name
+    try:
+        tzlocal.get_localzone_name = lambda: "Not/ARealZone"
+
+        response = client.post("/api/settings/bulk", json={"timezone": ""})
+
+        assert response.status_code == 200
+        assert str(app_timezone.get_app_timezone()) == "UTC"
+    finally:
+        tzlocal.get_localzone_name = original

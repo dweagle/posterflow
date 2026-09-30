@@ -341,5 +341,5 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
   UTC — so the host fallback only matters while nothing is saved, and it follows
   `TZ` when that is set. Give the host a named zone with `tzsetup` (it writes
   `/var/db/zoneinfo`) if you rely on that. A jail whose `/etc/localtime` is a
-  bare copy has no zone name; the app then logs a warning at startup and uses
-  UTC until you set the timezone in the UI.
+  bare copy has no zone name; the app then uses UTC and writes a warning to
+  stderr until you set the timezone in the UI.

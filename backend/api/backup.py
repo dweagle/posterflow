@@ -12,7 +12,7 @@ import json
 import shutil
 import tempfile
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from database import get_db
 from core.config import settings as app_settings
 from core.logging import LogTags, log_info, log_success, log_error, log_warning, log_user_action
@@ -114,7 +114,7 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
             # Create safety backups folder
             safety_backup_dir = CONFIG_DIR / "safety_backups"
             safety_backup_dir.mkdir(exist_ok=True)
-            backup_suffix = f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            backup_suffix = f".backup_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
             # (zip member, live target, response key, log label)
             restore_targets = [

@@ -916,11 +916,18 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
     # effective_timezone.
     if "timezone" in allowed:
         from core.app_timezone import set_app_timezone
-        from core.scheduler import apply_app_timezone, update_schedules
+        from core.scheduler import update_schedules
 
         set_app_timezone(allowed["timezone"])
-        apply_app_timezone()
-        update_schedules()
+        try:
+            update_schedules()
+        except Exception as e:
+            # The zone is already committed and the scheduler already re-pointed, so this
+            # is a rebuild failure, not a save failure. A stopped scheduler (e.g. startup
+            # failed and the app kept serving) makes add_job() queue without ever setting
+            # next_run_time. Say so instead of 500-ing a change that did take.
+            log_error(LogTags.SCHEDULER, f"Timezone saved but schedule rebuild failed: {e}\n{traceback.format_exc()}")
+            log_warning(LogTags.SCHEDULER, "Schedules will pick up the new timezone once the scheduler is running")
 
     return {"message": "Settings saved", "count": len(allowed)}
 
