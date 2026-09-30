@@ -343,7 +343,7 @@ def test_sync_local_only_drive_finds_new_files_without_rclone(test_db, monkeypat
 # Pinned before the sync-engine merge so the shared engine can't drift.
 # ---------------------------------------------------------------------------
 
-from datetime import datetime  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 
 
 def test_sync_fast_path_skips_db_update_when_nothing_changed(test_db, monkeypatch, tmp_path):
@@ -361,7 +361,7 @@ def test_sync_fast_path_skips_db_update_when_nothing_changed(test_db, monkeypatc
     poster_path = local_dir / "poster.jpg"
     poster_path.write_bytes(b"stable")
     st = poster_path.stat()
-    stamp = datetime(2020, 1, 1)  # DB stores naive datetimes
+    stamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
     p = Poster(drive_id=drive.drive_id, file_name="poster.jpg", file_path=str(poster_path),
                file_size=st.st_size, file_mtime=st.st_mtime, last_processed=stamp)
     test_db.add(p)
@@ -482,7 +482,7 @@ def test_sync_single_initial_metadata_fill_does_not_reprocess(test_db, monkeypat
     poster_path = local_dir / "p.jpg"
     poster_path.write_bytes(b"data")
     st = poster_path.stat()
-    stamp = datetime(2020, 1, 1)
+    stamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
     p = Poster(drive_id=drive.drive_id, file_name="p.jpg", file_path=str(poster_path),
                file_size=st.st_size, file_mtime=None, last_processed=stamp)  # NULL mtime = legacy row
     test_db.add(p)

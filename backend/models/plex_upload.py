@@ -1,7 +1,8 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import Column, DateTime, Float, Integer, String
+from sqlalchemy import Column, Float, Integer, String
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 
 from database import Base
@@ -21,8 +22,8 @@ class PlexUploadRecord(Base):
     uploaded_to_rating_keys = Column(String, nullable=True)     # JSON list of Plex ratingKeys; an unseen key = item re-added → re-upload
     uploaded_editions = Column(String, nullable=True)           # JSON list of edition titles
     uploaded_media_types = Column(String, nullable=True)        # JSON list of media types
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
     def __repr__(self) -> str:
         return f"<PlexUploadRecord(file_path='{self.file_path}')>"

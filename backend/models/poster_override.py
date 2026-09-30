@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 from database import Base
 
@@ -27,4 +28,4 @@ class PosterOverride(Base):
     slot = Column(String, nullable=True)  # artwork slot scope: logo | background | square
     drive_id = Column(String, nullable=False)  # Drive/ArtworkDrive drive_id to prefer
     file = Column(String, nullable=True)  # slot scope: one exact file on that drive, relative to its root
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import Any, Optional
@@ -15,8 +16,8 @@ class Setting(Base):
     key = Column(String, unique=True, nullable=False, index=True)
     value = Column(String, nullable=True)  # Plain text storage
     description = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
     def __repr__(self) -> str:
         return f"<Setting(key='{self.key}')>"

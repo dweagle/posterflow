@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 from database import Base
 
@@ -14,7 +15,7 @@ class Schedule(Base):
     schedule_type = Column(String, nullable=False)  # 'hourly', 'daily', 'multiple_daily', 'weekly', 'multiple_days', 'monthly', 'cron'
     schedule_value = Column(String, nullable=True)  # Minute for hourly, Time for daily, day+time for weekly, etc.
     job_config = Column(Text, nullable=True)  # JSON string for job-specific config (e.g. {"sync_after_run": true} for idarr)
-    last_run = Column(DateTime(timezone=True), nullable=True)
-    next_run = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_run = Column(UTCDateTime, nullable=True)
+    next_run = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())

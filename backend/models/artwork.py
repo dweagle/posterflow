@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Float, Index
+from sqlalchemy import Column, Integer, String, BigInteger, Float, Index
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 from database import Base
 
@@ -23,8 +24,8 @@ class Artwork(Base):
     imdb_id = Column(String, nullable=True)  # From {imdb-tt...} tag
     file_size = Column(BigInteger, nullable=True)
     file_mtime = Column(Float, nullable=True)  # Filesystem mtime for change detection
-    downloaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_processed = Column(DateTime(timezone=True), nullable=True)  # When last uploaded/processed (future)
+    downloaded_at = Column(UTCDateTime, server_default=func.now())
+    last_processed = Column(UTCDateTime, nullable=True)  # When last uploaded/processed (future)
 
     __table_args__ = (
         # Fast per-drive, per-type counts (drive_id + artwork_type).

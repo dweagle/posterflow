@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, Text
+from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from datetime import datetime, timezone, timedelta
@@ -88,8 +89,8 @@ class Job(Base):
     progress = Column(Integer, default=0)  # 0-100 percentage
     message = Column(Text, nullable=True)  # Current status message
     error = Column(Text, nullable=True)  # Error details if failed
-    started_at = Column(DateTime(timezone=True), server_default=func.now())
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(UTCDateTime, server_default=func.now())
+    completed_at = Column(UTCDateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Job(type='{self.job_type}', status='{self.status}', progress={self.progress})>"
