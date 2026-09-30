@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import pickle
 
 import pytest
 
@@ -87,6 +88,33 @@ def test_empty_value_falls_back_to_host_lookup(app_tz, monkeypatch):
 
     assert app_tz.set_app_timezone("") is True
     assert str(app_tz.get_app_timezone()) == "Asia/Tokyo"
+
+
+def test_host_timezone_resolves_by_name(app_tz, monkeypatch):
+    """A named zone pickles by key, which the SQLAlchemy job store needs for every add_job.
+
+    Patched at the tzlocal seam rather than at _host_timezone, so the real body runs.
+    """
+    import tzlocal
+
+    monkeypatch.setattr(tzlocal, "get_localzone_name", lambda: "Europe/Amsterdam")
+
+    tz = app_tz._host_timezone()
+
+    assert str(tz) == "Europe/Amsterdam"
+    assert pickle.loads(pickle.dumps(tz)) == tz
+
+
+def test_host_timezone_warns_and_uses_utc_when_host_has_no_zone_name(app_tz, monkeypatch):
+    """No TZ, no /var/db/zoneinfo and a copied /etc/localtime (FreeBSD jail) yields no name; fall back loudly, not silently."""
+    import tzlocal
+
+    monkeypatch.setattr(tzlocal, "get_localzone_name", lambda: None)
+
+    with capture_warnings() as messages:
+        assert str(app_tz._host_timezone()) == "UTC"
+
+    assert any("no zone name" in m for m in messages)
 
 
 def test_day_bounds_utc_spans_the_local_calendar_day():
