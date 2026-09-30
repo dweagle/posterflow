@@ -174,7 +174,7 @@ Environment=CONFIG_DIR=/home/your_user/posterflow
 # reference in docs/native-install.md works here, incl. raw RCLONE_* passthrough.
 # Below items are just examples.
 # Environment=PORT=8500
-# Environment=TZ=America/New_York
+# Environment=APP_TIMEZONE=Europe/Amsterdam
 # Environment=LOG_LEVEL=INFO
 # Environment=ALLOWED_FRAME_ORIGINS=http://organizr.local:8080
 Restart=on-failure
@@ -235,7 +235,8 @@ compose's `environment:` block - and how to change them after setup:
 | `CONFIG_DIR` | `~/.local/share/posterflow` | Database, logs, rclone.conf, synced posters |
 | `PORT` | `8357` | Web/API listen port |
 | `HOST` | `0.0.0.0` | Bind address |
-| `TZ` | host timezone | Scheduler local-time interpretation |
+| `TZ` | host timezone (inherited) | Host/process timezone. Storage and log timestamps are UTC regardless of it, so the only thing it still decides is the application-timezone fallback below. |
+| `APP_TIMEZONE` | *(unset)* | The application timezone: what a schedule's time means, and where "today" starts. Usually set in Settings → Scheduling; set it here for a headless box. Unset falls back to the host timezone, then UTC. |
 | `DEBUG` / `LOG_LEVEL` | `false` / `INFO` | Log verbosity |
 | `ALLOWED_FRAME_ORIGINS` | *(empty)* | Origins allowed to embed the app in an iframe |
 
@@ -255,7 +256,7 @@ an override file that survives unit-file upgrades. Add lines like:
 
 ```ini
 [Service]
-Environment=TZ=America/New_York
+Environment=APP_TIMEZONE=Europe/Amsterdam
 Environment=PORT=9000
 ```
 
@@ -332,7 +333,13 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
   accepts the packaged numpy (off Linux/macOS the requirement is just `>=2.4`).
 - Linux-only speedup packages (uvloop/httptools) skip automatically.
 - Starting at boot is yours to solve (an rc.d script wrapping the venv python).
-- Give the scheduler a named timezone: run `tzsetup` (it writes
-  `/var/db/zoneinfo`) or set `TZ=Region/City` in the service environment. A
-  jail whose `/etc/localtime` is a bare copy has no zone name; the scheduler
-  then logs a warning at startup and runs schedules in UTC.
+- The two timezones are separate things. `TZ` is the host zone; leave it at
+  `UTC`, because storage and log timestamps are UTC whatever it says. What
+  schedule times and "today" mean is the application timezone, which you set in
+  Settings → Scheduling (or with `APP_TIMEZONE` here). Resolution order is: the
+  value saved in the database, then `APP_TIMEZONE`, then the host's zone, then
+  UTC — so the host fallback only matters while nothing is saved, and it follows
+  `TZ` when that is set. Give the host a named zone with `tzsetup` (it writes
+  `/var/db/zoneinfo`) if you rely on that. A jail whose `/etc/localtime` is a
+  bare copy has no zone name; the app then logs a warning at startup and uses
+  UTC until you set the timezone in the UI.

@@ -80,7 +80,7 @@ services:
       - PUID=1000        # Host UID that owns the mount points above.
       - PGID=1000        # Host GID. Both default to 1000 if unset.
       - UMASK=022        # Optional. Mode mask for files the app creates. 002 makes them group-writable.
-      - TZ=America/New_York   # Host timezone. Drives scheduler local-time interpretation.
+      - TZ=UTC                # Keep UTC. Set your timezone in Settings → Scheduling instead.
       - DEBUG=false      # Optional. true forces file logging to DEBUG on startup.
       - LOG_LEVEL=INFO   # Optional. File log level when DEBUG=false.
       - ALLOWED_FRAME_ORIGINS=  # Optional. Comma-separated origins allowed to embed the app in an iframe (e.g. http://organizr.local:8080).
@@ -96,7 +96,7 @@ docker run -d \
   -v /srv/posterflow/config:/config \
   -v /srv/kometa/assets:/assets \
   -e PUID=1000 -e PGID=1000 \
-  -e TZ=America/New_York \
+  -e TZ=UTC \
   --restart unless-stopped \
   dweagle/posterflow:develop
 ```
@@ -116,7 +116,8 @@ docker run -d \
 | `PUID` | `1000` | User ID for file ownership |
 | `PGID` | `1000` | Group ID for file ownership |
 | `UMASK` | `022` | Permission mask for files and folders the container creates (posters, PSD exports, synced drive files). `022` gives `644`/`755`. Set `002` when other users in the `PGID` group need to save into those files over SMB, e.g. Photoshop on macOS writing in place. Applies to new files only; existing files keep their mode. |
-| `TZ` | `UTC` | Timezone |
+| `TZ` | `UTC` | Host/container timezone. Timestamps are stored and logged in UTC regardless. Set the application timezone in Settings → Scheduling; `TZ` is only its fallback, used when nothing is saved and `APP_TIMEZONE` is unset. |
+| `APP_TIMEZONE` | *(unset)* | Optional override for the application timezone, for headless deployments with no UI access. Resolution order: the value saved in Settings → Scheduling, then this variable, then the host's timezone, then UTC. |
 | `DEBUG` | `false` | Enable debug logging on startup (can be toggled in-app) |
 | `LOG_LEVEL` | `INFO` | File log verbosity when debug mode is off |
 | `ALLOWED_FRAME_ORIGINS` | *(empty)* | Comma-separated origins allowed to embed the app in an iframe (e.g. an Organizr/Homarr dashboard). Format `http(s)://host[:port]` — no paths or wildcards; invalid entries are ignored with a startup warning. Empty keeps embedding blocked for all other sites. |
