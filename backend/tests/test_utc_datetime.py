@@ -25,16 +25,16 @@ def session():
     Base.metadata.create_all(bind=engine)
     with Session(engine) as s:
         yield s
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 def test_aware_utc_round_trips_aware(session):
-    session.add(Sample(stamp=datetime(2026, 9, 30, 14, 30, tzinfo=timezone.utc)))
+    session.add(Sample(stamp=datetime(2026, 9, 30, 14, 30, 0, 123456, tzinfo=timezone.utc)))
     session.commit()
 
     stored = session.execute(select(Sample)).scalar_one()
 
-    assert stored.stamp == datetime(2026, 9, 30, 14, 30, tzinfo=timezone.utc)
+    assert stored.stamp == datetime(2026, 9, 30, 14, 30, 0, 123456, tzinfo=timezone.utc)
     assert stored.stamp.tzinfo is not None
 
 
