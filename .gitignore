@@ -45,6 +45,7 @@ Thumbs.db
 *.temp
 
 # AI assistant instructions (personal)
+AGENTS.md
 .github/copilot-instructions.md
 CLAUDE.md
 GEMINI.md
@@ -65,3 +66,4 @@ GEMINI.md
 
 # Local-only reference docs (kept in Claude's per-repo memory, not committed)
 docs/photopea-api.md
+docs/superpowers/
