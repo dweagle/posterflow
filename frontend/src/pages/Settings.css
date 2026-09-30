@@ -271,7 +271,8 @@
   flex: 1;
 }
 
-.settings-input-row input {
+.settings-input-row input,
+.settings-input-row select {
   flex: 1;
   padding: 0.45rem 0.75rem;
   background-color: #2a2a2a;
@@ -281,7 +282,8 @@
   font-size: 0.875rem;
 }
 
-.settings-input-row input:focus {
+.settings-input-row input:focus,
+.settings-input-row select:focus {
   outline: none;
   border-color: #64b5f6;
 }

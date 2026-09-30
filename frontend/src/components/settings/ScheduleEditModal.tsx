@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget, Workflow, listWorkflows } from '../../api/client'
-import { formatDateTime } from '../../utils/datetime'
+import { formatDateTime, browserTimeZone } from '../../utils/datetime'
 
 type EditingScheduleState = {
   schedule: Schedule
@@ -11,6 +11,8 @@ type ScheduleEditModalProps = {
   editingSchedule: EditingScheduleState | null
   drives: Drive[]
   scheduleSaving: boolean
+  appTimezone: string
+  effectiveTimezone: string
   updateScheduleField: <K extends keyof Schedule>(field: K, value: Schedule[K]) => void
   onClose: () => void
   onSave: () => void
@@ -20,12 +22,20 @@ function ScheduleEditModal({
   editingSchedule,
   drives,
   scheduleSaving,
+  appTimezone,
+  effectiveTimezone,
   updateScheduleField,
   onClose,
   onSave,
 }: ScheduleEditModalProps) {
   const [idarrTargets, setIdarrTargets] = useState<Array<{ index: number; target: MakerIdarrSyncTarget }>>([])
   const [workflows, setWorkflows] = useState<Workflow[]>([])
+
+  // What the user types is read in the application zone; what the API returns is an instant,
+  // rendered in the browser's zone. Both have to be named or the two disagree silently.
+  const browserZone = browserTimeZone()
+  const scheduleZone = appTimezone || effectiveTimezone || browserZone
+  const browserDiffers = browserZone !== scheduleZone
 
   const isSyncSchedule = editingSchedule?.schedule.job_type === 'gdrive_sync' || editingSchedule?.schedule.job_type === 'sync'
   const isIdarrSchedule = editingSchedule?.schedule.job_type === 'idarr'
@@ -599,12 +609,28 @@ function ScheduleEditModal({
             </div>
           )}
 
-          {editingSchedule.schedule.last_run && (
+          <p className="schedule-summary">
+            <span className="summary-disabled">
+              Schedule times are in {scheduleZone}
+              {browserDiffers && `, but your browser is in ${browserZone} — so the run times below are not the same wall clock.`}
+            </span>
+          </p>
+
+          {(editingSchedule.schedule.last_run || editingSchedule.schedule.next_run) && (
             <div className="schedule-status">
-              <div className="status-item">
-                <span className="status-label">Last Run:</span>
-                <span className="status-value">{formatDateTime(editingSchedule.schedule.last_run)}</span>
-              </div>
+              {editingSchedule.schedule.last_run && (
+                <div className="status-item">
+                  <span className="status-label">Last Run:</span>
+                  <span className="status-value">{formatDateTime(editingSchedule.schedule.last_run)}</span>
+                </div>
+              )}
+              {editingSchedule.schedule.next_run && (
+                <div className="status-item">
+                  <span className="status-label">Next Run:</span>
+                  <span className="status-value">{formatDateTime(editingSchedule.schedule.next_run)}</span>
+                </div>
+              )}
+              <p className="field-hint">Run times are shown in your browser zone ({browserZone}).</p>
             </div>
           )}
         </div>

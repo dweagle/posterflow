@@ -1,6 +1,7 @@
 import { Edit2, Plus, Trash2 } from 'lucide-react'
 import { ReactNode, useState } from 'react'
 import { Schedule } from '../../api/client'
+import { browserTimeZone, timeZoneOptions } from '../../utils/datetime'
 
 type SettingsSchedulingSectionProps = {
   schedules: Schedule[]
@@ -9,6 +10,11 @@ type SettingsSchedulingSectionProps = {
   onEditSchedule: (index: number) => void
   onRemoveSchedule: (index: number) => void
   getScheduleSummary: (schedule: Schedule) => ReactNode
+  appTimezone: string
+  onChangeAppTimezone: (value: string) => void
+  effectiveTimezone: string
+  onSaveAppTimezone: (value: string) => void
+  saving: boolean
 }
 
 function SettingsSchedulingSection({
@@ -18,8 +24,25 @@ function SettingsSchedulingSection({
   onEditSchedule,
   onRemoveSchedule,
   getScheduleSummary,
+  appTimezone,
+  onChangeAppTimezone,
+  effectiveTimezone,
+  onSaveAppTimezone,
+  saving,
 }: SettingsSchedulingSectionProps) {
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
+
+  const browserZone = browserTimeZone()
+  // Prefill, not a placeholder. A greyed-out hint leaves the field looking empty, and saving
+  // that persists "" — which silently hands every schedule back to the server's host zone.
+  const zoneValue = appTimezone || browserZone
+  const zoneOptions = timeZoneOptions()
+  // A stored or typed zone can be missing from Intl's list (aliases, newer zones); without
+  // this the select would silently show nothing selected.
+  const zoneChoices =
+    zoneOptions.length > 0 && !zoneOptions.includes(zoneValue) ? [zoneValue, ...zoneOptions] : zoneOptions
+  const isPrefilled = !appTimezone
+  const effectiveDiffers = !!effectiveTimezone && effectiveTimezone !== zoneValue
 
   const handleDeleteClick = (index: number) => {
     setConfirmDeleteIndex(index)
@@ -58,6 +81,58 @@ function SettingsSchedulingSection({
           </div>
         </div>
       )}
+      <div className="server-section">
+        <div className="server-section-header">
+          <h3>Timezone</h3>
+        </div>
+        <div className="setting-item">
+          <div className="setting-info">
+            <label htmlFor="app-timezone-field">Application Timezone</label>
+            <p className="setting-description">
+              Schedule times and calendar days are interpreted in this zone. Every timestamp is
+              stored in UTC and shown in your own browser zone.
+            </p>
+          </div>
+          <div className="settings-input-row">
+            {zoneChoices.length > 0 ? (
+              <select
+                id="app-timezone-field"
+                value={zoneValue}
+                onChange={(e) => onChangeAppTimezone(e.target.value)}
+              >
+                {zoneChoices.map((zone) => (
+                  <option key={zone} value={zone}>{zone}</option>
+                ))}
+              </select>
+            ) : (
+              // No Intl.supportedValuesOf: free text is the only honest control left.
+              <input
+                id="app-timezone-field"
+                type="text"
+                value={zoneValue}
+                onChange={(e) => onChangeAppTimezone(e.target.value)}
+                placeholder="e.g. Europe/Amsterdam"
+              />
+            )}
+            <button
+              type="button"
+              className="btn-primary btn-inline-save"
+              onClick={() => onSaveAppTimezone(zoneValue)}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : 'Save Timezone'}
+            </button>
+          </div>
+        </div>
+        {(isPrefilled || effectiveDiffers) && (
+          <p className="schedule-summary">
+            <span className="summary-disabled">
+              {isPrefilled && `Prefilled from your browser zone (${browserZone}). `}
+              {effectiveDiffers && `Not saved yet — the server is running in ${effectiveTimezone}, so that is what schedules use until you save.`}
+            </span>
+          </p>
+        )}
+      </div>
       <div className="server-section">
         <div className="server-section-header">
           <h3>Scheduled Tasks</h3>
