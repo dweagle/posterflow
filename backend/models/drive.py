@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String, Boolean
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 from pathlib import Path
 from database import Base
 from core.logging import log_warning
+from util.utc_datetime import UTCDateTime
 
 class Drive(Base):
     """

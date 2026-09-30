@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import Any, Optional
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 class Setting(Base):
     """

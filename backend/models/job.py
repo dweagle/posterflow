@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, String, Text
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 JOB_TYPE_POSTER_WORKFLOW = "Poster Workflow"

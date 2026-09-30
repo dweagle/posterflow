@@ -1,8 +1,8 @@
 from sqlalchemy import Column, Integer, String, Text
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 class ManualMediaEntry(Base):

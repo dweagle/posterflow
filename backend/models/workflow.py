@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, String, Boolean, Text
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import Any, Dict, List, Optional
 import json
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 # Canonical default workflow step configuration. Mirrors the FlowConfig defaults

@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 class Schedule(Base):
     __tablename__ = "schedules"

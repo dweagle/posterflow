@@ -9,11 +9,11 @@ from typing import Any
 from urllib.parse import quote_plus
 
 from sqlalchemy import Boolean, Column, Integer, String, Text
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from util.data.normalization import normalize_titles
+from util.utc_datetime import UTCDateTime
 
 from database import Base
 

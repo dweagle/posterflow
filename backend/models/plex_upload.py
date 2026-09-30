@@ -2,10 +2,10 @@ import json
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Column, Float, Integer, String
-from util.utc_datetime import UTCDateTime
 from sqlalchemy.sql import func
 
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 class PlexUploadRecord(Base):
