@@ -412,7 +412,6 @@ git commit -m "refactor(api): drop UTC patches made redundant by UTCDateTime"
 Create `backend/tests/test_app_timezone.py`:
 
 ```python
-import importlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -421,10 +420,17 @@ import pytest
 
 @pytest.fixture
 def app_tz():
-    """A freshly imported module, so each test starts from a clean cache."""
+    """The module with its cache reset, restored afterwards so other tests are unaffected.
+
+    Deliberately not importlib.reload(): reloading creates a second module object with
+    different globals, while core.scheduler (Task 5) holds a reference to the first one.
+    """
     import core.app_timezone as module
 
-    return importlib.reload(module)
+    original = module._cached
+    module._cached = None
+    yield module
+    module._cached = original
 
 
 def test_env_var_is_used_when_no_db_setting(app_tz, monkeypatch):
@@ -433,11 +439,22 @@ def test_env_var_is_used_when_no_db_setting(app_tz, monkeypatch):
     assert str(app_tz.get_app_timezone()) == "Europe/Amsterdam"
 
 
-def test_set_app_timezone_wins_and_is_cached(app_tz):
+def test_set_app_timezone_wins_and_is_cached(app_tz, monkeypatch):
+    monkeypatch.setattr(app_tz.settings, "app_timezone", "Asia/Tokyo", raising=False)
+
     assert app_tz.set_app_timezone("Europe/Amsterdam") is True
     assert str(app_tz.get_app_timezone()) == "Europe/Amsterdam"
 
-    app_tz._cached = None
+    # Cached: a later change to the env source must not leak through.
+    monkeypatch.setattr(app_tz.settings, "app_timezone", "Asia/Tokyo")
+    assert str(app_tz.get_app_timezone()) == "Europe/Amsterdam"
+
+
+def test_resolve_prefers_env_over_host(app_tz, monkeypatch):
+    """With nothing configured, the host's zone is the fallback — never silently UTC."""
+    monkeypatch.setattr(app_tz.settings, "app_timezone", "", raising=False)
+    monkeypatch.setattr(app_tz, "_host_timezone", lambda: ZoneInfo("Europe/Amsterdam"))
+
     assert str(app_tz.get_app_timezone()) == "Europe/Amsterdam"
 
 
@@ -606,7 +623,7 @@ def day_bounds_utc(now: datetime, tz) -> tuple[datetime, datetime]:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run python -m pytest -q tests/test_app_timezone.py`
-Expected: PASS, 7 passed
+Expected: PASS, 8 passed
 
 - [ ] **Step 6: Run the backend suite**
 
