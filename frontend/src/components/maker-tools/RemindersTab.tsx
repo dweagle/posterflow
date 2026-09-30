@@ -10,16 +10,10 @@ import ArtworkFinderCard from './ArtworkFinderCard'
 import { useArtworkScopes } from './useArtworkScopes'
 import IdarrScopePicker from './IdarrScopePicker'
 import MakerScopeRow from './MakerScopeRow'
+import { formatDate, formatDateTime } from '../../utils/datetime'
 
 type Props = {
   psdConfig: PsdConfig
-}
-
-function formatAdded(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 /** The Reminders tab: every flagged item as its real maker / artwork card, with the note on top. */
@@ -167,7 +161,7 @@ export default function RemindersTab({ psdConfig }: Props) {
                   ) : (
                     <>
                       <span className={`reminder-note${r.note ? '' : ' reminder-note--empty'}`}>{r.note || 'No note'}</span>
-                      {r.created_at && <span className="reminder-date" title={new Date(r.created_at).toLocaleString()}>Added {formatAdded(r.created_at)}</span>}
+                      {r.created_at && <span className="reminder-date" title={formatDateTime(r.created_at)}>Added {formatDate(r.created_at)}</span>}
                       <button type="button" className="tmdb-copy-btn" onClick={() => startEdit(r)} disabled={busy} title="Edit the note">
                         <Pencil size={12} /> Edit
                       </button>

@@ -2,6 +2,7 @@ import { ReactNode } from 'react'
 import { ExternalLink, ImageOff, Upload } from 'lucide-react'
 import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
 import { type PosterAvailability, type TmdbSearchResult } from '../../api/makerTools'
+import { formatDateTime } from '../../utils/datetime'
 
 export type CardMediaType = 'movie' | 'show' | 'season' | 'collection' | 'person'
 
@@ -13,14 +14,6 @@ const PLACEHOLDER_LETTER: Record<CardMediaType, string> = {
   season: 'S',
   collection: 'C',
   person: 'P',
-}
-
-// Format a request/list timestamp the same way across both Community tabs.
-function formatCardDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-    + ' · '
-    + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
 // Lives in posterStyles.ts now (the claim-status hook needs it without pulling
@@ -199,7 +192,7 @@ export default function RequestItemCard({
           )}
           {infoLines}
           {notes && <div className="request-notes">{notes}</div>}
-          <div className="request-timestamp">{formatCardDate(createdAt)}</div>
+          <div className="request-timestamp">{formatDateTime(createdAt)}</div>
         </div>
 
         <div className="request-maker-actions-group">

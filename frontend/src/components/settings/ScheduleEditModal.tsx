@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget, Workflow, listWorkflows } from '../../api/client'
+import { formatDateTime } from '../../utils/datetime'
 
 type EditingScheduleState = {
   schedule: Schedule
@@ -602,7 +603,7 @@ function ScheduleEditModal({
             <div className="schedule-status">
               <div className="status-item">
                 <span className="status-label">Last Run:</span>
-                <span className="status-value">{new Date(editingSchedule.schedule.last_run).toLocaleString()}</span>
+                <span className="status-value">{formatDateTime(editingSchedule.schedule.last_run)}</span>
               </div>
             </div>
           )}
