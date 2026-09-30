@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     app_name: str = "Posterflow"
     debug: bool = False
 
+    # Application timezone — what a schedule's "14:30" means and what "today" means to the
+    # user. Distinct from the process TZ, which stays UTC so storage is timezone-independent.
+    # No env_prefix is configured, so this reads from APP_TIMEZONE.
+    app_timezone: str = ""
+
     # Paths — config_dir is the root; the others re-derive from it when only CONFIG_DIR is overridden
     config_dir: Path = _CONFIG_DIR   # Database, rclone config, drives cache
     gdrive_dir: Path = _CONFIG_DIR / "posters" / "gdrive"  # Synced GDrive poster folders (overrideable via DB setting)
