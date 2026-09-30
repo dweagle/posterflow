@@ -12,6 +12,30 @@
 
 ---
 
+## Environment (do this first)
+
+The system `python3` is 3.9 and cannot import this codebase. All Python work goes through `uv`
+and a project virtualenv — see `AGENTS.md`.
+
+Once per clone, from `backend/`:
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install -r requirements-dev.txt
+```
+
+Then every command in this plan is prefixed `uv run` and run from `backend/`. Baseline before
+starting:
+
+```bash
+uv run python -m pytest -q tests/
+```
+
+Expected: `1979 passed`. If that is not the number, fix the environment before touching any task —
+a red baseline makes every later failure ambiguous.
+
+---
+
 ## File Structure
 
 **New files:**
@@ -136,7 +160,7 @@ def test_none_round_trips_as_none(session):
 
 Run from `backend/`:
 ```bash
-python -m pytest -q tests/test_utc_datetime.py
+uv run python -m pytest -q tests/test_utc_datetime.py
 ```
 Expected: FAIL with `ModuleNotFoundError: No module named 'util.utc_datetime'`
 
@@ -181,7 +205,7 @@ class UTCDateTime(TypeDecorator):
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `python -m pytest -q tests/test_utc_datetime.py`
+Run: `uv run python -m pytest -q tests/test_utc_datetime.py`
 Expected: PASS, 4 passed
 
 - [ ] **Step 5: Commit**
@@ -222,7 +246,7 @@ def test_no_models_declare_naive_datetime_columns():
 
 - [ ] **Step 2: Run the guard test to verify it fails**
 
-Run: `python -m pytest -q tests/test_no_naive_datetime_columns.py`
+Run: `uv run python -m pytest -q tests/test_no_naive_datetime_columns.py`
 Expected: FAIL listing the 13 offending model files
 
 - [ ] **Step 3: Swap the column type**
@@ -258,18 +282,18 @@ Expected: `13`
 
 - [ ] **Step 5: Verify the import cleanup**
 
-Run: `python -m pyflakes models/`
+Run: `uv run python -m pyflakes models/`
 Expected: no `imported but unused` entries naming `DateTime`. Other pre-existing warnings are
 out of scope.
 
 - [ ] **Step 6: Run the guard test to verify it passes**
 
-Run: `python -m pytest -q tests/test_no_naive_datetime_columns.py`
+Run: `uv run python -m pytest -q tests/test_no_naive_datetime_columns.py`
 Expected: PASS
 
 - [ ] **Step 7: Run the full backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all tests pass. A failure here means some code was relying on naive reads — investigate
 before continuing; do not weaken the test.
 
@@ -330,7 +354,7 @@ operating on an ORM attribute must be removed.
 
 - [ ] **Step 6: Run the backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 7: Commit**
@@ -432,7 +456,7 @@ def test_day_window_is_24h_across_a_dst_change():
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `python -m pytest -q tests/test_app_timezone.py`
+Run: `uv run python -m pytest -q tests/test_app_timezone.py`
 Expected: FAIL with `ModuleNotFoundError: No module named 'core.app_timezone'`
 
 - [ ] **Step 3: Add the config field**
@@ -547,12 +571,12 @@ def day_bounds_utc(now: datetime, tz) -> tuple[datetime, datetime]:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m pytest -q tests/test_app_timezone.py`
+Run: `uv run python -m pytest -q tests/test_app_timezone.py`
 Expected: PASS, 7 passed
 
 - [ ] **Step 6: Run the backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 7: Commit**
@@ -601,7 +625,7 @@ def test_apply_app_timezone_picks_up_a_later_change(monkeypatch):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest -q tests/test_schedules.py -k application_timezone`
+Run: `uv run python -m pytest -q tests/test_schedules.py -k application_timezone`
 Expected: FAIL — `AttributeError: module 'core.scheduler' has no attribute 'apply_app_timezone'`
 
 - [ ] **Step 3: Change the scheduler's timezone source**
@@ -647,12 +671,12 @@ def apply_app_timezone() -> None:
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `python -m pytest -q tests/test_schedules.py`
+Run: `uv run python -m pytest -q tests/test_schedules.py`
 Expected: PASS, including the two pre-existing `_local_timezone` tests and the two new ones
 
 - [ ] **Step 7: Run the backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 8: Commit**
@@ -756,21 +780,21 @@ restoration first, and the scheduler is built from the restored zone.
 
 - [ ] **Step 5: Confirm no import cycle was introduced**
 
-Run: `python -c "import main"` from `backend/`
+Run: `uv run python -c "import main"` from `backend/`
 Expected: no output, exit 0
 
 - [ ] **Step 6: Verify the setting is rejected when not allowlisted**
 
 Temporarily confirm the guard by running:
 ```bash
-python -m pytest -q tests/ -k settings
+uv run python -m pytest -q tests/ -k settings
 ```
 Expected: existing settings tests pass. If the suite has no coverage of the allowlist, that is
 acceptable — Steps 1 and 2 are both verified by Step 5 and the frontend task.
 
 - [ ] **Step 7: Run the backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 8: Commit**
@@ -840,7 +864,7 @@ def test_daily_activity_window_follows_the_application_timezone(client, test_db)
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `python -m pytest -q tests/test_stats_daily_activity.py`
+Run: `uv run python -m pytest -q tests/test_stats_daily_activity.py`
 Expected: FAIL — the current code derives its window from `datetime.now().astimezone()`, so both
 requests use the same window and `behind_utc` equals `in_utc`.
 
@@ -902,7 +926,7 @@ Expected: no matches. Any hit using `datetime.now()` for a *calendar day* must m
 
 - [ ] **Step 7: Run the backend suite**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 8: Commit**
@@ -955,14 +979,14 @@ Add `from datetime import timezone` to that file's imports.
 round-trip is now genuinely correct rather than accidentally correct. Run:
 
 ```bash
-python -m pytest -q tests/ -k job
+uv run python -m pytest -q tests/ -k job
 ```
 Expected: PASS. If a test asserts on a log timestamp value, update the expectation to UTC — do not
 re-add a local-time branch.
 
 - [ ] **Step 5: Confirm the rendered format is unchanged**
 
-Run: `python -m pytest -q tests/`
+Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
 - [ ] **Step 6: Commit**
@@ -1453,7 +1477,7 @@ Expected: no matches
 
 - [ ] **Step 5: Run the full verification**
 
-From `backend/`: `python -m pytest -q tests/`
+From `backend/`: `uv run python -m pytest -q tests/`
 From `frontend/`: `npm run -s test && npm run -s build`
 Expected: everything passes
 
