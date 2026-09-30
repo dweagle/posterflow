@@ -1167,6 +1167,7 @@ git commit -m "feat(frontend): add shared date and timezone helpers"
 - Modify: `frontend/src/components/maker-tools/RemindersTab.tsx:20-22`, `:170`
 - Modify: `frontend/src/components/community/RequestItemCard.tsx:20-23`
 - Modify: `frontend/src/components/poster-manager/UnmatchedItemsModal.tsx:522`
+- Modify: `frontend/src/components/poster-manager/MatchReportModal.tsx:286`
 - Modify: `frontend/src/components/settings/ScheduleEditModal.tsx:602-605`
 - Modify: `frontend/src/pages/PlexUpload.tsx:268`
 
@@ -1201,6 +1202,11 @@ Add the import to each file.
 - `frontend/src/components/community/RequestItemCard.tsx` lines 20-23: same
 - `frontend/src/components/poster-manager/UnmatchedItemsModal.tsx` line 522: `formatDate(sortDate)`
 - `frontend/src/pages/PlexUpload.tsx` line 268: `formatDateTime(normalized)`
+- `frontend/src/components/poster-manager/MatchReportModal.tsx` line 286: currently raw-interpolates
+  the API string — `` `synced ${drive.last_synced ?? 'never'}` `` — so the user sees
+  `synced 2024-03-15T12:30:45Z`. Replace with `formatDateTime(drive.last_synced)` and keep the
+  `'never'` fallback for null. This is the last raw datetime left in the frontend after Task 3 moved
+  these fields to Pydantic's default serializer.
 
 Add the import to each file.
 
