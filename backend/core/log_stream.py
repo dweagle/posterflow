@@ -12,6 +12,7 @@ its oldest entries rather than blocking logging or growing unbounded.
 """
 
 import asyncio
+from datetime import timezone
 from typing import Any, Dict, Optional
 
 # Keep in sync with core.logging's timestamp formats (importing it here would be circular).
@@ -76,7 +77,9 @@ def broadcast_sink(message: Any) -> None:
     if not raw.strip():
         return  # structural blank spacers exist for the files, not the stream
     hub.publish({
-        "timestamp": record["time"].strftime(_TIMESTAMP_FORMAT),
+        # Loguru's !UTC converts for FORMATTING only, and this sink uses format="{message}",
+        # so it never sees that conversion — record["time"] is still local and needs its own.
+        "timestamp": record["time"].astimezone(timezone.utc).strftime(_TIMESTAMP_FORMAT),
         "level": record["level"].name,
         "message": raw,
     })
