@@ -24,8 +24,13 @@ Three concrete defects follow:
 - The schedule editor never states which zone a time is interpreted in.
 
 A fourth, latent: the naive/aware contract on datetime columns is a convention maintained by
-hand at six call sites and already leaking — `backend/api/idarr.py:1459-1460` calls
-`.timestamp()` on a naive SQLite value with no guard, silently interpreting UTC as local.
+hand at seven call sites — four re-attaching UTC after an ORM read, three coercing values from
+outside the database (Idarr ISO-8601 strings, log-line timestamps, API-supplied datetimes) — and
+already leaking: `backend/api/idarr.py:1459-1460` calls `.timestamp()` on a naive SQLite value with
+no guard, silently interpreting UTC as local.
+
+Only the four ORM-read sites become redundant once the columns carry the type. The three external
+coercions are unrelated to SQLite's missing TIMESTAMPTZ and must stay.
 
 ## Goals
 

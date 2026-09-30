@@ -4,7 +4,7 @@
 
 **Goal:** Store every timestamp as aware UTC at the type level, and give schedules and user-facing day boundaries one explicitly configured application timezone that the browser no longer has to guess.
 
-**Architecture:** Split the single `TZ` env var into two independent concepts. Process `TZ` stays UTC and governs storage and log wall-clock. A new instance-wide "application timezone" — `APP_TIMEZONE` env var, overridable by a `timezone` DB setting — governs cron interpretation and what "today" means. A `UTCDateTime` SQLAlchemy `TypeDecorator` makes "naive in SQLite means UTC" a type-level guarantee rather than a hand-maintained convention at six call sites.
+**Architecture:** Split the single `TZ` env var into two independent concepts. Process `TZ` stays UTC and governs storage and log wall-clock. A new instance-wide "application timezone" — `APP_TIMEZONE` env var, overridable by a `timezone` DB setting — governs cron interpretation and what "today" means. A `UTCDateTime(TypeDecorator)` makes "naive in SQLite means UTC" a type-level guarantee rather than a hand-maintained convention at each ORM read site.
 
 **Tech Stack:** Python 3.12+, FastAPI, SQLAlchemy 2.0 (SQLite), Alembic, APScheduler 3.11, loguru, `zoneinfo` (stdlib), pytest. Frontend: React 19, TypeScript, Vite, vitest.
 
@@ -172,12 +172,16 @@ Create `backend/util/utc_datetime.py`:
 """UTC-aware DateTime column type.
 
 SQLite has no TIMESTAMPTZ: SQLAlchemy renders DateTime(timezone=True) as a plain
-DATETIME, so values come back naive and every reader has to guess. Historically
-that guess lived in six hand-written `.replace(tzinfo=timezone.utc)` patches and
-one place that guessed wrong. This type settles it once, at the column.
+DATETIME, so values come back naive and every reader has to guess. The codebase
+compensated by re-attaching UTC after each ORM read, and one read site forgot.
+This type settles that once, at the column.
 
 Binds are converted to UTC before storage; reads always come back aware. A naive
 bind is read as UTC, which is what every already-persisted value means.
+
+Scope: only ORM reads of a DateTime column. Coercions of values that never touch
+the database — an ISO-8601 string from Idarr, a log-line timestamp, a datetime
+supplied over the API — are a separate concern and must stay.
 """
 
 from datetime import timezone
@@ -312,6 +316,7 @@ git commit -m "refactor(models): use UTCDateTime for all timestamp columns"
 - Modify: `backend/api/drives.py:170-179`
 - Modify: `backend/api/artwork_drives.py:71-73`
 - Modify: `backend/api/poster_reminders.py:46-50`, `:53-68`
+- Modify: `backend/modules/upload.py:428-433`
 - Modify: `backend/api/idarr.py:1459-1460`
 
 - [ ] **Step 1: Remove the drives field serializer**
@@ -339,28 +344,57 @@ a plain `.isoformat()`:
 Preserve whatever key names and surrounding dict structure the call sites already use — change only
 the value expression. Remove `timezone` from the `datetime` import if it becomes unused.
 
-- [ ] **Step 4: Confirm the idarr timestamp call is now safe**
+- [ ] **Step 4: Remove the upload re-read guard**
+
+In `backend/modules/upload.py`, inside `_source_target_is_unchanged_since_last_processed()`, delete
+the tzinfo re-attachment:
+
+```python
+        last_processed = source_poster.last_processed
+        if last_processed.tzinfo is None:
+            last_processed = last_processed.replace(tzinfo=timezone.utc)
+```
+
+becomes:
+
+```python
+        last_processed = source_poster.last_processed
+```
+
+`source_poster.last_processed` is already guarded for `None` three lines above (line 416), and the
+column is a `UTCDateTime`, so the read is always aware. Keep the `timezone` import — that module
+uses it in roughly a dozen other places.
+
+- [ ] **Step 5: Confirm the idarr timestamp call is now safe**
 
 Read `backend/api/idarr.py` around lines 1455-1465 and confirm the `row.updated_at.timestamp()`
 call now receives an aware value. Add no code — the guard is that `updated_at` is a `UTCDateTime`
 column (it is, in `models/idarr.py`). Leave the call as-is.
 
-- [ ] **Step 5: Verify nothing else hand-patches UTC onto a DB value**
+- [ ] **Step 6: Verify nothing else hand-patches UTC onto a DB value**
 
 Run: `rg -n 'replace\(tzinfo=timezone\.utc\)' api/ services/ modules/ models/`
-Expected: only `backend/services/idarr_runner.py` and `backend/services/new_drives.py` may match —
-those coerce ISO-8601 *strings* from external sources, which is correct and unrelated. Any match
-operating on an ORM attribute must be removed.
 
-- [ ] **Step 6: Run the backend suite**
+Expected: exactly three matches may remain, all coercing values from outside the database:
+
+| Site | What it coerces |
+| --- | --- |
+| `api/jobs.py` | a timestamp parsed out of a workflow log line |
+| `services/new_drives.py` | an ISO-8601 string from Idarr's drive API |
+| `services/idarr_runner.py` | a caller-supplied `last_checked_at` |
+
+These are correct as written and unrelated to SQLite's missing TIMESTAMPTZ — do not remove them.
+Any other match operating on an ORM attribute must be removed.
+
+- [ ] **Step 7: Run the backend suite**
 
 Run: `uv run python -m pytest -q tests/`
 Expected: all pass
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add backend/api
+git add backend/api backend/modules/upload.py
 git commit -m "refactor(api): drop UTC patches made redundant by UTCDateTime"
 ```
 
