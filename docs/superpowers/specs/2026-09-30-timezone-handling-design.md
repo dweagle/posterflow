@@ -214,12 +214,36 @@ There is no shared date helper today; ten-plus call sites inline the formatting.
 | `browserTimeZone()` | `Intl.DateTimeFormat().resolvedOptions().timeZone` |
 | `timeZoneOptions()` | `Intl.supportedValuesOf('timeZone')`, `[]` where unsupported |
 
-### Timezone picker
+### Timezone picker, seeded from the browser
 
 `frontend/src/components/settings/SettingsSchedulingSection.tsx` gains a timezone field: a text
 input with a `<datalist>` populated from `timeZoneOptions()`. A text input rather than a `<select>`
 because `Intl.supportedValuesOf` is Baseline but not universal, and an empty datalist degrades to
 free text with no branching.
+
+While the stored `timezone` is empty, the field is pre-filled with `browserTimeZone()` and
+labelled "Detected from your browser". The user saves once and the value is pinned. This is a
+suggestion, never an override — see "Authority" below.
+
+### Authority: why the browser only suggests
+
+The browser timezone is authoritative for *display* and nothing else. The application timezone
+decides when a cron fires, which is server-authoritative behaviour, so it must be explicit and
+server-side.
+
+Posterflow has no per-user identity — auth is a single shared app password
+(`backend/core/auth.py:20-22`). Nothing distinguishes the owner from any other browser that
+reaches the app, so an automatic browser-derived zone could be written by a guest, a VPN, or a
+family member on another continent, silently shifting every schedule with no way to tell why. A
+GET must also not mutate future scheduling behaviour.
+
+Adopt-once-and-pin avoids both: nothing changes until a human saves, and after that the stored
+value wins regardless of who opens the app.
+
+The current fallback is the actual problem this fixes. Docker ships `TZ=UTC`, so an unconfigured
+install falls through to `tzlocal` and gets UTC schedules — the state most likely to be wrong, in
+the configuration most users start from. Prefilling gives the common single-operator case a
+correct default without giving up authority over scheduling.
 
 ### Schedule editor
 
@@ -240,8 +264,10 @@ zone abbreviation to the next-run line so the wall-clock time is never ambiguous
 The editor needs the *resolved* application zone, not the stored string — it may be unset and
 falling back. Expose the effective value from `core/app_timezone.py` as one read-only field
 (`effective_timezone`) on the existing settings GET, alongside the editable `timezone` key.
-Read-only because writing it is not meaningful; the field exists so the UI can label itself
+Read-only because writing it is not meaningful; the field exists so the editor can label itself
 correctly on a fresh install. No new endpoint.
+
+The prefill itself needs no round trip — it is `browserTimeZone()`, evaluated client-side.
 
 ### Unchanged
 
@@ -265,7 +291,9 @@ The last test is the cheap enforcement that keeps the invariant from drifting ba
 
 Frontend (vitest): `timeZoneOptions()` contains `Europe/Amsterdam`; `browserTimeZone()` returns a
 string. Formatted output is deliberately not asserted — it is the platform's responsibility, and
-pinning literal strings to the runner's zone produces brittle tests.
+pinning literal strings to the runner's zone produces brittle tests. The zone prefill is
+likewise untested: it is a single `stored || browserTimeZone()` fallback in JSX, and a component
+test for one conditional expression costs more than it catches.
 
 ## Rollout
 
