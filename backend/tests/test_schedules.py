@@ -1,6 +1,8 @@
 import pickle
 from datetime import datetime, timezone
 
+import pytest
+
 
 def test_scheduler_timezone_resolves_by_name(monkeypatch):
     """A named zone pickles by key, which the SQLAlchemy job store needs for every add_job."""
@@ -399,3 +401,42 @@ def test_scheduled_artwork_sync_queues_the_artwork_job(test_db, monkeypatch):
     from models.job import Job
     job = test_db.query(Job).filter(Job.id == submitted[0][1]).first()
     assert job.job_type == "Artwork Sync All (1 drives)"
+
+
+@pytest.fixture
+def restore_scheduler_timezone():
+    """apply_app_timezone() mutates a module-level global; put it back afterwards.
+
+    Without this, test_apply_app_timezone_picks_up_a_later_change leaves the scheduler on
+    Asia/Tokyo for the rest of the session, and every later test that adds a job in this
+    file would silently run it in Tokyo.
+    """
+    import core.scheduler as scheduler_module
+
+    original = scheduler_module.scheduler.timezone
+    yield
+    scheduler_module.scheduler.timezone = original
+
+
+def test_scheduler_uses_the_application_timezone_not_process_tz(monkeypatch, restore_scheduler_timezone):
+    """TZ governs storage; the app timezone governs when a cron fires. They must not be the same knob."""
+    import core.scheduler as scheduler_module
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(scheduler_module, "get_app_timezone", lambda: ZoneInfo("Europe/Amsterdam"))
+
+    scheduler_module.apply_app_timezone()
+
+    assert str(scheduler_module.scheduler.timezone) == "Europe/Amsterdam"
+
+
+def test_apply_app_timezone_picks_up_a_later_change(monkeypatch, restore_scheduler_timezone):
+    """Changing the setting at runtime must re-point the scheduler without a restart."""
+    import core.scheduler as scheduler_module
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(scheduler_module, "get_app_timezone", lambda: ZoneInfo("Asia/Tokyo"))
+
+    scheduler_module.apply_app_timezone()
+
+    assert str(scheduler_module.scheduler.timezone) == "Asia/Tokyo"

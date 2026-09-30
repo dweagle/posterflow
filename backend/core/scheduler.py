@@ -42,6 +42,7 @@ from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
 from tzlocal import get_localzone_name
 from zoneinfo import ZoneInfo
+from core.app_timezone import get_app_timezone
 
 
 def _local_timezone():
@@ -69,8 +70,19 @@ scheduler = BackgroundScheduler(
         'coalesce': True,
         'max_instances': 3
     },
-    timezone=_local_timezone()
+    timezone=get_app_timezone()
 )
+
+
+def apply_app_timezone() -> None:
+    """Re-point the scheduler at the current application timezone.
+
+    APScheduler's BaseScheduler._create_trigger_instance does
+    trigger_args.setdefault('timezone', self.timezone), so assigning the attribute is
+    enough for every subsequent add_job to pick it up. configure() is not usable here —
+    it raises SchedulerAlreadyRunningError once the scheduler has started.
+    """
+    scheduler.timezone = get_app_timezone()
 
 
 def _to_apscheduler_day_of_week(day_value: str) -> str:
