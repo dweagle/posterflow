@@ -1,9 +1,9 @@
 """UTC-aware DateTime column type.
 
 SQLite has no TIMESTAMPTZ: SQLAlchemy renders DateTime(timezone=True) as a plain
-DATETIME, so values come back naive and every reader has to guess. Historically
-that guess lived in six hand-written `.replace(tzinfo=timezone.utc)` patches and
-one place that guessed wrong. This type settles it once, at the column.
+DATETIME, so values come back naive and every reader has to guess. The codebase
+compensated by re-attaching UTC at each read site, and one site forgot. This type
+settles it once, at the column.
 
 Binds are converted to UTC before storage; reads always come back aware. A naive
 bind is read as UTC, which is what every already-persisted value means.
@@ -29,4 +29,6 @@ class UTCDateTime(TypeDecorator):
     def process_result_value(self, value, dialect):
         if value is None:
             return None
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
