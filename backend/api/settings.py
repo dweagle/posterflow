@@ -910,9 +910,10 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
 
     # A new zone re-interprets every cron expression, so the jobs have to be rebuilt.
     # set_app_timezone must land first — update_schedules() reads it via get_app_timezone().
-    # Function-local imports: core.scheduler pulls in every job module, and a module-scope
-    # import here would create a startup cycle. On an invalid zone set_app_timezone()
-    # returns False and keeps the old one, so both calls are no-ops against it.
+    # Function-local imports keep core.scheduler, and the job modules it pulls in, out of
+    # this module's import path. On an invalid zone set_app_timezone() returns False, so the
+    # rebuild just re-applies the zone already in force and the user sees that mismatch in
+    # effective_timezone.
     if "timezone" in allowed:
         from core.app_timezone import set_app_timezone
         from core.scheduler import apply_app_timezone, update_schedules

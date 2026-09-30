@@ -51,17 +51,39 @@ def test_posting_a_valid_timezone_persists_it_and_repoints_the_scheduler(client,
 
 def test_posting_an_invalid_timezone_leaves_the_previous_zone_in_force(client, test_db):
     """The stored value can be garbage; the app must not be. The user finds out through
-    effective_timezone, not through a 500."""
-    assert app_timezone.set_app_timezone("Europe/Amsterdam")
+    effective_timezone, not through a 500.
+
+    The starting zone is seeded through the API rather than by calling set_app_timezone()
+    directly: a directly-set zone would satisfy every assertion below even if the POST
+    path stopped calling set_app_timezone() altogether, so the test would pass vacuously.
+    """
+    seeded = client.post("/api/settings/bulk", json={"timezone": "Asia/Tokyo"})
+    assert seeded.status_code == 200
+    assert client.get("/api/settings/").json()["effective_timezone"] == "Asia/Tokyo"
 
     response = client.post("/api/settings/bulk", json={"timezone": "Not/AZone"})
 
     assert response.status_code == 200
-    assert str(app_timezone.get_app_timezone()) == "Europe/Amsterdam"
+    assert str(app_timezone.get_app_timezone()) == "Asia/Tokyo"
 
     payload = client.get("/api/settings/").json()
-    assert payload["effective_timezone"] == "Europe/Amsterdam"
+    assert payload["effective_timezone"] == "Asia/Tokyo"
+    # The garbage is still stored -- that is what makes it visible and fixable.
     assert payload["timezone"] == "Not/AZone"
+
+
+def test_update_schedules_runs_only_when_the_post_carries_a_timezone(client, test_db, monkeypatch):
+    """Re-pointing scheduler.timezone is not enough on its own -- jobs already added keep
+    the cron they were built with, so a zone change has to rebuild them. And a bulk save
+    that does not touch the timezone must not pay for a rebuild."""
+    rebuilds = []
+    monkeypatch.setattr(scheduler_module, "update_schedules", lambda: rebuilds.append(1))
+
+    assert client.post("/api/settings/bulk", json={"timezone": "Asia/Tokyo"}).status_code == 200
+    assert len(rebuilds) == 1
+
+    assert client.post("/api/settings/bulk", json={"poster_destination": "remote:posters"}).status_code == 200
+    assert len(rebuilds) == 1
 
 
 def test_effective_timezone_cannot_be_written(client, test_db):
