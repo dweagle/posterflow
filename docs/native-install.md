@@ -339,7 +339,8 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
   Settings → Scheduling (or with `APP_TIMEZONE` here). Resolution order is: the
   value saved in the database, then `APP_TIMEZONE`, then the host's zone, then
   UTC — so the host fallback only matters while nothing is saved, and it follows
-  `TZ` when that is set. Give the host a named zone with `tzsetup` (it writes
-  `/var/db/zoneinfo`) if you rely on that. A jail whose `/etc/localtime` is a
-  bare copy has no zone name; the app then uses UTC and writes a warning to
-  stderr until you set the timezone in the UI.
+  `TZ` when that is set. Pick "Use host timezone" in Settings → Scheduling to
+  clear a saved value and go back to it. Give the host a named zone with
+  `tzsetup` (it writes `/var/db/zoneinfo`) if you rely on that. A jail whose
+  `/etc/localtime` is a bare copy has no zone name; the app then uses UTC and
+  writes a warning to stderr until you set the timezone in the UI.

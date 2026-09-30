@@ -535,7 +535,6 @@ function Settings() {
     appleArtworkEnabled,
     handleToggleAppleArtwork,
     appTimezone,
-    setAppTimezone,
     effectiveTimezone,
     handleSaveAppTimezone,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
@@ -1438,7 +1437,6 @@ function Settings() {
           onRemoveSchedule={removeSchedule}
           getScheduleSummary={getScheduleSummary}
           appTimezone={appTimezone}
-          onChangeAppTimezone={setAppTimezone}
           effectiveTimezone={effectiveTimezone}
           onSaveAppTimezone={async (value: string) => {
             await handleSaveAppTimezone(value)

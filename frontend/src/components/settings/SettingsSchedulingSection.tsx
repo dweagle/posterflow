@@ -11,7 +11,6 @@ type SettingsSchedulingSectionProps = {
   onRemoveSchedule: (index: number) => void
   getScheduleSummary: (schedule: Schedule) => ReactNode
   appTimezone: string
-  onChangeAppTimezone: (value: string) => void
   effectiveTimezone: string
   onSaveAppTimezone: (value: string) => void
   saving: boolean
@@ -25,24 +24,33 @@ function SettingsSchedulingSection({
   onRemoveSchedule,
   getScheduleSummary,
   appTimezone,
-  onChangeAppTimezone,
   effectiveTimezone,
   onSaveAppTimezone,
   saving,
 }: SettingsSchedulingSectionProps) {
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
+  // Staged locally rather than derived straight from appTimezone, because `appTimezone ||
+  // browserZone` can never yield '' and a host choice would snap straight back to the
+  // prefill. null means untouched, which is what keeps the prefill alive until the user
+  // actually picks something — including the host.
+  const [zoneChoice, setZoneChoice] = useState<string | null>(null)
 
   const browserZone = browserTimeZone()
   // Prefill, not a placeholder. A greyed-out hint leaves the field looking empty, and saving
   // that persists "" — which silently hands every schedule back to the server's host zone.
-  const zoneValue = appTimezone || browserZone
+  const zoneValue = zoneChoice ?? (appTimezone || browserZone)
   const zoneOptions = timeZoneOptions()
+  const usingHost = zoneValue === ''
   // A stored or typed zone can be missing from Intl's list (aliases, newer zones); without
   // this the select would silently show nothing selected.
   const zoneChoices =
-    zoneOptions.length > 0 && !zoneOptions.includes(zoneValue) ? [zoneValue, ...zoneOptions] : zoneOptions
-  const isPrefilled = !appTimezone
-  const effectiveDiffers = !!effectiveTimezone && effectiveTimezone !== zoneValue
+    zoneOptions.length > 0 && zoneValue && !zoneOptions.includes(zoneValue)
+      ? [zoneValue, ...zoneOptions]
+      : zoneOptions
+  const isPrefilled = !appTimezone && zoneChoice === null
+  // Comparing against the host fallback is meaningless: what "the zone in force" would
+  // become is exactly what the user is asking to change away from.
+  const effectiveDiffers = !!effectiveTimezone && !usingHost && effectiveTimezone !== zoneValue
 
   const handleDeleteClick = (index: number) => {
     setConfirmDeleteIndex(index)
@@ -94,12 +102,13 @@ function SettingsSchedulingSection({
             </p>
           </div>
           <div className="settings-input-row">
-            {zoneChoices.length > 0 ? (
+            {zoneOptions.length > 0 ? (
               <select
                 id="app-timezone-field"
                 value={zoneValue}
-                onChange={(e) => onChangeAppTimezone(e.target.value)}
+                onChange={(e) => setZoneChoice(e.target.value)}
               >
+                <option value="">Use host timezone</option>
                 {zoneChoices.map((zone) => (
                   <option key={zone} value={zone}>{zone}</option>
                 ))}
@@ -110,8 +119,8 @@ function SettingsSchedulingSection({
                 id="app-timezone-field"
                 type="text"
                 value={zoneValue}
-                onChange={(e) => onChangeAppTimezone(e.target.value)}
-                placeholder="e.g. Europe/Amsterdam"
+                onChange={(e) => setZoneChoice(e.target.value)}
+                placeholder="e.g. Europe/Amsterdam — blank uses the host timezone"
               />
             )}
             <button
@@ -124,10 +133,11 @@ function SettingsSchedulingSection({
             </button>
           </div>
         </div>
-        {(isPrefilled || effectiveDiffers) && (
+        {(isPrefilled || usingHost || effectiveDiffers) && (
           <p className="schedule-summary">
             <span className="summary-disabled">
               {isPrefilled && `Prefilled from your browser zone (${browserZone}). `}
+              {usingHost && 'Schedules will follow the host timezone. '}
               {effectiveDiffers && `Not saved yet — the server is running in ${effectiveTimezone}, so that is what schedules use until you save.`}
             </span>
           </p>

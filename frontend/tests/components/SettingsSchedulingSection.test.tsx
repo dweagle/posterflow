@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import SettingsSchedulingSection from '../../src/components/settings/SettingsSchedulingSection'
@@ -27,15 +26,10 @@ const FIELD = 'Application Timezone'
 
 type Overrides = { appTimezone?: string; effectiveTimezone?: string }
 
-// The parent owns appTimezone, so the harness has to as well — otherwise typing into the
-// control just re-appends to a frozen prefill.
 function renderSection(overrides: Overrides = {}) {
   const onSaveAppTimezone = vi.fn()
-  const changes: string[] = []
 
-  function Harness() {
-    const [appTimezone, setAppTimezone] = useState(overrides.appTimezone ?? '')
-    return (
+  const Harness = () => (
       <SettingsSchedulingSection
         schedules={[]}
         onAddSchedule={noop}
@@ -43,20 +37,15 @@ function renderSection(overrides: Overrides = {}) {
         onEditSchedule={noop}
         onRemoveSchedule={noop}
         getScheduleSummary={() => null}
-        appTimezone={appTimezone}
-        onChangeAppTimezone={(value) => {
-          changes.push(value)
-          setAppTimezone(value)
-        }}
+        appTimezone={overrides.appTimezone ?? ''}
         effectiveTimezone={overrides.effectiveTimezone ?? ''}
         onSaveAppTimezone={onSaveAppTimezone}
         saving={false}
       />
-    )
-  }
+  )
 
   const { container } = render(<Harness />)
-  return { changes, container, onSaveAppTimezone }
+  return { container, onSaveAppTimezone }
 }
 
 describe('SettingsSchedulingSection timezone control', () => {
@@ -97,13 +86,15 @@ describe('SettingsSchedulingSection timezone control', () => {
   })
 
   it('reports the zone picked from the list', async () => {
-    const { changes } = renderSection({ appTimezone: '' })
+    const { onSaveAppTimezone } = renderSection({ appTimezone: '' })
 
     const control = screen.getByLabelText(FIELD)
     expect(control.tagName).toBe('SELECT')
     await userEvent.selectOptions(control, 'Asia/Tokyo')
+    expect((control as HTMLSelectElement).value).toBe('Asia/Tokyo')
 
-    expect(changes).toEqual(['Asia/Tokyo'])
+    await userEvent.click(screen.getByRole('button', { name: 'Save Timezone' }))
+    expect(onSaveAppTimezone).toHaveBeenCalledWith('Asia/Tokyo')
   })
 
   it('keeps a saved zone that Intl does not list selectable', () => {
@@ -113,9 +104,41 @@ describe('SettingsSchedulingSection timezone control', () => {
     expect(control.value).toBe('US/Eastern')
   })
 
+  it('offers the host timezone so a saved zone can be cleared', async () => {
+    // Once a zone is stored the field can never go blank again, so without an explicit
+    // entry the host fallback the docs describe is only reachable before the first save.
+    const { onSaveAppTimezone } = renderSection({
+      appTimezone: 'Asia/Tokyo',
+      effectiveTimezone: 'Asia/Tokyo',
+    })
+
+    await userEvent.selectOptions(screen.getByLabelText(FIELD), '')
+
+    const control = screen.getByLabelText(FIELD) as HTMLSelectElement
+    expect(control.value).toBe('')
+    expect(screen.getByRole('option', { name: 'Use host timezone' })).toBeTruthy()
+    expect(screen.getByText('Schedules will follow the host timezone.')).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save Timezone' }))
+    expect(onSaveAppTimezone).toHaveBeenCalledWith('')
+  })
+
+  it('does not call the host choice a prefill or claim a mismatch against it', () => {
+    // The zone in force IS the thing being changed away from, so naming it as a pending
+    // mismatch would describe the current state as if it were the outcome.
+    const { container } = renderSection({
+      appTimezone: 'Asia/Tokyo',
+      effectiveTimezone: 'Asia/Tokyo',
+    })
+    fireEvent.change(screen.getByLabelText(FIELD), { target: { value: '' } })
+
+    expect(container.textContent).not.toContain('Prefilled from your browser zone')
+    expect(container.textContent).not.toContain('the server is running in')
+  })
+
   it('falls back to free text when Intl cannot list zones', async () => {
     zoneState.options = []
-    const { changes, onSaveAppTimezone } = renderSection({ appTimezone: '' })
+    const { onSaveAppTimezone } = renderSection({ appTimezone: '' })
 
     // No empty dropdown: a textbox, still prefilled, still editable.
     expect(screen.queryByRole('combobox')).toBeNull()
@@ -123,10 +146,10 @@ describe('SettingsSchedulingSection timezone control', () => {
     expect(control.tagName).toBe('INPUT')
     expect(control.value).toBe('America/New_York')
 
-    // Clearing snaps back to the prefill: the field is never blank, so a save can never
-    // persist "" and silently revert to the host zone.
+    // A blank field now means "use the host timezone" rather than snapping back, so the
+    // host fallback stays reachable even when Intl cannot list zones.
     await userEvent.clear(control)
-    expect(control.value).toBe('America/New_York')
+    expect(control.value).toBe('')
 
     fireEvent.change(control, { target: { value: 'Etc/UTC' } })
     expect(control.value).toBe('Etc/UTC')
