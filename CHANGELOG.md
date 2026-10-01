@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.6] - 2026-09-30
+### Changed
+- Settings: the rclone/Google Drive credentials guide is rewritten with click-to-open screenshots. Service-account setup leads as the simpler route, with the OAuth steps (including Google's new Branding requirements) covered for makers who upload to their own drives.
+
 ## [0.16.5] - 2026-09-29
 ### Fixed
 - Scheduler: the local timezone is now resolved by name, so scheduled jobs run at the right local time (#11). If the host has no zone name, the scheduler warns and falls back to UTC.
