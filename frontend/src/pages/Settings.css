@@ -1095,15 +1095,6 @@ details[open] .feature-events-summary::before {
   text-decoration: underline;
 }
 
-.instruction-step.alternate-method {
-  border-left-color: #888;
-  background: #252525;
-}
-
-.instruction-step.alternate-method strong {
-  color: #888;
-}
-
 .btn-save {
   padding: 0.5rem 1rem;
   background-color: #4caf50;

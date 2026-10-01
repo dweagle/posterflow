@@ -86,7 +86,7 @@ describe('SetupWizard', () => {
 
     await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
-    await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+    await user.type(screen.getByPlaceholderText(/"refresh_token"/i), 'refresh-token')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Storage Configuration')
@@ -137,7 +137,7 @@ describe('SetupWizard', () => {
 
     await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
-    await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+    await user.type(screen.getByPlaceholderText(/"refresh_token"/i), 'refresh-token')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Storage Configuration')
@@ -220,7 +220,7 @@ describe('SetupWizard', () => {
 
     await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
     await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
-    await user.type(screen.getByPlaceholderText(/1\/\//i), 'refresh-token')
+    await user.type(screen.getByPlaceholderText(/"refresh_token"/i), 'refresh-token')
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Storage Configuration')

@@ -1,4 +1,5 @@
 import { Eye, EyeOff } from 'lucide-react'
+import { GoogleDriveCredentialsGuide, GoogleCredentialsConflictNotice } from './GoogleDriveCredentialsGuide'
 
 type RcloneSettings = {
   google_client_id: string
@@ -45,105 +46,62 @@ function SettingsRcloneSection({
   return (
     <div className="settings-section">
       <div className="settings-section-header">
-        <h2>Google Drive OAuth Credentials</h2>
+        <h2>Google Drive Access</h2>
         <p className="setting-description">
-          Configure Google Drive access for rclone using OAuth credentials or an optional service account JSON file path.
+          Sync-only users need a service account. Poster makers who upload to their own Google Drive need an OAuth client. Set up one, not both.
         </p>
         <p className="setting-description">
           Saved values are shown directly. Use the eye button to hide or reveal sensitive fields.
         </p>
       </div>
 
-      <button type="button" className="instructions-toggle" onClick={onToggleInstructions}>
-        {showInstructions ? '▼' : '▶'} How to get Google API credentials
-      </button>
-
-      {showInstructions && (
-        <div className="instructions-box">
-          <h3>Step-by-step Guide:</h3>
-
-          <div className="instruction-step">
-            <strong>1. Create a Google Cloud Project</strong>
-            <ul>
-              <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a></li>
-              <li>Click the <strong>project name button</strong> in the top-left header (it shows your current project name, e.g. "My First Project")</li>
-              <li>In the modal that appears, click <strong>"New project"</strong> in the top-right corner</li>
-              <li>Name it "PosterFlow" (or any name you prefer) and click "Create"</li>
-              <li>If you have other projects already created, you will need to choose this project in the project modal to work on.</li>
-            </ul>
-          </div>
-
-          <div className="instruction-step">
-            <strong>2. Enable Google Drive API</strong>
-            <ul>
-              <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "Library"</li>
-              <li>Search for "Google Drive API" and click on it</li>
-              <li>Click "Enable"</li>
-            </ul>
-          </div>
-
-          <div className="instruction-step">
-            <strong>3. Configure OAuth Consent Screen</strong>
-            If this is a new project, there will be a configuration setup walkthrough. If editing an existing project, the bolded headings in this guide can be found on the left-side menu.
-            <ul>
-              <li>Click the <strong>Get Started</strong> button to enter configuration.</li>
-              <li><strong>Branding:</strong> Enter app name (e.g. "PosterFlow") and support email. Click Next.</li>
-              <li><strong>Audience:</strong> Select "External" for personal use. Click Next.</li>
-              <li><strong>Branding:</strong> Enter contact email. Click Next.</li>
-              <li>Read and agree to the terms. Click Continue, then Create</li>
-              <li>⚠️ <strong>Important:</strong> After creating, click on the <strong>Audience</strong> tab in the menu. Select <strong>"Publish App"</strong> (then confirm). Apps left in "Testing" status cause Google tokens to <strong>expire every 7 days</strong>, requiring you to re-authorize repeatedly. Publishing to production (even unverified) gives you long-lived tokens — Google will show a one-time "unverified app" warning when you authorize, which is normal for self-hosted apps.</li>
-              <li><strong>Data Access:</strong> Click "Add or remove scopes"
-                <ul>
-                  <li>In the scope picker, find and check <code>.../auth/drive</code> — "See, edit, create, and delete all of your Google Drive files"</li>
-                  <li><strong>Important:</strong> Do NOT check <code>.../auth/drive.readonly</code> or any other drive scope — rclone requires full access to sync files</li>
-                  <li>Click "Update" then "Save"</li>
-                </ul>
-              </li>
-              <li>You will get a warning about verifying your app, but you can continue using the app/credentials without verifying. <a href="https://support.google.com/cloud/answer/7454865?hl=en" target="_blank" rel="noopener noreferrer">Details</a></li>
-            </ul>
-          </div>
-
-          <div className="instruction-step">
-            <strong>4. Create OAuth 2.0 Client/Credentials</strong>
-            <ul>
-              <li>Click <strong>Clients</strong> in the left-side menu</li>
-              <li>Click "Create client"</li>
-              <li>Application type: "Desktop app"</li>
-              <li>Name: "PosterFlow Client" or a name you prefer</li>
-              <li>Click "Create"</li>
-              <li>You will get a popup.</li>
-              <li>⚠️ <strong>Copy your Client ID and Client Secret immediately</strong> — Google no longer allows you to view the secret after leaving this page</li>
-            </ul>
-          </div>
-
-          <div className="instruction-step">
-            <strong>5. Generate Refresh Token (Recommended Method)</strong>
-            <ul>
-              <li>Install rclone on your computer: <a href="https://rclone.org/install/" target="_blank" rel="noopener noreferrer">rclone.org/install</a></li>
-              <li>Open terminal and run:</li>
-              <li><code>rclone authorize "drive" "YOUR_CLIENT_ID" "YOUR_CLIENT_SECRET"</code></li>
-              <li>A browser window will open — sign in and authorize</li>
-              <li>The terminal will display a token JSON — copy the entire output from &#123; to &#125;</li>
-              <li>Paste it in the "Refresh Token" field below</li>
-            </ul>
-          </div>
-
-          <div className="instruction-step alternate-method">
-            <strong>Alternative: OAuth Playground (if rclone not available)</strong>
-            <ul>
-              <li>Use <a href="https://developers.google.com/oauthplayground/" target="_blank" rel="noopener noreferrer">OAuth 2.0 Playground</a></li>
-              <li>Click settings gear → Check "Use your own OAuth credentials"</li>
-              <li>Paste your Client ID and Client Secret</li>
-              <li>In Step 1: Select "Drive API v3" → <code>https://www.googleapis.com/auth/drive</code></li>
-              <li>Click "Authorize APIs" and sign in</li>
-              <li>In Step 2: Click "Exchange authorization code for tokens"</li>
-              <li>Copy the "Refresh token" value</li>
-            </ul>
-          </div>
-        </div>
-      )}
+      <GoogleDriveCredentialsGuide open={showInstructions} onToggle={onToggleInstructions} />
 
       <div className="rclone-form">
+        <h3 className="credentials-path-title">Service account (sync only)</h3>
+
+        <div className="form-group">
+          <label>Service Account JSON Path</label>
+          <input
+            type="text"
+            value={rcloneSettings.google_service_account_file}
+            onChange={(e) => setRcloneSettings({ ...rcloneSettings, google_service_account_file: e.target.value })}
+            placeholder="/config/service_accounts/my-service-account.json"
+          />
+          <small>
+            Uploaded key files are stored under <code>/config/service_accounts</code>. Clear this field to use OAuth instead.
+          </small>
+          <input
+            type="file"
+            accept="application/json,.json"
+            id="settings-service-account-upload"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              await onUploadServiceAccount(file)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            className="btn-secondary service-account-upload-btn"
+            onClick={() => document.getElementById('settings-service-account-upload')?.click()}
+            disabled={uploadingServiceAccount}
+          >
+            {uploadingServiceAccount ? 'Uploading...' : 'Upload Service Account JSON'}
+          </button>
+        </div>
+
+        <GoogleCredentialsConflictNotice
+          serviceAccountFile={rcloneSettings.google_service_account_file}
+          clientId={rcloneSettings.google_client_id}
+          clientSecret={rcloneSettings.google_client_secret}
+          token={rcloneSettings.google_token}
+        />
+
+        <h3 className="credentials-path-title">OAuth client (poster makers)</h3>
+
         <div className="form-group">
           <label>Client ID</label>
           <div className="input-with-toggle">
@@ -185,7 +143,7 @@ function SettingsRcloneSection({
         </div>
 
         <div className="form-group">
-          <label>Google Drive Token (Full JSON)</label>
+          <label>Google Drive Token (full JSON from rclone authorize)</label>
           <div className="input-with-toggle">
             <textarea
               className={showToken ? '' : 'password-textarea'}
@@ -203,39 +161,6 @@ function SettingsRcloneSection({
               {showToken ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
-        </div>
-
-        <div className="form-group">
-          <label>Service Account JSON Path (Optional)</label>
-          <input
-            type="text"
-            value={rcloneSettings.google_service_account_file}
-            onChange={(e) => setRcloneSettings({ ...rcloneSettings, google_service_account_file: e.target.value })}
-            placeholder="/config/service_accounts/my-service-account.json"
-          />
-          <small>
-            If set, rclone will use this file with <code>--drive-service-account-file</code>. Keep OAuth fields configured as fallback if desired.
-          </small>
-          <input
-            type="file"
-            accept="application/json,.json"
-            id="settings-service-account-upload"
-            style={{ display: 'none' }}
-            onChange={async (e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              await onUploadServiceAccount(file)
-              e.target.value = ''
-            }}
-          />
-          <button
-            type="button"
-            className="btn-secondary service-account-upload-btn"
-            onClick={() => document.getElementById('settings-service-account-upload')?.click()}
-            disabled={uploadingServiceAccount}
-          >
-            {uploadingServiceAccount ? 'Uploading...' : 'Upload Service Account JSON'}
-          </button>
         </div>
 
         <button className={`btn-save ${hasUnsaved ? 'btn-unsaved' : ''}`} onClick={onSave} disabled={saving}>

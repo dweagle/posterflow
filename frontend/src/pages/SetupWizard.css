@@ -350,17 +350,6 @@
   text-decoration: underline;
 }
 
-.alternate-method {
-  border-top: 1px solid #424242;
-  padding-top: 1rem;
-  margin-top: 0.5rem;
-}
-
-.alternate-method strong {
-  color: #888 !important;
-  font-size: 0.875rem;
-}
-
 .server-section {
   margin-top: 1.25rem;
   margin-bottom: 1.25rem;

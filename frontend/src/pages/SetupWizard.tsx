@@ -5,6 +5,7 @@ import { MEDIA_SERVER_COPY, defaultNameForType, fetchMediaServerLibraries, insta
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { Eye, EyeOff } from 'lucide-react'
+import { GoogleDriveCredentialsGuide, GoogleCredentialsConflictNotice } from '../components/settings/GoogleDriveCredentialsGuide'
 import posterFlowIcon from '../assets/PosterFlow.webp'
 import './SetupWizard.css'
 
@@ -791,169 +792,15 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
             <div className="form-section">
               <h2>Google Drive Configuration</h2>
               <p className="section-description">
-                Enter OAuth credentials or a Service Account JSON path to access community poster drives.
+                Connect Google Drive so PosterFlow can sync the community poster drives. Sync-only users need a service account. Poster makers who upload need an OAuth client. Set up one, not both.
               </p>
 
-              <button 
-                type="button" 
-                className="instructions-toggle"
-                onClick={() => setShowInstructions(!showInstructions)}
-              >
-                {showInstructions ? '▼' : '▶'} How to get Google API credentials
-              </button>
+              <GoogleDriveCredentialsGuide open={showInstructions} onToggle={() => setShowInstructions(!showInstructions)} />
 
-              {showInstructions && (
-                <div className="instructions-box">
-                  <h3>Step-by-step Guide:</h3>
-
-                  <div className="instruction-step">
-                    <strong>1. Create a Google Cloud Project</strong>
-                    <ul>
-                      <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a></li>
-                      <li>Click the <strong>project name button</strong> in the top-left header (it shows your current project name, e.g. "My First Project")</li>
-                      <li>In the modal that appears, click <strong>"New project"</strong> in the top-right corner</li>
-                      <li>Name it "PosterFlow" (or any name you prefer) and click "Create"</li>
-                      <li>If you have other projects already created, you will need to choose this project in the project modal to work on.</li>
-                    </ul>
-                  </div>
-
-                  <div className="instruction-step">
-                    <strong>2. Enable Google Drive API</strong>
-                    <ul>
-                      <li>Click the <strong>&#9776; hamburger menu</strong> (top-left) → "APIs &amp; Services" → "Library"</li>
-                      <li>Search for "Google Drive API" and click on it</li>
-                      <li>Click "Enable"</li>
-                    </ul>
-                  </div>
-
-                  <div className="instruction-step">
-                    <strong>3. Configure OAuth Consent Screen</strong>
-                    If this is a new project, there will be a configuration setup walkthrough. If editing an existing project, the bolded headings in this guide can be found on the left-side menu.
-                    <ul>
-                      <li>Click the <strong>Get Started</strong> button to enter configuration.</li>
-                      <li><strong>Branding:</strong> Enter app name (e.g. "PosterFlow") and support email. Click Next.</li>
-                      <li><strong>Audience:</strong> Select "External" for personal use. Click Next.</li>
-                      <li><strong>Branding:</strong> Enter contact email. Click Next.</li>
-                      <li>Read and agree to the terms. Click Continue, then Create</li>
-                      <li>⚠️ <strong>Important:</strong> After creating, click on the <strong>Audience</strong> tab in the menu. Select <strong>"Publish App"</strong> (then confirm). Apps left in "Testing" status cause Google tokens to <strong>expire every 7 days</strong>, requiring you to re-authorize repeatedly. Publishing to production (even unverified) gives you long-lived tokens — Google will show a one-time "unverified app" warning when you authorize, which is normal for self-hosted apps.</li>
-                      <li><strong>Data Access:</strong> Click "Add or remove scopes"
-                        <ul>
-                          <li>In the scope picker, find and check <code>.../auth/drive</code> — "See, edit, create, and delete all of your Google Drive files"</li>
-                          <li><strong>Important:</strong> Do NOT check <code>.../auth/drive.readonly</code> or any other drive scope — rclone requires full access to sync files</li>
-                          <li>Click "Update" then "Save"</li>
-                        </ul>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div className="instruction-step">
-                    <strong>4. Create OAuth 2.0 Client/Credentials</strong>
-                    <ul>
-                      <li>Click <strong>Clients</strong> in the left-side menu</li>
-                      <li>Click "Create client"</li>
-                      <li>Application type: "Desktop app"</li>
-                      <li>Name: "PosterFlow Client" or a name you prefer</li>
-                      <li>Click "Create"</li>
-                      <li>You will get a popup.</li>
-                      <li>⚠️ <strong>Copy your Client ID and Client Secret immediately</strong> — Google no longer allows you to view the secret after leaving this page</li>
-                    </ul>
-                  </div>
-
-                  <div className="instruction-step">
-                    <strong>5. Generate Refresh Token (Recommended Method)</strong>
-                    <ul>
-                      <li>Install rclone on your computer: <a href="https://rclone.org/install/" target="_blank" rel="noopener noreferrer">rclone.org/install</a></li>
-                      <li>Open terminal and run:</li>
-                      <li><code>rclone authorize "drive" "YOUR_CLIENT_ID" "YOUR_CLIENT_SECRET"</code></li>
-                      <li>A browser window will open — sign in and authorize</li>
-                      <li>The terminal will display a token JSON — copy the entire output from &#123; to &#125;</li>
-                      <li>Paste it in the "Refresh Token" field below</li>
-                    </ul>
-                  </div>
-
-                  <div className="instruction-step alternate-method">
-                    <strong>Alternative: OAuth Playground (if rclone not available)</strong>
-                    <ul>
-                      <li>Use <a href="https://developers.google.com/oauthplayground/" target="_blank" rel="noopener noreferrer">OAuth 2.0 Playground</a></li>
-                      <li>Click settings gear → Check "Use your own OAuth credentials"</li>
-                      <li>Paste your Client ID and Client Secret</li>
-                      <li>In Step 1: Select "Drive API v3" → <code>https://www.googleapis.com/auth/drive</code></li>
-                      <li>Click "Authorize APIs" and sign in</li>
-                      <li>In Step 2: Click "Exchange authorization code for tokens"</li>
-                      <li>Copy the "Refresh token" value</li>
-                    </ul>
-                  </div>
-                </div>
-              )}
+              <h3 className="credentials-path-title">Service account (sync only)</h3>
 
               <div className="form-group">
-                <label>Client ID <span className="required">*</span></label>
-                <div className="input-with-toggle">
-                  <input
-                    type={showClientId ? "text" : "password"}
-                    name="google_client_id"
-                    value={formData.google_client_id}
-                    onChange={(e) => updateGoogleCreds('google_client_id', e.target.value)}
-                    placeholder="123456789.apps.googleusercontent.com"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="toggle-visibility"
-                    onClick={() => setShowClientId(!showClientId)}
-                    title={showClientId ? "Hide" : "Show"}
-                  >
-                    {showClientId ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Client Secret <span className="required">*</span></label>
-                <div className="input-with-toggle">
-                  <input
-                    type={showClientSecret ? "text" : "password"}
-                    name="google_client_secret"
-                    value={formData.google_client_secret}
-                    onChange={(e) => updateGoogleCreds('google_client_secret', e.target.value)}
-                    placeholder="GOCSPX-xxxxxxxxxxxxx"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="toggle-visibility"
-                    onClick={handleToggleClientSecretVisibility}
-                    title={showClientSecret ? "Hide" : "Show"}
-                  >
-                    {showClientSecret ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Refresh Token <span className="required">*</span></label>
-                <div className="input-with-toggle">
-                  <input
-                    type={showRefreshToken ? "text" : "password"}
-                    name="google_refresh_token"
-                    value={formData.google_refresh_token}
-                    onChange={(e) => updateGoogleCreds('google_refresh_token', e.target.value)}
-                    placeholder="{1//xxxxxxxxxxxxx}"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="toggle-visibility"
-                    onClick={handleToggleRefreshTokenVisibility}
-                    title={showRefreshToken ? "Hide" : "Show"}
-                  >
-                    {showRefreshToken ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Service Account JSON Path (Optional)</label>
+                <label>Service Account JSON Path</label>
                 <input
                   type="text"
                   name="google_service_account_file"
@@ -962,7 +809,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                   placeholder="/config/service_accounts/my-service-account.json"
                 />
                 <small>
-                  You can provide this instead of OAuth fields. PosterFlow will pass it to rclone with <code>--drive-service-account-file</code>.
+                  Upload the key file from Option A in the guide. It is stored under <code>/config/service_accounts</code>.
                 </small>
                 <input
                   type="file"
@@ -986,6 +833,78 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 </button>
               </div>
 
+              <GoogleCredentialsConflictNotice
+                serviceAccountFile={formData.google_service_account_file}
+                clientId={formData.google_client_id}
+                clientSecret={formData.google_client_secret}
+                token={formData.google_refresh_token}
+              />
+
+              <h3 className="credentials-path-title">OAuth client (poster makers)</h3>
+
+              <div className="form-group">
+                <label>Client ID</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showClientId ? "text" : "password"}
+                    name="google_client_id"
+                    value={formData.google_client_id}
+                    onChange={(e) => updateGoogleCreds('google_client_id', e.target.value)}
+                    placeholder="123456789.apps.googleusercontent.com"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={() => setShowClientId(!showClientId)}
+                    title={showClientId ? "Hide" : "Show"}
+                  >
+                    {showClientId ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Client Secret</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showClientSecret ? "text" : "password"}
+                    name="google_client_secret"
+                    value={formData.google_client_secret}
+                    onChange={(e) => updateGoogleCreds('google_client_secret', e.target.value)}
+                    placeholder="GOCSPX-xxxxxxxxxxxxx"
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={handleToggleClientSecretVisibility}
+                    title={showClientSecret ? "Hide" : "Show"}
+                  >
+                    {showClientSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Google Drive Token (full JSON from rclone authorize)</label>
+                <div className="input-with-toggle">
+                  <input
+                    type={showRefreshToken ? "text" : "password"}
+                    name="google_refresh_token"
+                    value={formData.google_refresh_token}
+                    onChange={(e) => updateGoogleCreds('google_refresh_token', e.target.value)}
+                    placeholder='{"access_token": "...", "token_type": "Bearer", "refresh_token": "...", "expiry": "..."}'
+                  />
+                  <button
+                    type="button"
+                    className="toggle-visibility"
+                    onClick={handleToggleRefreshTokenVisibility}
+                    title={showRefreshToken ? "Hide" : "Show"}
+                  >
+                    {showRefreshToken ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
               <div className="button-group-wrapper">
                 <div className="button-group">
                   <button type="button" className="btn-secondary" onClick={() => setStep(0)}>
@@ -1000,7 +919,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                     {isSaving ? 'Saving...' : 'Save & Continue'}
                   </button>
                 </div>
-                <small className="btn-subtext">Enter either OAuth fields above or a Service Account JSON path</small>
+                <small className="btn-subtext">Fill in the service account path, or all three OAuth fields</small>
               </div>
             </div>
           )}
