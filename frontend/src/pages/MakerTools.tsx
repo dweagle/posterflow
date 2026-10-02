@@ -37,6 +37,7 @@ import MakerScopeRow from '../components/maker-tools/MakerScopeRow'
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
 type MainTab = 'monitor' | 'tmdb-search' | 'unmatched' | 'artwork' | 'reminders'
+type MonitorFilter = 'all' | 'needed' | 'ready'
 
 const DEFAULT_MONITOR_CONFIG: MakerMonitorConfig = {
   tmdb_api_key: '',
@@ -138,6 +139,7 @@ function MakerTools() {
   const [discoveryTab, setDiscoveryTab] = useState<DiscoveryTab>('series')
   const [modalDiscoveryLanguagesInput, setModalDiscoveryLanguagesInput] = useState('en, ko, ja, zh, es')
   const [tmdbQuery, setTmdbQuery] = useState('')
+  const [monitorFilter, setMonitorFilter] = useState<MonitorFilter>('all')
   const [tmdbFilter, setTmdbFilter] = useState<TmdbSearchFilter>('all')
   const [tmdbSearching, setTmdbSearching] = useState(false)
   const [tmdbResults, setTmdbResults] = useState<TmdbSearchResult[] | null>(null)
@@ -713,6 +715,12 @@ function MakerTools() {
               }
 
               const postersReady = Math.max(0, libraryResult.premieres_found - libraryResult.posters_needed)
+              const visibleShows = libraryResult.shows
+                .filter((show) => monitorFilter === 'all' || (monitorFilter === 'needed' ? !show.poster_exists : show.poster_exists))
+                .sort((left, right) => String(left.date || '').localeCompare(String(right.date || '')))
+              const emptyMessage = libraryResult.shows.length === 0
+                ? 'No upcoming premieres found in this drive.'
+                : monitorFilter === 'needed' ? 'Every upcoming premiere here already has a poster.' : 'No upcoming premieres here have a poster yet.'
 
               return (
                 <div className="maker-result-panel" key={tabKey}>
@@ -723,12 +731,25 @@ function MakerTools() {
                     <div className="stat-card"><span>{postersReady}</span><small>Ready to Go</small></div>
                   </div>
 
-                  <div className="maker-show-list full-width">
-                    {libraryResult.shows.length === 0 && <p className="muted">No upcoming premieres found in this drive.</p>}
+                  <div className="tmdb-filter-bar" role="group" aria-label="Filter premieres by poster status">
+                    {(['all', 'needed', 'ready'] as MonitorFilter[]).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`tmdb-filter-btn${monitorFilter === f ? ' active' : ''}`}
+                        onClick={() => setMonitorFilter(f)}
+                      >
+                        {f === 'all' && <>All ({libraryResult.shows.length})</>}
+                        {f === 'needed' && <><Paintbrush size={13} /> Needs Poster ({libraryResult.posters_needed})</>}
+                        {f === 'ready' && <><Check size={13} /> Poster Ready ({postersReady})</>}
+                      </button>
+                    ))}
+                  </div>
 
-                    {libraryResult.shows
-                      .slice()
-                      .sort((left, right) => String(left.date || '').localeCompare(String(right.date || '')))
+                  <div className="maker-show-list full-width">
+                    {visibleShows.length === 0 && <p className="muted">{emptyMessage}</p>}
+
+                    {visibleShows
                       .map((show) => {
                         const key = `${libraryResult.library_name}-${show.tmdb_id}-${show.season_number}`
                         const tmdbId = Number(show.tmdb_id)
