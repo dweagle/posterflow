@@ -1,14 +1,16 @@
 // PSD save + JPG export. Both document writes run inside core.executeAsModal (required for anything
 // that edits the document / writes a file through the DOM). PSD save overwrites the file the doc was
 // opened from (doc.save() = Ctrl+S). JPG is written as a COPY (asCopy=true) so the open doc's
-// dirty/saved state and format are untouched, into the per-style image folder from fs.js.
+// dirty/saved state and format are untouched, into the per-style image folder from fs.js, then
+// scrubbed of Photoshop's metadata (strip.js).
 'use strict';
 
 const { core } = require('photoshop');
 const { getImageFolder } = require('./fs');
+const { scrubFile } = require('./strip');
 
-// Photoshop's JPEG quality is 0–12 (12 = max). 10 ≈ the Photopea panel's jpg:0.90 — high, small-ish.
-const JPG_QUALITY = 10;
+// Photoshop's JPEG quality is 0–12 (12 = max). 9 ≈ the Photopea panel's jpg:0.90 (same size, 4:4:4 chroma).
+const JPG_QUALITY = 9;
 
 async function savePsd(doc) {
   await core.executeAsModal(async () => { await doc.save(); }, { commandName: 'Save poster PSD' });
@@ -25,6 +27,7 @@ async function exportJpg(doc, style, baseName, suffix, { forcePick = false } = {
   await core.executeAsModal(async () => {
     await doc.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
   }, { commandName: 'Export poster JPG' });
+  await scrubFile(file);
   return { ok: true, filename, folderName: folder.name };
 }
 
@@ -45,6 +48,7 @@ async function exportJpgRemote(doc, ctx, baseName, suffix) {
   await core.executeAsModal(async () => {
     await doc.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
   }, { commandName: 'Export poster JPG' });
+  await scrubFile(file);
   const bytes = await R.readBytes(file);
   await R.putBytes('/api/maker-tools/image-exports/' + encodeURIComponent(filename) + '?style=' + encodeURIComponent(ctx.style || ''), bytes);
   return { ok: true, filename, folderName: 'Posterflow' };

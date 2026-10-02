@@ -329,6 +329,38 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(K(sel(-40, 100, 660, 500)) === null, 'a non-square marquee is left to Crop\'s snap even off-canvas');
 }
 
+// ---- strip: export metadata scrub ----
+{
+  const S = require('../strip');
+  const seg = (marker, payload) => [0xFF, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xFF, ...payload];
+  const str = (s) => Array.from(s, (c) => c.charCodeAt(0));
+  const exif = seg(0xE1, [...str('Exif'), 0, 0, 1, 2, 3]);
+  const xmp = seg(0xE1, str('http://ns.adobe.com/xap/1.0/\0<x/>'));
+  const irb = seg(0xED, [...str('Photoshop 3.0'), 0]);
+  const c2pa = seg(0xEB, str('JP\0\0'));
+  const adobe = seg(0xEE, [...str('Adobe'), 0, 100, 0, 0, 0, 0, 1]);
+  const dqt = seg(0xDB, [0, ...new Array(64).fill(16)]);
+  const sos = [0xFF, 0xDA, 0, 8, 1, 1, 0, 0, 63, 0, 0xAB, 0xCD, 0xFF, 0xD9];
+  const jpg = Uint8Array.from([0xFF, 0xD8, ...exif, ...xmp, ...irb, ...c2pa, ...adobe, ...dqt, ...sos]);
+  const out = new Uint8Array(S.stripJpeg(jpg.buffer));
+  const markers = [];
+  for (let i = 2; i + 4 <= out.length && out[i] === 0xFF && out[i + 1] !== 0xDA; i += 2 + ((out[i + 2] << 8) | out[i + 3])) markers.push(out[i + 1].toString(16));
+  ok(markers.join(',') === 'e0,ee,db', 'jpeg: APP1/APP11/APP13 dropped, JFIF added, Adobe + DQT kept (got ' + markers + ')');
+  ok(out[0] === 0xFF && out[1] === 0xD8, 'jpeg: SOI kept');
+  ok(Array.from(out.subarray(out.length - sos.length)).join(',') === sos.join(','), 'jpeg: scan data + EOI copied verbatim');
+  ok(new Uint8Array(S.stripJpeg(out.buffer)).length === out.length, 'jpeg: scrubbing twice is a no-op (JFIF not duplicated)');
+  ok(S.stripJpeg(Uint8Array.from([1, 2, 3]).buffer).byteLength === 3, 'jpeg: non-JPEG bytes returned untouched');
+  const chunk = (type, data) => [data.length >>> 24, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255, ...str(type), ...data, 0, 0, 0, 0];
+  const png = Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    ...chunk('IHDR', new Array(13).fill(0)), ...chunk('iTXt', [1, 2, 3]), ...chunk('pHYs', new Array(9).fill(0)),
+    ...chunk('tEXt', [4]), ...chunk('eXIf', [5]), ...chunk('IDAT', [6, 7]), ...chunk('IEND', [])]);
+  const pout = new Uint8Array(S.stripPng(png.buffer));
+  const types = [];
+  for (let i = 8; i + 12 <= pout.length;) { const len = ((pout[i] << 24) | (pout[i + 1] << 16) | (pout[i + 2] << 8) | pout[i + 3]) >>> 0; types.push(String.fromCharCode(pout[i + 4], pout[i + 5], pout[i + 6], pout[i + 7])); i += 12 + len; }
+  ok(types.join(',') === 'IHDR,pHYs,IDAT,IEND', 'png: text/exif chunks dropped, the rest kept in order (got ' + types + ')');
+  ok(S.stripPng(Uint8Array.from([1, 2, 3]).buffer).byteLength === 3, 'png: non-PNG bytes returned untouched');
+}
+
 // ---- the three panels report the same version ----
 {
   const fs = require('fs'), path = require('path');

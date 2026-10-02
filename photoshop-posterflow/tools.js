@@ -9,6 +9,7 @@ const { app, core, action } = require('photoshop');
 const G = require('./geometry');
 const { treeFromList } = require('./model');
 const { JPG_QUALITY } = require('./save');
+const { scrubFile } = require('./strip');
 
 // Neutral density: the export's logo formula has a transparency term that needs the layer's pixels
 // (fragile to read for one layer), so — like the Photopea panel — we skip it and use 0.30 (no sparse
@@ -252,6 +253,7 @@ async function exportLogoPng(doc, constants, folder, filename) {
       await dup.trim(constants.TrimType.TRANSPARENT);
       const file = await folder.createFile(filename, { overwrite: true });
       await dup.saveAs.png(file, {}, true);
+      await scrubFile(file);
       result = { ok: true, filename, folderName: folder.name, entry: file };   // entry: remote docs upload it
     } finally {
       await dup.closeWithoutSaving();
@@ -338,6 +340,7 @@ async function cropSaveSquare(dup, folder, filename, rect, wantSide) {
     if (up) await dup.resizeImage(wantSide, wantSide);
     const file = await folder.createFile(filename, { overwrite: true });
     await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+    await scrubFile(file);
     result = { ok: true, filename, folderName: folder.name, entry: file, side: up ? wantSide : rect.side, srcSide: rect.side };
   }, { commandName: 'Crop square art' });
   return result;
@@ -389,6 +392,7 @@ async function exportSelectedLayersJpg(doc, constants, folder, nameFor) {
         const filename = dedupe(nameFor(target.name));
         const file = await folder.createFile(filename, { overwrite: true });
         await dup.saveAs.jpg(file, { quality: JPG_QUALITY }, true);
+        await scrubFile(file);
         files.push({ filename, entry: file });
       } finally {
         await dup.closeWithoutSaving();
