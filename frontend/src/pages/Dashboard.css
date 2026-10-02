@@ -981,6 +981,7 @@
 .job-message {
   color: #ccc;
   font-size: 0.875rem;
+  text-align: left;
   margin-bottom: 0.35rem;
   line-height: 1.4;
   display: -webkit-box;
