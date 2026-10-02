@@ -15,7 +15,7 @@ from urllib.parse import quote
 import requests
 import zlib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
@@ -43,6 +43,9 @@ from models.setting import get_setting, get_setting_value, upsert_setting
 from services import apple_tv
 from services import fanart
 from services import tvdb
+from util.constants import year_regex
+from util.data.extract import extract_ids
+from util.data.normalization import normalize_titles
 from services.discord_notifications import send_discord_notification, send_major_error_notification
 
 router = APIRouter(prefix="/api/maker-tools", tags=["maker-tools"])
@@ -3327,6 +3330,153 @@ async def save_poster_export(filename: str, request: Request, db: Session = Depe
         raise HTTPException(status_code=500, detail=f"Failed to save poster: {exc}")
 
     return JSONResponse({"filename": filename, "saved": True, "folder": str(save_dir)})
+
+
+# ---------------------------------------------------------------------------
+# Export picker: the Community Requests Upload button lists finished exports already on the
+# server (panel Poster / JPG exports) so makers can post without the OS file dialog.
+# ---------------------------------------------------------------------------
+_EXPORT_PICKER_SOURCES = (
+    ("poster", SETTING_POSTER_EXPORT_FOLDER),
+    ("cl2k", SETTING_PSD_IMAGE_EXPORT_FOLDER),
+    ("mm2k", SETTING_PSD_IMAGE_EXPORT_FOLDER_MM2K),
+)
+_EXPORT_PICKER_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+_EXPORT_PICKER_CAP = 400
+_EXPORT_THUMB_SIZE = (320, 480)
+# " - Season N" / " - Specials" from the panels' Poster button, then Photopea's " (k)" duplicate suffix.
+_EXPORT_SEASON_RE = re.compile(r" - (?:Season (\d+)|(Specials))(?: \(\d{1,3}\))?$", re.IGNORECASE)
+_EXPORT_TAIL_RE = re.compile(r"(?: - (?:Season \d+|Specials))?(?: \(\d{1,3}\))?$", re.IGNORECASE)
+
+
+def _export_picker_roots(db: Session) -> list[tuple[str, Path]]:
+    """(source, folder) for each configured export folder, duplicates dropped."""
+    roots: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for source, key in _EXPORT_PICKER_SOURCES:
+        raw = (get_setting_value(db, key) or "").strip()
+        if not raw:
+            continue
+        folder = Path(raw)
+        resolved = folder.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        roots.append((source, folder))
+    return roots
+
+
+def _export_season(stem: str) -> int | None:
+    """Season number from the export suffix; 0 = Specials, None = plain poster."""
+    m = _EXPORT_SEASON_RE.search(stem)
+    if not m:
+        return None
+    return 0 if m.group(2) else int(m.group(1))
+
+
+def _export_match(stem: str, *, tmdb_id: int | None, tvdb_id: int | None, title: str,
+                  year: int | None, seasons: set[int]) -> str | None:
+    """'exact' when the file is the requested item in a requested slot (one of `seasons`, or the
+    plain poster when none), 'item' when it is the same title in another slot, None otherwise.
+    Id tags decide; untagged files fall back to title + year."""
+    file_tmdb, file_tvdb, _ = extract_ids(stem)
+    if file_tmdb or file_tvdb:
+        same = ((tmdb_id is not None and file_tmdb == tmdb_id)
+                or (tvdb_id is not None and file_tvdb == tvdb_id))
+    else:
+        want = normalize_titles(title or "")
+        same = bool(want) and normalize_titles(_EXPORT_TAIL_RE.sub("", stem)) == want
+        if same and year:
+            m = year_regex.search(stem)
+            same = m is None or int(m.group(1)) == year
+    if not same:
+        return None
+    file_season = _export_season(stem)
+    wanted = file_season in seasons if seasons else file_season is None
+    return "exact" if wanted else "item"
+
+
+def _list_export_files(root: Path, source: str) -> list[dict]:
+    """Flat scan of one export folder; hidden entries and non-images skipped."""
+    files: list[dict] = []
+    try:
+        with os.scandir(root) as it:
+            for entry in it:
+                if entry.name.startswith(".") or not entry.name.lower().endswith(_EXPORT_PICKER_EXTS):
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    st = entry.stat()
+                except OSError:
+                    continue
+                files.append({"name": entry.name, "source": source, "size": st.st_size, "mtime": st.st_mtime})
+    except OSError as exc:
+        log_warning(LogTags.API, f"Export picker could not read {root}: {exc}")
+    return files
+
+
+@router.get("/poster-exports")
+def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, title: str = "",
+                        year: int | None = None, seasons: str = "",
+                        db: Session = Depends(get_db)) -> JSONResponse:
+    """Finished exports on the server for the request upload picker: every configured export
+    folder, newest first, each file tagged with how it relates to the request. `seasons` is a
+    comma list of requested season numbers (0 = Specials); empty means the plain poster.
+    Blocking FS work, so sync on purpose."""
+    wanted = {int(part) for part in seasons.split(",") if part.strip().isdigit()}
+    folders: list[dict] = []
+    files: list[dict] = []
+    for source, folder in _export_picker_roots(db):
+        exists = folder.is_dir()
+        folders.append({"source": source, "folder": str(folder), "exists": exists})
+        if exists:
+            files.extend(_list_export_files(folder, source))
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    truncated = len(files) > _EXPORT_PICKER_CAP
+    files = files[:_EXPORT_PICKER_CAP]
+    for f in files:
+        stem = Path(f["name"]).stem
+        f["season"] = _export_season(stem)
+        f["match"] = _export_match(stem, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title, year=year, seasons=wanted)
+    return JSONResponse({"folders": folders, "files": files, "truncated": truncated})
+
+
+def _resolve_export_file(db: Session, source: str, filename: str) -> Path:
+    """`filename` inside the export folder `source` names, or 4xx. Containment is the security
+    boundary: GET is auth-exempt so <img src> thumbnails work."""
+    _validate_image_filename(filename)
+    if not filename.lower().endswith(_EXPORT_PICKER_EXTS):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    root = dict(_export_picker_roots(db)).get(str(source or "poster").strip().lower())
+    if root is None:
+        raise HTTPException(status_code=400, detail="Unknown or unconfigured export folder.")
+    root = root.resolve()
+    target = (root / filename).resolve()
+    if target.parent != root:
+        raise HTTPException(status_code=403, detail="Path is outside the export folder.")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    return target
+
+
+@router.get("/poster-exports/{filename}")
+def serve_poster_export(filename: str, source: str = "poster", thumb: bool = False,
+                        db: Session = Depends(get_db)) -> Response:
+    """One export for the request picker: a small JPEG preview with ?thumb=1, else the file
+    itself (the browser re-wraps it as an upload)."""
+    target = _resolve_export_file(db, source, filename)
+    if not thumb:
+        return FileResponse(str(target), headers={"Cache-Control": "no-cache"})
+    try:
+        with Image.open(target) as im:
+            im.draft("RGB", _EXPORT_THUMB_SIZE)
+            im.thumbnail(_EXPORT_THUMB_SIZE)
+            buf = BytesIO()
+            im.convert("RGB").save(buf, format="JPEG", quality=82)
+    except Exception as exc:
+        raise HTTPException(status_code=415, detail=f"Could not read image: {exc}")
+    return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
 
 
 class SaveGalleryArtworkRequest(BaseModel):

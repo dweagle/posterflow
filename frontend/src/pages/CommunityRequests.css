@@ -1609,3 +1609,97 @@
   }
 }
 
+
+/* Upload picker: finished exports already on the server (Photoshop / Photopea panel exports) */
+.request-export-picker {
+  max-width: 820px;
+}
+.export-picker-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.export-picker-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: transparent;
+  color: #bbb;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.export-picker-tabs button span {
+  color: #777;
+  font-size: 0.72rem;
+}
+.export-picker-tabs button.active {
+  border-color: #4caf50;
+  color: #81c784;
+  background: rgba(76, 175, 80, 0.1);
+}
+.export-picker-note {
+  margin: 6px 0 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #888;
+}
+.export-picker-note.warn {
+  color: #ffb74d;
+}
+.export-picker-note.ok {
+  color: #81c784;
+}
+.request-export-picker .tmdb-gallery-thumb-btn.export-picker-thumb--selected {
+  border-color: #4caf50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.5);
+}
+.export-picker-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #4caf50;
+  color: #fff;
+  pointer-events: none;
+}
+.request-export-picker .tmdb-gallery-item-meta {
+  min-width: 0;
+}
+.export-picker-name {
+  display: block;
+  font-size: 0.72rem;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.export-picker-age {
+  font-size: 0.68rem;
+  color: #777;
+}
+.export-picker-preview {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #64b5f6;
+  font-size: 0.68rem;
+  text-align: left;
+  cursor: pointer;
+}
+.export-picker-preview:hover {
+  text-decoration: underline;
+}
+.export-picker-footer .export-picker-computer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}

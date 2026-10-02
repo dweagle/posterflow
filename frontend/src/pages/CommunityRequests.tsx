@@ -13,10 +13,14 @@ import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
 import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
+import RequestUploadPickerModal from '../components/community/RequestUploadPickerModal'
 import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'season' | 'collection'
+// Any of these set means the panels export finished posters to the server, so Upload can
+// offer them instead of the OS file dialog.
+const EXPORT_FOLDER_KEYS = ['poster_export_folder', 'psd_image_export_folder', 'psd_image_export_folder_mm2k']
 type StatusFilter = 'active' | 'all' | 'pending' | 'in_progress' | 'fulfilled' | 'rejected'
 type SortOrder = 'newest' | 'oldest'
 type PageTab = 'requests' | 'lists'
@@ -101,6 +105,9 @@ export default function CommunityRequests() {
   const [archiveStates, setArchiveStates] = useState<Map<string, 'loading' | 'done' | string>>(new Map())
   const [archiveConfirm, setArchiveConfirm] = useState<{ requestId: string; message: string } | null>(null)
   const [claimConflict, setClaimConflict] = useState<string | null>(null)   // message shown when a claim fails (already claimed)
+  // Upload picker over the server's export folders; only offered when one is configured.
+  const [exportPickerAvailable, setExportPickerAvailable] = useState(false)
+  const [pickerRequestId, setPickerRequestId] = useState<string | null>(null)
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
   const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
@@ -123,6 +130,7 @@ export default function CommunityRequests() {
     getSettings().then((settings) => {
       setPsdConfig(derivePsdConfig(settings))
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
+      setExportPickerAvailable(EXPORT_FOLDER_KEYS.some((k) => !!(settings[k] || '').trim()))
     }).catch(() => {})
   }, [])
 
@@ -164,10 +172,15 @@ export default function CommunityRequests() {
       .catch(() => {})
   }, [requests])
 
-  const handleUploadClick = useCallback((requestId: string) => {
+  const openFileDialog = useCallback((requestId: string) => {
     uploadTargetRef.current = requestId
     fileInputRef.current?.click()
   }, [])
+
+  const handleUploadClick = useCallback((requestId: string) => {
+    if (exportPickerAvailable) setPickerRequestId(requestId)
+    else openFileDialog(requestId)
+  }, [exportPickerAvailable, openFileDialog])
 
   const DISCORD_MAX_FILES = 10
 
@@ -309,6 +322,8 @@ export default function CommunityRequests() {
     if (!allFiles.length) return
     doUpload(requestId, allFiles)
   }, [doUpload])
+
+  const pickerRequest = pickerRequestId ? requests.find((r) => r.id === pickerRequestId) ?? null : null
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -860,6 +875,14 @@ export default function CommunityRequests() {
     </div>
 
     {/* ── Archive thread confirm modal ──────────────────────────────────────────────────────────────── */}
+    {pickerRequest && (
+      <RequestUploadPickerModal
+        request={pickerRequest}
+        onClose={() => setPickerRequestId(null)}
+        onPost={(files) => { setPickerRequestId(null); doUpload(pickerRequest.id, files) }}
+        onPickFromComputer={() => { setPickerRequestId(null); openFileDialog(pickerRequest.id) }}
+      />
+    )}
     {archiveConfirm && (() => {
       const PRESETS = [
         'Looks great! Thanks for the poster! 🎉',

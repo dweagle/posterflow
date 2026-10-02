@@ -3538,3 +3538,140 @@ def test_poster_check_accepts_null_ids_in_the_batch(client, test_db):
 
     assert resp.status_code == 200
     assert resp.json() == {"tmdb-111625": [{"style": "CL2K", "seasons": [1]}]}
+
+
+# ---------------------------------------------------------------------------
+# Export picker (Community Requests upload)
+# ---------------------------------------------------------------------------
+
+
+def _seed_export_folder(test_db, folder: str, key: str = "poster_export_folder") -> None:
+    test_db.add(Setting(key=key, value=folder))
+    test_db.commit()
+
+
+def test_poster_exports_list_unconfigured_is_empty(client):
+    response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 1})
+    assert response.status_code == 200
+    assert response.json() == {"folders": [], "files": [], "truncated": False}
+
+
+def test_poster_exports_list_tags_files_by_request(client, test_db):
+    names = [
+        "Alien Earth (2025) {tmdb-157239}.jpg",
+        "Alien Earth (2025) {tmdb-157239} - Season 1.jpg",
+        "Alien Earth (2025) {tmdb-157239} - Specials (2).jpg",
+        "Alien (1979) {tmdb-348}.jpg",
+        "Dune (2021).png",
+        "notes.txt",
+        ".hidden.jpg",
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _seed_export_folder(test_db, tmpdir)
+        for i, name in enumerate(names):
+            path = Path(tmpdir) / name
+            path.write_bytes(b"x")
+            os.utime(path, (1_000 + i, 1_000 + i))
+
+        response = client.get(
+            "/api/maker-tools/poster-exports",
+            params={"tmdb_id": 157239, "title": "Alien: Earth", "year": 2025},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["folders"] == [{"source": "poster", "folder": tmpdir, "exists": True}]
+        assert body["truncated"] is False
+        # newest first; hidden files and non-images are skipped
+        assert [f["name"] for f in body["files"]] == list(reversed(names[:5]))
+        by_name = {f["name"]: f for f in body["files"]}
+        assert by_name[names[0]]["match"] == "exact"
+        assert by_name[names[0]]["season"] is None
+        assert by_name[names[1]]["match"] == "item"
+        assert by_name[names[1]]["season"] == 1
+        assert by_name[names[2]]["match"] == "item"
+        assert by_name[names[2]]["season"] == 0
+        assert by_name[names[3]]["match"] is None      # tagged with another id
+        assert by_name[names[4]]["match"] is None      # untagged, other title
+        assert by_name[names[0]]["source"] == "poster"
+        assert by_name[names[0]]["size"] == 1
+
+        # season request: the season file is exact, the plain show poster is the same item
+        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "seasons": "1"})
+        by_name = {f["name"]: f for f in response.json()["files"]}
+        assert by_name[names[1]]["match"] == "exact"
+        assert by_name[names[0]]["match"] == "item"
+        assert by_name[names[2]]["match"] == "item"
+
+        # several requested seasons (0 = Specials) are all exact; junk in the list is ignored
+        response = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 157239, "seasons": "0, 1,x"})
+        by_name = {f["name"]: f for f in response.json()["files"]}
+        assert by_name[names[1]]["match"] == "exact"
+        assert by_name[names[2]]["match"] == "exact"
+        assert by_name[names[0]]["match"] == "item"
+
+        # untagged files match by title + year only
+        response = client.get("/api/maker-tools/poster-exports", params={"title": "Dune", "year": 2021})
+        by_name = {f["name"]: f for f in response.json()["files"]}
+        assert by_name[names[4]]["match"] == "exact"
+        assert by_name[names[0]]["match"] is None
+        response = client.get("/api/maker-tools/poster-exports", params={"title": "Dune", "year": 1984})
+        by_name = {f["name"]: f for f in response.json()["files"]}
+        assert by_name[names[4]]["match"] is None
+
+
+def test_poster_exports_list_merges_folders_and_drops_duplicates(client, test_db):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        poster = Path(tmpdir) / "poster"
+        images = Path(tmpdir) / "images"
+        poster.mkdir()
+        images.mkdir()
+        _seed_export_folder(test_db, str(poster))
+        _seed_export_folder(test_db, str(images), key="psd_image_export_folder")
+        _seed_export_folder(test_db, str(images), key="psd_image_export_folder_mm2k")   # same folder twice
+        (poster / "A.jpg").write_bytes(b"x")
+        (images / "B.webp").write_bytes(b"x")
+
+        response = client.get("/api/maker-tools/poster-exports")
+        body = response.json()
+        assert [(f["source"], f["exists"]) for f in body["folders"]] == [("poster", True), ("cl2k", True)]
+        assert sorted((f["name"], f["source"]) for f in body["files"]) == [("A.jpg", "poster"), ("B.webp", "cl2k")]
+
+
+def test_poster_exports_list_reports_missing_folder(client, test_db):
+    _seed_export_folder(test_db, "/definitely/not/here")
+    body = client.get("/api/maker-tools/poster-exports").json()
+    assert body["folders"] == [{"source": "poster", "folder": "/definitely/not/here", "exists": False}]
+    assert body["files"] == []
+
+
+def test_poster_exports_serve_full_and_thumbnail(client, test_db):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _seed_export_folder(test_db, tmpdir)
+        data = _make_jpeg_bytes(400, 600)
+        (Path(tmpdir) / "Poster (2024).jpg").write_bytes(data)
+
+        response = client.get("/api/maker-tools/poster-exports/Poster (2024).jpg", params={"source": "poster"})
+        assert response.status_code == 200
+        assert response.content == data
+
+        response = client.get("/api/maker-tools/poster-exports/Poster (2024).jpg", params={"source": "poster", "thumb": 1})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+        with Image.open(BytesIO(response.content)) as im:
+            assert im.size == (320, 480)
+
+
+def test_poster_exports_serve_rejects_bad_requests(client, test_db):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir) / "exports"
+        root.mkdir()
+        _seed_export_folder(test_db, str(root))
+        (Path(tmpdir) / "outside.jpg").write_bytes(b"x")
+        (root / "notes.txt").write_bytes(b"x")
+
+        # routing rejects the decoded "/" before the handler sees it; either way it never serves
+        assert client.get("/api/maker-tools/poster-exports/..%2Foutside.jpg").status_code in (400, 404)
+        assert client.get("/api/maker-tools/poster-exports/notes.txt").status_code == 400
+        assert client.get("/api/maker-tools/poster-exports/missing.jpg").status_code == 404
+        assert client.get("/api/maker-tools/poster-exports/missing.jpg", params={"source": "nope"}).status_code == 400
+        assert client.get("/api/maker-tools/poster-exports/missing.jpg", params={"source": "cl2k"}).status_code == 400

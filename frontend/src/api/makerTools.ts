@@ -1027,3 +1027,57 @@ export function reminderToSearchResult(r: PosterReminder): TmdbSearchResult {
     tvdb_id: r.tvdb_id,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Export picker (Community Requests upload): finished exports already on the server
+// ---------------------------------------------------------------------------
+
+export type PosterExportSource = 'poster' | 'cl2k' | 'mm2k'
+
+export interface PosterExportFile {
+  name: string
+  source: PosterExportSource
+  size: number
+  mtime: number                 // unix seconds
+  season: number | null         // 0 = Specials, null = plain poster
+  match: 'exact' | 'item' | null
+}
+
+export interface PosterExportListResponse {
+  folders: { source: PosterExportSource; folder: string; exists: boolean }[]
+  files: PosterExportFile[]
+  truncated: boolean
+}
+
+export interface PosterExportQuery {
+  tmdb_id?: number | null
+  tvdb_id?: number | null
+  title?: string
+  year?: number | null
+  seasons?: number[]            // requested season numbers (0 = Specials); empty = the plain poster
+}
+
+/** Finished exports on the server, newest first, each tagged with how it relates to the item. */
+export const listPosterExports = (q: PosterExportQuery): Promise<PosterExportListResponse> => {
+  const params: Record<string, string | number> = {}
+  if (q.tmdb_id) params.tmdb_id = q.tmdb_id
+  if (q.tvdb_id) params.tvdb_id = q.tvdb_id
+  if (q.title) params.title = q.title
+  if (q.year) params.year = q.year
+  if (q.seasons?.length) params.seasons = q.seasons.join(',')
+  return getData('/api/maker-tools/poster-exports', { params })
+}
+
+const posterExportPath = (file: Pick<PosterExportFile, 'name'>) =>
+  `/api/maker-tools/poster-exports/${encodeURIComponent(file.name)}`
+
+/** URL of one export for <img> tags; `thumb` gets a small JPEG preview. API_URL-prefixed like the
+ * other source-image previews. */
+export const getPosterExportUrl = (file: Pick<PosterExportFile, 'name' | 'source'>, thumb = false): string =>
+  `${API_URL}${posterExportPath(file)}?source=${file.source}${thumb ? '&thumb=1' : ''}`
+
+/** One export as a File, so it goes through the same upload path as a file picked from disk. */
+export const fetchPosterExportFile = async (file: Pick<PosterExportFile, 'name' | 'source'>): Promise<File> => {
+  const blob = await getData<Blob>(posterExportPath(file), { params: { source: file.source }, responseType: 'blob' })
+  return new File([blob], file.name, { type: blob.type })
+}

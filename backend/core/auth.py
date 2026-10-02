@@ -52,6 +52,7 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
 # signed token, but PUT-to-save still requires the Bearer header).
 _EXEMPT_METHOD_PREFIXES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/maker-tools/psd-exports/"),  # Photopea files:[url] fetch — see verify_psd_access_token
+    ("GET", "/api/maker-tools/poster-exports/"),  # request picker <img> thumbnails; path containment guards it
 )
 
 
