@@ -155,6 +155,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "sidebar_config",
     # Community Requests maker preferences
     "idarr_quick_add_community",
+    "community_upload_action",
+    "request_export_picker",
 })
 
 

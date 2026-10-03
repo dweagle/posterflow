@@ -9,11 +9,14 @@ import {
   type PosterExportListResponse,
 } from '../../api/makerTools'
 import { getApiErrorMessage } from '../../api/client'
+import { uploadActionButtonLabel, type CommunityUploadAction } from './useIdarrQuickAdd'
 
 type View = 'matching' | 'all'
 
 type Props = {
   request: CommunityRequest
+  /** What posting does (Discord, Discord + IDarr, IDarr only); only changes the button label here. */
+  action?: CommunityUploadAction
   onClose: () => void
   /** Files chosen from the server, wrapped as File objects for the normal upload path. */
   onPost: (files: File[]) => void
@@ -77,7 +80,7 @@ export function autoSelect(files: PosterExportFile[], slots: Set<PosterSlot> | '
 
 /** Pick finished posters that the panels already exported to the server and post them to the
  * request's Discord thread, skipping the OS file dialog (slow on Macs with network shares). */
-export default function RequestUploadPickerModal({ request, onClose, onPost, onPickFromComputer }: Props) {
+export default function RequestUploadPickerModal({ request, action = 'discord', onClose, onPost, onPickFromComputer }: Props) {
   const [data, setData] = useState<PosterExportListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -234,7 +237,7 @@ export default function RequestUploadPickerModal({ request, onClose, onPost, onP
               disabled={preparing || selected.size === 0}
               onClick={() => void handlePost()}
             >
-              {preparing ? 'Preparing…' : `Post${selected.size ? ` ${selected.size}` : ''} to Discord`}
+              {preparing ? 'Preparing…' : uploadActionButtonLabel(action, selected.size)}
             </button>
           </div>
         </div>

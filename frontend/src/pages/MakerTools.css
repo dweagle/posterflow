@@ -370,10 +370,83 @@
 
 .maker-setting-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.5rem 0;
+  padding: 0.3rem 0;
+}
+
+/* Label + info icon on one line, vertically centred on the toggle. Rows with extra controls
+   (Default Editor) wrap below the label. */
+.maker-setting-row > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* The row's gap already spaces the icon from its label. */
+.maker-setting-row > div:first-child > .psd-info-wrap {
+  margin-left: 0;
+}
+
+/* Compact switch so a toggle row is no taller than its label line. */
+.maker-setting-row .toggle-switch {
+  width: 36px;
+  height: 20px;
+}
+
+.maker-setting-row .toggle-slider {
+  border-radius: 20px;
+}
+
+.maker-setting-row .toggle-slider:before {
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  top: 3px;
+}
+
+.maker-setting-row .toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(16px);
+}
+
+/* Default Editor: the Photopea / Photoshop choice sits where the other rows keep their toggle. */
+.maker-setting-row .editor-choice {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+/* `.maker-card label` stacks labels as flex columns; these must stay radio-then-text on one line. */
+.schedule-modal .modal-body .editor-choice label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Outranks DriveEditModal's `.modal-body input:not([type='checkbox'])`, which would stretch the
+   radio to full width (text wraps under it) and pad it like a text field. */
+.schedule-modal .modal-body .editor-choice input[type="radio"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  accent-color: #64b5f6;
+}
+
+/* The plugin download link follows the Default Editor row on its own line. */
+.psd-ccx-link.psd-ccx-link--row {
+  display: block;
+  margin: 0 0 0.3rem;
 }
 
 .maker-list {

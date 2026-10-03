@@ -33,6 +33,7 @@ import './MakerTools.css'
 import Toolbar from '../components/Toolbar'
 import IdarrScopePicker from '../components/maker-tools/IdarrScopePicker'
 import MakerScopeRow from '../components/maker-tools/MakerScopeRow'
+import { publishUploadPreferences, readUploadPreferences, type UploadPreferences } from '../components/community/useIdarrQuickAdd'
 
 type ResultTab = string
 type DiscoveryTab = 'series' | 'movies'
@@ -157,6 +158,9 @@ function MakerTools() {
   const [backgroundExportFolder, setBackgroundExportFolder] = useState('')
   const [squareartExportFolder, setSquareartExportFolder] = useState('')
   const [posterExportFolder, setPosterExportFolder] = useState('')       // panel Poster button (selected layer)
+  const [requestExportPicker, setRequestExportPicker] = useState(true)   // Requests Upload lists server exports first
+  // Requests Upload: the IDarr toggle (shared with the Requests page) + whether it still posts to Discord.
+  const [requestUpload, setRequestUpload] = useState<UploadPreferences>({ enabled: false, idarrAction: 'discord_idarr' })
   const [psdDefaultEditor, setPsdDefaultEditor] = useState<'photopea' | 'photoshop'>('photopea')
   const [psdExportFolderMm2k, setPsdExportFolderMm2k] = useState('')
   const [psdTemplatePathMm2k, setPsdTemplatePathMm2k] = useState('')
@@ -258,6 +262,8 @@ function MakerTools() {
       setBackgroundExportFolder((settings.background_export_folder || '').trim())
       setSquareartExportFolder((settings.squareart_export_folder || '').trim())
       setPosterExportFolder((settings.poster_export_folder || '').trim())
+      setRequestExportPicker((settings.request_export_picker || '').trim().toLowerCase() !== 'false')
+      setRequestUpload(readUploadPreferences(settings))
       setPsdDefaultEditor(cfg.defaultEditor)
     }).catch(() => {
       // Non-blocking: page still works with empty defaults
@@ -320,8 +326,12 @@ function MakerTools() {
         background_export_folder: backgroundExportFolder.trim(),
         squareart_export_folder: squareartExportFolder.trim(),
         poster_export_folder: posterExportFolder.trim(),
+        request_export_picker: String(requestExportPicker),
+        idarr_quick_add_community: String(requestUpload.enabled),
+        community_upload_action: requestUpload.idarrAction,
         psd_default_editor: psdDefaultEditor,
       })
+      publishUploadPreferences(requestUpload)
       showToast('PSD settings saved', 'success')
       setShowPsdConfigModal(false)
     } catch (error) {
@@ -1065,21 +1075,20 @@ function MakerTools() {
                       </label>
                     </div>
                     {psdOpenPhotopea && (
-                      <div className="maker-setting-row">
-                        <div>
-                          <span style={{ fontWeight: 500 }}>Default Editor</span>
-                          <InfoTip>
-                            Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
-                            next to the export buttons starts on this choice. Photoshop mode queues the export for
-                            the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
-                            itself); the panel needs its server connection configured.
-                          </InfoTip>
-                          <div style={{ display: 'flex', flexDirection: 'row', gap: '1.25rem', marginTop: '0.45rem' }}>
+                      <>
+                        <div className="maker-setting-row">
+                          <div>
+                            <span style={{ fontWeight: 500 }}>Default Editor</span>
+                            <InfoTip>
+                              Where the export buttons send a saved PSD by default — the per-export Pea/PS toggle
+                              next to the export buttons starts on this choice. Photoshop mode queues the export for
+                              the Posterflow panel running inside Photoshop (it polls this server and opens the PSD
+                              itself); the panel needs its server connection configured.
+                            </InfoTip>
+                          </div>
+                          <div className="editor-choice">
                             {([['photopea', 'Photopea'], ['photoshop', 'Photoshop']] as const).map(([val, label]) => (
-                              <label
-                                key={val}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', alignSelf: 'flex-start', cursor: 'pointer' }}
-                              >
+                              <label key={val}>
                                 <input
                                   type="radio"
                                   name="psd-default-editor"
@@ -1090,16 +1099,16 @@ function MakerTools() {
                               </label>
                             ))}
                           </div>
-                          <button
-                            type="button"
-                            className="psd-ccx-link"
-                            title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
-                            onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
-                          >
-                            Download the Photoshop panel (.ccx)
-                          </button>
                         </div>
-                      </div>
+                        <button
+                          type="button"
+                          className="psd-ccx-link psd-ccx-link--row"
+                          title="Download the Posterflow panel for Photoshop — double-click the file to install it via Creative Cloud"
+                          onClick={() => { void downloadPhotoshopPlugin().catch((err) => showToast(getApiErrorMessage(err, 'Failed to download the plugin'), 'error')) }}
+                        >
+                          Download the Photoshop panel (.ccx)
+                        </button>
+                      </>
                     )}
                     {psdOpenPhotopea && (
                       <div className="maker-setting-row">
@@ -1122,6 +1131,62 @@ function MakerTools() {
                         </label>
                       </div>
                     )}
+                    <div className="maker-setting-row">
+                      <div>
+                        <span style={{ fontWeight: 500 }}>Requests Upload Picks From Exports</span>
+                        <InfoTip>
+                          When on, the <strong>Upload</strong> button on a request card first lists posters
+                          already saved to the Poster Pull Folder and the Style Folders&apos; Image Export
+                          Folders, with the newest match for the request pre-selected. Turn off to open your
+                          browser&apos;s file dialog right away. Needs at least one of those folders set.
+                        </InfoTip>
+                      </div>
+                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={requestExportPicker}
+                          onChange={(e) => setRequestExportPicker(e.target.checked)}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                    </div>
+                    <div className="maker-setting-row">
+                      <div>
+                        <span style={{ fontWeight: 500 }}>Requests Upload Adds to IDarr</span>
+                        <InfoTip>
+                          The same switch as <strong>Image Drop also adds to IDarr</strong> on the Requests page.
+                          When on, posters uploaded or dropped on a request card also go to your IDarr quick
+                          add folder and IDarr runs, like dropping files on the IDarr sidebar icon.
+                        </InfoTip>
+                      </div>
+                      <label className="toggle-switch" style={{ flexShrink: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={requestUpload.enabled}
+                          onChange={(e) => setRequestUpload((r) => ({ ...r, enabled: e.target.checked }))}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                    </div>
+                    <div className="maker-setting-row">
+                      <div>
+                        <span style={{ fontWeight: 500 }}>Requests Upload Posts to Discord</span>
+                        <InfoTip>
+                          When on, uploads go to the request&apos;s Discord thread. Turn it off to add posters to
+                          IDarr only. It can only be off while <strong>Adds to IDarr</strong> is on, so an upload
+                          always does something; the choice is remembered while IDarr is off.
+                        </InfoTip>
+                      </div>
+                      <label className="toggle-switch" style={{ flexShrink: 0 }} title={requestUpload.enabled ? undefined : 'Turn on Adds to IDarr to post to IDarr only'}>
+                        <input
+                          type="checkbox"
+                          checked={!requestUpload.enabled || requestUpload.idarrAction === 'discord_idarr'}
+                          disabled={!requestUpload.enabled}
+                          onChange={(e) => setRequestUpload((r) => ({ ...r, idarrAction: e.target.checked ? 'discord_idarr' : 'idarr' }))}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                    </div>
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, margin: '0 0 0.5rem' }}>

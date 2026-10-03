@@ -635,3 +635,16 @@ def test_backup_storage_rejects_invalid_retention(client):
     response = client.post("/api/settings/backup-storage", json={"path": "", "retention": -1})
     assert response.status_code == 400
     assert "retention" in response.json()["detail"].lower()
+
+
+def test_save_bulk_community_upload_preferences_persist(client, test_db):
+    """The Requests page upload action and the export picker switch must be allowlisted."""
+    response = client.post(
+        "/api/settings/bulk",
+        json={"community_upload_action": "idarr", "request_export_picker": "false"},
+    )
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+    saved = {s.key: s.value for s in test_db.query(Setting).filter(
+        Setting.key.in_(["community_upload_action", "request_export_picker"])).all()}
+    assert saved == {"community_upload_action": "idarr", "request_export_picker": "false"}

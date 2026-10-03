@@ -11,7 +11,7 @@ import { hasCollectionMoviesNote, hasRequestFlag, ORIGINAL_LANGUAGE_NOTE } from 
 import CollectionMoviesPanel from '../components/community/CollectionMoviesPanel'
 import ListsView from '../components/community/ListsView'
 import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
-import { useIdarrQuickAdd } from '../components/community/useIdarrQuickAdd'
+import { useIdarrQuickAdd, uploadActionAddsToIdarr, uploadActionPostsToDiscord, uploadActionHint, uploadDoneLabel } from '../components/community/useIdarrQuickAdd'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import RequestUploadPickerModal from '../components/community/RequestUploadPickerModal'
 import { useToast } from '../components/Toast'
@@ -124,13 +124,16 @@ export default function CommunityRequests() {
   // of the same files doesn't add them to IDarr twice. Cleared when the card resets.
   const idarrSentRef = useRef<Map<string, string>>(new Map())
   // Shared "Image Drop also adds to IDarr" behaviour (also used by the Lists tab).
-  const { enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
+  const { action: uploadAction, enabled: idarrQuickAddEnabled, setEnabled: setIdarrQuickAddEnabled, doIdarrUpload, targetOptions: idarrTargets, selectedTargetValue: idarrTarget, setSelectedTarget: setIdarrTarget } = useIdarrQuickAdd()
 
   useEffect(() => {
     getSettings().then((settings) => {
       setPsdConfig(derivePsdConfig(settings))
       setTmdbApiKeyConfigured(!!(settings.tmdb_api_key || '').trim())
-      setExportPickerAvailable(EXPORT_FOLDER_KEYS.some((k) => !!(settings[k] || '').trim()))
+      setExportPickerAvailable(
+        (settings.request_export_picker || '').trim().toLowerCase() !== 'false'
+        && EXPORT_FOLDER_KEYS.some((k) => !!(settings[k] || '').trim()),
+      )
     }).catch(() => {})
   }, [])
 
@@ -201,33 +204,40 @@ export default function CommunityRequests() {
 
   const doUpload = useCallback(async (requestId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(requestId, 'uploading'))
+    const toDiscord = uploadActionPostsToDiscord(uploadAction)
 
     // IDarr is the maker's own local pipeline, independent of Discord. Kick it
     // off once, up front, so the dropped files are added even if the Discord
     // post later fails or is only partially posted. Skip it when the same files
     // were already sent (a Retry after a failed Discord post) to avoid duplicates.
-    if (idarrQuickAddEnabled) {
+    let idarrResult: Promise<boolean> | null = null
+    if (uploadActionAddsToIdarr(uploadAction)) {
       const signature = filesSignature(files)
       if (idarrSentRef.current.get(requestId) !== signature) {
         idarrSentRef.current.set(requestId, signature)
-        void doIdarrUpload(files)
+        idarrResult = doIdarrUpload(files)
       }
     }
 
     try {
-      // Send in batches of DISCORD_MAX_FILES (Discord limit per message).
-      // Wait 1.5 s between batches to avoid Discord channel rate limits.
-      const totalBatches = Math.ceil(files.length / DISCORD_MAX_FILES)
-      for (let i = 0; i < files.length; i += DISCORD_MAX_FILES) {
-        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500))
-        if (totalBatches > 1) {
-          const batchNum = Math.floor(i / DISCORD_MAX_FILES) + 1
-          setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${batchNum}/${totalBatches}`))
+      if (toDiscord) {
+        // Send in batches of DISCORD_MAX_FILES (Discord limit per message).
+        // Wait 1.5 s between batches to avoid Discord channel rate limits.
+        const totalBatches = Math.ceil(files.length / DISCORD_MAX_FILES)
+        for (let i = 0; i < files.length; i += DISCORD_MAX_FILES) {
+          if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500))
+          if (totalBatches > 1) {
+            const batchNum = Math.floor(i / DISCORD_MAX_FILES) + 1
+            setUploadStates((prev) => new Map(prev).set(requestId, `uploading-${batchNum}/${totalBatches}`))
+          }
+          await uploadBatchWithRetry(requestId, files.slice(i, i + DISCORD_MAX_FILES))
         }
-        await uploadBatchWithRetry(requestId, files.slice(i, i + DISCORD_MAX_FILES))
+      } else if (idarrResult && !(await idarrResult)) {
+        // IDarr-only: the add IS the upload, so its failure is the card's failure.
+        idarrSentRef.current.delete(requestId)
+        throw new Error('IDarr add failed. Check the IDarr scope.')
       }
-      const label = files.length > 1 ? `Posted ${files.length}!` : 'Posted!'
-      setUploadStates((prev) => new Map(prev).set(requestId, label))
+      setUploadStates((prev) => new Map(prev).set(requestId, uploadDoneLabel(uploadAction, files.length)))
       // Reset after a delay so the button can be used again. Clearing the IDarr
       // guard lets a later, deliberate re-upload of the same files add them again.
       setTimeout(() => {
@@ -243,7 +253,7 @@ export default function CommunityRequests() {
         new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upload failed')
       )
     }
-  }, [uploadBatchWithRetry, idarrQuickAddEnabled, doIdarrUpload])
+  }, [uploadBatchWithRetry, uploadAction, doIdarrUpload])
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const allFiles = Array.from(e.target.files ?? [])
@@ -618,7 +628,7 @@ export default function CommunityRequests() {
                 <span className="maker-idarr-toggle-info-wrap">
                   <span className="maker-idarr-info-icon"><Info size={12} /></span>
                   <span className="maker-idarr-tooltip">
-                    When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon.
+                    When enabled, any image you drop or upload to a request card is also sent to your IDarr quick add folder and processed — identical to dragging files onto the IDarr sidebar icon. Whether it still posts to Discord is set in the Maker Tools PSD settings.
                   </span>
                 </span>
                 <span className="idarr-toggle-control">
@@ -699,7 +709,7 @@ export default function CommunityRequests() {
                     // Only the maker who claimed it (or the server owner) may complete it.
                     const canComplete = req.claimed_by_discord_id === discordUserId || isOwner
                     const isUploading = us === 'uploading' || (typeof us === 'string' && us.startsWith('uploading-'))
-                    const isPosted = typeof us === 'string' && us.startsWith('Posted')
+                    const isPosted = typeof us === 'string' && (us.startsWith('Posted') || us.startsWith('Added'))
                     const uploadLabel = isUploading
                       ? (typeof us === 'string' && us.startsWith('uploading-') ? `Uploading ${us.slice('uploading-'.length)}…` : 'Uploading…')
                       : isPosted ? us : us ? 'Retry' : 'Upload'
@@ -708,7 +718,7 @@ export default function CommunityRequests() {
                         <button
                           type="button"
                           className={`request-upload-btn${isUploading || isPosted ? (isUploading ? '' : ' upload-done') : us ? ' upload-error' : ''}`}
-                          data-tooltip={typeof us === 'string' && !isUploading && !isPosted ? us : 'Upload poster(s) to Discord thread'}
+                          data-tooltip={typeof us === 'string' && !isUploading && !isPosted ? us : uploadActionHint(uploadAction)}
                           disabled={isUploading || isPosted}
                           onClick={() => handleUploadClick(req.id)}
                         >
@@ -878,6 +888,7 @@ export default function CommunityRequests() {
     {pickerRequest && (
       <RequestUploadPickerModal
         request={pickerRequest}
+        action={uploadAction}
         onClose={() => setPickerRequestId(null)}
         onPost={(files) => { setPickerRequestId(null); doUpload(pickerRequest.id, files) }}
         onPickFromComputer={() => { setPickerRequestId(null); openFileDialog(pickerRequest.id) }}

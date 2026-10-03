@@ -134,6 +134,17 @@ describe('RequestUploadPickerModal', () => {
     await screen.findByText('Folder not found on the server: /gone')
   })
 
+  it('labels the primary button after the upload action', async () => {
+    listPosterExports.mockResolvedValue({ folders, files: FILES, truncated: false })
+    render(<RequestUploadPickerModal request={request} action="idarr" onClose={vi.fn()} onPost={vi.fn()} onPickFromComputer={vi.fn()} />)
+    expect((await screen.findByRole('button', { name: /to IDarr/ })).textContent).toBe('Add 1 to IDarr')
+    cleanup()
+
+    listPosterExports.mockResolvedValue({ folders, files: FILES, truncated: false })
+    render(<RequestUploadPickerModal request={request} action="discord_idarr" onClose={vi.fn()} onPost={vi.fn()} onPickFromComputer={vi.fn()} />)
+    expect((await screen.findByRole('button', { name: /to Discord/ })).textContent).toBe('Post 1 to Discord + IDarr')
+  })
+
   it('shows the list error and keeps the OS dialog available', async () => {
     listPosterExports.mockRejectedValue(new Error('boom'))
     render(<RequestUploadPickerModal request={request} onClose={vi.fn()} onPost={vi.fn()} onPickFromComputer={vi.fn()} />)
