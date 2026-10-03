@@ -6,6 +6,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.7] - 2026-10-02
+### Added
+- Community Requests: the Maker Tools Upload button now opens an in-app picker over the server's export folders, pre-selecting the newest export for each requested slot. No more fighting the OS file dialog over network shares. (Requires an export folder to be set in PSD export settings.)
+- Maker Tools: two new PSD settings. Turn the Requests Upload export picker off, and choose whether an upload posts to Discord, adds to IDarr, or both.
+- Maker Tools: a Monitor filter for poster status.
+
+### Changed
+- Photoshop Plugin: exports save JPGs at quality 9 and scrub Photoshop metadata. (Photoshop plugin 1.3.1 - reinstall the .ccx to pick it up.)
+
+### Fixed
+- Dashboard: job message text aligns left.
+
 ## [0.16.6] - 2026-09-30
 ### Changed
 - Settings: the rclone/Google Drive credentials guide is rewritten with click-to-open screenshots. Service-account setup leads as the simpler route, with the OAuth steps (including Google's new Branding requirements) covered for makers who upload to their own drives.
