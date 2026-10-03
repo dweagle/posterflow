@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.logging import LogTags, log_debug, log_error, log_info, log_warning
@@ -376,6 +377,8 @@ class PlexUploadService:
                     f"skipped={int(stats.get('skipped', 0))}, errors={int(stats.get('errors', 0))}"
                 )
             except Exception as e:
+                if isinstance(e, SQLAlchemyError):
+                    self.db.rollback()
                 stats["errors"] += 1
                 log_error(LogTags.UPLOADER, f"Failed processing asset '{asset['path']}': {e}\n{traceback.format_exc()}")
                 file_name = Path(str(asset.get("path") or "")).name
@@ -2493,6 +2496,8 @@ class PlexUploadService:
                     if atype in art["by_type"]:
                         art["by_type"][atype] += uploaded_count
             except Exception as e:
+                if isinstance(e, SQLAlchemyError):
+                    self.db.rollback()
                 art["errors"] += 1
                 log_error(LogTags.UPLOADER, f"Failed processing artwork '{asset.get('path')}': {e}\n{traceback.format_exc()}")
             if progress_callback:
@@ -3222,7 +3227,12 @@ class PlexUploadService:
             cached = self._record_cache[file_path]
             return dict(cached) if cached is not None else self._empty_record()
 
-        db_record = self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).first()
+        try:
+            db_record = self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).first()
+        except SQLAlchemyError:
+            self.db.rollback()
+            self._record_cache.pop(file_path, None)
+            raise
         if not db_record:
             self._record_cache[file_path] = None
             return self._empty_record()
@@ -3272,7 +3282,9 @@ class PlexUploadService:
                 db_record.file_mtime = current_mtime
                 self.db.commit()
                 result["file_mtime"] = current_mtime
-            except Exception:  # nosec B110
+            except SQLAlchemyError:
+                self.db.rollback()
+            except OSError:
                 pass
 
         # Evict the ORM object from the session identity map immediately after extracting
@@ -3400,29 +3412,34 @@ class PlexUploadService:
         except OSError:
             file_mtime = None
 
-        db_record = self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).first()
-        if db_record:
-            db_record.file_hash = file_hash
-            db_record.file_mtime = file_mtime
-            db_record.uploaded_to_libraries = json.dumps(sorted(libraries))
-            db_record.uploaded_to_library_keys = json.dumps(sorted(library_keys))
-            db_record.uploaded_to_rating_keys = json.dumps(sorted(rating_keys))
-            db_record.uploaded_editions = json.dumps(sorted(editions))
-            db_record.uploaded_media_types = json.dumps(sorted(media_types))
-        else:
-            db_record = PlexUploadRecord(
-                file_path=file_path,
-                file_hash=file_hash,
-                file_mtime=file_mtime,
-                uploaded_to_libraries=json.dumps(sorted(libraries)),
-                uploaded_to_library_keys=json.dumps(sorted(library_keys)),
-                uploaded_to_rating_keys=json.dumps(sorted(rating_keys)),
-                uploaded_editions=json.dumps(sorted(editions)),
-                uploaded_media_types=json.dumps(sorted(media_types)),
-            )
-            self.db.add(db_record)
+        try:
+            db_record = self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path == file_path).first()
+            if db_record:
+                db_record.file_hash = file_hash
+                db_record.file_mtime = file_mtime
+                db_record.uploaded_to_libraries = json.dumps(sorted(libraries))
+                db_record.uploaded_to_library_keys = json.dumps(sorted(library_keys))
+                db_record.uploaded_to_rating_keys = json.dumps(sorted(rating_keys))
+                db_record.uploaded_editions = json.dumps(sorted(editions))
+                db_record.uploaded_media_types = json.dumps(sorted(media_types))
+            else:
+                db_record = PlexUploadRecord(
+                    file_path=file_path,
+                    file_hash=file_hash,
+                    file_mtime=file_mtime,
+                    uploaded_to_libraries=json.dumps(sorted(libraries)),
+                    uploaded_to_library_keys=json.dumps(sorted(library_keys)),
+                    uploaded_to_rating_keys=json.dumps(sorted(rating_keys)),
+                    uploaded_editions=json.dumps(sorted(editions)),
+                    uploaded_media_types=json.dumps(sorted(media_types)),
+                )
+                self.db.add(db_record)
 
-        self.db.commit()
+            self.db.commit()
+        except SQLAlchemyError:
+            self.db.rollback()
+            self._record_cache.pop(file_path, None)
+            raise
 
         updated = {
             "uploaded_to_libraries": sorted(libraries),

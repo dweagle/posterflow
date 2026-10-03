@@ -13,6 +13,7 @@ from pathlib import Path
 import time
 import math
 from typing import Any, Callable, Optional
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ from models.job import (
     JOB_STATUS_RUNNING,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
+    JOB_STATUSES_RECENT_TERMINAL,
     update_job_state,
 )
 from core.logging import LogTags, log_success, log_error, log_warning, log_info, log_debug, log_section_start, log_section_end
@@ -365,6 +367,8 @@ class BaseSyncService:
                             self.db.bulk_save_objects(pending_inserts)
                             pending_inserts = []
                         self.db.commit()
+                except SQLAlchemyError:
+                    raise
                 except Exception as e:
                     log_error(self.log_tag, f"Error updating database for file: {e}", drive=drive.name, file=file_info.get('name', 'unknown'), error=str(e))
 
@@ -407,6 +411,7 @@ class BaseSyncService:
             return {"success": True, "added": added, "updated": updated, "deleted": deleted}
 
         except Exception as e:
+            self.db.rollback()
             import traceback
             _name = drive.name if drive else drive_id
             log_error(self.log_tag, f"Failed '{_name}': {str(e)}\n{traceback.format_exc()}", drive=_name, error=str(e))
@@ -427,6 +432,17 @@ class BaseSyncService:
         progress slicing). Parallelise files via rclone_transfers, not workers."""
         log_info(self.log_tag, f"Starting batch sync of {len(drive_ids)} drives {'sequentially' if max_workers == 1 else f'with {max_workers} workers'}")
 
+        database_errors: list[str] = []
+
+        def report_progress(phase: str, current: int, total: int, message: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(phase, current, total, message)
+                except SQLAlchemyError as e:
+                    self.db.rollback()
+                    database_errors.append(str(e))
+                    log_warning(self.log_tag_all, f"Error updating progress: {e}")
+
         job = None
         if job_id:
             job = self.db.query(Job).filter(Job.id == job_id).first()
@@ -437,7 +453,7 @@ class BaseSyncService:
             self.db.commit()
 
         if progress_callback:
-            progress_callback("preparing", 0, 100, "Preparing drives for sync...")
+            report_progress("preparing", 0, 100, "Preparing drives for sync...")
 
         sync_tasks = []
         # Drives stay in this map rather than in the task dicts — the task dicts cross into
@@ -486,7 +502,7 @@ class BaseSyncService:
                 log_debug(self.log_tag, "Cleared records for files to be re-downloaded", drive=task['drive_name'], deleted=len(ids_to_delete))
 
         if progress_callback:
-            progress_callback("syncing", 5, 100, f"Syncing {len(sync_tasks)} drives...")
+            report_progress("syncing", 5, 100, f"Syncing {len(sync_tasks)} drives...")
 
         last_updates: dict = {}
 
@@ -542,14 +558,17 @@ class BaseSyncService:
                     last_update['message'] = message
                     last_update['last_emit_at'] = now
                     if progress_callback:
-                        progress_callback("syncing", min(new_progress, 65), 100, f"{drive_name} ({task_idx + 1}/{len(sync_tasks)}): {message}")
+                        report_progress("syncing", min(new_progress, 65), 100, f"{drive_name} ({task_idx + 1}/{len(sync_tasks)}): {message}")
                     if job_id:
                         job_obj = self.db.query(Job).filter(Job.id == job_id).first()
-                        if job_obj:
+                        if job_obj and job_obj.status not in JOB_STATUSES_RECENT_TERMINAL:
                             job_obj.progress = min(new_progress, 65)
                             job_obj.message = f"{drive_name} ({task_idx + 1}/{len(sync_tasks)}): {message}"
                             self.db.commit()
             except Exception as e:
+                self.db.rollback()
+                if isinstance(e, SQLAlchemyError):
+                    database_errors.append(str(e))
                 log_warning(self.log_tag_all, f"Error updating progress: {e}")
 
         remote_sync_tasks = [t for t in sync_tasks if not t.get('is_local_only', False)]
@@ -567,9 +586,10 @@ class BaseSyncService:
             log_info(self.log_tag, f"Drive '{task.get('drive_name', 'Unknown')}' is local-folder-only; skipping Google Drive sync and scanning local files", drive=task.get('drive_name', 'Unknown'))
 
         if progress_callback:
-            progress_callback("updating", 65, 100, "Updating database for synced drives...")
+            report_progress("updating", 65, 100, "Updating database for synced drives...")
 
-        total_added = total_updated = total_deleted = total_errors = 0
+        total_added = total_updated = total_deleted = 0
+        total_errors = 0
         log_debug(self.log_tag, f"Starting database update phase for {len(sync_tasks)} drives")
 
         for idx, task in enumerate(sync_tasks):
@@ -577,7 +597,7 @@ class BaseSyncService:
                 drive_name = task.get('drive_name', 'Unknown')
                 db_progress = 65 + int(((idx + 1) / len(sync_tasks)) * 35)
                 if progress_callback:
-                    progress_callback("updating", db_progress, 100, f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})")
+                    report_progress("updating", db_progress, 100, f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})")
                 if job:
                     job.progress = db_progress
                     job.message = f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})"
@@ -686,9 +706,33 @@ class BaseSyncService:
 
             except Exception as e:
                 self.db.rollback()
+                if isinstance(e, SQLAlchemyError):
+                    database_errors.append(str(e))
+                else:
+                    total_errors += 1
                 import traceback
                 log_error(self.log_tag, f"Error processing {drive_name}: {str(e)}\n{traceback.format_exc()}", drive=drive_name, error=str(e))
-                total_errors += 1
+
+        # Report before the terminal commit so progress writes cannot overwrite it.
+        if not database_errors:
+            report_progress("completed", 100, 100, f"Completed: {total_added} added, {total_updated} updated, {total_deleted} deleted")
+
+        if database_errors:
+            error = f"Sync failed: {len(database_errors)} database write error(s); earlier drive commits retained"
+            report_progress("failed", 100, 100, error)
+            # The failed callback can itself fail; include that write in the final count.
+            error = f"Sync failed: {len(database_errors)} database write error(s); earlier drive commits retained"
+            if job:
+                update_job_state(self.db, job, status=JOB_STATUS_FAILED, progress=100, message=error, error=error, completed_at=datetime.now(timezone.utc))
+            return {
+                "success": False,
+                "error": error,
+                "drives_synced": len(sync_tasks),
+                "added": total_added,
+                "updated": total_updated,
+                "deleted": total_deleted,
+                "errors": total_errors + len(database_errors),
+            }
 
         if job:
             job.progress = 100
@@ -698,14 +742,11 @@ class BaseSyncService:
                 job.message = f"Synced {len(sync_tasks)} drives: {total_added} added, {total_updated} updated, {total_deleted} deleted"
             update_job_state(self.db, job, status=JOB_STATUS_COMPLETED, progress=100, message=job.message, completed_at=datetime.now(timezone.utc))
 
-        if progress_callback:
-            progress_callback("completed", 100, 100, f"Completed: {total_added} added, {total_updated} updated, {total_deleted} deleted")
-
         return {
             "success": True,
             "drives_synced": len(sync_tasks),
             "added": total_added,
             "updated": total_updated,
             "deleted": total_deleted,
-            "errors": total_errors,
+            "errors": total_errors + len(database_errors),
         }

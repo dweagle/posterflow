@@ -195,6 +195,7 @@ def _mark_job_failed(
     failure_context: str,
 ) -> None:
     try:
+        db.rollback()
         job = db.query(Job).filter(Job.id == job_id).first()
         if job:
             update_job_state(

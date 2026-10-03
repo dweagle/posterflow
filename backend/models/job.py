@@ -209,13 +209,15 @@ def update_job_state(
 
 
 def mark_job_failed(db: Session, job_id: int, error: Exception | str) -> None:
-    """Mark a job as failed and set completion timestamp."""
+    """Discard pending work, then persist a failed terminal job."""
+    db.rollback()
     job = db.query(Job).filter(Job.id == job_id).first()
     if job:
         update_job_state(
             db,
             job,
             status=JOB_STATUS_FAILED,
+            progress=100,
             error=str(error),
             completed_at=datetime.now(timezone.utc),
         )
