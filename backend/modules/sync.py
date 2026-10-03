@@ -1,6 +1,8 @@
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.job import (
@@ -8,6 +10,8 @@ from models.job import (
     JOB_TYPE_GDRIVE_SYNC,
     JOB_STATUS_RUNNING,
     JOB_STATUS_COMPLETED,
+    JOB_STATUS_FAILED,
+    JOB_STATUSES_RECENT_TERMINAL,
     mark_job_failed,
     update_job_state,
     finalize_job_cancelled,
@@ -32,6 +36,8 @@ def _build_progress_callback(
     db: Session,
     job_id: int,
     log_tag: str,
+    *,
+    propagate_database_errors: bool = False,
 ) -> Callable[[str, int, int, str], None]:
     """Create a standard progress callback for sync jobs."""
     def sync_progress(phase: str, current: int, total: int, message: str) -> None:
@@ -40,12 +46,18 @@ def _build_progress_callback(
         check_cancelled(job_id)
         try:
             job = db.query(Job).filter(Job.id == job_id).first()
+            # Terminal state is authoritative for single and batch jobs, including delayed events.
+            if job and job.status in JOB_STATUSES_RECENT_TERMINAL:
+                return
             if job and total > 0:
                 progress = int((current / total) * 100)
                 job.progress = min(progress, 99)
                 job.message = message
                 db.commit()
         except Exception as e:
+            db.rollback()
+            if propagate_database_errors and isinstance(e, SQLAlchemyError):
+                raise
             log_warning(log_tag, f"Error updating progress: {e}")
 
     return sync_progress
@@ -117,6 +129,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
         # 'cancelled' (not failed) and no error notifications are sent.
         raise
     except Exception as e:
+        db.rollback()
         log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
         send_discord_notification(
             db,
@@ -164,7 +177,7 @@ def _sync_all_poster_drives(db: Session, job_id: int, skip_discord: bool) -> dic
         drive_ids,
         job_id,
         max_workers=1,  # Must stay 1: shared Session isn't thread-safe and progress slicing assumes sequential drives
-        progress_callback=_build_progress_callback(db, job_id, LogTags.SCHEDULER),
+        progress_callback=_build_progress_callback(db, job_id, LogTags.SCHEDULER, propagate_database_errors=True),
     )
 
     if result.get('success'):
@@ -231,7 +244,7 @@ def _sync_all_artwork_drives(db: Session, job_id: int, skip_discord: bool = Fals
     result = service.sync_multiple_drives(
         drive_ids,
         job_id,
-        progress_callback=_build_progress_callback(db, job_id, LogTags.SYNC),
+        progress_callback=_build_progress_callback(db, job_id, LogTags.SYNC, propagate_database_errors=True),
     )
 
     if result.get('success'):
@@ -301,12 +314,25 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str 
             return poster_result or {"success": True, "message": "Nothing selected to sync"}
         if poster_result is None:
             return artwork_result
+        # Each category finalizes the shared job; a later success must not erase a failure.
+        if not success:
+            error = "; ".join(
+                str(r.get("error") or r.get("message") or "Sync failed")
+                for r in (poster_result, artwork_result) if not r.get("success")
+            )
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if job:
+                update_job_state(
+                    db, job, status=JOB_STATUS_FAILED, progress=100, message=error,
+                    error=error, completed_at=datetime.now(timezone.utc),
+                )
         return {"success": success, "posters": poster_result, "artwork": artwork_result}
     except JobCancelled:
         # User stopped the job — re-raise so the caller finalizes it as
         # 'cancelled' (the task wrapper for direct runs, or the workflow parent).
         raise
     except Exception as e:
+        db.rollback()
         log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
         # Report regardless of which side ran — an artwork-only failure must not be silent.
         if not skip_discord:
@@ -389,6 +415,8 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered
             db.commit()
             db.refresh(job)
 
+        # Keep the durable ID for failure reporting, including jobs created by this runner.
+        job_id = job.id
         drive_ids = [drive.id for drive in drives]
         log_debug(LogTags.SCHEDULER, f"Syncing {len(drive_ids)} {drive_group} drives")
 
@@ -397,7 +425,7 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered
             drive_ids,
             job.id,
             max_workers=1,  # Must stay 1: shared Session isn't thread-safe and progress slicing assumes sequential drives
-            progress_callback=_build_progress_callback(db, job.id, LogTags.SCHEDULER),
+            progress_callback=_build_progress_callback(db, job.id, LogTags.SCHEDULER, propagate_database_errors=True),
         )
 
         if result.get('success'):
@@ -409,6 +437,7 @@ def run_sync_group_job(drive_group: str, job_id: Optional[int] = None, triggered
             finalize_job_cancelled(db, job_id)
         raise
     except Exception as e:
+        db.rollback()
         log_error(LogTags.SCHEDULER, f"Scheduled {drive_group} sync failed: {str(e)}\n{traceback.format_exc()}")
         if job_id is not None:
             mark_job_failed(db, job_id, e)
