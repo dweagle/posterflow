@@ -21,6 +21,14 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _parse_config(raw) -> dict | None:
+    try:
+        config = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return config if isinstance(config, dict) else None
+
+
 def upgrade() -> None:
     conn = op.get_bind()
     settings = sa.table("settings", sa.column("key", sa.String), sa.column("value", sa.String))
@@ -30,32 +38,30 @@ def upgrade() -> None:
         return row[0] if row else None
 
     # Only promote if global key is not already set
-    existing_global = get_value("tmdb_api_key")
-    if not existing_global or not existing_global.strip():
-        monitor_raw = get_value("maker_tools_monitor_config")
-        if monitor_raw:
-            try:
-                cfg = json.loads(monitor_raw)
-                embedded = str(cfg.get("tmdb_api_key") or "").strip()
-                if embedded and embedded != "***masked***":
+    existing_global = conn.execute(
+        sa.select(settings.c.value).where(settings.c.key == "tmdb_api_key")
+    ).fetchone()
+    cfg = _parse_config(get_value("maker_tools_monitor_config"))
+    if existing_global is None or not (existing_global[0] or "").strip():
+        if cfg is not None:
+            embedded = str(cfg.get("tmdb_api_key") or "").strip()
+            if embedded and embedded != "***masked***":
+                if existing_global is None:
                     conn.execute(settings.insert().values(key="tmdb_api_key", value=embedded))
-            except Exception:  # nosec B110
-                pass
+                else:
+                    conn.execute(
+                        settings.update().where(settings.c.key == "tmdb_api_key")
+                        .values(value=embedded)
+                    )
 
     # Strip tmdb_api_key from maker_tools_monitor_config JSON regardless
-    monitor_raw = get_value("maker_tools_monitor_config")
-    if monitor_raw:
-        try:
-            cfg = json.loads(monitor_raw)
-            if "tmdb_api_key" in cfg:
-                del cfg["tmdb_api_key"]
-                conn.execute(
-                    settings.update()
-                    .where(settings.c.key == "maker_tools_monitor_config")
-                    .values(value=json.dumps(cfg))
-                )
-        except Exception:  # nosec B110
-            pass
+    if cfg is not None and "tmdb_api_key" in cfg:
+        del cfg["tmdb_api_key"]
+        conn.execute(
+            settings.update()
+            .where(settings.c.key == "maker_tools_monitor_config")
+            .values(value=json.dumps(cfg))
+        )
 
 
 def downgrade() -> None:
