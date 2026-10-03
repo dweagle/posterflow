@@ -354,7 +354,7 @@ def _scan_source_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Dic
             "name": drive.display_name or drive.name,
             "style_type": drive.style_type,
             "local_path": str(path),
-            "last_synced": drive.last_synced.strftime("%Y-%m-%d %H:%M") if drive.last_synced else None,
+            "last_synced": drive.last_synced.isoformat() if drive.last_synced else None,
             "missing": missing,
         })
         if not missing:
@@ -384,7 +384,7 @@ def _scan_artwork_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Di
             "name": drive.display_name or drive.name,
             "style_type": "ART",
             "local_path": str(path),
-            "last_synced": drive.last_synced.strftime("%Y-%m-%d %H:%M") if drive.last_synced else None,
+            "last_synced": drive.last_synced.isoformat() if drive.last_synced else None,
             "missing": not path.is_dir(),
         })
 

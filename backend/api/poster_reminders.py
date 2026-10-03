@@ -1,7 +1,6 @@
 """Poster reminders — items flagged on a maker / artwork card to come back to later, with a note.
 Backs the bell checkbox on the cards and the Reminders tab in Maker Tools.
 """
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,13 +42,6 @@ def _clean_note(note: Optional[str]) -> str:
     return text
 
 
-def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
-    # SQLite's CURRENT_TIMESTAMP is UTC but comes back naive; stamp it so the browser converts.
-    if dt is None:
-        return None
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).isoformat()
-
-
 def _reminder_dict(r: PosterReminder) -> Dict[str, Any]:
     return {
         "id": r.id,
@@ -63,8 +55,8 @@ def _reminder_dict(r: PosterReminder) -> Dict[str, Any]:
         "poster_url": r.poster_url,
         "homepage": r.homepage,
         "note": r.note or "",
-        "created_at": _iso_utc(r.created_at),
-        "updated_at": _iso_utc(r.updated_at),
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
 
 

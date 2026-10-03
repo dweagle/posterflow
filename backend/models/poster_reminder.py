@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.sql import func
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 class PosterReminder(Base):
@@ -20,5 +21,5 @@ class PosterReminder(Base):
     poster_url = Column(String, nullable=True)
     homepage = Column(String, nullable=True)
     note = Column(Text, nullable=False, default="", server_default="")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, server_default=func.now(), onupdate=func.now())

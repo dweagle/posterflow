@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from core.app_timezone import today_in_app_tz
 from core.auth import mint_psd_access_token, verify_psd_access_token
 from core.config import settings as app_settings
 from core.job_queue import job_queue
@@ -151,8 +152,9 @@ class MakerMonitorRunQueuedResponse(BaseModel):
     message: str
 
 
-def _monitor_today_local() -> date:
-    return datetime.now().astimezone().date()
+def _monitor_today() -> date:
+    """Today in the application timezone — 'local' no longer means the process TZ."""
+    return today_in_app_tz()
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -742,7 +744,7 @@ def _check_show_status(
     tvdb_id: int | None = None,
     status_cache: StatusCache | None = None,
 ) -> MakerMonitorShowResult | None:
-    today = _monitor_today_local()
+    today = _monitor_today()
     end_date = today + timedelta(days=lookahead_days)
     start_date = today - timedelta(days=MAKER_MONITOR_TODAY_GRACE_DAYS)
 
@@ -4048,7 +4050,7 @@ def run_maker_monitor_scan_internal(
         if progress_callback:
             progress_callback(80, "Running discovery scan...")
 
-        start_date = _monitor_today_local()
+        start_date = _monitor_today()
         end_date = start_date + timedelta(days=resolved_config.lookahead_days)
 
         discovery_drives = _resolve_discovery_drives(db)
@@ -4105,7 +4107,7 @@ def run_maker_monitor_scan_internal(
     if progress_callback:
         progress_callback(95, "Merging retained missing items...")
 
-    today = _monitor_today_local()
+    today = _monitor_today()
 
     # Build a map of (tmdb_id, season_number) -> air_date from all fresh scan results
     # so carryover items in libraries that missed a show can use the up-to-date air date

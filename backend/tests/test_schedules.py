@@ -1,33 +1,6 @@
-import pickle
 from datetime import datetime, timezone
 
-
-def test_scheduler_timezone_resolves_by_name(monkeypatch):
-    """A named zone pickles by key, which the SQLAlchemy job store needs for every add_job."""
-    import core.scheduler as scheduler_module
-
-    monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: "Europe/Amsterdam")
-
-    tz = scheduler_module._local_timezone()
-
-    assert str(tz) == "Europe/Amsterdam"
-    assert pickle.loads(pickle.dumps(tz)) == tz
-
-
-def test_scheduler_timezone_warns_and_uses_utc_when_host_has_no_zone_name(monkeypatch):
-    """No TZ, no /var/db/zoneinfo and a copied /etc/localtime (FreeBSD jail) yields no name; fall back loudly, not silently."""
-    import core.scheduler as scheduler_module
-
-    monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: None)
-    warnings = []
-    monkeypatch.setattr(scheduler_module, "log_warning", lambda tag, msg, **k: warnings.append(msg))
-
-    tz = scheduler_module._local_timezone()
-
-    assert tz is timezone.utc
-    assert pickle.loads(pickle.dumps(tz)) is timezone.utc
-    assert len(warnings) == 1
-    assert "TZ" in warnings[0]
+import pytest
 
 
 def test_create_schedule_rejects_invalid_drive_group(client):
@@ -399,3 +372,45 @@ def test_scheduled_artwork_sync_queues_the_artwork_job(test_db, monkeypatch):
     from models.job import Job
     job = test_db.query(Job).filter(Job.id == submitted[0][1]).first()
     assert job.job_type == "Artwork Sync All (1 drives)"
+
+
+@pytest.fixture
+def restore_scheduler_timezone():
+    """apply_app_timezone() mutates a module-level global; put it back afterwards.
+
+    The leak is cross-file, not within this one: the two tests below are last in the file,
+    but core.scheduler.scheduler is session-wide, and tests/test_settings.py sorts after
+    this module. Task 6 adds a "changing the setting re-points the scheduler" test there,
+    which would otherwise silently start from an Asia/Tokyo baseline.
+    """
+    import core.scheduler as scheduler_module
+
+    original = scheduler_module.scheduler.timezone
+    yield
+    scheduler_module.scheduler.timezone = original
+
+
+def test_scheduler_uses_the_application_timezone_not_process_tz(monkeypatch, restore_scheduler_timezone):
+    """TZ governs storage; the app timezone governs when a cron fires. They must not be the same knob."""
+    import core.scheduler as scheduler_module
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(scheduler_module, "get_app_timezone", lambda: ZoneInfo("Europe/Amsterdam"))
+
+    scheduler_module.apply_app_timezone()
+
+    assert str(scheduler_module.scheduler.timezone) == "Europe/Amsterdam"
+
+
+def test_apply_app_timezone_picks_up_a_later_change(monkeypatch, restore_scheduler_timezone):
+    """Changing the setting at runtime must re-point the scheduler without a restart."""
+    import core.scheduler as scheduler_module
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(scheduler_module, "get_app_timezone", lambda: ZoneInfo("Asia/Tokyo"))
+
+    scheduler_module.apply_app_timezone()
+
+    assert str(scheduler_module.scheduler.timezone) == "Asia/Tokyo"
+    # The attribute is only a proxy; prove it reaches the trigger a cron job actually gets.
+    assert str(scheduler_module.scheduler._create_trigger("cron", {"hour": "3"}).timezone) == "Asia/Tokyo"

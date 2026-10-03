@@ -2673,7 +2673,7 @@ def _shark_week_payload():
 def test_check_show_status_matches_year_numbered_drive_files():
     existing = {1988, 1989, 2025, 2026}
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=None), \
          patch("services.tvdb.fetch_series_seasons",
                return_value=_tvdb_year_rows(1988, 1989, 2025, 2026)):
@@ -2687,7 +2687,7 @@ def test_check_show_status_matches_year_numbered_drive_files():
 def test_check_show_status_reports_year_season_as_needed_when_missing():
     existing = {1988, 1989, 2025}
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=None), \
          patch("services.tvdb.fetch_series_seasons",
                return_value=_tvdb_year_rows(1988, 1989, 2025, 2026)):
@@ -2700,7 +2700,7 @@ def test_check_show_status_reports_year_season_as_needed_when_missing():
 
 def test_check_show_status_keeps_tmdb_number_without_tvdb_key():
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_shark_week_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", side_effect=AssertionError("should not be called")), \
          patch("services.tvdb.fetch_series_seasons",
                side_effect=AssertionError("should not be called")):
@@ -2738,7 +2738,7 @@ def test_check_show_status_takes_the_premiere_from_tvdb():
     """TVDB's newest season decides, even when TMDB's next episode says a different season."""
     episodes = MagicMock(return_value=_tvdb_episodes("2026-08-01", "2026-08-08"))
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload(next_season=2)), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(0, 1, 2, 3, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", episodes), \
          patch("services.tvdb.fetch_series_seasons", side_effect=AssertionError("no year translation on the TVDB path")):
@@ -2753,7 +2753,7 @@ def test_check_show_status_takes_the_premiere_from_tvdb():
 def test_check_show_status_tvdb_catches_a_daily_show_mid_run():
     """General Hospital: the next episode is S64E03, but the season opened yesterday, inside the grace day."""
     with patch("api.maker_tools._tmdb_fetch_json", return_value={**_monitor_payload(), "next_episode_to_air": None}), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 9, 9)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 9, 9)), \
          patch("services.tvdb.fetch_series_outline",
                return_value=_tvdb_outline(63, 64, last_aired="2026-09-10", next_aired="2026-09-10")), \
          patch("services.tvdb.fetch_season_episodes",
@@ -2766,7 +2766,7 @@ def test_check_show_status_tvdb_catches_a_daily_show_mid_run():
 
 def test_check_show_status_tvdb_reports_an_existing_poster():
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01")):
         result = _check_show_status("1", {1, 2}, "tmdb-key", 21, ("tvdb-key", ""))
@@ -2778,7 +2778,7 @@ def test_check_show_status_tvdb_reports_an_existing_poster():
 def test_check_show_status_tvdb_steps_past_an_undated_placeholder_season():
     episodes = MagicMock(side_effect=[_tvdb_episodes(None), _tvdb_episodes("2026-08-01")])
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, 3, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", episodes):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""))
@@ -2791,7 +2791,7 @@ def test_check_show_status_tvdb_steps_past_an_undated_placeholder_season():
 def test_check_show_status_tvdb_gives_up_after_the_probe_limit():
     episodes = MagicMock(return_value=_tvdb_episodes(None))
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, 3, 4, 5, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", episodes):
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", "")) is None
@@ -2802,7 +2802,7 @@ def test_check_show_status_tvdb_gives_up_after_the_probe_limit():
 def test_check_show_status_tvdb_quiet_show_skips_the_season_lookup():
     """Nothing aired near the window: TVDB is trusted without a second call, and TMDB doesn't get a vote."""
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, last_aired="2025-12-01")), \
          patch("services.tvdb.fetch_season_episodes", side_effect=AssertionError("should not be called")):
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", "")) is None
@@ -2810,7 +2810,7 @@ def test_check_show_status_tvdb_quiet_show_skips_the_season_lookup():
 
 def test_check_show_status_tvdb_mid_season_show_is_not_a_premiere():
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-05-01", "2026-08-01")):
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", "")) is None
@@ -2819,7 +2819,7 @@ def test_check_show_status_tvdb_mid_season_show_is_not_a_premiere():
 def test_check_show_status_falls_back_to_tmdb_when_tvdb_fails():
     import services.tvdb as tvdb_service
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload(next_season=2)), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", side_effect=tvdb_service.TvdbError("down")), \
          patch("services.tvdb.fetch_series_seasons", side_effect=tvdb_service.TvdbError("down")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""))
@@ -2830,7 +2830,7 @@ def test_check_show_status_falls_back_to_tmdb_when_tvdb_fails():
 
 def test_check_show_status_falls_back_to_tmdb_when_tvdb_lists_no_seasons():
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload(next_season=2)), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(0, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", side_effect=AssertionError("should not be called")), \
          patch("services.tvdb.fetch_series_seasons", return_value=[]):
@@ -2844,7 +2844,7 @@ def test_check_show_status_uses_tmdb_when_the_show_has_no_tvdb_id():
     payload = _monitor_payload(next_season=2)
     payload["external_ids"] = {"imdb_id": "tt1", "tvdb_id": None}
     with patch("api.maker_tools._tmdb_fetch_json", return_value=payload), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", side_effect=AssertionError("should not be called")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""))
 
@@ -2855,7 +2855,7 @@ def test_check_show_status_uses_tmdb_when_the_show_has_no_tvdb_id():
 def test_check_show_status_quiet_show_with_a_drive_tag_never_calls_tmdb():
     tally = SourceTally()
     with patch("api.maker_tools._tmdb_fetch_json", side_effect=AssertionError("TMDB must not be called")), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, last_aired="2025-12-01")) as outline:
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tally, tvdb_id=4242) is None
 
@@ -2866,7 +2866,7 @@ def test_check_show_status_quiet_show_with_a_drive_tag_never_calls_tmdb():
 def test_check_show_status_premiere_with_a_drive_tag_fetches_tmdb_once_for_the_card():
     fetch = MagicMock(return_value=_monitor_payload())
     with patch("api.maker_tools._tmdb_fetch_json", fetch), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, next_aired="2026-08-01")) as outline, \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242)
@@ -2882,7 +2882,7 @@ def test_check_show_status_tries_tmdbs_tvdb_id_when_the_drive_tag_is_unknown_to_
     outline = MagicMock(side_effect=lambda *, tvdb_id, api_key, pin:
                         _tvdb_outline(1, 2, next_aired="2026-08-01") if tvdb_id == 4242 else None)
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", outline), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=9999)
@@ -2896,7 +2896,7 @@ def test_check_show_status_does_not_retry_the_same_tvdb_id_after_a_failure():
     import services.tvdb as tvdb_service
     outline = MagicMock(side_effect=tvdb_service.TvdbError("down"))
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload(next_season=2)), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", outline), \
          patch("services.tvdb.fetch_series_seasons", side_effect=tvdb_service.TvdbError("down")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242)
@@ -3022,7 +3022,7 @@ def test_check_show_status_recheck_catches_a_revival_that_premiered_while_skippe
     cache = StatusCache({"tvdb:4242": _cached("Ended", recheck="2026-08-10")})
     outline = {**_tvdb_outline(1, 2, last_aired="2026-08-08", next_aired="2026-08-15"), "status": "Continuing"}
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 8, 10)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 8, 10)), \
          patch("services.tvdb.fetch_series_outline", return_value=outline), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01", "2026-08-08", "2026-08-15")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242, status_cache=cache)
@@ -3036,7 +3036,7 @@ def test_check_show_status_lookback_does_not_widen_a_daily_check():
     """A show cached Continuing is checked daily, so a premiere older than the grace day stays out."""
     cache = StatusCache({"tvdb:4242": _cached("Continuing")})
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 8, 10)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 8, 10)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, next_aired="2026-08-15")), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01", "2026-08-15")):
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242, status_cache=cache) is None
@@ -3051,7 +3051,7 @@ def test_check_show_status_tmdb_recheck_uses_the_last_aired_episode():
         "last_episode_to_air": {"air_date": "2026-08-01", "season_number": 2, "episode_number": 1},
     }
     with patch("api.maker_tools._tmdb_fetch_json", return_value=payload), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 8, 10)):
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 8, 10)):
         result = _check_show_status("1", {1}, "tmdb-key", 21, status_cache=cache)
 
     assert result is not None
@@ -3062,7 +3062,7 @@ def test_check_show_status_skips_a_cached_ended_show_without_any_call():
     cache = StatusCache({"tvdb:4242": _cached("Ended")})
     tally = SourceTally()
     with patch("api.maker_tools._tmdb_fetch_json", side_effect=AssertionError("no TMDB call")), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", side_effect=AssertionError("no TVDB call")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tally, tvdb_id=4242, status_cache=cache)
 
@@ -3074,7 +3074,7 @@ def test_check_show_status_tmdb_ended_never_skips_a_tvdb_checked_show():
     """TMDB splits some anthologies into ended one-season shows; TheTVDB decides when it's configured."""
     cache = StatusCache({"tmdb:1": _cached("Ended")})
     with patch("api.maker_tools._tmdb_fetch_json", return_value=_monitor_payload()), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=_tvdb_outline(1, 2, next_aired="2026-08-01")), \
          patch("services.tvdb.fetch_season_episodes", return_value=_tvdb_episodes("2026-08-01")):
         result = _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242, status_cache=cache)
@@ -3086,7 +3086,7 @@ def test_check_show_status_tmdb_ended_never_skips_a_tvdb_checked_show():
 def test_check_show_status_skips_by_tmdb_status_without_a_tvdb_key():
     cache = StatusCache({"tmdb:1": _cached("Canceled")})
     with patch("api.maker_tools._tmdb_fetch_json", side_effect=AssertionError("no TMDB call")), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)):
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)):
         assert _check_show_status("1", {1}, "tmdb-key", 21, status_cache=cache) is None
 
 
@@ -3095,7 +3095,7 @@ def test_check_show_status_records_the_status_from_both_sources():
     payload = {**_monitor_payload(next_season=2), "status": "Returning Series"}
     outline = {**_tvdb_outline(1, 2, last_aired="2025-12-01"), "status": "Ended"}
     with patch("api.maker_tools._tmdb_fetch_json", return_value=payload), \
-         patch("api.maker_tools._monitor_today_local", return_value=date(2026, 7, 26)), \
+         patch("api.maker_tools._monitor_today", return_value=date(2026, 7, 26)), \
          patch("services.tvdb.fetch_series_outline", return_value=outline):
         assert _check_show_status("1", {1}, "tmdb-key", 21, ("tvdb-key", ""), tvdb_id=4242, status_cache=cache) is None
         # Untagged show: TMDB is fetched first, so its status is recorded before TVDB decides.

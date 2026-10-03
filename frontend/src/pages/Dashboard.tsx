@@ -5,6 +5,7 @@ import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOr
 import { useToast } from '../components/Toast'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { useAppEvents } from '../contexts/AppEventsContext'
+import { formatDateTime, formatNextRun } from '../utils/datetime'
 import './Dashboard.css'
 
 // Coverage card scopes — posters stays the default; the rest are the artwork types.
@@ -238,21 +239,6 @@ function Dashboard() {
     })
   }
 
-
-  const formatNextRun = (nextRun: string | null) => {
-    if (!nextRun) return 'Not scheduled'
-    try {
-      const date = new Date(nextRun)
-      return date.toLocaleString('en-US', {
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      })
-    } catch {
-      return 'Invalid date'
-    }
-  }
 
   const formatTimeValue = (value: string) => {
     const normalized = value.trim()
@@ -620,7 +606,7 @@ function Dashboard() {
             <div className="coverage-header-left">
               <h2>{activeScope.title}</h2>
               <p className="last-checked">
-                {activeCoverage?.last_run ? `Last checked: ${new Date(activeCoverage.last_run).toLocaleString()}` : 'Not checked yet'}
+                {activeCoverage?.last_run ? `Last checked: ${formatDateTime(activeCoverage.last_run)}` : 'Not checked yet'}
               </p>
             </div>
             <div className="coverage-header-center">

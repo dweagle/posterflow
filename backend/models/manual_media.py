@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.sql import func
 
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 class ManualMediaEntry(Base):
@@ -21,7 +22,7 @@ class ManualMediaEntry(Base):
     imdb_id = Column(String, nullable=True)
     # JSON array of season numbers, e.g. "[1, 2, 3]". Null for movies.
     seasons_json = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<ManualMediaEntry(id={self.id}, title='{self.title}', type='{self.media_type}')>"

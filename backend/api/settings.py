@@ -12,6 +12,7 @@ from models.setting import Setting, get_setting, upsert_setting
 from util.library_configs import media_libraries_only
 from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
+from core.app_timezone import get_app_timezone
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -68,6 +69,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # App setup
     "setup_complete",
     "poster_destination",
+    "timezone",
     # Media server instances
     "plex_instances",
     "sonarr_instances",
@@ -775,6 +777,9 @@ def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     payload: Dict[str, str] = {}
     for setting in settings:
         payload[setting.key] = setting.value
+    # Computed, not stored: the zone actually in force. A bad stored "timezone" still
+    # resolves to the previous valid zone, and this is where the user sees that.
+    payload["effective_timezone"] = str(get_app_timezone())
     return _mask_settings_payload(payload)
 
 
@@ -904,6 +909,27 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
         db.rollback()
         log_error(LogTags.API, f"Database error saving bulk settings: {e}\n{traceback.format_exc()}", count=len(allowed))
         raise HTTPException(status_code=500, detail="Failed to save settings")
+
+    # A new zone re-interprets every cron expression, so the jobs have to be rebuilt.
+    # set_app_timezone must land first — update_schedules() reads it via get_app_timezone().
+    # Function-local imports keep core.scheduler, and the job modules it pulls in, out of
+    # this module's import path. On an invalid zone set_app_timezone() returns False, so the
+    # rebuild just re-applies the zone already in force and the user sees that mismatch in
+    # effective_timezone.
+    if "timezone" in allowed:
+        from core.app_timezone import set_app_timezone
+        from core.scheduler import update_schedules
+
+        set_app_timezone(allowed["timezone"])
+        try:
+            update_schedules()
+        except Exception as e:
+            # The zone is already committed and the scheduler already re-pointed, so this
+            # is a rebuild failure, not a save failure. A stopped scheduler (e.g. startup
+            # failed and the app kept serving) makes add_job() queue without ever setting
+            # next_run_time. Say so instead of 500-ing a change that did take.
+            log_error(LogTags.SCHEDULER, f"Timezone saved but schedule rebuild failed: {e}\n{traceback.format_exc()}")
+            log_warning(LogTags.SCHEDULER, "Schedules will pick up the new timezone once the scheduler is running")
 
     return {"message": "Settings saved", "count": len(allowed)}
 

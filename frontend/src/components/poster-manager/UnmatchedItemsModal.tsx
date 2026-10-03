@@ -18,6 +18,7 @@ import { usePersistedPosterStyle } from '../community/posterStyles'
 import SortControls from './SortControls'
 import { type ItemType, sortItems, useSortPrefs } from './itemSort'
 import { matchedByIdTooltip } from '../../utils/mediaServer'
+import { formatDate } from '../../utils/datetime'
 
 export type UnmatchedModalType = 'movies' | 'series' | 'collections' | 'seasons' | 'all' | null
 
@@ -519,7 +520,7 @@ function UnmatchedItemsModal({
             {item.year && <span className="item-year">({item.year})</span>}
             {sortDate && (
               <span className="item-year item-sort-date" title={prefs.field === 'added' ? 'Date added' : 'Release date'}>
-                · {new Date(sortDate).toLocaleDateString()}
+                · {formatDate(sortDate)}
               </span>
             )}
             {item.category && (

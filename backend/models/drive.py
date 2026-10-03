@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.sql import func
 from pathlib import Path
 from database import Base
 from core.logging import log_warning
+from util.utc_datetime import UTCDateTime
 
 class Drive(Base):
     """
@@ -22,12 +23,12 @@ class Drive(Base):
     custom_path = Column(String, nullable=True)  # Custom sync path for this drive
     is_custom = Column(Boolean, default=False)  # True if user-added drive
     is_deprecated = Column(Boolean, default=False)  # True if removed from preset list
-    last_synced = Column(DateTime(timezone=True), nullable=True)
-    last_rename_processed = Column(DateTime(timezone=True), nullable=True)  # Last rename operation
+    last_synced = Column(UTCDateTime, nullable=True)
+    last_rename_processed = Column(UTCDateTime, nullable=True)  # Last rename operation
     sync_file_count = Column(Integer, default=0)  # Current file count after sync
     last_files_transferred = Column(Integer, default=0)  # Files changed in last sync
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
     def __repr__(self) -> str:
         return f"<Drive(name='{self.name}', style='{self.style_type}', priority={self.priority}, subscribed={self.subscribed})>"

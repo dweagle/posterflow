@@ -31,7 +31,7 @@ const reportResponse: MatchReportResponse = {
       tvdb: { tvdb_id: 372727, tmdb_id: null, imdb_id: 'tt11016042', title: 'RIPLEY', year: 2024 },
       plex: { tvdb_id: 372727, tmdb_id: null, imdb_id: null, title: 'RIPLEY', year: 2024, library: 'TV Shows', instance: 'Plex' },
     },
-    drives: { scanned: [{ name: 'DriveA', style_type: 'CL2K', last_synced: '2026-08-01 10:00', missing: false }], total_assets: 100, error: null },
+    drives: { scanned: [{ name: 'DriveA', style_type: 'CL2K', last_synced: '2026-08-01T10:00:00+00:00', missing: false }], total_assets: 100, error: null },
     candidates: {
       considered: 4, shown: 1, omitted: 0,
       items: [{ title: 'RIPLEY', year: 2024, tmdb_id: null, tvdb_id: 111, imdb_id: null, drive: 'DriveA',

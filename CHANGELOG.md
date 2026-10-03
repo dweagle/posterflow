@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- Settings: a new Application Timezone in the Scheduling tab — schedule times and which calendar day the dashboard counts as "today" are interpreted in this zone. Precedence is the saved setting, then the `APP_TIMEZONE` environment variable, then the host timezone, then UTC.
+
+### Changed
+- Storage: every timestamp is stored in UTC and log timestamps are pinned to UTC, whatever `TZ` says.
+- UI: timestamps render in the viewer's own browser zone, which is the point of storing UTC. Log lines carry no UTC offset and are shown as written, since a browser cannot reliably re-zone an offset-less string.
+- Schedules: `TZ` no longer decides how schedule times are read. Leave it at `UTC` and set your timezone in Settings → Scheduling instead — anyone who set `TZ` to fix their schedules should move that to the UI. It is now only the fallback for that setting, used when nothing is saved and `APP_TIMEZONE` is unset.
+- Log files written before this release hold host-local timestamps and are read back as UTC. Historical lines only; `elapsed` values are unaffected.
+
+### Fixed
+- Match Report: timestamps rendered shifted by the viewer's UTC offset, because the backend wrote UTC without the offset and the browser read the string as local time.
 
 ## [0.16.7] - 2026-10-02
 ### Added

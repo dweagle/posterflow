@@ -8,8 +8,8 @@ import traceback
 import shutil
 import json
 import threading
-from pydantic import BaseModel, ConfigDict, field_serializer
-from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict
+from datetime import datetime
 
 from database import get_db
 from models.drive import Drive
@@ -166,16 +166,7 @@ class DriveSchema(BaseModel):
     last_files_transferred: int = 0
     poster_count: int = 0
     unprocessed_count: int = 0
-    
-    @field_serializer('last_synced', 'last_rename_processed')
-    def serialize_datetime(self, value: datetime | None) -> str | None:
-        if value is None:
-            return None
-        # If datetime is naive, assume it's UTC and make it aware
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.isoformat()
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class DriveUpdateRequest(BaseModel):

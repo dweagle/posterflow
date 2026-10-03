@@ -1,12 +1,12 @@
 from loguru import logger
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from core.config import settings
 
 
-LOGURU_TIMESTAMP_FORMAT = "YY/MM/DD HH:mm:ss"
+LOGURU_TIMESTAMP_FORMAT = "YY/MM/DD HH:mm:ss!UTC"
 PYTHON_TIMESTAMP_FORMAT = "%y/%m/%d %H:%M:%S"
 
 # ============================================================================
@@ -249,7 +249,7 @@ def add_job_log_handler(job_type: str, job_id: int, job_name: Optional[str] = No
     _structural_info(log_separator())
     logger.info(f"[{log_tag:^9}] {LogIcons.START} JOB STARTED: {job_display_name}")
     logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Job ID: {job_id}")
-    logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Started: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
+    logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Started: {datetime.now(timezone.utc).strftime(PYTHON_TIMESTAMP_FORMAT)}")
     _structural_info(log_separator())
     
     log_debug(LogTags.LOGGING, f"Job log handler added: {log_filename.name}")
@@ -334,7 +334,7 @@ def remove_job_log_handler(handler_id: int, job_type: str = None, success: bool 
             
             _structural_info(log_separator())
             logger.info(f"[{log_tag:^9}] {status_icon} JOB {status_text}")
-            logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Ended: {datetime.now().strftime(PYTHON_TIMESTAMP_FORMAT)}")
+            logger.debug(f"[{log_tag:^9}] {LogIcons.INFO} Ended: {datetime.now(timezone.utc).strftime(PYTHON_TIMESTAMP_FORMAT)}")
             _structural_info(log_separator())
             _structural_blank()
         

@@ -37,6 +37,7 @@ import {
 import { useToast } from '../components/Toast'
 import UnsavedChangesModal from '../components/poster-manager/UnsavedChangesModal'
 import Toolbar from '../components/Toolbar'
+import { formatDateTime } from '../utils/datetime'
 import './PlexUpload.css'
 
 
@@ -258,28 +259,6 @@ function PlexUpload() {
   }, [lastJob])
 
   const webhookPath = '/api/posterflow/plex-upload/webhook'
-
-  const formatWebhookTimestamp = (value: string | null): string => {
-    if (!value) {
-      return '—'
-    }
-
-    const normalized = value.replace(/(\.\d{3})\d+(?=(Z|[+-]\d{2}:\d{2})$)/, '$1')
-    const parsed = new Date(normalized)
-    if (Number.isNaN(parsed.getTime())) {
-      return value
-    }
-
-    const month = String(parsed.getMonth() + 1).padStart(2, '0')
-    const day = String(parsed.getDate()).padStart(2, '0')
-    const year = parsed.getFullYear()
-    const hours24 = parsed.getHours()
-    const minutes = String(parsed.getMinutes()).padStart(2, '0')
-    const amPm = hours24 >= 12 ? 'PM' : 'AM'
-    const hours12 = String((hours24 % 12) || 12).padStart(2, '0')
-
-    return `${month}/${day}/${year} ${hours12}:${minutes} ${amPm}`
-  }
 
   const webhookUrl = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -2109,8 +2088,8 @@ function PlexUpload() {
               </div>
 
               <div className="webhook-stats-grid-compact">
-                <div><span>Last event:</span> <strong>{formatWebhookTimestamp(webhookStats.last_event_at)}</strong></div>
-                <div><span>Last queued:</span> <strong>{formatWebhookTimestamp(webhookStats.last_queued_at)}</strong></div>
+                <div><span>Last event:</span> <strong>{formatDateTime(webhookStats.last_event_at)}</strong></div>
+                <div><span>Last queued:</span> <strong>{formatDateTime(webhookStats.last_queued_at)}</strong></div>
                 <div><span>Last error:</span> <strong>{webhookStats.last_error || '—'}</strong></div>
               </div>
             </>

@@ -77,6 +77,8 @@ export const useSettingsCore = ({
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
+  const [appTimezone, setAppTimezone] = useState('')
+  const [effectiveTimezone, setEffectiveTimezone] = useState('')
 
   const fetchSettings = async (): Promise<SettingsCoreSnapshot | null> => {
     try {
@@ -100,6 +102,10 @@ export const useSettingsCore = ({
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
+
+      setAppTimezone((settings.timezone || '').trim())
+      // Read-only: what the server actually resolved, which may differ when unset.
+      setEffectiveTimezone((settings.effective_timezone || '').trim())
 
       const plexInstances = parseInstances(settings.plex_instances, 'Plex')
       // Arrs are optional (media-server sourcing) — no blank starter card
@@ -258,6 +264,35 @@ export const useSettingsCore = ({
     }
   }
 
+  // `value` is what the control currently shows. That is not always `appTimezone`: the
+  // picker prefills the browser's zone, and saving what is on screen is the point.
+  const handleSaveAppTimezone = async (value?: string): Promise<boolean> => {
+    const valueToSave = (value ?? appTimezone).trim()
+    try {
+      setSaving(true)
+      await saveBulkSettings({ timezone: valueToSave })
+      // The bulk POST answers with a count, not a zone, so read the resolved one back:
+      // it is the only authority on what the scheduler is actually running in. A zone the
+      // server rejects still gets stored, and shows up here as a mismatch.
+      const refreshed = await getSettings()
+      const resolved = (refreshed.effective_timezone || '').trim()
+      setEffectiveTimezone(resolved)
+      if (valueToSave && resolved && resolved !== valueToSave) {
+        showToast(`Server rejected "${valueToSave}" — still running in ${resolved}`, 'error')
+        return false
+      }
+      setAppTimezone(valueToSave)
+      showToast('Timezone saved')
+      return true
+    } catch (error) {
+      console.error('Error saving timezone:', error)
+      showToast(getApiErrorMessage(error, 'Failed to save timezone'), 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSavePsdExportFolder = async (): Promise<boolean> => {
     try {
       setSaving(true)
@@ -367,5 +402,9 @@ export const useSettingsCore = ({
     handleSavePsdTemplatePath,
     psdOpenPhotopea,
     handleTogglePsdOpenPhotopea,
+    appTimezone,
+    setAppTimezone,
+    effectiveTimezone,
+    handleSaveAppTimezone,
   }
 }

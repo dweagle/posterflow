@@ -12,6 +12,7 @@ import { useAppEvents } from '../contexts/AppEventsContext'
 import './GDrives.css'
 import Toolbar from '../components/Toolbar'
 import { getAddToPriorityPref, setAddToPriorityPref } from '../utils/priorityPrompt'
+import { formatDateTime } from '../utils/datetime'
 
 // Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
 const driveFolderUrl = (driveId: string): string | null =>
@@ -805,7 +806,7 @@ function GDrives() {
                         </p>
                         <p className="last-synced">
                           {drive.last_synced 
-                            ? `Synced: ${new Date(drive.last_synced).toLocaleDateString()} ${new Date(drive.last_synced).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
+                            ? `Synced: ${formatDateTime(drive.last_synced)}`
                             : 'Not synced yet'
                           }
                         </p>
@@ -954,7 +955,7 @@ function GDrives() {
                 </p>
                 <p className="last-synced">
                   {drive.last_synced 
-                    ? `Synced: ${new Date(drive.last_synced).toLocaleDateString()} ${new Date(drive.last_synced).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
+                    ? `Synced: ${formatDateTime(drive.last_synced)}`
                     : 'Not synced yet'
                   }
                 </p>

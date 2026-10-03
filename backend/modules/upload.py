@@ -427,9 +427,6 @@ def _run_webhook_preupload_rename_pass(
             return False
 
         last_processed = source_poster.last_processed
-        if last_processed.tzinfo is None:
-            last_processed = last_processed.replace(tzinfo=timezone.utc)
-
         current_mtime_dt = datetime.fromtimestamp(current_mtime, timezone.utc)
         return current_mtime_dt <= last_processed
 

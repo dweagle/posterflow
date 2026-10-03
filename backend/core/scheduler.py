@@ -3,7 +3,6 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 import json
-from datetime import timezone
 from typing import Optional, Callable, Any
 from database import SessionLocal
 from models.schedule import Schedule
@@ -40,21 +39,7 @@ from modules.border import run_border_replacer_background_job
 from modules.idarr import run_idarr_background_job
 from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
-from tzlocal import get_localzone_name
-from zoneinfo import ZoneInfo
-
-
-def _local_timezone():
-    # by name so APScheduler can pickle jobs; get_localzone() returns an unpicklable file-stream zone when TZ points at a file or the host has no zone name
-    name = get_localzone_name()
-    if name:
-        return ZoneInfo(name)
-    log_warning(
-        LogTags.SCHEDULER,
-        "Local timezone has no zone name, so scheduled times will run in UTC. "
-        "Set TZ to an IANA name such as Europe/Amsterdam (FreeBSD: run tzsetup) and restart.",
-    )
-    return timezone.utc
+from core.app_timezone import get_app_timezone
 
 
 # Create scheduler instance
@@ -69,8 +54,19 @@ scheduler = BackgroundScheduler(
         'coalesce': True,
         'max_instances': 3
     },
-    timezone=_local_timezone()
+    timezone=get_app_timezone()
 )
+
+
+def apply_app_timezone() -> None:
+    """Re-point the scheduler at the current application timezone.
+
+    APScheduler's BaseScheduler._create_trigger does
+    trigger_args.setdefault('timezone', self.timezone), so assigning the attribute is
+    enough for every subsequent add_job to pick it up. configure() is not usable here —
+    it raises SchedulerAlreadyRunningError once the scheduler has started.
+    """
+    scheduler.timezone = get_app_timezone()
 
 
 def _to_apscheduler_day_of_week(day_value: str) -> str:
@@ -418,6 +414,9 @@ def update_schedules() -> None:
     Update APScheduler jobs from database schedules.
     Call this whenever schedules are created/updated/deleted.
     """
+    # Re-point the scheduler first: the cron triggers below are built from it, and a
+    # caller that changed the application zone must not have to remember to do this.
+    apply_app_timezone()
     db = SessionLocal()
     try:
         # Remove all existing jobs

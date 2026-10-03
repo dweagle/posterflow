@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Float, Index
+from sqlalchemy import Column, Integer, String, BigInteger, Float, Index
 from sqlalchemy.sql import func
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 class Poster(Base):
     """
@@ -16,10 +17,10 @@ class Poster(Base):
     file_path = Column(String, nullable=False, unique=True)  # Full path on disk
     file_size = Column(BigInteger, nullable=True)  # Size in bytes
     gdrive_file_id = Column(String, nullable=True)  # Google Drive file ID
-    downloaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    downloaded_at = Column(UTCDateTime, server_default=func.now())
     file_mtime = Column(Float, nullable=True)  # Filesystem modification time for change detection
     dest_file_mtime = Column(Float, nullable=True)  # Destination file mtime after last write (for external-change detection)
-    last_processed = Column(DateTime(timezone=True), nullable=True)  # When last renamed/organized
+    last_processed = Column(UTCDateTime, nullable=True)  # When last renamed/organized
     border_rule_sig = Column(String, nullable=True)  # Fingerprint of the Plex border rule applied last run (incremental per-item reprocessing)
 
     __table_args__ = (

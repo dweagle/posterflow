@@ -534,6 +534,9 @@ function Settings() {
     handleSaveFanartApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
+    appTimezone,
+    effectiveTimezone,
+    handleSaveAppTimezone,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -1433,6 +1436,15 @@ function Settings() {
           onEditSchedule={toggleEditSchedule}
           onRemoveSchedule={removeSchedule}
           getScheduleSummary={getScheduleSummary}
+          appTimezone={appTimezone}
+          effectiveTimezone={effectiveTimezone}
+          onSaveAppTimezone={async (value: string) => {
+            await handleSaveAppTimezone(value)
+            // The server rebuilds every cron job from the new zone, so the next-run times
+            // currently on screen are stale until we read them back.
+            await fetchSchedules()
+          }}
+          saving={saving}
         />
       )}
 
@@ -1440,6 +1452,8 @@ function Settings() {
         editingSchedule={editingSchedule}
         drives={drives}
         scheduleSaving={scheduleSaving}
+        appTimezone={appTimezone}
+        effectiveTimezone={effectiveTimezone}
         updateScheduleField={updateScheduleField}
         onClose={cancelScheduleEdit}
         onSave={saveSchedule}
