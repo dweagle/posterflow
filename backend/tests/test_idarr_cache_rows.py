@@ -802,14 +802,17 @@ def _load_migration_0010():
 
 def test_migration_0010_rekeys_and_dedupes_legacy_rows(test_db):
     """Legacy title-keyed rows for the same id collapse to one id-only row (merged filenames, freshest timestamp)."""
+    import sqlalchemy as sa
+
     scope = "t2_demo"
     older = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 6, 2, 12, 0, 0, tzinfo=timezone.utc)
     # Two legacy rows for tmdb 550 under different (title-embedded) keys.
     test_db.add(IdarrAssetCache(
         asset_key=f"movie::1171x1299::::tmdb=550::scope={scope}",
         title="1171x1299", year=None, asset_type="movie", tmdb_id=550, matched=True,
         payload_json=json.dumps({"current_filenames": ["1171x1299 - logo.png"]}),
-        last_checked_at=older,
+        last_checked_at=newer,
     ))
     test_db.add(IdarrAssetCache(
         asset_key=f"movie::fightclub::1999::tmdb=550::scope={scope}",
@@ -818,7 +821,7 @@ def test_migration_0010_rekeys_and_dedupes_legacy_rows(test_db):
             "canonical_title": "Fight Club",
             "current_filenames": ["Fight Club (1999) {tmdb-550} - logo.png"],
         }),
-        last_checked_at=None,
+        last_checked_at=older,
     ))
     # An unresolved (no-id) row must be left untouched.
     test_db.add(IdarrAssetCache(
@@ -828,7 +831,17 @@ def test_migration_0010_rekeys_and_dedupes_legacy_rows(test_db):
     ))
     test_db.commit()
 
-    _load_migration_0010().rekey_idarr_cache(test_db.connection())
+    statements = []
+    connection = test_db.connection()
+
+    def capture(conn, clause, multiparams, params, execution_options):
+        statements.append(clause)
+
+    sa.event.listen(connection, "before_execute", capture)
+    try:
+        _load_migration_0010().rekey_idarr_cache(connection)
+    finally:
+        sa.event.remove(connection, "before_execute", capture)
     test_db.expire_all()
 
     survivors = test_db.query(IdarrAssetCache).filter(IdarrAssetCache.tmdb_id == 550).all()
@@ -838,12 +851,24 @@ def test_migration_0010_rekeys_and_dedupes_legacy_rows(test_db):
     # Canonical-filename row won as survivor; both filenames merged in.
     files = json.loads(surv.payload_json).get("current_filenames")
     assert set(files) == {"1171x1299 - logo.png", "Fight Club (1999) {tmdb-550} - logo.png"}
-    # Inherited the only/freshest timestamp from the group.
-    assert surv.last_checked_at is not None
+    # Canonical row wins despite being older; freshness comes from the losing row.
+    assert json.loads(surv.payload_json)["canonical_title"] == "Fight Club"
+    assert surv.last_checked_at == newer.replace(tzinfo=None)
     # The unresolved row is untouched.
     assert test_db.query(IdarrAssetCache).filter(
         IdarrAssetCache.asset_key == f"movie::somethingunknown::2020::scope={scope}"
     ).count() == 1
+
+    select, = [clause for clause in statements if isinstance(clause, sa.sql.Select)]
+    update, = [clause for clause in statements if isinstance(clause, sa.sql.Update)]
+    selected_type = select.selected_columns.last_checked_at.type
+    assert isinstance(selected_type, sa.DateTime) and selected_type.timezone
+    column_type = update.table.c.last_checked_at.type
+    assert isinstance(column_type, sa.DateTime) and column_type.timezone
+    bind = update.compile().binds["last_checked_at"]
+    assert isinstance(bind.type, sa.DateTime) and bind.type.timezone
+    assert isinstance(bind.value, datetime)
+    assert bind.value == newer.replace(tzinfo=None)
 
 
 def test_idarr_runner_store_asset_cache_rows_preserves_group_filenames(test_db, tmp_path):

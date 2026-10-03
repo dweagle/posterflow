@@ -80,7 +80,7 @@ def rekey_idarr_cache(conn) -> None:
         sa.column("tmdb_id", sa.Integer),
         sa.column("tvdb_id", sa.Integer),
         sa.column("imdb_id", sa.String),
-        sa.column("last_checked_at", sa.String),
+        sa.column("last_checked_at", sa.DateTime(timezone=True)),
         sa.column("payload_json", sa.String),
     )
     pending = sa.table("idarr_pending_matches", sa.column("asset_key", sa.String))
