@@ -1092,7 +1092,7 @@ def get_maker_idarr_last_run(sync_target_index: int | None = None, db: Session =
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, sync_target_index)
     run_query = _apply_idarr_run_scope_filter(run_query, scope_token, scoped_source_dir)
-    latest_run = run_query.order_by(IdarrRun.completed_at.desc(), IdarrRun.id.desc()).first()
+    latest_run = run_query.order_by(IdarrRun.completed_at.desc().nullslast(), IdarrRun.id.desc()).first()
     if latest_run:
         try:
             stats_payload = json.loads(latest_run.stats_json) if latest_run.stats_json else {}
@@ -1368,7 +1368,7 @@ def _build_idarr_pending_items_payload(
     cache_by_key = {row.asset_key: row for row in cache_rows}
     source_dirs = _get_idarr_source_dirs(db, sync_target_index)
 
-    recent_runs = db.query(IdarrRun).order_by(IdarrRun.completed_at.desc(), IdarrRun.id.desc()).limit(50).all()
+    recent_runs = db.query(IdarrRun).order_by(IdarrRun.completed_at.desc().nullslast(), IdarrRun.id.desc()).limit(50).all()
     run_history: dict[str, dict[str, Any]] = {}
     for run in recent_runs:
         details_payload: dict[str, Any] | None = None
@@ -2796,7 +2796,7 @@ def export_maker_idarr_csvs(payload: IdarrExportRequest, db: Session = Depends(g
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, payload.sync_target_index)
     run_query = _apply_idarr_run_scope_filter(run_query, scope_token, scoped_source_dir)
-    latest_run = run_query.order_by(IdarrRun.completed_at.desc(), IdarrRun.id.desc()).first()
+    latest_run = run_query.order_by(IdarrRun.completed_at.desc().nullslast(), IdarrRun.id.desc()).first()
     if not latest_run:
         raise HTTPException(status_code=404, detail="No IDarr run data available for export")
 
@@ -3010,7 +3010,7 @@ def revert_maker_idarr_latest_run(payload: IdarrRevertRequest, db: Session = Dep
     run_query = db.query(IdarrRun)
     scope_token, scoped_source_dir = _resolve_scope_context(db, payload.sync_target_index)
     run_query = _apply_idarr_run_scope_filter(run_query, scope_token, scoped_source_dir)
-    latest_run = run_query.order_by(IdarrRun.completed_at.desc(), IdarrRun.id.desc()).first()
+    latest_run = run_query.order_by(IdarrRun.completed_at.desc().nullslast(), IdarrRun.id.desc()).first()
     if not latest_run:
         raise HTTPException(status_code=404, detail="No IDarr run data available for revert")
 

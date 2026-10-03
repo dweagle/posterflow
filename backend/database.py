@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 from core.config import settings
@@ -10,9 +11,11 @@ from typing import Generator
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 # Create SQLAlchemy engine (NullPool avoids connection pool exhaustion with SQLite)
+database_url = make_url(settings.database_url)
+_is_sqlite = database_url.get_backend_name() == "sqlite"
 engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False},  # Needed for SQLite
+    database_url,
+    connect_args={"check_same_thread": False} if _is_sqlite else {},  # Needed for SQLite
     echo=False,  # Disable SQL query logging (causes log spam)
     poolclass=NullPool,
 )
@@ -21,6 +24,8 @@ engine = create_engine(
 # busy_timeout (wait for a write lock instead of erroring with "database is locked").
 @event.listens_for(engine, "connect")
 def set_sqlite_pragmas(dbapi_connection, connection_record):
+    if not _is_sqlite:
+        return
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -54,4 +59,5 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-log_info(LogTags.STARTUP, f"Database configured: {settings.database_url}")
+# Log the driver, never the URL: it may embed a percent-encoded password.
+log_info(LogTags.STARTUP, f"Database configured: {database_url.drivername}")

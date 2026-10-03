@@ -358,7 +358,7 @@ def _searchable_file(drive, file_path: str) -> Optional[Path]:
 
 def _content_recency(model):
     """Newest content first: file mtime, falling back to the DB download time."""
-    return func.coalesce(model.file_mtime, func.strftime('%s', model.downloaded_at).cast(Float), 0.0)
+    return func.coalesce(model.file_mtime, func.extract('epoch', model.downloaded_at).cast(Float), 0.0)
 
 
 def _recent_synced_items(rows, limit: int, image_route: str) -> List[Dict[str, Any]]:
@@ -512,20 +512,18 @@ def get_artwork_image(
 def get_poster_daily_activity(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get daily and weekly poster activity summary for dashboard card."""
     # Use local system time to determine day boundaries so "today" matches the
-    # user's calendar day regardless of UTC offset. DB timestamps are UTC-naive,
-    # so we convert local boundaries back to UTC for range comparisons.
+    # user's calendar day regardless of UTC offset. Keep the boundaries tz-aware
+    # so PostgreSQL does not compare them against the session timezone.
     now_local = datetime.now().astimezone()
     today_local = now_local.date()
     local_tz = now_local.tzinfo
     today_start_utc = (
         datetime.combine(today_local, dt_time.min, tzinfo=local_tz)
         .astimezone(timezone.utc)
-        .replace(tzinfo=None)
     )
     tomorrow_start_utc = (
         datetime.combine(today_local + timedelta(days=1), dt_time.min, tzinfo=local_tz)
         .astimezone(timezone.utc)
-        .replace(tzinfo=None)
     )
     week_ago_start_utc = today_start_utc - timedelta(days=7)
     month_ago_start_utc = today_start_utc - timedelta(days=30)

@@ -23,12 +23,13 @@ from models.manual_media import ManualMediaEntry  # noqa: F401
 from models.workflow import Workflow  # noqa: F401
 from models.poster_override import PosterOverride  # noqa: F401
 from models.poster_reminder import PosterReminder  # noqa: F401
+from models.plex_upload import PlexUploadRecord  # noqa: F401
 
 # this is the Alembic Config object
 config = context.config
 
-# Set sqlalchemy.url from our settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Escape '%' so Config interpolation keeps percent-encoded credentials intact.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata

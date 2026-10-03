@@ -218,7 +218,7 @@ def run_database_migrations() -> None:
 
     config = Config(str(alembic_ini))
     config.set_main_option("script_location", str(Path(__file__).parent / "alembic"))
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
     command.upgrade(config, "head")
 
 
