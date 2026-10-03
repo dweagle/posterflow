@@ -16,12 +16,13 @@ from datetime import datetime
 from database import get_db
 from core.config import settings as app_settings
 from core.logging import LogTags, log_info, log_success, log_error, log_warning, log_user_action
-from services.backup import build_backup_zip, run_backup_to_location
+from services.backup import (
+    UnsupportedDatabaseBackup, build_backup_zip, run_backup_to_location, sqlite_database_path,
+)
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 CONFIG_DIR = app_settings.config_dir
-DB_FILE = CONFIG_DIR / "posterflow.db"
 RCLONE_CONF = CONFIG_DIR / "rclone.conf"
 DRIVES_CACHE = CONFIG_DIR / "drives_cache.json"
 ARTWORK_DRIVES_CACHE = CONFIG_DIR / "artwork_drives_cache.json"
@@ -43,6 +44,8 @@ def create_backup() -> FileResponse:
             background=BackgroundTask(backup_path.unlink, missing_ok=True)
         )
 
+    except UnsupportedDatabaseBackup as e:
+        raise HTTPException(status_code=501, detail=str(e))
     except Exception as e:
         log_error(LogTags.BACKUP, f"Failed to create backup: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to create backup")
@@ -60,6 +63,8 @@ def save_backup_to_location(db: Session = Depends(get_db)) -> Dict[str, str]:
             "message": f"Backup saved to {backup_path}",
             "path": str(backup_path),
         }
+    except UnsupportedDatabaseBackup as e:
+        raise HTTPException(status_code=501, detail=str(e))
     except Exception as e:
         log_error(LogTags.BACKUP, f"Failed to save backup: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to save backup")
@@ -70,6 +75,11 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
     """
     Restore database and configuration from a backup zip file
     """
+    try:
+        db_file = sqlite_database_path()
+    except UnsupportedDatabaseBackup as e:
+        raise HTTPException(status_code=501, detail=str(e))
+
     if not confirm:
         log_warning(LogTags.BACKUP, "Restore blocked without explicit confirmation")
         raise HTTPException(status_code=400, detail="Must pass confirm=true to restore backup")
@@ -118,7 +128,7 @@ async def restore_backup(confirm: bool = False, file: UploadFile = File(...)) ->
 
             # (zip member, live target, response key, log label)
             restore_targets = [
-                ("posterflow.db", DB_FILE, "database", "Database"),
+                ("posterflow.db", db_file, "database", "Database"),
                 ("rclone.conf", RCLONE_CONF, "rclone_config", "Rclone config"),
                 ("drives_cache.json", DRIVES_CACHE, "drives_cache", "Drives cache"),
                 ("artwork_drives_cache.json", ARTWORK_DRIVES_CACHE, "artwork_drives_cache", "Artwork drives cache"),
