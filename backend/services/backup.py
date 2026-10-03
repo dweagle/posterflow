@@ -1,12 +1,12 @@
 """Shared backup zip builder used by the manual download endpoint and scheduled backups."""
 import json
-import shutil
 import sqlite3
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
@@ -18,6 +18,27 @@ DEFAULT_RETENTION = 7
 
 # Config files bundled alongside the database snapshot
 CONFIG_FILES = ("rclone.conf", "drives_cache.json", "artwork_drives_cache.json")
+
+
+class UnsupportedDatabaseBackup(NotImplementedError):
+    pass
+
+
+def sqlite_database_path() -> Path:
+    """Resolve the active database, refusing unsupported full ZIP backups."""
+    url = make_url(app_settings.database_url)
+    if (
+        url.get_backend_name() != "sqlite"
+        or not url.database
+        or url.database == ":memory:"
+        or url.query.get("mode") == "memory"
+        or "uri" in url.query
+        or url.database.startswith("file:")
+    ):
+        raise UnsupportedDatabaseBackup(
+            "Full ZIP backup/restore requires a file-backed SQLite database."
+        )
+    return Path(url.database).resolve()
 
 
 def default_backup_dir() -> Path:
@@ -39,30 +60,23 @@ def get_backup_retention(db: Session) -> int:
         return DEFAULT_RETENTION
 
 
-def _snapshot_database(dest: Path) -> bool:
-    """Snapshot the SQLite DB to dest with the online backup API so the copy is
-    consistent even while jobs are writing; falls back to a plain file copy."""
-    db_file = app_settings.config_dir / "posterflow.db"
-    if not db_file.exists():
-        return False
+def _snapshot_database(dest: Path) -> None:
+    """Snapshot the active SQLite DB with the WAL-consistent online backup API."""
+    db_file = sqlite_database_path()
+    src = sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True)
     try:
-        src = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(dest))
         try:
-            dst = sqlite3.connect(str(dest))
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
+            src.backup(dst)
         finally:
-            src.close()
-    except Exception as e:
-        log_warning(LogTags.BACKUP, f"SQLite snapshot failed, copying database file directly: {e}")
-        shutil.copy(db_file, dest)
-    return True
+            dst.close()
+    finally:
+        src.close()
 
 
 def build_backup_zip(dest_dir: Path) -> Path:
     """Create a timestamped backup zip in dest_dir and return its path."""
+    sqlite_database_path()
     dest_dir.mkdir(parents=True, exist_ok=True)
     backup_path = dest_dir / f"{BACKUP_PREFIX}{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
 
@@ -73,11 +87,11 @@ def build_backup_zip(dest_dir: Path) -> Path:
     }
 
     with tempfile.TemporaryDirectory() as temp_dir:
+        db_snapshot = Path(temp_dir) / "posterflow.db"
+        _snapshot_database(db_snapshot)
         with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            db_snapshot = Path(temp_dir) / "posterflow.db"
-            if _snapshot_database(db_snapshot):
-                zipf.write(db_snapshot, "posterflow.db")
-                log_info(LogTags.BACKUP, "Added database to backup")
+            zipf.write(db_snapshot, "posterflow.db")
+            log_info(LogTags.BACKUP, "Added database to backup")
 
             for name in CONFIG_FILES:
                 source = app_settings.config_dir / name

@@ -19,7 +19,10 @@ import pytest
 import unittest.mock
 
 from models.setting import upsert_setting
-from services.backup import build_backup_zip, prune_backups, run_backup_to_location
+from core.config import settings as app_settings
+from services.backup import (
+    UnsupportedDatabaseBackup, build_backup_zip, prune_backups, run_backup_to_location,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +102,7 @@ def test_restore_returns_success_with_valid_backup(client, tmp_path, monkeypatch
     """A well-formed backup zip with posterflow.db should restore cleanly."""
     # Patch CONFIG_DIR so the backup writes to tmp_path rather than the real config dir
     monkeypatch.setattr("api.backup.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("api.backup.DB_FILE", tmp_path / "posterflow.db")
+    monkeypatch.setattr(app_settings, "database_url", f"sqlite:///{tmp_path / 'posterflow.db'}")
     monkeypatch.setattr("api.backup.RCLONE_CONF", tmp_path / "rclone.conf")
     monkeypatch.setattr("api.backup.DRIVES_CACHE", tmp_path / "drives_cache.json")
 
@@ -126,7 +129,7 @@ def test_restore_creates_safety_backup_of_existing_db(client, tmp_path, monkeypa
     monkeypatch.setattr("api.backup.CONFIG_DIR", tmp_path)
     db_path = tmp_path / "posterflow.db"
     db_path.write_bytes(b"original-db")
-    monkeypatch.setattr("api.backup.DB_FILE", db_path)
+    monkeypatch.setattr(app_settings, "database_url", f"sqlite:///{db_path}")
     monkeypatch.setattr("api.backup.RCLONE_CONF", tmp_path / "rclone.conf")
     monkeypatch.setattr("api.backup.DRIVES_CACHE", tmp_path / "drives_cache.json")
 
@@ -140,6 +143,25 @@ def test_restore_creates_safety_backup_of_existing_db(client, tmp_path, monkeypa
     assert safety_files[0].read_bytes() == b"original-db"
 
 
+def test_restore_backup_uses_custom_sqlite_url(client, tmp_path, monkeypatch):
+    config_dir = _make_config_dir(tmp_path, monkeypatch)
+    stale_db = config_dir / "posterflow.db"
+    stale_bytes = stale_db.read_bytes()
+    db_path = tmp_path / "custom #%.sqlite"
+    db_path.write_bytes(b"original-custom-db")
+    monkeypatch.setattr(app_settings, "database_url", f"sqlite:///{db_path}")
+    monkeypatch.setattr("api.backup.CONFIG_DIR", config_dir)
+
+    resp = _post_restore(client, _make_zip({"posterflow.db": b"replacement-custom-db"}))
+
+    assert resp.status_code == 200
+    assert db_path.read_bytes() == b"replacement-custom-db"
+    assert stale_db.read_bytes() == stale_bytes
+    safety_files = list((config_dir / "safety_backups").glob("posterflow.db.*"))
+    assert len(safety_files) == 1
+    assert safety_files[0].read_bytes() == b"original-custom-db"
+
+
 # ---------------------------------------------------------------------------
 # Shared builder (services/backup.py)
 # ---------------------------------------------------------------------------
@@ -150,6 +172,7 @@ def _make_config_dir(tmp_path, monkeypatch):
     config_dir.mkdir()
     import services.backup as backup_service
     monkeypatch.setattr(backup_service.app_settings, "config_dir", config_dir)
+    monkeypatch.setattr(backup_service.app_settings, "database_url", f"sqlite:///{config_dir / 'posterflow.db'}")
 
     conn = sqlite3.connect(str(config_dir / "posterflow.db"))
     conn.execute("CREATE TABLE marker (value TEXT)")
@@ -193,6 +216,191 @@ def test_build_backup_zip_skips_missing_files(tmp_path, monkeypatch):
 
     with zipfile.ZipFile(backup_path) as zf:
         assert set(zf.namelist()) == {"posterflow.db", "metadata.json"}
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_build_backup_zip_snapshots_custom_sqlite_url(tmp_path, monkeypatch, relative):
+    config_dir = _make_config_dir(tmp_path, monkeypatch)
+    (config_dir / "rclone.conf").write_text("[gdrive]\ntype=drive\n")
+    # Reserved URI characters and a non-default suffix must identify the actual file.
+    db_path = tmp_path / "custom #%.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE marker (value TEXT)")
+        conn.execute("INSERT INTO marker VALUES ('custom')")
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.chdir(tmp_path)
+    database = db_path.name if relative else str(db_path)
+    monkeypatch.setattr(app_settings, "database_url", f"sqlite:///{database}")
+
+    backup_path = build_backup_zip(tmp_path / "backups")
+
+    with zipfile.ZipFile(backup_path) as zf:
+        snapshot = tmp_path / "snapshot.db"
+        snapshot.write_bytes(zf.read("posterflow.db"))
+        assert zf.read("rclone.conf") == b"[gdrive]\ntype=drive\n"
+    conn = sqlite3.connect(str(snapshot))
+    try:
+        assert conn.execute("SELECT value FROM marker").fetchall() == [("custom",)]
+    finally:
+        conn.close()
+
+
+def test_build_backup_zip_snapshots_committed_live_wal(tmp_path, monkeypatch):
+    config_dir = _make_config_dir(tmp_path, monkeypatch)
+    db_path = config_dir / "posterflow.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        assert conn.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        conn.execute("INSERT INTO marker VALUES ('live-wal')")
+        conn.commit()
+        assert db_path.with_name("posterflow.db-wal").stat().st_size > 0
+
+        backup_path = build_backup_zip(tmp_path / "backups")
+
+        with zipfile.ZipFile(backup_path) as zf:
+            snapshot = tmp_path / "snapshot.db"
+            snapshot.write_bytes(zf.read("posterflow.db"))
+        observer = sqlite3.connect(str(snapshot))
+        try:
+            assert observer.execute("SELECT value FROM marker").fetchall() == [
+                ("hello",), ("live-wal",),
+            ]
+        finally:
+            observer.close()
+    finally:
+        conn.close()
+
+
+def test_build_backup_zip_snapshot_failure_publishes_no_archive(tmp_path, monkeypatch):
+    _make_config_dir(tmp_path, monkeypatch)
+    dest_dir = tmp_path / "backups"
+    with unittest.mock.patch(
+        "services.backup.sqlite3.connect", side_effect=sqlite3.OperationalError("snapshot failed")
+    ):
+        with pytest.raises(sqlite3.OperationalError, match="snapshot failed"):
+            build_backup_zip(dest_dir)
+    assert not list(dest_dir.glob("*.zip"))
+
+
+def test_run_backup_snapshot_failure_preserves_existing_backups(tmp_path, monkeypatch, test_db):
+    _make_config_dir(tmp_path, monkeypatch)
+    dest_dir = tmp_path / "backups"
+    dest_dir.mkdir()
+    originals = {
+        f"posterflow_backup_{stamp}.zip": stamp.encode()
+        for stamp in ("20200101_000000", "20200102_000000")
+    }
+    for name, content in originals.items():
+        (dest_dir / name).write_bytes(content)
+    upsert_setting(test_db, "backup_location", str(dest_dir))
+    upsert_setting(test_db, "backup_retention", "1")
+    test_db.commit()
+
+    with unittest.mock.patch(
+        "services.backup.sqlite3.connect", side_effect=sqlite3.OperationalError("snapshot failed")
+    ):
+        with pytest.raises(sqlite3.OperationalError, match="snapshot failed"):
+            run_backup_to_location(test_db)
+
+    assert {p.name: p.read_bytes() for p in dest_dir.iterdir()} == originals
+
+
+def test_build_backup_zip_missing_active_database_fails_without_archive(tmp_path, monkeypatch):
+    _make_config_dir(tmp_path, monkeypatch)
+    missing_db = tmp_path / "missing.sqlite"
+    monkeypatch.setattr(app_settings, "database_url", f"sqlite:///{missing_db}")
+    dest_dir = tmp_path / "backups"
+
+    with pytest.raises(sqlite3.OperationalError):
+        build_backup_zip(dest_dir)
+
+    assert not missing_db.exists()
+    assert not list(dest_dir.glob("*.zip"))
+
+
+@pytest.mark.parametrize("url", [
+    "postgresql+posterflow_missing_driver://localhost/posterflow",
+    "sqlite:///:memory:",
+    "sqlite://",
+    "sqlite:///named.db?mode=memory",
+    "sqlite:///file:named.db",
+    "sqlite:///named.db?uri=true",
+    "sqlite:///named.db?uri=True",
+    "sqlite:///named.db?uri=1",
+])
+def test_build_backup_zip_rejects_unsupported_database_before_creation(tmp_path, monkeypatch, url):
+    _make_config_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_settings, "database_url", url)
+    dest_dir = tmp_path / "must_not_exist"
+    with pytest.raises(UnsupportedDatabaseBackup, match="file-backed SQLite"):
+        build_backup_zip(dest_dir)
+    assert not dest_dir.exists()
+
+
+def test_unsupported_database_guard_does_not_import_driver(tmp_path, monkeypatch):
+    _make_config_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        app_settings, "database_url", "postgresql+posterflow_missing_driver://localhost/posterflow"
+    )
+    import builtins
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        assert not name.startswith(("psycopg", "posterflow_missing_driver"))
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    with unittest.mock.patch("services.backup.sqlite3.connect") as connect:
+        with pytest.raises(UnsupportedDatabaseBackup) as exc:
+            build_backup_zip(tmp_path / "must_not_exist")
+    connect.assert_not_called()
+    assert str(exc.value) == "Full ZIP backup/restore requires a file-backed SQLite database."
+
+
+@pytest.mark.parametrize("url", [
+    "postgresql+posterflow_missing_driver://localhost/posterflow",
+    "sqlite:///:memory:",
+    "sqlite:///file:named.db?uri=true",
+])
+@pytest.mark.parametrize("endpoint", ["download", "save", "restore"])
+def test_backup_endpoints_refuse_unsupported_database_without_writes(
+    client, test_db, tmp_path, monkeypatch, url, endpoint,
+):
+    config_dir = _make_config_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr("api.backup.CONFIG_DIR", config_dir)
+    for name in ("rclone.conf", "drives_cache.json", "artwork_drives_cache.json"):
+        (config_dir / name).write_bytes(f"original-{name}".encode())
+    monkeypatch.setattr("api.backup.RCLONE_CONF", config_dir / "rclone.conf")
+    monkeypatch.setattr("api.backup.DRIVES_CACHE", config_dir / "drives_cache.json")
+    monkeypatch.setattr("api.backup.ARTWORK_DRIVES_CACHE", config_dir / "artwork_drives_cache.json")
+    originals = {p.name: p.read_bytes() for p in config_dir.iterdir()}
+    dest_dir = tmp_path / "must_not_exist"
+    upsert_setting(test_db, "backup_location", str(dest_dir))
+    test_db.commit()
+    monkeypatch.setattr(app_settings, "database_url", url)
+
+    with unittest.mock.patch("api.backup.tempfile.TemporaryDirectory") as temp_dir:
+        if endpoint == "download":
+            resp = client.get("/api/backup/")
+        elif endpoint == "save":
+            resp = client.post("/api/backup/save")
+        else:
+            resp = _post_restore(client, _make_zip({
+                "posterflow.db": b"replacement-db",
+                "rclone.conf": b"replacement-conf",
+                "drives_cache.json": b"replacement-cache",
+                "artwork_drives_cache.json": b"replacement-artwork-cache",
+            }))
+
+    assert resp.status_code == 501
+    assert resp.json()["detail"] == "Full ZIP backup/restore requires a file-backed SQLite database."
+    temp_dir.assert_not_called()
+    assert {p.name: p.read_bytes() for p in config_dir.iterdir()} == originals
+    assert not dest_dir.exists()
+    assert not (config_dir / "safety_backups").exists()
 
 
 def test_prune_backups_removes_oldest_beyond_keep(tmp_path):
