@@ -28,7 +28,7 @@ def upgrade() -> None:
     # Drives that were already configured as local-only (drive_id starts with "manual-")
     # should have sync_enabled set to False since they never ran rclone.
     op.execute(
-        "UPDATE drives SET sync_enabled = 0 WHERE drive_id LIKE 'manual-%'"
+        "UPDATE drives SET sync_enabled = FALSE WHERE drive_id LIKE 'manual-%'"
     )
 
 
