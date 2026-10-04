@@ -77,6 +77,8 @@ def run_artwork_sync_job(drive_id: int, job_id: int, triggered_by: str = "manual
     except JobCancelled:
         raise
     except Exception as e:
+        # the notifications below read settings, so recover the session first
+        db.rollback()
         log_error(LogTags.SYNC, f"Artwork sync job failed: {str(e)}\n{traceback.format_exc()}")
         send_discord_notification(
             db,

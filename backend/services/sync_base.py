@@ -13,6 +13,7 @@ from pathlib import Path
 import time
 import math
 from typing import Any, Callable, Optional
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ from models.job import (
     JOB_STATUS_RUNNING,
     JOB_STATUS_COMPLETED,
     JOB_STATUS_FAILED,
+    JOB_STATUSES_RECENT_TERMINAL,
     update_job_state,
 )
 from core.logging import LogTags, log_success, log_error, log_warning, log_info, log_debug, log_section_start, log_section_end
@@ -365,6 +367,9 @@ class BaseSyncService:
                             self.db.bulk_save_objects(pending_inserts)
                             pending_inserts = []
                         self.db.commit()
+                except SQLAlchemyError:
+                    # a failed write fails the sync; carrying on would error once per remaining file
+                    raise
                 except Exception as e:
                     log_error(self.log_tag, f"Error updating database for file: {e}", drive=drive.name, file=file_info.get('name', 'unknown'), error=str(e))
 
@@ -407,6 +412,7 @@ class BaseSyncService:
             return {"success": True, "added": added, "updated": updated, "deleted": deleted}
 
         except Exception as e:
+            self.db.rollback()
             import traceback
             _name = drive.name if drive else drive_id
             log_error(self.log_tag, f"Failed '{_name}': {str(e)}\n{traceback.format_exc()}", drive=_name, error=str(e))
@@ -545,11 +551,12 @@ class BaseSyncService:
                         progress_callback("syncing", min(new_progress, 65), 100, f"{drive_name} ({task_idx + 1}/{len(sync_tasks)}): {message}")
                     if job_id:
                         job_obj = self.db.query(Job).filter(Job.id == job_id).first()
-                        if job_obj:
+                        if job_obj and job_obj.status not in JOB_STATUSES_RECENT_TERMINAL:
                             job_obj.progress = min(new_progress, 65)
                             job_obj.message = f"{drive_name} ({task_idx + 1}/{len(sync_tasks)}): {message}"
                             self.db.commit()
             except Exception as e:
+                self.db.rollback()
                 log_warning(self.log_tag_all, f"Error updating progress: {e}")
 
         remote_sync_tasks = [t for t in sync_tasks if not t.get('is_local_only', False)]
@@ -570,6 +577,7 @@ class BaseSyncService:
             progress_callback("updating", 65, 100, "Updating database for synced drives...")
 
         total_added = total_updated = total_deleted = total_errors = 0
+        db_failed_drives: list[str] = []
         log_debug(self.log_tag, f"Starting database update phase for {len(sync_tasks)} drives")
 
         for idx, task in enumerate(sync_tasks):
@@ -579,9 +587,14 @@ class BaseSyncService:
                 if progress_callback:
                     progress_callback("updating", db_progress, 100, f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})")
                 if job:
-                    job.progress = db_progress
-                    job.message = f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})"
-                    self.db.commit()
+                    try:
+                        job.progress = db_progress
+                        job.message = f"Updating database for {drive_name} ({idx + 1}/{len(sync_tasks)})"
+                        self.db.commit()
+                    except SQLAlchemyError as e:
+                        # a failed progress write must not skip this drive's update
+                        self.db.rollback()
+                        log_warning(self.log_tag_all, f"Error updating progress: {e}")
 
                 drive_id = task.get('drive_id')
                 result_key = task.get('result_key')
@@ -689,6 +702,23 @@ class BaseSyncService:
                 import traceback
                 log_error(self.log_tag, f"Error processing {drive_name}: {str(e)}\n{traceback.format_exc()}", drive=drive_name, error=str(e))
                 total_errors += 1
+                if isinstance(e, SQLAlchemyError):
+                    db_failed_drives.append(drive_name)
+
+        # drives saved before or after the failing one keep their committed rows
+        if db_failed_drives:
+            error = f"Database update failed for {', '.join(db_failed_drives)}"
+            if job:
+                update_job_state(self.db, job, status=JOB_STATUS_FAILED, progress=100, message=error, error=error, completed_at=datetime.now(timezone.utc))
+            return {
+                "success": False,
+                "error": error,
+                "drives_synced": len(sync_tasks),
+                "added": total_added,
+                "updated": total_updated,
+                "deleted": total_deleted,
+                "errors": total_errors,
+            }
 
         if job:
             job.progress = 100
