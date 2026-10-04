@@ -9,6 +9,7 @@ import {
   fetchUnmatchedMatchReport,
 } from '../../api/client'
 import { useToast } from '../Toast'
+import { formatDateShortTime } from '../../utils/datetime'
 
 export interface MatchReportItem {
   media_type: 'movies' | 'series' | 'collections'
@@ -283,7 +284,7 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                 {report.drives.error && <div className="mr-problem">{report.drives.error}</div>}
                 {report.drives.scanned.map((drive) => (
                   <div key={drive.name} className="match-report-mono">
-                    [{drive.style_type}] {drive.name} — {drive.missing ? 'MISSING LOCALLY' : `synced ${drive.last_synced ?? 'never'}`}
+                    [{drive.style_type}] {drive.name} — {drive.missing ? 'MISSING LOCALLY' : `synced ${drive.last_synced ? formatDateShortTime(drive.last_synced) : 'never'}`}
                   </div>
                 ))}
                 <div className="match-report-muted">{report.drives.total_assets.toLocaleString()} assets in the scan index</div>

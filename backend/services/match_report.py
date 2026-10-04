@@ -354,7 +354,7 @@ def _scan_source_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Dic
             "name": drive.display_name or drive.name,
             "style_type": drive.style_type,
             "local_path": str(path),
-            "last_synced": drive.last_synced.strftime("%Y-%m-%d %H:%M") if drive.last_synced else None,
+            "last_synced": drive.last_synced.isoformat() if drive.last_synced else None,
             "missing": missing,
         })
         if not missing:
@@ -384,7 +384,7 @@ def _scan_artwork_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Di
             "name": drive.display_name or drive.name,
             "style_type": "ART",
             "local_path": str(path),
-            "last_synced": drive.last_synced.strftime("%Y-%m-%d %H:%M") if drive.last_synced else None,
+            "last_synced": drive.last_synced.isoformat() if drive.last_synced else None,
             "missing": not path.is_dir(),
         })
 
@@ -485,6 +485,15 @@ def _nonpriority_matches(
         if len(hits) >= 3:
             break
     return hits
+
+
+def _format_synced(value: Optional[str]) -> str:
+    if not value:
+        return "never"
+    try:
+        return datetime.fromisoformat(value).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return value
 
 
 def _newest_mtime(files: List[str]) -> Optional[str]:
@@ -1454,7 +1463,7 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
     if drives.get("error"):
         lines.append(f"  ✗ {drives['error']}")
     for drive in drives.get("scanned", []):
-        status = "MISSING LOCALLY" if drive.get("missing") else f"synced {drive.get('last_synced') or 'never'}"
+        status = "MISSING LOCALLY" if drive.get("missing") else f"synced {_format_synced(drive.get('last_synced'))}"
         lines.append(f"  [{drive.get('style_type')}] {drive.get('name')} — {status}")
     lines.append(f"  {drives.get('total_assets', 0):,} assets in the scan index")
     lines.append("")

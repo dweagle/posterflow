@@ -7,8 +7,8 @@ import traceback
 import shutil
 import json
 import threading
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
-from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict, field_validator
+from datetime import datetime
 
 from database import get_db
 from models.artwork_drive import ArtworkDrive, ARTWORK_TYPES, ARTWORK_TYPE_SUBFOLDERS
@@ -63,14 +63,6 @@ class ArtworkDriveSchema(BaseModel):
             picked = {t.strip() for t in value.split(',') if t.strip()}
             return [t for t in ARTWORK_TYPES if t in picked] or list(ARTWORK_TYPES)
         return value
-
-    @field_serializer('last_synced', 'last_rename_processed')
-    def serialize_datetime(self, value: datetime | None) -> str | None:
-        if value is None:
-            return None
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.isoformat()
 
     model_config = ConfigDict(from_attributes=True)
 

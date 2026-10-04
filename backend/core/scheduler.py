@@ -3,7 +3,6 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 import json
-from datetime import timezone
 from typing import Optional, Callable, Any
 from database import SessionLocal
 from models.schedule import Schedule
@@ -40,21 +39,7 @@ from modules.border import run_border_replacer_background_job
 from modules.idarr import run_idarr_background_job
 from api.maker_tools import run_maker_monitor_scan_for_schedule
 from services.backup import run_backup_to_location
-from tzlocal import get_localzone_name
-from zoneinfo import ZoneInfo
-
-
-def _local_timezone():
-    # by name so APScheduler can pickle jobs; get_localzone() returns an unpicklable file-stream zone when TZ points at a file or the host has no zone name
-    name = get_localzone_name()
-    if name:
-        return ZoneInfo(name)
-    log_warning(
-        LogTags.SCHEDULER,
-        "Local timezone has no zone name, so scheduled times will run in UTC. "
-        "Set TZ to an IANA name such as Europe/Amsterdam (FreeBSD: run tzsetup) and restart.",
-    )
-    return timezone.utc
+from core.app_timezone import get_app_timezone
 
 
 # Create scheduler instance
@@ -69,7 +54,7 @@ scheduler = BackgroundScheduler(
         'coalesce': True,
         'max_instances': 3
     },
-    timezone=_local_timezone()
+    timezone=get_app_timezone()
 )
 
 
@@ -418,6 +403,8 @@ def update_schedules() -> None:
     Update APScheduler jobs from database schedules.
     Call this whenever schedules are created/updated/deleted.
     """
+    # 'cron' triggers take their zone from the scheduler at add_job time
+    scheduler.timezone = get_app_timezone()
     db = SessionLocal()
     try:
         # Remove all existing jobs
@@ -671,7 +658,7 @@ def start_scheduler() -> None:
     """Start the APScheduler background scheduler"""
     if not scheduler.running:
         scheduler.start()
-        log_info(LogTags.SCHEDULER, "Started APScheduler")
+        log_info(LogTags.SCHEDULER, f"Started APScheduler, schedule times are in {get_app_timezone()}")
         # Load schedules from database
         update_schedules()
 

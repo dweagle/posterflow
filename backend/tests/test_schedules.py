@@ -1,33 +1,22 @@
-import pickle
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 
-def test_scheduler_timezone_resolves_by_name(monkeypatch):
-    """A named zone pickles by key, which the SQLAlchemy job store needs for every add_job."""
+def test_update_schedules_points_cron_triggers_at_the_app_timezone(test_db, monkeypatch):
+    """A zone change must reach the triggers add_job builds, without a restart."""
     import core.scheduler as scheduler_module
 
-    monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: "Europe/Amsterdam")
+    original = scheduler_module.scheduler.timezone
+    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: test_db)
+    monkeypatch.setattr(test_db, "close", lambda: None, raising=False)
+    monkeypatch.setattr(scheduler_module, "get_app_timezone", lambda: ZoneInfo("Asia/Tokyo"))
+    try:
+        scheduler_module.update_schedules()
 
-    tz = scheduler_module._local_timezone()
-
-    assert str(tz) == "Europe/Amsterdam"
-    assert pickle.loads(pickle.dumps(tz)) == tz
-
-
-def test_scheduler_timezone_warns_and_uses_utc_when_host_has_no_zone_name(monkeypatch):
-    """No TZ, no /var/db/zoneinfo and a copied /etc/localtime (FreeBSD jail) yields no name; fall back loudly, not silently."""
-    import core.scheduler as scheduler_module
-
-    monkeypatch.setattr(scheduler_module, "get_localzone_name", lambda: None)
-    warnings = []
-    monkeypatch.setattr(scheduler_module, "log_warning", lambda tag, msg, **k: warnings.append(msg))
-
-    tz = scheduler_module._local_timezone()
-
-    assert tz is timezone.utc
-    assert pickle.loads(pickle.dumps(tz)) is timezone.utc
-    assert len(warnings) == 1
-    assert "TZ" in warnings[0]
+        assert str(scheduler_module.scheduler.timezone) == "Asia/Tokyo"
+        assert str(scheduler_module.scheduler._create_trigger("cron", {"hour": "3"}).timezone) == "Asia/Tokyo"
+    finally:
+        scheduler_module.scheduler.timezone = original
 
 
 def test_create_schedule_rejects_invalid_drive_group(client):

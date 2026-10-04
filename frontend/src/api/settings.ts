@@ -66,6 +66,10 @@ export const getSettings = async (): Promise<Record<string, string>> => {
   return getData('/api/settings/')
 }
 
+export const getTimezones = async (): Promise<string[]> => {
+  return getData('/api/settings/timezones')
+}
+
 export const revealSensitiveSetting = async (
   payload: RevealSensitiveSettingRequest,
 ): Promise<RevealSensitiveSettingResponse> => {

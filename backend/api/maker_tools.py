@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from core.app_timezone import today_in_app_tz
 from core.auth import mint_psd_access_token, verify_psd_access_token
 from core.config import settings as app_settings
 from core.job_queue import job_queue
@@ -152,7 +153,7 @@ class MakerMonitorRunQueuedResponse(BaseModel):
 
 
 def _monitor_today_local() -> date:
-    return datetime.now().astimezone().date()
+    return today_in_app_tz()
 
 
 def _parse_iso_date(value: str | None) -> date | None:

@@ -110,6 +110,7 @@ export {
   getPlexLibraryConfigs,
   archiveIdarrSourceFile,
   getSettings,
+  getTimezones,
   importMakerIdarrIgnoredTitles,
   ignoreAndUploadMakerIdarrPending,
   removeMakerIdarrIgnoredTitle,

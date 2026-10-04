@@ -80,7 +80,7 @@ services:
       - PUID=1000        # Host UID that owns the mount points above.
       - PGID=1000        # Host GID. Both default to 1000 if unset.
       - UMASK=022        # Optional. Mode mask for files the app creates. 002 makes them group-writable.
-      - TZ=America/New_York   # Host timezone. Drives scheduler local-time interpretation.
+      - TZ=America/New_York   # Host timezone for logs and schedule times. Settings > Scheduling can override it for schedules.
       - DEBUG=false      # Optional. true forces file logging to DEBUG on startup.
       - LOG_LEVEL=INFO   # Optional. File log level when DEBUG=false.
       - ALLOWED_FRAME_ORIGINS=  # Optional. Comma-separated origins allowed to embed the app in an iframe (e.g. http://organizr.local:8080).
@@ -116,7 +116,7 @@ docker run -d \
 | `PUID` | `1000` | User ID for file ownership |
 | `PGID` | `1000` | Group ID for file ownership |
 | `UMASK` | `022` | Permission mask for files and folders the container creates (posters, PSD exports, synced drive files). `022` gives `644`/`755`. Set `002` when other users in the `PGID` group need to save into those files over SMB, e.g. Photoshop on macOS writing in place. Applies to new files only; existing files keep their mode. |
-| `TZ` | `UTC` | Timezone |
+| `TZ` | `UTC` | Timezone for log timestamps and schedule times. Settings → Scheduling can set a different timezone for schedules. |
 | `DEBUG` | `false` | Enable debug logging on startup (can be toggled in-app) |
 | `LOG_LEVEL` | `INFO` | File log verbosity when debug mode is off |
 | `ALLOWED_FRAME_ORIGINS` | *(empty)* | Comma-separated origins allowed to embed the app in an iframe (e.g. an Organizr/Homarr dashboard). Format `http(s)://host[:port]` — no paths or wildcards; invalid entries are ignored with a startup warning. Empty keeps embedding blocked for all other sites. |

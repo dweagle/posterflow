@@ -12,6 +12,8 @@ from models.setting import Setting, get_setting, upsert_setting
 from util.library_configs import media_libraries_only
 from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
+from core.app_timezone import get_app_timezone, parse_timezone, set_app_timezone, timezone_names
+from core.scheduler import update_schedules
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -68,6 +70,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     # App setup
     "setup_complete",
     "poster_destination",
+    "timezone",
     # Media server instances
     "plex_instances",
     "sonarr_instances",
@@ -775,7 +778,14 @@ def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     payload: Dict[str, str] = {}
     for setting in settings:
         payload[setting.key] = setting.value
+    # computed, not stored: the zone schedules actually run in
+    payload["effective_timezone"] = str(get_app_timezone())
     return _mask_settings_payload(payload)
+
+
+@router.get("/timezones")
+def get_timezones() -> List[str]:
+    return timezone_names()
 
 
 @router.post("/reveal")
@@ -886,6 +896,11 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
     if not allowed:
         return {"message": "Settings saved", "count": 0}
 
+    if "timezone" in allowed:
+        allowed["timezone"] = (allowed["timezone"] or "").strip()
+        if allowed["timezone"] and parse_timezone(allowed["timezone"]) is None:
+            raise HTTPException(status_code=400, detail=f"Unknown timezone: {allowed['timezone']}")
+
     log_user_action(f"Saving settings: {', '.join(sorted(allowed.keys()))}")
 
     for key, value in allowed.items():
@@ -904,6 +919,15 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
         db.rollback()
         log_error(LogTags.API, f"Database error saving bulk settings: {e}\n{traceback.format_exc()}", count=len(allowed))
         raise HTTPException(status_code=500, detail="Failed to save settings")
+
+    if "timezone" in allowed:
+        set_app_timezone(allowed["timezone"])
+        log_info(LogTags.SCHEDULER, f"Schedule times are now in {get_app_timezone()}")
+        try:
+            update_schedules()
+        except Exception:
+            # the zone is saved and in force, so a failed rebuild is not a failed save
+            log_warning(LogTags.SCHEDULER, "Timezone saved, but schedules were not rebuilt. They pick it up on the next schedule change or restart.")
 
     return {"message": "Settings saved", "count": len(allowed)}
 

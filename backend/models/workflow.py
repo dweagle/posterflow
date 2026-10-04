@@ -1,9 +1,10 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Boolean, Text
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import Any, Dict, List, Optional
 import json
 from database import Base
+from util.utc_datetime import UTCDateTime
 
 
 # Canonical default workflow step configuration. Mirrors the FlowConfig defaults
@@ -32,8 +33,8 @@ class Workflow(Base):
     name = Column(String, nullable=False)
     config = Column(Text, nullable=False)  # JSON string of the FlowConfig step selection
     is_default = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
     def __repr__(self) -> str:
         return f"<Workflow(id={self.id}, name='{self.name}')>"

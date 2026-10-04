@@ -235,7 +235,7 @@ compose's `environment:` block - and how to change them after setup:
 | `CONFIG_DIR` | `~/.local/share/posterflow` | Database, logs, rclone.conf, synced posters |
 | `PORT` | `8357` | Web/API listen port |
 | `HOST` | `0.0.0.0` | Bind address |
-| `TZ` | host timezone | Scheduler local-time interpretation |
+| `TZ` | host timezone | Log timestamps and schedule times. Settings → Scheduling can set a different timezone for schedules. |
 | `DEBUG` / `LOG_LEVEL` | `false` / `INFO` | Log verbosity |
 | `ALLOWED_FRAME_ORIGINS` | *(empty)* | Origins allowed to embed the app in an iframe |
 
@@ -332,7 +332,7 @@ Then the same install steps, using `python3.13 -m venv .venv`. Notes:
   accepts the packaged numpy (off Linux/macOS the requirement is just `>=2.4`).
 - Linux-only speedup packages (uvloop/httptools) skip automatically.
 - Starting at boot is yours to solve (an rc.d script wrapping the venv python).
-- Give the scheduler a named timezone: run `tzsetup` (it writes
-  `/var/db/zoneinfo`) or set `TZ=Region/City` in the service environment. A
-  jail whose `/etc/localtime` is a bare copy has no zone name; the scheduler
-  then logs a warning at startup and runs schedules in UTC.
+- Give the scheduler a named timezone: pick one in Settings → Scheduling, run
+  `tzsetup` (it writes `/var/db/zoneinfo`) or set `TZ=Region/City` in the
+  service environment. A jail whose `/etc/localtime` is a bare copy has no zone
+  name; the scheduler then logs a warning at startup and runs schedules in UTC.

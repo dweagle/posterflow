@@ -37,7 +37,7 @@ def _base_report(**overrides: Any) -> Dict[str, Any]:
                       "tvdb": {"skipped": "no TVDB API key configured"},
                       "plex": {"skipped": "no Plex instance configured"}},
         "drives": {"scanned": [{"name": "DriveA", "style_type": "CL2K", "local_path": "/d/a",
-                                "last_synced": "2026-08-01 10:00", "missing": False}],
+                                "last_synced": "2026-08-01T10:00:00+00:00", "missing": False}],
                    "total_assets": 100, "error": None},
         "candidates": {"considered": 3, "shown": 0, "omitted": 0, "id_pool": 0, "items": []},
     }
@@ -431,6 +431,7 @@ class TestRendering:
         # Verdict section leads; evidence and the JSON appendix follow.
         assert text.index("VERDICT") < text.index("LIBRARY RECORD") < text.index("ID CROSS-CHECK")
         assert text.index("DRIVE CANDIDATES") < text.index("DRIVES SCANNED") < text.index("RAW DATA (JSON)")
+        assert "[CL2K] DriveA — synced 2026-08-01 10:00 UTC" in text
         assert "2 more near-miss candidate(s) omitted" in text
         assert "```" not in text
 
@@ -625,7 +626,7 @@ class TestBuildReport:
         index = create_new_empty_index()
         build_search_index(index, str(asset.get("title", "")), asset)
         drives = [{"name": "DriveA", "style_type": "CL2K", "local_path": "/d/a",
-                   "last_synced": "2026-08-01 10:00", "missing": False}]
+                   "last_synced": "2026-08-01T10:00:00+00:00", "missing": False}]
         return drives, index, [asset], None
 
     def test_end_to_end_with_matching_poster(self, test_db, monkeypatch):

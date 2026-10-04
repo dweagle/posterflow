@@ -77,6 +77,8 @@ export const useSettingsCore = ({
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
+  const [appTimezone, setAppTimezone] = useState('')
+  const [effectiveTimezone, setEffectiveTimezone] = useState('')
 
   const fetchSettings = async (): Promise<SettingsCoreSnapshot | null> => {
     try {
@@ -100,6 +102,8 @@ export const useSettingsCore = ({
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
+      setAppTimezone((settings.timezone || '').trim())
+      setEffectiveTimezone((settings.effective_timezone || '').trim())
 
       const plexInstances = parseInstances(settings.plex_instances, 'Plex')
       // Arrs are optional (media-server sourcing) — no blank starter card
@@ -258,6 +262,27 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSaveAppTimezone = async (value: string): Promise<boolean> => {
+    try {
+      setSaving(true)
+      await saveBulkSettings({ timezone: value })
+      setAppTimezone(value)
+      showToast('Timezone saved!')
+      // the server resolves blank to the host zone, so read back what is in force
+      const refreshed = await getSettings().catch(() => null)
+      if (refreshed) {
+        setEffectiveTimezone((refreshed.effective_timezone || '').trim())
+      }
+      return true
+    } catch (error) {
+      console.error('Error saving timezone:', error)
+      showToast(getApiErrorMessage(error, 'Failed to save timezone'), 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSavePsdExportFolder = async (): Promise<boolean> => {
     try {
       setSaving(true)
@@ -367,5 +392,8 @@ export const useSettingsCore = ({
     handleSavePsdTemplatePath,
     psdOpenPhotopea,
     handleTogglePsdOpenPhotopea,
+    appTimezone,
+    effectiveTimezone,
+    handleSaveAppTimezone,
   }
 }

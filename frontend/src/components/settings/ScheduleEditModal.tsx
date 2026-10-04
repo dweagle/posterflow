@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget, Workflow, listWorkflows } from '../../api/client'
+import { browserTimeZone, formatDateTime, sameTimeZone } from '../../utils/datetime'
 
 type EditingScheduleState = {
   schedule: Schedule
@@ -10,6 +11,7 @@ type ScheduleEditModalProps = {
   editingSchedule: EditingScheduleState | null
   drives: Drive[]
   scheduleSaving: boolean
+  effectiveTimezone: string
   updateScheduleField: <K extends keyof Schedule>(field: K, value: Schedule[K]) => void
   onClose: () => void
   onSave: () => void
@@ -19,12 +21,14 @@ function ScheduleEditModal({
   editingSchedule,
   drives,
   scheduleSaving,
+  effectiveTimezone,
   updateScheduleField,
   onClose,
   onSave,
 }: ScheduleEditModalProps) {
   const [idarrTargets, setIdarrTargets] = useState<Array<{ index: number; target: MakerIdarrSyncTarget }>>([])
   const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const browserZone = browserTimeZone()
 
   const isSyncSchedule = editingSchedule?.schedule.job_type === 'gdrive_sync' || editingSchedule?.schedule.job_type === 'sync'
   const isIdarrSchedule = editingSchedule?.schedule.job_type === 'idarr'
@@ -598,11 +602,17 @@ function ScheduleEditModal({
             </div>
           )}
 
+          {effectiveTimezone && !sameTimeZone(browserZone, effectiveTimezone) && (
+            <p className="field-hint">
+              Schedule times are in {effectiveTimezone}. Your browser is in {browserZone}.
+            </p>
+          )}
+
           {editingSchedule.schedule.last_run && (
             <div className="schedule-status">
               <div className="status-item">
                 <span className="status-label">Last Run:</span>
-                <span className="status-value">{new Date(editingSchedule.schedule.last_run).toLocaleString()}</span>
+                <span className="status-value">{formatDateTime(editingSchedule.schedule.last_run)}</span>
               </div>
             </div>
           )}

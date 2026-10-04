@@ -1,6 +1,7 @@
 import { Edit2, Plus, Trash2 } from 'lucide-react'
-import { ReactNode, useState } from 'react'
-import { Schedule } from '../../api/client'
+import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { Schedule, getTimezones } from '../../api/client'
+import { browserTimeZone, sameTimeZone } from '../../utils/datetime'
 
 type SettingsSchedulingSectionProps = {
   schedules: Schedule[]
@@ -9,6 +10,10 @@ type SettingsSchedulingSectionProps = {
   onEditSchedule: (index: number) => void
   onRemoveSchedule: (index: number) => void
   getScheduleSummary: (schedule: Schedule) => ReactNode
+  appTimezone: string
+  effectiveTimezone: string
+  onSaveAppTimezone: (value: string) => void
+  saving: boolean
 }
 
 function SettingsSchedulingSection({
@@ -18,8 +23,25 @@ function SettingsSchedulingSection({
   onEditSchedule,
   onRemoveSchedule,
   getScheduleSummary,
+  appTimezone,
+  effectiveTimezone,
+  onSaveAppTimezone,
+  saving,
 }: SettingsSchedulingSectionProps) {
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
+  // null until the user picks, so the select follows the saved value ('' = host timezone)
+  const [zoneChoice, setZoneChoice] = useState<string | null>(null)
+  const zone = zoneChoice ?? appTimezone
+  // the server lists the zones it can run; browser lists carry legacy names it may reject
+  const [serverZones, setServerZones] = useState<string[]>([])
+  useEffect(() => {
+    getTimezones().then(setServerZones).catch(() => setServerZones([]))
+  }, [])
+  const zones = useMemo(
+    () => (appTimezone && !serverZones.includes(appTimezone) ? [appTimezone, ...serverZones] : serverZones),
+    [appTimezone, serverZones],
+  )
+  const browserZone = browserTimeZone()
 
   const handleDeleteClick = (index: number) => {
     setConfirmDeleteIndex(index)
@@ -58,6 +80,37 @@ function SettingsSchedulingSection({
           </div>
         </div>
       )}
+      <div className="server-section">
+        <div className="server-section-header">
+          <h3>Timezone</h3>
+        </div>
+        <div className="setting-item api-key-setting">
+          <div className="setting-info">
+            <label htmlFor="app-timezone">Schedule Timezone</label>
+            <p className="setting-description">
+              Schedule times and the dashboard's daily counts use this timezone.
+              {effectiveTimezone && ` Schedules currently run in ${effectiveTimezone}.`}
+              {effectiveTimezone && !sameTimeZone(browserZone, effectiveTimezone) && ` Your browser is in ${browserZone}.`}
+            </p>
+          </div>
+          <div className="settings-input-row api-key-control">
+            <select id="app-timezone" value={zone} onChange={(e) => setZoneChoice(e.target.value)}>
+              <option value="">Host timezone (TZ)</option>
+              {zones.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-primary btn-inline-save"
+              onClick={() => onSaveAppTimezone(zone)}
+              disabled={saving || zone === appTimezone}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
       <div className="server-section">
         <div className="server-section-header">
           <h3>Scheduled Tasks</h3>

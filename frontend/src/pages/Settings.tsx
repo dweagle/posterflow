@@ -534,6 +534,9 @@ function Settings() {
     handleSaveFanartApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
+    appTimezone,
+    effectiveTimezone,
+    handleSaveAppTimezone,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
 
   useEffect(() => {
@@ -1433,6 +1436,10 @@ function Settings() {
           onEditSchedule={toggleEditSchedule}
           onRemoveSchedule={removeSchedule}
           getScheduleSummary={getScheduleSummary}
+          appTimezone={appTimezone}
+          effectiveTimezone={effectiveTimezone}
+          onSaveAppTimezone={handleSaveAppTimezone}
+          saving={saving}
         />
       )}
 
@@ -1440,6 +1447,7 @@ function Settings() {
         editingSchedule={editingSchedule}
         drives={drives}
         scheduleSaving={scheduleSaving}
+        effectiveTimezone={effectiveTimezone}
         updateScheduleField={updateScheduleField}
         onClose={cancelScheduleEdit}
         onSave={saveSchedule}

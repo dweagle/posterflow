@@ -15,6 +15,7 @@ import { useToast } from './Toast'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import Toolbar from './Toolbar'
 import { getAddToPriorityPref, setAddToPriorityPref } from '../utils/priorityPrompt'
+import { formatDateShortTime } from '../utils/datetime'
 
 // Build a Google Drive folder URL, skipping placeholder IDs for custom drives without a real ID
 const driveFolderUrl = (driveId: string): string | null =>
@@ -509,7 +510,7 @@ function ArtworkDrivesPanel() {
         )}
         <p className="last-synced">
           {drive.last_synced
-            ? `Synced: ${new Date(drive.last_synced).toLocaleDateString()} ${new Date(drive.last_synced).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            ? `Synced: ${formatDateShortTime(drive.last_synced)}`
             : 'Not synced yet'}
         </p>
       </div>
