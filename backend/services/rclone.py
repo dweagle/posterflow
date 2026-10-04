@@ -75,6 +75,73 @@ SYNC_RESULT_INDENT = "    "
 # unit, and a bare file count. Only the count may drive progress.
 BYTE_STATS_RE = re.compile(r"(?:Bytes|[KMGTP]iB)")
 
+# rclone output meaning the credentials themselves were refused, so every drive would fail alike
+AUTH_FAILURE_RE = re.compile(r"failed when making oauth client|invalid_grant|invalid_client|unauthorized_client|deleted_client")
+
+# The timestamp shape rclone writes for a token's expiry; its parser rejects anything else
+TOKEN_EXPIRY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+
+TOKEN_NOT_JSON_MESSAGE = (
+    "The saved Google Drive token is not valid JSON, so rclone cannot use it. "
+    "Paste the full token from rclone authorize in Settings, or use a service account."
+)
+MISSING_CREDENTIALS_MESSAGE = (
+    "Missing Google Drive credentials. Configure either OAuth (Client ID/Secret + Token) or Service Account JSON path."
+)
+TOKEN_RECOPY_HINT = "Copy the full token from rclone authorize again, from { to }."
+
+
+# None means rclone could not parse the token either
+def _parse_token_object(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        parsed = json.loads(token)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+# Why a pasted token cannot work, or None when it looks usable
+def google_token_problem(token: str) -> Optional[str]:
+    text = token.strip()
+    if not text.startswith("{"):
+        return "Google Drive token must be the full JSON from rclone authorize, from { to }. A refresh token on its own will not work."
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        return f"Google Drive token is not valid JSON. Something is missing or extra near character {e.pos + 1}. {TOKEN_RECOPY_HINT}"
+    if not isinstance(parsed, dict):
+        return f"Google Drive token is not valid JSON. {TOKEN_RECOPY_HINT}"
+
+    refresh_token = parsed.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        return f'Google Drive token has no "refresh_token". {TOKEN_RECOPY_HINT}'
+    for field in ("access_token", "refresh_token"):
+        value = parsed.get(field)
+        if isinstance(value, str) and any(char.isspace() for char in value):
+            return f'Google Drive token has a space or line break inside "{field}". {TOKEN_RECOPY_HINT}'
+    expiry = parsed.get("expiry")
+    if expiry is not None and not (isinstance(expiry, str) and TOKEN_EXPIRY_RE.fullmatch(expiry)):
+        return f'Google Drive token has a damaged "expiry" value. {TOKEN_RECOPY_HINT}'
+    return None
+
+
+def _auth_failure_message(code: str) -> str:
+    if code == "failed when making oauth client":
+        return "rclone could not read the saved Google Drive credentials. Save the token or service account key again in Settings."
+    return f"Google rejected the saved Google Drive credentials ({code}). Save a new token or service account key in Settings."
+
+
+# The last line where rclone says why it gave up, without its timestamp
+def _failure_reason(lines: Deque[str]) -> Optional[str]:
+    for line in reversed(lines):
+        for marker in ("CRITICAL:", "ERROR :", "ERROR:"):
+            if marker in line:
+                return line.split(marker, 1)[1].strip()
+        if "NOTICE: Failed to" in line:
+            return line.split("NOTICE:", 1)[1].strip()
+    return None
+
+
 class RcloneService:
     """Service for managing rclone operations with Google Drive"""
 
@@ -243,9 +310,13 @@ scope = drive.readonly
 
         return None
 
-    def _get_drive_auth_args(self) -> Optional[List[str]]:
-        """Get validated rclone auth args from stored settings."""
+    # (auth args, None) or (None, reason) when the stored credentials cannot be used
+    def _resolve_drive_auth(self) -> Tuple[Optional[List[str]], Optional[str]]:
         client_id, client_secret, token_json, service_account_file = self._get_credentials()
+
+        # rclone dies on a token it cannot parse, so catch it before launching anything
+        if not service_account_file and token_json and _parse_token_object(token_json) is None:
+            return None, TOKEN_NOT_JSON_MESSAGE
 
         auth_args = self._build_drive_auth_args(
             client_id=client_id,
@@ -254,11 +325,14 @@ scope = drive.readonly
             service_account_file=service_account_file,
         )
         if auth_args is None:
-            log_error(
-                LogTags.RCLONE,
-                "Missing Google Drive credentials. Configure either OAuth (Client ID/Secret + Token) or Service Account JSON path."
-            )
+            return None, MISSING_CREDENTIALS_MESSAGE
+        return auth_args, None
 
+    def _get_drive_auth_args(self) -> Optional[List[str]]:
+        """Get validated rclone auth args from stored settings."""
+        auth_args, problem = self._resolve_drive_auth()
+        if problem:
+            log_error(LogTags.RCLONE, problem)
         return auth_args
     
     def test_connection(self) -> bool:
@@ -299,9 +373,10 @@ scope = drive.readonly
             # can detect if rclone refreshed it during the sync and persist the new value.
             _, _, original_token, _ = self._get_credentials()
 
-            auth_args = self._get_drive_auth_args()
+            auth_args, auth_problem = self._resolve_drive_auth()
             if auth_args is None:
-                return {"success": False, "files_transferred": 0, "error": "Missing Google Drive credentials"}
+                log_error(LogTags.RCLONE, auth_problem)
+                return {"success": False, "files_transferred": 0, "error": auth_problem, "auth_failed": True}
             
             local_path.mkdir(parents=True, exist_ok=True)
             
@@ -529,8 +604,15 @@ scope = drive.readonly
                 return {"success": True, "files_transferred": transferred}
             else:
                 error_output = ''.join(recent_lines)  # Last 50 lines (capped by deque)
-                log_error(LogTags.RCLONE, f"Failed: '{display_name}' - {error_output}")
-                return {"success": False, "files_transferred": 0}
+                # errors were already logged line by line, so name the reason once instead of the whole tail
+                reason = _failure_reason(recent_lines) or error_output
+                log_error(LogTags.RCLONE, f"Failed: '{display_name}' - {reason}")
+                auth_match = AUTH_FAILURE_RE.search(error_output)
+                if auth_match:
+                    auth_message = _auth_failure_message(auth_match.group(0))
+                    log_error(LogTags.RCLONE, auth_message)
+                    return {"success": False, "files_transferred": 0, "error": auth_message, "auth_failed": True}
+                return {"success": False, "files_transferred": 0, "error": reason}
 
         except JobCancelled:
             # User stopped the sync — kill rclone so it doesn't run orphaned, then
@@ -988,6 +1070,7 @@ scope = drive.readonly
             Dictionary mapping drive_id to sync result
         """
         results = {}
+        auth_error: List[str] = []  # filled by the first drive whose credentials are refused
         
         def sync_single_drive(task: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             """Helper function to sync a single drive"""
@@ -1002,6 +1085,10 @@ scope = drive.readonly
             batch_job_id = task.get('job_id')
             if batch_job_id is not None:
                 check_cancelled(batch_job_id)
+
+            # refused credentials fail every drive the same way, so don't launch the rest
+            if auth_error:
+                return drive_id, {'success': False, 'files_transferred': 0, 'drive_name': drive_name, 'error': auth_error[0], 'skipped': True}
             
             # Create a callback that includes the task index
             # sync_folder calls with: (filename, files_checked, files_transferred, phase)
@@ -1010,8 +1097,10 @@ scope = drive.readonly
                 file_callback = lambda filename, files_checked, files_transferred, phase, transfer_total=0: progress_callback(task_index, drive_name, filename, files_checked, files_transferred, phase, transfer_total)
             
             try:
-                success = self.sync_folder(drive_id, local_folder, drive_name=drive_name, progress_callback=file_callback, exclude_dirs=exclude_dirs)
-                return drive_id, {'success': success, 'drive_name': drive_name}
+                result = self.sync_folder(drive_id, local_folder, drive_name=drive_name, progress_callback=file_callback, exclude_dirs=exclude_dirs)
+                if result.get('auth_failed') and not auth_error:
+                    auth_error.append(result.get('error') or "Google Drive credentials were refused")
+                return drive_id, {**result, 'drive_name': drive_name}
             except JobCancelled:
                 # Propagate so the whole batch aborts instead of marking this
                 # drive failed and moving on to the next one.
@@ -1042,7 +1131,14 @@ scope = drive.readonly
                     results[task['drive_id']] = {'success': False, 'error': str(e)}
         
         successful = sum(1 for r in results.values() if r.get('success', False))
-        log_success(LogTags.RCLONE, f"Batch sync completed: {successful}/{len(sync_tasks)} drives synced successfully")
+        skipped = sum(1 for r in results.values() if r.get('skipped'))
+        if skipped:
+            log_warning(LogTags.RCLONE, f"Skipped {skipped} remaining drive(s) that would fail the same way")
+        summary = f"Batch sync completed: {successful}/{len(sync_tasks)} drives synced successfully"
+        if successful == len(sync_tasks):
+            log_success(LogTags.RCLONE, summary)
+        else:
+            log_warning(LogTags.RCLONE, summary)
         
         return results
 

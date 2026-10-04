@@ -462,6 +462,86 @@ def test_sync_multiple_drives_self_heals_orphaned_records(test_db, monkeypatch, 
     assert remaining == {"keep.jpg"}
 
 
+def _two_remote_drives_and_job(test_db, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+    ok, _ = _make_drive_and_job(test_db, drive_id="batch-ok", name="BatchOk")
+    bad, _ = _make_drive_and_job(test_db, drive_id="batch-bad", name="BatchBad")
+    ok.sync_enabled = bad.sync_enabled = True
+    job = Job(job_type="Sync All", status="pending", progress=0, message="queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+    ok_dir = tmp_path / "posters" / "MM2K" / "BatchOk"
+    ok_dir.mkdir(parents=True)
+    (ok_dir / "a1.jpg").write_bytes(b"a1")
+    return ok, bad, job
+
+
+def test_sync_multiple_drives_fails_the_job_when_a_drive_fails(test_db, monkeypatch, tmp_path):
+    """Runs the real rclone batch over a faked sync_folder, so the result shape is the real one."""
+    ok, bad, job = _two_remote_drives_and_job(test_db, monkeypatch, tmp_path)
+    service = PosterSyncService(test_db)
+
+    def _fake_sync_folder(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
+        if drive_id == "batch-bad":
+            return {"success": False, "files_transferred": 0, "error": "Failed to sync: boom"}
+        return {"success": True, "files_transferred": 1}
+
+    monkeypatch.setattr(service.rclone, "sync_folder", _fake_sync_folder)
+
+    result = service.sync_multiple_drives([ok.id, bad.id], job_id=job.id)
+
+    assert result["success"] is False
+    assert result["error"] == "Sync failed for BatchBad"
+    assert result["added"] == 1
+    test_db.refresh(job)
+    assert job.status == "failed"
+    assert test_db.query(Poster).filter(Poster.drive_id == ok.drive_id).count() == 1
+    test_db.refresh(ok)
+    assert ok.last_files_transferred == 1
+
+
+def test_sync_multiple_drives_reports_refused_credentials_once(test_db, monkeypatch, tmp_path):
+    ok, bad, job = _two_remote_drives_and_job(test_db, monkeypatch, tmp_path)
+    service = PosterSyncService(test_db)
+    calls = []
+
+    def _fake_sync_folder(drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None):
+        calls.append(drive_id)
+        return {"success": False, "files_transferred": 0, "error": "Google rejected the token", "auth_failed": True}
+
+    monkeypatch.setattr(service.rclone, "sync_folder", _fake_sync_folder)
+
+    result = service.sync_multiple_drives([ok.id, bad.id], job_id=job.id)
+
+    assert calls == ["batch-ok"]
+    assert result["success"] is False
+    assert result["error"] == "Google rejected the token"
+    test_db.refresh(job)
+    assert (job.status, job.error) == ("failed", "Google rejected the token")
+    assert test_db.query(Poster).count() == 0
+
+
+def test_sync_drive_shows_the_credential_problem_on_the_job(test_db, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+    drive, job = _make_drive_and_job(test_db, drive_id="single-auth", name="SingleAuth")
+    drive.sync_enabled = True
+    test_db.commit()
+    service = PosterSyncService(test_db)
+    monkeypatch.setattr(
+        service.rclone, "sync_folder",
+        lambda drive_id, local_path, drive_name=None, progress_callback=None, exclude_dirs=None:
+            {"success": False, "files_transferred": 0, "error": "Google rejected the token", "auth_failed": True})
+
+    result = service.sync_drive(drive_id=drive.id, job_id=job.id)
+
+    assert result == {"success": False, "error": "Google rejected the token"}
+    test_db.refresh(job)
+    assert job.error == "Google rejected the token"
+
+
 # ---------------------------------------------------------------------------
 # Reconciled drift: single-drive sync now matches the batch path.
 # ---------------------------------------------------------------------------

@@ -166,7 +166,7 @@ export const useSettingsCore = ({
       return true
     } catch (error) {
       console.error('Error saving rclone settings:', error)
-      showToast('Failed to save rclone settings', 'error')
+      showToast(getApiErrorMessage(error, 'Failed to save rclone settings'), 'error')
       return false
     } finally {
       setSaving(false)

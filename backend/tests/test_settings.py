@@ -206,6 +206,37 @@ def test_reveal_blocks_password_hash_key(client, test_db):
     assert "cannot be revealed" in response.json()["detail"]
 
 
+GOOD_GOOGLE_TOKEN = '{"access_token":"ya29.abc","token_type":"Bearer","refresh_token":"1//0abc","expiry":"2026-10-04T15:33:52Z"}'
+
+
+def test_save_bulk_rejects_a_google_token_that_is_not_the_full_json(client, test_db):
+    response = client.post(
+        "/api/settings/bulk",
+        json={"google_client_id": "new-id", "google_token": "1//0bareRefreshToken"},
+    )
+
+    assert response.status_code == 400
+    assert "full JSON" in response.json()["detail"]
+    assert test_db.query(Setting).filter(Setting.key.in_(["google_token", "google_client_id"])).count() == 0
+
+
+def test_save_bulk_accepts_a_full_google_token(client, test_db):
+    response = client.post("/api/settings/bulk", json={"google_token": GOOD_GOOGLE_TOKEN})
+
+    assert response.status_code == 200
+    assert test_db.query(Setting).filter(Setting.key == "google_token").first().value == GOOD_GOOGLE_TOKEN
+
+
+def test_save_bulk_does_not_recheck_a_masked_google_token(client, test_db):
+    test_db.add(Setting(key="google_token", value="saved-before-the-check-existed"))
+    test_db.commit()
+
+    response = client.post("/api/settings/bulk", json={"google_token": MASKED_VALUE})
+
+    assert response.status_code == 200
+    assert test_db.query(Setting).filter(Setting.key == "google_token").first().value == "saved-before-the-check-existed"
+
+
 def test_save_bulk_rejects_unknown_keys(client, test_db):
     """Keys not in BULK_SETTINGS_ALLOWLIST must be silently dropped (not persisted)."""
     response = client.post(

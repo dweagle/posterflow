@@ -30,7 +30,8 @@ vi.mock('../../src/api/client', () => ({
   testRadarr: vi.fn(),
   uploadBackup: vi.fn(),
   uploadServiceAccountJson: vi.fn(),
-  getApiErrorMessage: vi.fn(() => 'error'),
+  getApiErrorMessage: (error: { response?: { data?: { detail?: string } } }, fallback: string) =>
+    error?.response?.data?.detail ?? fallback,
 }))
 
 describe('SetupWizard', () => {
@@ -112,6 +113,26 @@ describe('SetupWizard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
     await screen.findByText('Media Server Configuration')
+  })
+
+  it('shows why the server rejected the token and stays on step 1', async () => {
+    const user = userEvent.setup()
+    const reason = 'Google Drive token has no "refresh_token".'
+    mockSaveSettings.mockRejectedValueOnce({ response: { data: { detail: reason } } })
+    render(<SetupWizard onComplete={mockOnComplete} />)
+
+    await screen.findByRole('button', { name: 'Start Setup Wizard' })
+    await user.click(screen.getByRole('button', { name: 'Start Setup Wizard' }))
+
+    await user.type(screen.getByPlaceholderText(/apps\.googleusercontent\.com/i), 'client-id')
+    await user.type(screen.getByPlaceholderText(/GOCSPX-/i), 'client-secret')
+    await user.type(screen.getByPlaceholderText(/"refresh_token"/i), 'refresh-token')
+    await user.click(screen.getByRole('button', { name: 'Save & Continue' }))
+
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(reason, 'error')
+    })
+    expect(screen.queryByText('Storage Configuration')).toBeNull()
   })
 
   it('skips setup and navigates to dashboard', async () => {

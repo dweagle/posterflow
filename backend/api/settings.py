@@ -14,6 +14,7 @@ from core.config import Settings, settings as app_settings, running_in_container
 from core.logging import LogTags, log_user_action, log_error, log_info, log_warning
 from core.app_timezone import get_app_timezone, parse_timezone, set_app_timezone, timezone_names
 from core.scheduler import update_schedules
+from services.rclone import google_token_problem
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -900,6 +901,13 @@ def save_bulk_settings(settings: Dict[str, str], db: Session = Depends(get_db)) 
         allowed["timezone"] = (allowed["timezone"] or "").strip()
         if allowed["timezone"] and parse_timezone(allowed["timezone"]) is None:
             raise HTTPException(status_code=400, detail=f"Unknown timezone: {allowed['timezone']}")
+
+    # a masked or blank value is not a newly pasted token
+    google_token = (allowed.get("google_token") or "").strip()
+    if google_token and google_token != MASKED_VALUE:
+        token_problem = google_token_problem(google_token)
+        if token_problem:
+            raise HTTPException(status_code=400, detail=token_problem)
 
     log_user_action(f"Saving settings: {', '.join(sorted(allowed.keys()))}")
 

@@ -104,12 +104,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
         const response = await revealSensitiveSetting({ setting_key: 'google_token' })
         const revealedValue = String(response.value || '')
         if (!revealedValue) {
-          showToast('No saved Refresh Token available to reveal', 'error')
+          showToast('No saved Google Drive Token available to reveal', 'error')
           return
         }
         setFormData((prev) => ({ ...prev, google_refresh_token: revealedValue }))
       } catch (error) {
-        showToast(getApiErrorMessage(error, 'Failed to reveal Refresh Token'), 'error')
+        showToast(getApiErrorMessage(error, 'Failed to reveal Google Drive Token'), 'error')
         return
       }
     }
@@ -479,7 +479,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
       formData.google_client_secret.trim() !== '' &&
       formData.google_refresh_token.trim() !== ''
     if (!hasServiceAccount && !hasOAuth) {
-      showToast('Please enter either your OAuth credentials (Client ID, Client Secret, and Refresh Token) or upload a Service Account JSON file.', 'error')
+      showToast('Please enter either your OAuth credentials (Client ID, Client Secret, and the full token JSON) or upload a Service Account JSON file.', 'error')
       return
     }
     setIsSaving(true)
@@ -494,7 +494,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
       setStep(2)
     } catch (error) {
       console.error('Error saving settings:', error)
-      showToast('Error saving settings. Please try again.', 'error')
+      showToast(getApiErrorMessage(error, 'Error saving settings. Please try again.'), 'error')
     } finally {
       setIsSaving(false)
     }

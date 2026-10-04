@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import io
 import pytest
 
-from services.rclone import RcloneService
+from services.rclone import RcloneService, google_token_problem
 from core.config import Settings, settings
 
 
@@ -370,6 +370,145 @@ class TestSyncFolder:
         calls = []
         svc.sync_folder("drive-123", tmp_path / "dest", progress_callback=lambda *a: calls.append(a))
         assert len(calls) > 0
+
+    def test_google_rejecting_the_token_is_an_auth_failure(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        self._make_popen(monkeypatch, [
+            "2026/10/04 22:49:36 ERROR : Attempt 3/3 failed with 1 errors and: couldn't fetch token: invalid_grant: maybe token expired?",
+            "2026/10/04 22:49:36 NOTICE: Failed to sync: couldn't list directory: couldn't fetch token: invalid_grant: maybe token expired?",
+        ], returncode=1)
+        result = svc.sync_folder("drive-123", tmp_path / "dest")
+        assert result["success"] is False
+        assert result["auth_failed"] is True
+        assert "invalid_grant" in result["error"]
+
+    def test_ordinary_failure_is_not_an_auth_failure(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        self._make_popen(monkeypatch, ["2026/10/04 22:49:36 ERROR : poster.jpg: Failed to copy: disk full"], returncode=1)
+        result = svc.sync_folder("drive-123", tmp_path / "dest")
+        assert result["success"] is False
+        assert not result.get("auth_failed")
+        assert result["error"] == "poster.jpg: Failed to copy: disk full"
+
+    def test_unparseable_token_fails_before_rclone_starts(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        monkeypatch.setattr(svc, "_get_credentials", lambda: ("id", "secret", "1//0bareRefreshToken", None))
+        monkeypatch.setattr("services.rclone.subprocess.Popen", lambda *a, **k: pytest.fail("rclone must not start"))
+        result = svc.sync_folder("drive-123", tmp_path / "dest")
+        assert result["success"] is False
+        assert result["auth_failed"] is True
+        assert "not valid JSON" in result["error"]
+
+    def test_failure_log_names_the_reason_instead_of_the_output_tail(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        errors = []
+        monkeypatch.setattr("services.rclone.log_error", lambda tag, message, **_context: errors.append(message))
+        self._make_popen(monkeypatch, [
+            "2026/10/03 12:31:16 INFO  : Starting transaction limiter: max 10 transactions/s with burst 1",
+            '2026/10/03 12:31:16 CRITICAL: Failed to create file system for "gdrive,root_folder_id=abc:": drive: failed when making oauth client: bad token',
+        ], returncode=1)
+        result = svc.sync_folder("drive-123", tmp_path / "dest")
+        assert errors[0] == (
+            "Failed: 'drive-123' - Failed to create file system for \"gdrive,root_folder_id=abc:\": "
+            "drive: failed when making oauth client: bad token"
+        )
+        assert result["auth_failed"] is True
+
+
+# ---------------------------------------------------------------------------
+# sync_multiple_folders — per-drive results and stopping on refused credentials
+# ---------------------------------------------------------------------------
+
+class TestSyncMultipleFolders:
+    def _service(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(settings, "config_dir", tmp_path)
+        monkeypatch.setattr("services.rclone.shutil.which", lambda _: "/usr/bin/rclone")
+        return RcloneService()
+
+    def _tasks(self, tmp_path, count):
+        return [
+            {"drive_id": f"drive-{i}", "drive_name": f"Drive {i}", "local_folder": tmp_path / f"d{i}", "task_index": i}
+            for i in range(count)
+        ]
+
+    def test_each_drive_keeps_its_own_outcome(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        outcomes = {
+            "drive-0": {"success": True, "files_transferred": 3},
+            "drive-1": {"success": False, "files_transferred": 0, "error": "boom"},
+        }
+        monkeypatch.setattr(svc, "sync_folder", lambda drive_id, *_a, **_k: outcomes[drive_id])
+
+        results = svc.sync_multiple_folders(self._tasks(tmp_path, 2))
+
+        assert results["drive-0"]["success"] is True
+        assert results["drive-0"]["files_transferred"] == 3
+        assert results["drive-1"]["success"] is False
+
+    def test_refused_credentials_stop_the_batch_after_one_drive(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        calls = []
+
+        def _sync_folder(drive_id, *_a, **_k):
+            calls.append(drive_id)
+            return {"success": False, "files_transferred": 0, "error": "Google rejected the token", "auth_failed": True}
+
+        monkeypatch.setattr(svc, "sync_folder", _sync_folder)
+
+        results = svc.sync_multiple_folders(self._tasks(tmp_path, 3))
+
+        assert calls == ["drive-0"]
+        assert [r["success"] for r in results.values()] == [False, False, False]
+        assert results["drive-1"]["skipped"] is True
+        assert results["drive-2"]["error"] == "Google rejected the token"
+
+    def test_ordinary_failure_does_not_stop_the_batch(self, monkeypatch, tmp_path):
+        svc = self._service(monkeypatch, tmp_path)
+        calls = []
+
+        def _sync_folder(drive_id, *_a, **_k):
+            calls.append(drive_id)
+            return {"success": False, "files_transferred": 0, "error": "boom"}
+
+        monkeypatch.setattr(svc, "sync_folder", _sync_folder)
+
+        svc.sync_multiple_folders(self._tasks(tmp_path, 3))
+
+        assert calls == ["drive-0", "drive-1", "drive-2"]
+
+
+# ---------------------------------------------------------------------------
+# google_token_problem — what the save-time check accepts and rejects
+# ---------------------------------------------------------------------------
+
+VALID_TOKEN = (
+    '{"access_token":"ya29.abc","token_type":"Bearer","refresh_token":"1//0abc",'
+    '"expiry":"2026-10-04T15:33:52.4695466-05:00","expires_in":3599}'
+)
+
+
+class TestGoogleTokenProblem:
+    def test_full_token_from_rclone_authorize_is_accepted(self):
+        assert google_token_problem(VALID_TOKEN) is None
+
+    def test_utc_expiry_is_accepted(self):
+        assert google_token_problem(VALID_TOKEN.replace("15:33:52.4695466-05:00", "20:33:52Z")) is None
+
+    def test_bare_refresh_token_is_rejected(self):
+        assert "full JSON" in google_token_problem("1//0abc")
+
+    def test_missing_comma_points_at_the_spot(self):
+        problem = google_token_problem(VALID_TOKEN.replace('","token_type"', '""token_type"'))
+        assert "near character 27" in problem
+
+    def test_token_without_refresh_token_is_rejected(self):
+        assert "refresh_token" in google_token_problem('{"access_token":"ya29.abc","token_type":"Bearer"}')
+
+    def test_damaged_expiry_is_rejected(self):
+        assert "expiry" in google_token_problem(VALID_TOKEN.replace("2026-10-04T", "202610-04T"))
+
+    def test_space_inside_a_token_value_is_rejected(self):
+        assert "space or line break" in google_token_problem(VALID_TOKEN.replace("1//0abc", "1//0a bc"))
 
 
 # ---------------------------------------------------------------------------

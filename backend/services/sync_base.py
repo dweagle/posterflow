@@ -227,8 +227,10 @@ class BaseSyncService:
                 progress_callback("validating", 70, 100, "Rclone sync completed, validating...")
 
             if not result["success"]:
-                update_job_state(self.db, job, status=JOB_STATUS_FAILED, error="Rclone sync failed", progress=70, completed_at=datetime.now(timezone.utc))
-                return {"success": False, "error": "Rclone sync failed"}
+                # a credential failure has a plain message worth showing; other reasons stay in the log
+                error = (result.get("error") if result.get("auth_failed") else None) or "Rclone sync failed"
+                update_job_state(self.db, job, status=JOB_STATUS_FAILED, error=error, progress=70, completed_at=datetime.now(timezone.utc))
+                return {"success": False, "error": error}
 
             files_transferred = result.get("files_transferred", 0)
 
@@ -578,6 +580,8 @@ class BaseSyncService:
 
         total_added = total_updated = total_deleted = total_errors = 0
         db_failed_drives: list[str] = []
+        sync_failed_drives: list[str] = []
+        auth_error: Optional[str] = None
         log_debug(self.log_tag, f"Starting database update phase for {len(sync_tasks)} drives")
 
         for idx, task in enumerate(sync_tasks):
@@ -605,8 +609,14 @@ class BaseSyncService:
                     continue
 
                 log_debug(self.log_tag, f"Processing drive {idx + 1}/{len(sync_tasks)}: {drive_name}")
-                if not results.get(result_key, {}).get('success', False):
-                    log_error(self.log_tag, f"Sync failed for {drive_name}")
+                drive_result = results.get(result_key, {})
+                if not drive_result.get('success', False):
+                    # skipped drives never ran, and the batch already said why
+                    if not drive_result.get('skipped'):
+                        log_error(self.log_tag, f"Sync failed for {drive_name}", drive=drive_name)
+                    if drive_result.get('auth_failed'):
+                        auth_error = drive_result.get('error')
+                    sync_failed_drives.append(drive_name)
                     total_errors += 1
                     continue
 
@@ -706,8 +716,17 @@ class BaseSyncService:
                     db_failed_drives.append(drive_name)
 
         # drives saved before or after the failing one keep their committed rows
+        failures: list[str] = []
+        if auth_error:
+            failures.append(auth_error)
+        elif sync_failed_drives:
+            shown = ", ".join(sync_failed_drives[:5])
+            more = f" and {len(sync_failed_drives) - 5} more" if len(sync_failed_drives) > 5 else ""
+            failures.append(f"Sync failed for {shown}{more}")
         if db_failed_drives:
-            error = f"Database update failed for {', '.join(db_failed_drives)}"
+            failures.append(f"Database update failed for {', '.join(db_failed_drives)}")
+        if failures:
+            error = "; ".join(failures)
             if job:
                 update_job_state(self.db, job, status=JOB_STATUS_FAILED, progress=100, message=error, error=error, completed_at=datetime.now(timezone.utc))
             return {
