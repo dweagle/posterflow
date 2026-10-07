@@ -1,12 +1,12 @@
 """Shared backup zip builder used by the manual download endpoint and scheduled backups."""
 import json
-import shutil
 import sqlite3
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from core.config import settings as app_settings
@@ -18,6 +18,55 @@ DEFAULT_RETENTION = 7
 
 # Config files bundled alongside the database snapshot
 CONFIG_FILES = ("rclone.conf", "drives_cache.json", "artwork_drives_cache.json")
+
+
+class UnsupportedDatabaseBackup(NotImplementedError):
+    pass
+
+
+def sqlite_database_path() -> Path:
+    """The database file the app actually opened; backup and restore both work on this."""
+    url = make_url(app_settings.database_url)
+    database = url.database or ""
+    if (
+        url.get_backend_name() != "sqlite"
+        or not database
+        or database == ":memory:"
+        or database.startswith("file:")
+        or url.query.get("mode") == "memory"
+        or "uri" in url.query
+    ):
+        raise UnsupportedDatabaseBackup("Backup and restore need a file-backed SQLite database")
+    return Path(database).resolve()
+
+
+def _copy_database(source: Path, dest: Path) -> None:
+    # SQLite's online backup copies a consistent snapshot, pending journal included, even
+    # while the app is writing; a plain file copy would miss or scramble the journal
+    src = sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(str(dest), timeout=30)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
+def snapshot_database(dest: Path) -> None:
+    """Write a consistent copy of the live database to dest."""
+    _copy_database(sqlite_database_path(), dest)
+
+
+def is_sqlite_database(path: Path) -> bool:
+    with open(path, "rb") as f:
+        return f.read(16) == b"SQLite format 3\x00"
+
+
+def restore_database(backup_file: Path) -> None:
+    """Load a backup into the live database file through SQLite, so the journal stays consistent."""
+    _copy_database(backup_file, sqlite_database_path())
 
 
 def default_backup_dir() -> Path:
@@ -39,30 +88,9 @@ def get_backup_retention(db: Session) -> int:
         return DEFAULT_RETENTION
 
 
-def _snapshot_database(dest: Path) -> bool:
-    """Snapshot the SQLite DB to dest with the online backup API so the copy is
-    consistent even while jobs are writing; falls back to a plain file copy."""
-    db_file = app_settings.config_dir / "posterflow.db"
-    if not db_file.exists():
-        return False
-    try:
-        src = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
-        try:
-            dst = sqlite3.connect(str(dest))
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-        finally:
-            src.close()
-    except Exception as e:
-        log_warning(LogTags.BACKUP, f"SQLite snapshot failed, copying database file directly: {e}")
-        shutil.copy(db_file, dest)
-    return True
-
-
 def build_backup_zip(dest_dir: Path) -> Path:
     """Create a timestamped backup zip in dest_dir and return its path."""
+    sqlite_database_path()
     dest_dir.mkdir(parents=True, exist_ok=True)
     backup_path = dest_dir / f"{BACKUP_PREFIX}{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
 
@@ -73,19 +101,24 @@ def build_backup_zip(dest_dir: Path) -> Path:
     }
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            db_snapshot = Path(temp_dir) / "posterflow.db"
-            if _snapshot_database(db_snapshot):
+        # snapshot first: a backup without the database is worse than a failed backup
+        db_snapshot = Path(temp_dir) / "posterflow.db"
+        snapshot_database(db_snapshot)
+        try:
+            with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(db_snapshot, "posterflow.db")
                 log_info(LogTags.BACKUP, "Added database to backup")
 
-            for name in CONFIG_FILES:
-                source = app_settings.config_dir / name
-                if source.exists():
-                    zipf.write(source, name)
-                    log_info(LogTags.BACKUP, f"Added {name} to backup")
+                for name in CONFIG_FILES:
+                    source = app_settings.config_dir / name
+                    if source.exists():
+                        zipf.write(source, name)
+                        log_info(LogTags.BACKUP, f"Added {name} to backup")
 
-            zipf.writestr("metadata.json", json.dumps(metadata, indent=2))
+                zipf.writestr("metadata.json", json.dumps(metadata, indent=2))
+        except Exception:
+            backup_path.unlink(missing_ok=True)
+            raise
 
     log_success(LogTags.BACKUP, f"Created backup: {backup_path.name}")
     return backup_path
