@@ -3031,6 +3031,11 @@ class PlexUploadService:
                 client = create_arr_client(instance["url"], instance["api_key"], "radarr", logger=None)
                 if not client or not client.connect_status:
                     incomplete = True
+                    log_warning(
+                        LogTags.UPLOADER,
+                        f"Radarr '{instance['name']}' ({instance['url']}) unreachable; "
+                        "its download status is skipped this run",
+                    )
                     continue
                 for movie in client.get_parsed_media(include_unmonitored=True):
                     movie_keys = self._availability_keys_for_item(
@@ -3061,6 +3066,11 @@ class PlexUploadService:
                 client = create_arr_client(instance["url"], instance["api_key"], "sonarr", logger=None)
                 if not client or not client.connect_status:
                     incomplete = True
+                    log_warning(
+                        LogTags.UPLOADER,
+                        f"Sonarr '{instance['name']}' ({instance['url']}) unreachable; "
+                        "its download status is skipped this run",
+                    )
                     continue
                 for show in client.get_parsed_media(include_unmonitored=True):
                     show_keys = self._availability_keys_for_item(

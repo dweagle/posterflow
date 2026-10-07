@@ -554,8 +554,8 @@ class PosterRenameService:
 
     @property
     def media_fetch_failed_types(self) -> set[str]:
-        """Media types ("movies"/"series") whose media-server fetch failed in the last
-        get_media_from_instances call; cleanup treats them as unsafe to prune."""
+        """Media types ("movies"/"series") whose media-server or arr fetch failed in the
+        last get_media_from_instances call; cleanup treats them as unsafe to prune."""
         return set(self._media_fetch_failed_types)
 
     def _asset_matches_target(
@@ -1647,56 +1647,8 @@ class PosterRenameService:
                 client=client,
             )
 
-        # Get Radarr instances
-        radarr_instances = get_setting(self.db, "radarr_instances")
-        if radarr_instances and radarr_instances.value:
-            instances = json.loads(radarr_instances.value)
-            for instance in instances:
-                try:
-                    client = create_arr_client(
-                        instance["url"],
-                        instance["api_key"],
-                        "radarr",
-                        self.logger
-                    )
-                    if client and client.connect_status:
-                        # Use include_unmonitored=True to match DAPS behavior
-                        results = client.get_parsed_media(include_unmonitored=True)
-                        if results:
-                            # Add instance info to each media item
-                            for item in results:
-                                item["instance"] = instance.get("name", "Radarr")
-                            media_dict["movies"].extend(results)
-                        else:
-                            log_error(log_tag, f"No Radarr data found from {instance['url']}")
-                except Exception as e:
-                    log_error(log_tag, f"Error getting Radarr data: {e}")
-
-        # Get Sonarr instances
-        sonarr_instances = get_setting(self.db, "sonarr_instances")
-        if sonarr_instances and sonarr_instances.value:
-            instances = json.loads(sonarr_instances.value)
-            for instance in instances:
-                try:
-                    client = create_arr_client(
-                        instance["url"],
-                        instance["api_key"],
-                        "sonarr",
-                        self.logger
-                    )
-                    if client and client.connect_status:
-                        # Use include_unmonitored=True to match DAPS behavior
-                        # This includes all seasons regardless of monitored status
-                        results = client.get_parsed_media(include_unmonitored=True)
-                        if results:
-                            # Add instance info to each media item
-                            for item in results:
-                                item["instance"] = instance.get("name", "Sonarr")
-                            media_dict["series"].extend(results)
-                        else:
-                            log_error(log_tag, f"No Sonarr data found from {instance['url']}")
-                except Exception as e:
-                    log_error(log_tag, f"Error getting Sonarr data: {e}")
+        self._fetch_arr_media("radarr_instances", "radarr", "movies", media_dict, log_tag)
+        self._fetch_arr_media("sonarr_instances", "sonarr", "series", media_dict, log_tag)
 
         # Media-server movies/shows (arr-less installs, or hybrid via the toggle).
         # Fetched after the arrs so arr entries win the first-wins duplicate merge.
@@ -1726,6 +1678,41 @@ class PosterRenameService:
         self._inject_manual_media(media_dict, log_tag)
 
         return media_dict
+
+    def _fetch_arr_media(
+        self,
+        setting_key: str,
+        arr_type: str,
+        media_type: str,
+        media_dict: MediaDict,
+        log_tag: str,
+    ) -> None:
+        """Append every configured instance's media; one that is unreachable or returns
+        nothing marks its type as failed so cleanup never prunes those folders."""
+        setting = get_setting(self.db, setting_key)
+        if not setting or not setting.value:
+            return
+        label = arr_type.capitalize()
+        for instance in json.loads(setting.value):
+            name = instance.get("name", label)
+            try:
+                client = create_arr_client(instance["url"], instance["api_key"], arr_type, self.logger)
+                # include_unmonitored=True matches DAPS: unmonitored items and seasons still get posters
+                results = client.get_parsed_media(include_unmonitored=True) if client and client.connect_status else []
+            except Exception as e:
+                log_error(log_tag, f"Error getting {label} data from '{name}': {e}")
+                results = []
+            if not results:
+                self._media_fetch_failed_types.add(media_type)
+                log_warning(
+                    log_tag,
+                    f"{label} '{name}' ({instance['url']}) returned no media (unreachable or empty); "
+                    f"{media_type} folders are protected from cleanup this run",
+                )
+                continue
+            for item in results:
+                item["instance"] = name
+            media_dict[media_type].extend(results)
 
     def _enrich_collections_with_tmdb(
         self, media_dict: MediaDict, log_tag: str = LogTags.RENAMER

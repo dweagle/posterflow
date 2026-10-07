@@ -779,3 +779,64 @@ def test_resolve_plex_ids_still_errors_when_uuid_matches_but_item_missing(test_d
     error = _resolve_plex_webhook_ids(test_db, parsed)
     assert error and "not found" in error
     assert "_unconfigured_server" not in parsed
+
+
+# ── arr fetch failures ───────────────────────────────────────────────────
+
+
+class _ArrClient:
+    def __init__(self, media):
+        self.connect_status = True
+        self._media = media
+
+    def get_parsed_media(self, include_unmonitored=True):
+        return list(self._media)
+
+
+def _configure_arrs(test_db):
+    upsert_setting(test_db, "radarr_instances", json.dumps([{"name": "Radarr", "url": "http://r", "api_key": "k"}]))
+    upsert_setting(test_db, "sonarr_instances", json.dumps([{"name": "Sonarr", "url": "http://s", "api_key": "k"}]))
+    test_db.commit()
+
+
+def test_unreachable_arr_marks_its_type_failed(test_db, monkeypatch):
+    import services.poster_renamer as renamer_module
+
+    _configure_arrs(test_db)
+    movie = {"type": "movie", "title": "Heat", "year": 1995, "tmdb_id": 949, "normalized_title": "heat"}
+    monkeypatch.setattr(
+        renamer_module,
+        "create_arr_client",
+        lambda url, key, arr_type, logger: _ArrClient([movie]) if arr_type == "radarr" else None,
+    )
+    service = PosterRenameService(test_db)
+    media_dict = service.get_media_from_instances()
+    assert [m["title"] for m in media_dict["movies"]] == ["Heat"]
+    assert media_dict["movies"][0]["instance"] == "Radarr"
+    assert media_dict["series"] == []
+    # Sonarr down: series stays protected from cleanup even though the fetch "succeeded" overall
+    assert service.media_fetch_failed_types == {"series"}
+
+
+def test_arr_returning_nothing_marks_its_type_failed(test_db, monkeypatch):
+    import services.poster_renamer as renamer_module
+
+    _configure_arrs(test_db)
+    monkeypatch.setattr(renamer_module, "create_arr_client", lambda url, key, arr_type, logger: _ArrClient([]))
+    service = PosterRenameService(test_db)
+    service.get_media_from_instances()
+    assert service.media_fetch_failed_types == {"movies", "series"}
+
+
+def test_arr_exception_marks_its_type_failed(test_db, monkeypatch):
+    import services.poster_renamer as renamer_module
+
+    _configure_arrs(test_db)
+
+    def boom(url, key, arr_type, logger):
+        raise RuntimeError("dns failure")
+
+    monkeypatch.setattr(renamer_module, "create_arr_client", boom)
+    service = PosterRenameService(test_db)
+    service.get_media_from_instances()
+    assert service.media_fetch_failed_types == {"movies", "series"}
