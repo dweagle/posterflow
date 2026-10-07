@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.8] - 2026-10-06
+### Added
+- Settings: a schedule timezone setting — schedules can run in a timezone of your choice, with timestamps stored UTC-aware under the hood. (Thanks, mvanbaak!)
+
+### Changed
+- Rclone: better Google Drive token validation and error handling.
+
+### Fixed
+- Asset Upload: stale collection posters no longer land on same-titled movies.
+- Asset Cleanup: a type's folders are kept when its arr instance is unreachable, instead of being treated as orphaned.
+- Backup: restores now go through SQLite's backup API, and snapshot errors fail closed instead of producing a bad backup. (Thanks, mvanbaak!) 
+- Sync: recovers from database errors, and finished jobs stay at 100% instead of showing stale progress.(Thanks, mvanbaak!)
+- Database: the Alembic URL escapes % characters, and every model is registered with Alembic. (Thanks, mvanbaak!)
+
 ## [0.16.7] - 2026-10-02
 ### Added
 - Community Requests: the Maker Tools Upload button now opens an in-app picker over the server's export folders, pre-selecting the newest export for each requested slot. No more fighting the OS file dialog over network shares. (Requires an export folder to be set in PSD export settings.)
