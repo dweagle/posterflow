@@ -301,7 +301,8 @@ class AssetCleanupService:
                 # Common and benign: the sources are healthy, there just are no collections
                 log_info(
                     LogTags.CLEANUP,
-                    "No collections found from any source — collection folder removals skipped (nothing to compare against)",
+                    "No collections found from any source — collection folder removals skipped (nothing to compare against); "
+                    "yearless folders that shadow a year-tagged item are still removed",
                     unsafe_types=sorted(unsafe_types),
                 )
             else:
@@ -357,6 +358,7 @@ class AssetCleanupService:
                 dry_run=dry_run,
                 delete_unknown=delete_unknown,
                 unsafe_types=unsafe_types,
+                failed_types=set(fetch_failed_types or ()),
                 ignore_set=ignore_set,
                 result=result,
                 # Artwork lives in the item folders under the main destination, never tmp/ —
@@ -407,11 +409,13 @@ class AssetCleanupService:
         unsafe_types: set[str],
         ignore_set: set[str],
         result: Dict[str, Any],
+        failed_types: Optional[set[str]] = None,
         artwork_sourced: Optional[Dict[int, Dict[str, set]]] = None,
         globally_sourced_artwork: Optional[set] = None,
         poster_sourced: Optional[Dict[int, Dict[Any, set]]] = None,
     ) -> None:
         """Run grouping + classification + deletion for one scan root."""
+        failed_types = failed_types or set()
         artwork_sourced = artwork_sourced or {}
         globally_sourced_artwork = globally_sourced_artwork or set()
         poster_sourced = poster_sourced or {}
@@ -476,12 +480,28 @@ class AssetCleanupService:
             to_remove.append((asset, f"stale duplicate of '{media.get('title')}' (current: {self._canonical_name(media)})"))
 
         # ── Orphan classification ──────────────────────────────────────────
+        # Year-tagged folders matched to a live item: a same-titled yearless folder is a stale collection poster.
+        yeared_owners = {
+            str(a.get("normalized_title") or ""): self._asset_folder_name(a) or str(a.get("title") or "")
+            for group in groups
+            for a in group["assets"]
+            if a.get("year")
+        }
         for asset in orphans:
             name = self._asset_folder_name(asset) or os.path.basename(asset.get("files", [""])[0])
             if self._normalize_for_ignore(name) in ignore_set:
                 log_debug(LogTags.CLEANUP, f"Ignored (config): {name}")
                 continue
             asset_type = str(asset.get("type") or "")
+            owner = yeared_owners.get(str(asset.get("normalized_title") or ""))
+            if (
+                asset_type == "collections"
+                and owner
+                and "collections" not in failed_types
+                and not self._has_id_tag(asset)
+            ):
+                to_remove.append((asset, f"orphan collection folder (no matching collection; '{owner}' owns this title)"))
+                continue
             if asset_type in unsafe_types:
                 continue
             # 'movies' is indistinguishable from a series whose source is down (see above).

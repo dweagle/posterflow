@@ -7,7 +7,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -38,13 +38,16 @@ PlexUploadProgressCallback = Callable[[int, int, Dict[str, int], str], None]
 
 # Why a file never reached a Plex item. Labels claim only what was determined —
 # the index covers selected libraries only, so "absent from Plex" is never said.
-UNMATCHED_REASONS = ("no_plex_match", "year_mismatch", "not_downloaded", "type_unresolved", "edition_pending")
+UNMATCHED_REASONS = (
+    "no_plex_match", "year_mismatch", "not_downloaded", "type_unresolved", "edition_pending", "collection_shadowed",
+)
 UNMATCHED_REASON_LABELS = {
     "no_plex_match": "no server match",
     "year_mismatch": "year differs",
     "not_downloaded": "not downloaded",
     "type_unresolved": "type unresolved",
     "edition_pending": "edition pending",
+    "collection_shadowed": "stale collection folder",
 }
 # The same reasons spelled out, for the log where there is room to be unambiguous.
 UNMATCHED_REASON_DETAIL = {
@@ -54,6 +57,8 @@ UNMATCHED_REASON_DETAIL = {
     "not_downloaded": "*arr knows the item but reports no downloaded file/episodes yet",
     "type_unresolved": "no IDs in the path and movie/show/collection could not be told apart",
     "edition_pending": "waiting for a specific movie edition to appear in Plex",
+    "collection_shadowed": "a folder with no year or ID tokens (the collection convention) whose title also has a "
+                           "year-tagged folder; the server has no collection by that name, so it was not applied to the movie/show",
 }
 
 
@@ -156,6 +161,7 @@ class PlexUploadService:
     ERROR_INVALID_LIBRARY_CONFIG = "Invalid media server library configuration. Configure in Settings → Media tab."
     ERROR_INDEX_BUILD_FAILED = "Unable to build media server index from configured instances/libraries."
     MESSAGE_NO_POSTER_ASSETS = "No poster assets found to upload."
+    REASON_COLLECTION_SHADOWED = "collection_shadowed"
 
     def __init__(self, db: Session, upload_delay_ms: int = 50) -> None:
         self.db = db
@@ -1321,6 +1327,7 @@ class PlexUploadService:
 
         # rglob() order is arbitrary; sort by title, main before seasons, seasons ascending.
         assets.sort(key=self._asset_sort_key)
+        self._mark_shadowed_collection_assets(assets)
 
         log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local poster assets", count=len(assets))
         return assets
@@ -1332,6 +1339,53 @@ class PlexUploadService:
         season_number = asset.get("season_number")
         season_rank = season_number if isinstance(season_number, int) else -1
         return (media_key, is_season, season_rank)
+
+    def _mark_shadowed_collection_assets(
+        self, assets: List[Dict[str, Any]], siblings: Sequence[Dict[str, Any]] = ()
+    ) -> None:
+        # Plex names collections without the suffix: 'The Dark Knight' shares a media key with the movie's year-tagged folder.
+        yeared = {
+            str(a.get("media_key") or "")
+            for a in (*assets, *siblings)
+            if a.get("folder_year") is not None
+        }
+        for asset in assets:
+            if asset.get("folder_year") is not None or str(asset.get("media_key") or "") not in yeared:
+                continue
+            if not self._extract_asset_id_keys(asset):
+                asset["shadowed_by_year"] = True
+
+    def _skip_shadowed_collection_asset(
+        self, asset: Dict[str, Any], media_counts: Dict[str, int], *, dry_run: bool, kind: str = "poster"
+    ) -> AssetOutcome:
+        file_path = asset["path"]
+        label = self._asset_label(asset)
+        log_debug(
+            LogTags.UPLOADER,
+            f"Skipping collection {kind} {label}: no collection on the server, and a year-tagged folder owns this title",
+            file=file_path,
+        )
+        record = self._get_uploaded_record(file_path)
+        misapplied = set(record.get("uploaded_media_types", [])) & {"movies", "shows", "seasons"}
+        if misapplied and not dry_run:
+            # It reached the movie/show before this guard existed; drop the cache so the item's own files re-apply.
+            siblings = [
+                a["path"]
+                for cached in (*self._local_assets_cache.values(), *self._local_artwork_cache.values())
+                for a in cached
+                if a.get("media_key") == asset.get("media_key") and a.get("folder_year") is not None
+            ]
+            paths = [file_path, *siblings]
+            self.db.query(PlexUploadRecord).filter(PlexUploadRecord.file_path.in_(paths)).delete(synchronize_session=False)
+            self.db.commit()
+            for path in paths:
+                self._record_cache.pop(path, None)
+            log_debug(
+                LogTags.UPLOADER,
+                f"Cleared upload cache for {len(siblings)} year-tagged file(s) titled like {label}, so the item's own {kind} is re-applied",
+                file=file_path,
+            )
+        return AssetOutcome(0, False, 0, media_counts, skip_reason=self.REASON_COLLECTION_SHADOWED)
 
     def _parse_asset_folder_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
         folder_name = file_path.parent.name
@@ -1420,6 +1474,8 @@ class PlexUploadService:
             if parsed:
                 assets.append(parsed)
         assets.sort(key=lambda a: (str(a.get("media_key") or ""), str(a.get("artwork_type") or "")))
+        # A movie folder may hold only a poster, so the poster list supplies year-tagged siblings too.
+        self._mark_shadowed_collection_assets(assets, self._local_assets_cache.get(str(destination)) or [])
         log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local artwork files", count=len(assets))
         return assets
 
@@ -2079,6 +2135,8 @@ class PlexUploadService:
             collections_raw=collections_raw,
         )
         if not inferred_filter:
+            if resolution_reason == self.REASON_COLLECTION_SHADOWED:
+                return self._skip_shadowed_collection_asset(asset, media_counts, dry_run=dry_run)
             if resolution_reason:
                 log_info(
                     LogTags.UPLOADER,
@@ -2386,6 +2444,8 @@ class PlexUploadService:
             )
 
         if not inferred_filter:
+            if resolution_reason == self.REASON_COLLECTION_SHADOWED:
+                return self._skip_shadowed_collection_asset(asset, {}, dry_run=dry_run, kind=artwork_type)
             if not resolution_reason:
                 return _no_match_outcome()
             # Artwork used to return silently, leaving the bucket undiagnosable.
@@ -2741,6 +2801,8 @@ class PlexUploadService:
         # No folder year → collection-style asset; prefer collections when available.
         if has_collections:
             return "collection", None
+        if asset.get("shadowed_by_year"):
+            return None, self.REASON_COLLECTION_SHADOWED
 
         return self._resolve_movie_show_filter(
             asset, arr_availability, has_movies=has_movies, has_shows=has_shows

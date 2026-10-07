@@ -1,6 +1,10 @@
 """Asset discovery, selection and matching: no-id assets, index candidates, target
 media type, stale-item guards, show folder keys, and unmatched-reason diagnosis."""
 
+import json
+from pathlib import Path
+
+from models.plex_upload import PlexUploadRecord
 from models.setting import Setting
 from services.plex_upload import AssetOutcome, PlexUploadService, format_unmatched_reasons
 from plex_upload_fakes import _FakePlexItem, wrap_item
@@ -1039,6 +1043,7 @@ def test_process_assets_accumulates_reasons_and_plex_targets(test_db, monkeypatc
         "not_downloaded": 1,
         "type_unresolved": 0,
         "edition_pending": 0,
+        "collection_shadowed": 0,
     }
     # Buckets partition the scan: nothing is double-counted, nothing vanishes.
     assert stats["uploaded_files"] == 2
@@ -1152,3 +1157,109 @@ def test_season_poster_without_arr_configured_falls_back_to_match_diagnosis(test
 
     assert outcome.matched is False
     assert outcome.skip_reason == "no_plex_match"
+
+
+# ── collection folders shadowing a year-tagged title ───────────────────────
+
+def _shadow_asset(path="/assets/The Dark Knight/poster.jpg"):
+    return {
+        "media_key": "thedarkknight", "path": path, "display_name": "The Dark Knight",
+        "asset_type": "main", "season_number": None, "folder_year": None, "shadowed_by_year": True,
+    }
+
+
+def _dark_knight_index(with_collection: bool):
+    movie = _FakePlexItem("movie", "The Dark Knight : Le Chevalier noir", 2008, "Films", rating_key="155")
+    index = {"movies": {"thedarkknight": [movie]}, "shows": {}, "collections": {}}
+    if with_collection:
+        index["collections"]["thedarkknight"] = [
+            _FakePlexItem("collection", "The Dark Knight", None, "Films", rating_key="900")
+        ]
+    return index
+
+
+def test_discover_marks_yearless_folder_shadowed_by_year_tagged_sibling(test_db, tmp_path):
+    """Plex names a TMDB collection without the suffix, so its folder ('The Dark Knight') shares
+    a media key with the first film's folder. Discovery flags the yearless one, posters and
+    artwork alike; a yearless folder with no such sibling is a normal collection."""
+    for name in ("The Dark Knight", "The Dark Knight (2008) {tmdb-155}", "Marvel"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "poster.jpg").write_bytes(b"img")
+    (tmp_path / "The Dark Knight" / "background.jpg").write_bytes(b"img")
+
+    service = PlexUploadService(test_db)
+    posters = {Path(a["path"]).parent.name: a for a in service._get_local_assets(tmp_path)}
+    artwork = {Path(a["path"]).parent.name: a for a in service._discover_local_artwork(tmp_path)}
+
+    assert posters["The Dark Knight"].get("shadowed_by_year") is True
+    assert "shadowed_by_year" not in posters["The Dark Knight (2008) {tmdb-155}"]
+    assert "shadowed_by_year" not in posters["Marvel"]
+    assert artwork["The Dark Knight"].get("shadowed_by_year") is True
+
+
+def test_shadowed_collection_folder_is_not_applied_to_the_movie(test_db):
+    """No collection on the server + a year-tagged sibling folder: the yearless folder is a
+    stale collection poster and must not fall through to the movie (with or without *arr)."""
+    service = PlexUploadService(test_db)
+    arr = {"movies": {"thedarkknight": {"has_file": True, "tmdb_id": 155}}, "shows": {}}
+
+    for availability in (arr, None):
+        outcome = service._upload_asset(
+            _shadow_asset(), _dark_knight_index(False), dry_run=True, arr_availability=availability
+        )
+        assert outcome.uploaded == 0
+        assert outcome.matched is False
+        assert outcome.skip_reason == "collection_shadowed"
+
+
+def test_shadowed_collection_folder_still_goes_to_its_collection(test_db):
+    service = PlexUploadService(test_db)
+
+    outcome = service._upload_asset(_shadow_asset(), _dark_knight_index(True), dry_run=True)
+
+    assert outcome.media_counts == {"movies": 0, "shows": 0, "seasons": 0, "collections": 1}
+
+
+def test_shadowed_collection_poster_once_applied_to_movie_releases_sibling_cache(test_db, tmp_path):
+    """Before this guard the collection poster reached the movie, and the movie's own poster is
+    cached as current, so Plex would keep the wrong image for good. Drop both records so the
+    movie's poster re-applies; unrelated records stay."""
+    coll = tmp_path / "The Dark Knight" / "poster.jpg"
+    own = tmp_path / "The Dark Knight (2008) {tmdb-155}" / "poster.jpg"
+    other = tmp_path / "Other (2000) {tmdb-9}" / "poster.jpg"
+    for f in (coll, own, other):
+        f.parent.mkdir()
+        f.write_bytes(b"img")
+    for path, kinds in ((coll, ["movies"]), (own, ["movies"]), (other, ["movies"])):
+        test_db.add(PlexUploadRecord(
+            file_path=str(path), file_mtime=path.stat().st_mtime,
+            uploaded_media_types=json.dumps(kinds), uploaded_to_rating_keys=json.dumps(["155"]),
+        ))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    shadowed = next(a for a in service._get_local_assets(tmp_path) if a["path"] == str(coll))
+    outcome = service._upload_asset(shadowed, _dark_knight_index(False), dry_run=False)
+
+    assert outcome.skip_reason == "collection_shadowed"
+    remaining = {r.file_path for r in test_db.query(PlexUploadRecord).all()}
+    assert remaining == {str(other)}
+
+
+def test_shadowed_collection_poster_never_misapplied_keeps_caches(test_db, tmp_path):
+    coll = tmp_path / "The Dark Knight" / "poster.jpg"
+    own = tmp_path / "The Dark Knight (2008) {tmdb-155}" / "poster.jpg"
+    for f in (coll, own):
+        f.parent.mkdir()
+        f.write_bytes(b"img")
+    test_db.add(PlexUploadRecord(
+        file_path=str(coll), file_mtime=coll.stat().st_mtime, uploaded_media_types=json.dumps(["collections"]),
+    ))
+    test_db.add(PlexUploadRecord(file_path=str(own), file_mtime=own.stat().st_mtime, uploaded_media_types=json.dumps(["movies"])))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    shadowed = next(a for a in service._get_local_assets(tmp_path) if a["path"] == str(coll))
+    service._upload_asset(shadowed, _dark_knight_index(False), dry_run=False)
+
+    assert test_db.query(PlexUploadRecord).count() == 2

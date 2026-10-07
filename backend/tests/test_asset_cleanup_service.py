@@ -346,3 +346,67 @@ def test_flat_series_artwork_not_deleted_when_sonarr_down(test_db, tmp_path):
 
     assert (dest / "Breaking Bad (2008) - logo.png").exists()
     assert (dest / "Breaking Bad (2008) - background.jpg").exists()
+
+
+def test_yearless_collection_folder_shadowing_movie_removed_when_server_has_no_collection(test_db, tmp_path):
+    """Plex names a TMDB collection without the suffix, so the renamer wrote 'The Dark Knight/'
+    beside 'The Dark Knight (2008) {tmdb-155}/'. Once the server has no such collection the
+    folder is stale and the uploader would land it on the movie — remove it (and its staged
+    tmp/ copy) even though the empty collection list skips other collection folders."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Dark Knight (2008) {tmdb-155}", ["poster.jpg"])
+    _make_folder(dest, "The Dark Knight", ["poster.jpg", "background.jpg"])
+    _make_folder(dest / "tmp", "The Dark Knight (2008) {tmdb-155}", ["poster.jpg"])
+    _make_folder(dest / "tmp", "The Dark Knight", ["poster.jpg"])
+    _make_folder(dest, "Marvel", ["poster.jpg"])  # plain collection folder: nothing to compare against, kept
+
+    media = {
+        "movies": [_movie("The Dark Knight", 2008, "/movies/The Dark Knight (2008) {tmdb-155}", tmdb_id=155)],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=False)
+
+    assert (dest / "The Dark Knight (2008) {tmdb-155}").exists()
+    assert not (dest / "The Dark Knight").exists()
+    assert not (dest / "tmp" / "The Dark Knight").exists()
+    assert (dest / "Marvel").exists()
+    assert result["counts"]["removed_orphans"] == 2
+    assert all("owns this title" in entry["reason"] for entry in result["removed"])
+
+
+def test_shadowing_collection_folder_kept_when_collection_fetch_failed(test_db, tmp_path):
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Dark Knight (2008) {tmdb-155}", ["poster.jpg"])
+    _make_folder(dest, "The Dark Knight", ["poster.jpg"])
+
+    media = {
+        "movies": [_movie("The Dark Knight", 2008, "/movies/The Dark Knight (2008) {tmdb-155}", tmdb_id=155)],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=False, fetch_failed_types={"collections"})
+
+    assert (dest / "The Dark Knight").exists()
+    assert result["counts"]["removed_orphans"] == 0
+
+
+def test_shadowing_collection_folder_kept_when_its_collection_exists(test_db, tmp_path):
+    """The folder matches a live Plex collection titled like the movie: it is that collection's
+    poster, not a stale one."""
+    dest = tmp_path / "assets"
+    _make_folder(dest, "The Dark Knight (2008) {tmdb-155}", ["poster.jpg"])
+    _make_folder(dest, "The Dark Knight", ["poster.jpg"])
+
+    media = {
+        "movies": [_movie("The Dark Knight", 2008, "/movies/The Dark Knight (2008) {tmdb-155}", tmdb_id=155)],
+        "series": [_series("Living Show", 2015, "/tv/Living Show (2015)", tvdb_id=42)],
+        "collections": [_collection("The Dark Knight")],
+    }
+
+    result = _run(test_db, dest, media, dry_run=False, delete_unknown=False)
+
+    assert (dest / "The Dark Knight").exists()
+    assert result["counts"]["removed_orphans"] == 0

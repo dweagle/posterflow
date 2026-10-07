@@ -680,3 +680,20 @@ def test_arr_answer_never_overrides_a_real_plex_match(test_db, tmp_path, monkeyp
     assert outcome.matched is True, "Plex has the item — *arr must not veto the upload"
     assert outcome.uploaded == 1
     assert outcome.skip_reason is None
+
+
+def test_artwork_in_shadowed_collection_folder_is_not_applied_to_the_movie(test_db, tmp_path):
+    """Same guard as posters: the collection folder's background must not land on the movie
+    when the server has no such collection and a year-tagged folder owns the title."""
+    svc = _svc(test_db)
+    for name in ("The Dark Knight", "The Dark Knight (2008) {tmdb-155}"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "background.jpg").write_bytes(b"b")
+    movie = wrap_item(_FakeArtItem(item_type="movie", title="The Dark Knight", year=2008))
+    idx = {"movies": {"thedarkknight": [movie]}, "shows": {}, "collections": {}}
+
+    artwork = {Path(a["path"]).parent.name: a for a in svc._discover_local_artwork(tmp_path)}
+    outcome = svc._upload_artwork_asset(artwork["The Dark Knight"], idx, dry_run=True)
+
+    assert outcome.matched is False
+    assert outcome.skip_reason == "collection_shadowed"
