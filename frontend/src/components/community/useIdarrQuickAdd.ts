@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react'
 import { getMakerIdarrConfig, getSettings, saveSettings } from '../../api/client'
 import { quickAddFilesToIdarr } from '../../utils/idarrQuickAdd'
-import { useIdarrSyncTarget, resolveSyncTargetIndex, readStoredSyncTarget, type IdarrSyncTargetOption } from '../../hooks/useIdarrSyncTarget'
+import { useIdarrSyncTarget, resolvePosterSyncTargetIndex, readStoredSyncTarget, type IdarrSyncTargetOption } from '../../hooks/useIdarrSyncTarget'
 
 export type IdarrTargetOption = IdarrSyncTargetOption
 
@@ -101,12 +101,12 @@ const getPrefs = () => prefs
  * Used by both the Requests and Lists tabs so the maker's local IDarr pipeline
  * works identically whichever tab a poster is dropped on. `action` is what an upload
  * does right now (Discord, Discord + IDarr, or IDarr only; the IDarr flavour is chosen in
- * the PSD settings modal). Also exposes the IDarr sync targets + the selected one, so
- * makers can pick the destination drive/scope without leaving the page.
+ * the PSD settings modal). Also exposes the IDarr poster drives + the selected one, so
+ * makers can pick the destination drive without leaving the page.
  */
 export function useIdarrQuickAdd() {
   const current = useSyncExternalStore(subscribe, getPrefs, getPrefs)
-  const { options: targetOptions, selectedValue: selectedTargetValue, setSelectedValue: setSelectedTarget } = useIdarrSyncTarget()
+  const { posterOptions: targetOptions, selectedPosterValue: selectedTargetValue, setSelectedValue: setSelectedTarget } = useIdarrSyncTarget()
 
   useEffect(() => {
     loadPreferences()
@@ -124,8 +124,9 @@ export function useIdarrQuickAdd() {
       const syncTargets = Array.isArray(config.sync_targets) ? config.sync_targets : []
       if (!syncTargets.length) return false
 
-      const resolvedIndex = resolveSyncTargetIndex(syncTargets, readStoredSyncTarget())
-      await quickAddFilesToIdarr(resolvedIndex >= 0 ? resolvedIndex : 0, files, config)
+      const resolvedIndex = resolvePosterSyncTargetIndex(syncTargets, readStoredSyncTarget())
+      if (resolvedIndex < 0) return false
+      await quickAddFilesToIdarr(resolvedIndex, files, config)
       return true
     } catch {
       return false

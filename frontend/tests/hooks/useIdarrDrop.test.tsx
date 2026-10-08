@@ -21,6 +21,7 @@ vi.mock('../../src/components/Toast', () => ({
 const TARGETS = [
   { personal_drive_id: 'a', source_dir: '/sync/a', label: 'Posters', scope_token: 'tok-a' },
   { personal_drive_id: 'b', source_dir: '/sync/b', label: 'Artwork', scope_token: 'tok-b', is_asset_drive: true },
+  { personal_drive_id: 'c', source_dir: '/sync/c', label: 'Posters 4K', scope_token: 'tok-c' },
 ]
 
 // The scope store is module-level, so each test gets fresh modules.
@@ -48,30 +49,42 @@ afterEach(() => {
 
 describe('useIdarrDrop', () => {
   it('drops into the shared scope and reports the add', async () => {
-    localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-b')
+    localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-c')
     const useIdarrDrop = await loadHook()
     const { result } = renderHook(() => useIdarrDrop())
     await waitFor(() => expect(result.current.enabled).toBe(true))
-    expect(result.current.targetLabel).toBe('Artwork')
+    expect(result.current.targetLabel).toBe('Posters 4K')
 
     const event = fileDrop()
     await act(async () => { result.current.dropProps.onDrop?.(event) })
 
-    expect(mocks.quickAddFilesToIdarr).toHaveBeenCalledWith(1, event.dataTransfer.files)
-    expect(mocks.showToast).toHaveBeenCalledWith('IDarr (Artwork): added 1 file(s)', 'success')
+    expect(mocks.quickAddFilesToIdarr).toHaveBeenCalledWith(2, event.dataTransfer.files)
+    expect(mocks.showToast).toHaveBeenCalledWith('IDarr (Posters 4K): added 1 file(s)', 'success')
     expect(result.current.state).toBe('done')
     expect(result.current.dragOver).toBe(false)
   })
 
-  it('a pinned target wins over the shared scope', async () => {
+  it('falls back to the first poster drive when the shared scope is an artwork drive', async () => {
     localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-b')
     const useIdarrDrop = await loadHook()
-    const { result } = renderHook(() => useIdarrDrop({ syncTargetIndex: 0 }))
+    const { result } = renderHook(() => useIdarrDrop())
     await waitFor(() => expect(result.current.enabled).toBe(true))
     expect(result.current.targetLabel).toBe('Posters')
 
     await act(async () => { result.current.dropProps.onDrop?.(fileDrop()) })
     expect(mocks.quickAddFilesToIdarr).toHaveBeenCalledWith(0, expect.anything())
+    expect(mocks.showToast).toHaveBeenCalledWith('IDarr (Posters): added 1 file(s)', 'success')
+  })
+
+  it('a pinned target wins over the shared scope, even an artwork one', async () => {
+    localStorage.setItem('posterflow.idarr.selectedSyncTarget', 'scope:tok-c')
+    const useIdarrDrop = await loadHook()
+    const { result } = renderHook(() => useIdarrDrop({ syncTargetIndex: 1 }))
+    await waitFor(() => expect(result.current.enabled).toBe(true))
+    expect(result.current.targetLabel).toBe('Artwork')
+
+    await act(async () => { result.current.dropProps.onDrop?.(fileDrop()) })
+    expect(mocks.quickAddFilesToIdarr).toHaveBeenCalledWith(1, expect.anything())
   })
 
   it('stays off when disabled, pinned to no scope, or there are no targets', async () => {

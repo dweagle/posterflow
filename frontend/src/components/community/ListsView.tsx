@@ -376,26 +376,39 @@ export default function ListsView() {
     }
   }, [moveTarget, token, login, updateListItem, showToast, refreshCommunityRequestCount])
 
+  // False means nothing reached IDarr (no poster drive configured, or the add failed).
+  const addToIdarr = useCallback(async (files: File[]): Promise<boolean> => {
+    const added = await doIdarrUpload(files)
+    if (!added) showToast('IDarr add failed. Check the IDarr drive.', 'error')
+    return added
+  }, [doIdarrUpload, showToast])
+
   const handleDrop = useCallback((e: React.DragEvent, _itemId: string) => {
     e.preventDefault()
     setDragOverId(null)
     const files = Array.from(e.dataTransfer.files)
     if (!files.length) return
-    if (idarrEnabled) void doIdarrUpload(files)
-  }, [idarrEnabled, doIdarrUpload])
+    if (idarrEnabled) void addToIdarr(files)
+  }, [idarrEnabled, addToIdarr])
 
   // Click-to-upload equivalent of the IDarr drop: open a file picker and push the
   // chosen poster(s) to the maker's IDarr pipeline (same path as a drag-drop).
   const doIdarrUploadForItem = useCallback(async (itemId: string, files: File[]) => {
     setUploadStates((prev) => new Map(prev).set(itemId, 'uploading'))
-    await doIdarrUpload(files)
-    setUploadStates((prev) => new Map(prev).set(itemId, 'done'))
+    const added = await addToIdarr(files)
+    setUploadStates((prev) => {
+      const next = new Map(prev)
+      if (added) next.set(itemId, 'done')
+      else next.delete(itemId)
+      return next
+    })
+    if (!added) return
     setTimeout(() => setUploadStates((prev) => {
       const next = new Map(prev)
       next.delete(itemId)
       return next
     }), 3000)
-  }, [doIdarrUpload])
+  }, [addToIdarr])
 
   const handleUploadClick = useCallback((itemId: string) => {
     uploadTargetRef.current = itemId

@@ -1,9 +1,9 @@
 import { HardDrive } from 'lucide-react'
 import { useIdarrSyncTarget } from '../../hooks/useIdarrSyncTarget'
 
-/** "IDarr drive" picker for the poster maker pages: the same shared scope as the sidebar picker. */
+/** "IDarr drive" picker for the poster maker pages: the shared sidebar scope, poster drives only. */
 export default function IdarrScopePicker() {
-  const { options, selectedValue, setSelectedValue } = useIdarrSyncTarget()
+  const { posterOptions: options, selectedPosterValue: selectedValue, setSelectedValue } = useIdarrSyncTarget()
   if (options.length === 0) return null
   return (
     <div className="artwork-scope-control">

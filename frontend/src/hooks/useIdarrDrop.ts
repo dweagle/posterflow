@@ -9,7 +9,7 @@ export type IdarrDropState = 'idle' | 'adding' | 'done'
 interface UseIdarrDropOptions {
   /** Off when the host handles drops itself. */
   enabled?: boolean
-  /** Pin the drop to one sync target (artwork cards use their artwork scope); omit for the shared scope. */
+  /** Pin the drop to one sync target (artwork cards use their artwork scope); omit for the shared poster drive. */
   syncTargetIndex?: number | null
 }
 
@@ -21,14 +21,14 @@ const isFileDrag = (event: DragEvent) => Array.from(event.dataTransfer?.types ??
  * not light the card up.
  */
 export function useIdarrDrop({ enabled = true, syncTargetIndex }: UseIdarrDropOptions = {}) {
-  const { targets, selectedIndex } = useIdarrSyncTarget()
+  const { targets, selectedPosterIndex } = useIdarrSyncTarget()
   const { showToast } = useToast()
   const [dragOver, setDragOver] = useState(false)
   const [state, setState] = useState<IdarrDropState>('idle')
   const depthRef = useRef(0)
   const resetTimerRef = useRef<number | null>(null)
 
-  const targetIndex = syncTargetIndex === undefined ? selectedIndex : syncTargetIndex
+  const targetIndex = syncTargetIndex === undefined ? selectedPosterIndex : syncTargetIndex
   const active = enabled && targetIndex !== null && targetIndex >= 0 && targetIndex < targets.length
   const targetLabel = active ? getSyncTargetLabel(targets[targetIndex as number], targetIndex as number) : ''
 

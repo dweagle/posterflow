@@ -4,6 +4,7 @@ import { getMakerIdarrConfig, type MakerIdarrSyncTarget } from '../api/client'
 export const IDARR_SYNC_TARGET_STORAGE_KEY = 'posterflow.idarr.selectedSyncTarget'
 
 type SyncTargetIdentity = Pick<MakerIdarrSyncTarget, 'personal_drive_id' | 'source_dir' | 'label' | 'scope_token'>
+type SyncTargetKind = Pick<MakerIdarrSyncTarget, 'is_asset_drive' | 'is_psd_drive'>
 
 function legacyStorageValue(target: SyncTargetIdentity): string {
   const driveId = String(target.personal_drive_id || '').trim()
@@ -37,6 +38,18 @@ export function resolveSyncTargetIndex(targets: SyncTargetIdentity[], stored: st
   const exact = targets.findIndex((target) => getSyncTargetStorageValue(target) === stored)
   if (exact >= 0) return exact
   return targets.findIndex((target) => legacyStorageValue(target) === stored)
+}
+
+// Artwork (asset) and PSD sync targets never take poster drops.
+export function isPosterSyncTarget(target: SyncTargetKind): boolean {
+  return !target.is_asset_drive && !target.is_psd_drive
+}
+
+// The stored selection when it is a poster drive, else the first poster drive; -1 when there is none.
+export function resolvePosterSyncTargetIndex(targets: (SyncTargetIdentity & SyncTargetKind)[], stored: string | null): number {
+  const index = resolveSyncTargetIndex(targets, stored)
+  if (index >= 0 && isPosterSyncTarget(targets[index])) return index
+  return targets.findIndex(isPosterSyncTarget)
 }
 
 export interface IdarrSyncTargetOption {
@@ -135,6 +148,15 @@ export function useIdarrSyncTarget() {
 
   const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : null
 
+  // Poster-only pickers (requests, maker cards) hide artwork and PSD drives; a shared selection
+  // that points at one of those falls back to the first poster drive.
+  const posterOptions = useMemo(
+    () => options.filter((option) => isPosterSyncTarget(targets[option.index])),
+    [options, targets],
+  )
+  const selectedPosterIndex = useMemo(() => resolvePosterSyncTargetIndex(targets, storedValue), [targets, storedValue])
+  const selectedPosterOption = selectedPosterIndex >= 0 ? options[selectedPosterIndex] : null
+
   const setSelectedValue = useCallback((value: string) => {
     writeStoredSyncTarget(value)
   }, [])
@@ -153,6 +175,9 @@ export function useIdarrSyncTarget() {
     selectedValue: selectedOption?.value ?? '',
     selectedLabel: selectedOption?.label ?? '',
     selectedTarget: selectedIndex >= 0 ? targets[selectedIndex] : null,
+    posterOptions,
+    selectedPosterIndex,
+    selectedPosterValue: selectedPosterOption?.value ?? '',
     setSelectedValue,
     setSelectedIndex,
     refresh: refreshIdarrSyncTargets,

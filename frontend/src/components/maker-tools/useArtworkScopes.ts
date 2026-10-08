@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { useIdarrSyncTarget, getSyncTargetStorageValue, resolveSyncTargetIndex } from '../../hooks/useIdarrSyncTarget'
+import { useIdarrSyncTarget, getSyncTargetStorageValue, isPosterSyncTarget, resolveSyncTargetIndex } from '../../hooks/useIdarrSyncTarget'
 
 export type AssetScope = { index: number; value: string; label: string }
 
@@ -16,7 +16,7 @@ export function useArtworkScopes() {
     })
     return {
       scopes: indexed.filter(({ t }) => Boolean(t.is_asset_drive)).map(toScope),
-      posterScopes: indexed.filter(({ t }) => !t.is_asset_drive && !t.is_psd_drive).map(toScope),
+      posterScopes: indexed.filter(({ t }) => isPosterSyncTarget(t)).map(toScope),
     }
   }, [targets])
 
