@@ -31,4 +31,6 @@ attrs==26.1.0
 # wheel platforms, a floor elsewhere so FreeBSD can use its pkg-provided build.
 numpy==2.5.3; sys_platform == "linux" or sys_platform == "darwin"
 numpy>=2.4; sys_platform != "linux" and sys_platform != "darwin"
+# notifications to any Apprise-supported service; pure Python, no [all-plugins] extras
+apprise==2.0.1
 setproctitle==1.3.7

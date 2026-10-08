@@ -25,7 +25,7 @@ Community drive recommendations — poster drives, artwork drives and the priori
 - **Scheduler** — Automate any job on a recurring schedule
 - **Live Job Status** — WebSocket-powered real-time job progress and log streaming
 - **After Job Scripts** — Autorun a custom script after a completed job
-- **Discord Notifications** — Optional notifications on job completion
+- **Notifications** — Optional Discord and Apprise notifications on job completion
 
 ## Quick Start
 

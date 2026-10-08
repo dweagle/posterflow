@@ -377,7 +377,7 @@ def test_runner_reports_the_original_error_when_a_commit_fails(sessions, tmp_pat
 
         with patch.object(sync_module, "SessionLocal", return_value=db), \
              patch.object(db, "commit", _failing_commit(db, failures, _job_message_pending(db, "Preparing to sync"))), \
-             patch.object(sync_module, "send_discord_notification", notify), \
+             patch.object(sync_module, "send_notification", notify), \
              patch.object(sync_module, "send_major_error_notification", lambda *a, **k: None), \
              pytest.raises(IntegrityError):
             if runner == "all":
@@ -413,7 +413,7 @@ def test_single_drive_runner_recovers_the_session_before_notifying(sessions, ass
 
         with patch.object(module, "SessionLocal", return_value=db), \
              patch.object(service_model, "sync_drive", sync_drive), \
-             patch.object(module, "send_discord_notification", notify), \
+             patch.object(module, "send_notification", notify), \
              patch.object(module, "send_major_error_notification", lambda *a, **k: None), \
              pytest.raises(IntegrityError):
             run(1, job_id)

@@ -397,7 +397,7 @@ def _run_upload_job(test_db, monkeypatch, stats):
     monkeypatch.setattr(upload_module, "PlexUploadService", _FakeService)
     monkeypatch.setattr(upload_module, "log_info", lambda tag, message, **kw: logs.append(message))
     monkeypatch.setattr(upload_module, "log_success", lambda tag, message, **kw: logs.append(f"{message} {kw}"))
-    monkeypatch.setattr(upload_module, "send_discord_notification", lambda *a, **k: logs.append(str(k.get("description", ""))))
+    monkeypatch.setattr(upload_module, "send_notification", lambda *a, **k: logs.append(str(k.get("description", ""))))
 
     upload_module.run_plex_upload_background_job(job.id, dry_run=False, skip_discord=False)
     return test_db.query(Job).filter(Job.id == job.id).first(), logs

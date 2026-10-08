@@ -27,7 +27,7 @@ from core.logging import (
     add_job_log_handler,
     remove_job_log_handler,
 )
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 from core.hooks import run_post_job_hook, HOOK_KEY_SYNC_ONE, HOOK_KEY_SYNC_ALL
 
 
@@ -83,7 +83,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
         if result.get('success'):
             success = True
             log_debug(LogTags.SCHEDULER, f"Completed '{drive_name}'")
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="success",
@@ -99,7 +99,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
         else:
             log_warning(LogTags.SCHEDULER, f"Failed '{drive_name}'")
             error_message = str(result.get("error") or result.get("message") or "Sync failed")
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="error",
@@ -127,7 +127,7 @@ def run_sync_one_job(drive_id: int, job_id: int, triggered_by: str = "manual") -
         # the notifications below read settings, so recover the session first
         db.rollback()
         log_error(LogTags.SCHEDULER, f"Sync job failed: {str(e)}\n{traceback.format_exc()}")
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="sync",
             event_type="error",
@@ -179,7 +179,7 @@ def _sync_all_poster_drives(db: Session, job_id: int, skip_discord: bool) -> dic
     if result.get('success'):
         log_debug(LogTags.SCHEDULER, f"Completed sync: {result.get('message', 'Done')}")
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="success",
@@ -196,7 +196,7 @@ def _sync_all_poster_drives(db: Session, job_id: int, skip_discord: bool) -> dic
         error_message = str(result.get("error") or result.get("message") or "Sync failed")
         log_warning(LogTags.SCHEDULER, f"Sync failed: {error_message}")
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="error",
@@ -246,7 +246,7 @@ def _sync_all_artwork_drives(db: Session, job_id: int, skip_discord: bool = Fals
     if result.get('success'):
         log_debug(LogTags.SYNC, f"Completed artwork sync: {result.get('message', 'Done')}")
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="success",
@@ -263,7 +263,7 @@ def _sync_all_artwork_drives(db: Session, job_id: int, skip_discord: bool = Fals
         error_message = str(result.get("error") or result.get("message") or "Artwork sync failed")
         log_warning(LogTags.SYNC, f"Artwork sync failed: {error_message}")
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="error",
@@ -332,7 +332,7 @@ def run_sync_all_job(job_id: int, skip_discord: bool = False, triggered_by: str 
         # Report regardless of which side ran — an artwork-only failure must not be silent.
         if not skip_discord:
             artwork_only = sync_artwork and not sync_posters
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="error",

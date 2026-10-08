@@ -36,7 +36,7 @@ from models.setting import get_setting, upsert_setting
 from services.rclone import RcloneService
 from services.sync_base import STEP_INDENT
 from services.idarr_runner import IdarrRunner
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 
 IDARR_RUN_HISTORY_KEEP_LATEST = 10
 # Auto-prune idarr_asset_cache after each run: remove entries with no activity in this many days.
@@ -867,7 +867,7 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
             discord_fields.append({"name": "Renamed Files", "value": renamed_value, "inline": False})
 
         if not config_data.get("source_filenames"):
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="idarr",
                 event_type="success",
@@ -919,7 +919,7 @@ def _run_idarr_background_job_locked(job_id: int, config_data: dict[str, Any]) -
         log_section_end(LogTags.IDARR, f"IDarr Job Stopped (job_id={job_id})")
     except Exception as exc:
         log_error(LogTags.IDARR, f"IDarr background job failed: {exc}\n{traceback.format_exc()}")
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="idarr",
             event_type="error",

@@ -42,7 +42,7 @@ from models.job import (
 from core.job_cancel import JobCancelled, check_cancelled
 from models.poster import Poster
 from services.border_replacer import BorderReplacerService
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 from services.poster_renamer import PosterRenameService
 from services.plex_upload import (
     PlexUploadService,
@@ -2336,7 +2336,7 @@ def run_plex_upload_background_job(
             log_warning(LogTags.UPLOADER, f"Could not persist upload stats for workflow reporting: {e}")
 
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
@@ -2357,7 +2357,7 @@ def run_plex_upload_background_job(
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Asset upload job failed: {e}\n{traceback.format_exc()}")
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="error",
@@ -2490,7 +2490,7 @@ def _complete_no_local_assets_warning(
         warning=warning_message,
     )
 
-    send_discord_notification(
+    send_notification(
         db,
         feature_key="plex_upload",
         event_type="info",
@@ -3365,7 +3365,7 @@ def run_plex_webhook_background_job(
                 discord_fields.append(
                     {"name": "⚠️ Year Discrepancy", "value": year_discrepancy_text, "inline": False}
                 )
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="plex_upload",
                 event_type="success",
@@ -3385,7 +3385,7 @@ def run_plex_webhook_background_job(
         raise
     except Exception as e:
         log_error(LogTags.UPLOADER, f"Webhook upload failed: {e}\n{traceback.format_exc()}")
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="plex_upload",
             event_type="error",

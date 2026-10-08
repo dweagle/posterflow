@@ -8,7 +8,6 @@ from services.discord_notifications import (
     _normalize_features,
     _truncate,
     send_discord_notification,
-    send_major_error_notification,
 )
 
 
@@ -282,53 +281,6 @@ def test_send_discord_notification_returns_false_when_feature_disabled():
 
 
 # ---------------------------------------------------------------------------
-# send_major_error_notification (delegates to send_discord_notification)
-# ---------------------------------------------------------------------------
-
-
-def test_send_major_error_notification_uses_system_errors_feature():
-    import json
-
-    db = MagicMock()
-    features = {
-        "system_errors": {
-            "enabled": True,
-            "on_success": True,
-            "on_error": True,
-            "include_summary": True,
-            "include_details": True,
-        }
-    }
-
-    def mock_get_setting(session, key):
-        s = MagicMock()
-        if key == "discord_notifications_enabled":
-            s.value = "true"
-        elif key == "discord_notifications_webhook_url":
-            s.value = "https://discord.com/api/webhooks/123/abc"
-        elif key == "discord_notifications_features":
-            s.value = json.dumps(features)
-        else:
-            return None
-        return s
-
-    mock_response = MagicMock()
-    mock_response.status_code = 204
-
-    with patch("services.discord_notifications.get_setting", side_effect=mock_get_setting):
-        with patch("requests.post", return_value=mock_response) as mock_post:
-            result = send_major_error_notification(
-                db,
-                source="test_module",
-                message="Something went wrong",
-                job_id=42,
-            )
-
-    assert result is True
-    mock_post.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
 # Artwork reporting: artwork must reach Discord everywhere posters do —
 # especially artwork-only runs, which used to be completely silent.
 # ---------------------------------------------------------------------------
@@ -367,7 +319,7 @@ def test_artwork_sync_all_success_reports_same_fields_as_posters(test_db, monkey
     monkeypatch.setattr(art_sync, "ArtworkSyncService", _fake_artwork_service(
         {"success": True, "drives_synced": 2, "added": 5, "updated": 3, "deleted": 1}))
     sent: list = []
-    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+    monkeypatch.setattr(sync_module, "send_notification", lambda *a, **k: sent.append(k))
 
     sync_module._sync_all_artwork_drives(test_db, job.id)
 
@@ -391,7 +343,7 @@ def test_artwork_sync_all_failure_is_not_silent(test_db, monkeypatch):
         {"success": False, "error": "rclone exploded"}))
     sent: list = []
     errors: list = []
-    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+    monkeypatch.setattr(sync_module, "send_notification", lambda *a, **k: sent.append(k))
     monkeypatch.setattr(sync_module, "send_major_error_notification", lambda *a, **k: errors.append(k))
 
     sync_module._sync_all_artwork_drives(test_db, job.id)
@@ -412,7 +364,7 @@ def test_artwork_sync_all_respects_skip_discord(test_db, monkeypatch):
 
     monkeypatch.setattr(art_sync, "ArtworkSyncService", _fake_artwork_service({"success": True, "drives_synced": 1}))
     sent: list = []
-    monkeypatch.setattr(sync_module, "send_discord_notification", lambda *a, **k: sent.append(k))
+    monkeypatch.setattr(sync_module, "send_notification", lambda *a, **k: sent.append(k))
 
     sync_module._sync_all_artwork_drives(test_db, job.id, skip_discord=True)
 
@@ -449,7 +401,7 @@ def _patch_unmatched(monkeypatch, result):
     monkeypatch.setattr(um, "UnmatchedAssetsService", _Svc)
     monkeypatch.setattr(um, "reconcile_community_lists", lambda *a, **k: None)
     sent: list = []
-    monkeypatch.setattr(um, "send_discord_notification", lambda *a, **k: sent.append(k))
+    monkeypatch.setattr(um, "send_notification", lambda *a, **k: sent.append(k))
     return um, sent
 
 
@@ -662,7 +614,7 @@ def test_plex_upload_stats_are_committed_not_just_staged(test_db, monkeypatch):
     monkeypatch.setattr(upload_module, "SessionLocal", lambda: test_db)
     monkeypatch.setattr(test_db, "close", lambda: None, raising=False)
     monkeypatch.setattr(upload_module, "PlexUploadService", _FakeService)
-    monkeypatch.setattr(upload_module, "send_discord_notification", lambda *a, **k: None)
+    monkeypatch.setattr(upload_module, "send_notification", lambda *a, **k: None)
 
     upload_module.run_plex_upload_background_job(job.id, dry_run=False, skip_discord=True)
 

@@ -393,27 +393,3 @@ def send_discord_workflow_summary(
     except Exception as exc:
         log_error(LogTags.API, f"Failed to send Discord workflow summary: {exc}")
         return False
-
-
-def send_major_error_notification(
-    db: Session,
-    *,
-    source: str,
-    message: str,
-    job_id: int | None = None,
-) -> bool:
-    fields: List[Dict[str, Any]] = [
-        {"name": "Source", "value": source, "inline": True},
-    ]
-    if job_id is not None:
-        fields.append({"name": "Job ID", "value": str(job_id), "inline": True})
-
-    return send_discord_notification(
-        db,
-        feature_key="system_errors",
-        event_type="error",
-        title="PosterFlow Major Error",
-        description=message,
-        fields=fields,
-        color=0xF44336,
-    )

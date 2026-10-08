@@ -79,7 +79,9 @@ export {
 } from './maintenance'
 
 export {
+  type AppriseNotificationConfig,
   type DiscordNotificationConfig,
+  type AppriseNotificationFeatureConfig,
   type DiscordNotificationFeatureConfig,
   type MakerIdarrCacheStats,
   type MakerIdarrConfig,
@@ -96,6 +98,7 @@ export {
   addMakerIdarrIgnoredTitle,
   checkSetupComplete,
   clearMakerIdarrPendingMatches,
+  getAppriseNotificationConfig,
   getDiscordNotificationConfig,
   getMakerIdarrCacheStats,
   getMakerIdarrConfig,
@@ -121,6 +124,7 @@ export {
   reviewMakerIdarrPendingCandidate,
   runMakerIdarrCacheMaintenance,
   saveBulkSettings,
+  saveAppriseNotificationConfig,
   saveDiscordNotificationConfig,
   saveMakerIdarrConfig,
   savePlexLibraryConfig,
@@ -132,6 +136,7 @@ export {
   type BackupStorageSettings,
   getBackupStorage,
   saveBackupStorage,
+  testAppriseNotification,
   testDiscordNotification,
   testJellyfin,
   testPlex,

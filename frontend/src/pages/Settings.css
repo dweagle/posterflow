@@ -221,6 +221,18 @@
   flex-shrink: 0;
 }
 
+.notification-channel-tabs {
+  margin-bottom: 1rem;
+}
+
+/* unsaved marker on a channel tab, same red as the unsaved Save button */
+.notification-channel-unsaved {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f44336;
+}
+
 .notification-webhook-group {
   margin: 0.5rem 0 0.75rem;
 }
@@ -246,7 +258,8 @@
   font-size: 0.9rem;
 }
 
-.notification-webhook-group input {
+.notification-webhook-group input,
+.notification-webhook-group textarea {
   width: 100%;
   padding: 0.5rem 0.75rem;
   background-color: #2a2a2a;
@@ -256,9 +269,21 @@
   font-size: 0.875rem;
 }
 
-.notification-webhook-group input:focus {
+.notification-webhook-group input:focus,
+.notification-webhook-group textarea:focus {
   outline: none;
   border-color: #64b5f6;
+}
+
+/* Apprise URL lists: textareas styled like the Discord inputs; autoGrowTextarea sets the height */
+.notification-webhook-group textarea,
+.notification-feature-webhook textarea {
+  display: block;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.25;
+  font-family: inherit;
+  letter-spacing: normal;
 }
 
 .settings-input-row {
@@ -440,6 +465,19 @@
   font-style: italic;
 }
 
+.settings .notification-feature-webhook textarea {
+  font-size: 0.8rem;
+  color: #aaa;
+  min-height: 28px;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+.notification-feature-webhook textarea::placeholder {
+  color: #555;
+  font-style: italic;
+}
+
 .notification-feature-webhook .toggle-visibility {
   height: 28px;
 }
@@ -555,6 +593,16 @@ details[open] .feature-events-summary::before {
   font-size: 0.85rem;
   flex-shrink: 0;
   margin-top: 0.1rem;
+}
+
+.feature-event-item a {
+  color: #64b5f6;
+  text-decoration: none;
+}
+
+.feature-event-item a:hover {
+  color: #42a5f5;
+  text-decoration: underline;
 }
 
 .feature-event-success .feature-event-icon {

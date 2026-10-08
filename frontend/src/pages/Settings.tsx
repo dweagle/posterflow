@@ -10,6 +10,11 @@ import {
   testDiscordNotification,
   DiscordNotificationConfig,
   DiscordNotificationFeatureConfig,
+  getAppriseNotificationConfig,
+  saveAppriseNotificationConfig,
+  testAppriseNotification,
+  AppriseNotificationConfig,
+  AppriseNotificationFeatureConfig,
   getApiErrorMessage,
   revealSensitiveSetting,
 } from '../api/client'
@@ -37,6 +42,8 @@ import './Settings.css'
 
 type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
 const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
+type NotificationChannel = 'discord' | 'apprise'
+const NOTIFICATION_CHANNEL_STORAGE_KEY = 'posterflow.settings.notificationChannel'
 
 const isSettingsTab = (value: string): value is SettingsTab => {
   return ['basic', 'notifications', 'rclone', 'media', 'scheduling', 'backup', 'maintenance', 'security', 'scripts'].includes(value)
@@ -126,7 +133,7 @@ const calculateDirtyMediaIndices = (
   }
 }
 
-const DISCORD_NOTIFICATION_FEATURE_ORDER = [
+const NOTIFICATION_FEATURE_ORDER = [
   'workflow',
   'sync',
   'poster_renamer',
@@ -137,7 +144,7 @@ const DISCORD_NOTIFICATION_FEATURE_ORDER = [
   'system_errors',
 ]
 
-const DISCORD_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info'; label: string }[]> = {
+const NOTIFICATION_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info'; label: string }[]> = {
   workflow: [
     { type: 'success', label: 'Success - Per-step summary embed — one embed per step that ran (poster sync, artwork sync, renamer, border, plex, unmatched), each showing its own result' },
     { type: 'error', label: 'Error - Step failed — included in the summary as an error embed for that step' },
@@ -174,7 +181,7 @@ const DISCORD_FEATURE_EVENTS: Record<string, { type: 'success' | 'error' | 'info
   ],
 }
 
-const DISCORD_NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
+const NOTIFICATION_FEATURE_LABELS: Record<string, string> = {
   workflow: 'Workflow Start/End',
   sync: 'Drive Sync Summary (Posters + Artwork)',
   poster_renamer: 'Asset Renamer Results',
@@ -205,7 +212,7 @@ const defaultDiscordConfig = (): DiscordNotificationConfig => ({
   mention_on_error: true,
   mention_on_success: false,
   mention_on_info: false,
-  features: DISCORD_NOTIFICATION_FEATURE_ORDER.reduce<Record<string, DiscordNotificationFeatureConfig>>((accumulator, key) => {
+  features: NOTIFICATION_FEATURE_ORDER.reduce<Record<string, DiscordNotificationFeatureConfig>>((accumulator, key) => {
     accumulator[key] = defaultDiscordFeatureConfig()
     return accumulator
   }, {}),
@@ -225,7 +232,7 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
   normalized.mention_on_info = config.mention_on_info ?? false
 
   if (config.features) {
-    DISCORD_NOTIFICATION_FEATURE_ORDER.forEach((key) => {
+    NOTIFICATION_FEATURE_ORDER.forEach((key) => {
       const candidate = config.features?.[key]
       if (!candidate) {
         return
@@ -249,6 +256,65 @@ const normalizeDiscordConfig = (config?: Partial<DiscordNotificationConfig>): Di
   return normalized
 }
 
+const defaultAppriseFeatureConfig = (): AppriseNotificationFeatureConfig => ({
+  enabled: false,
+  on_success: true,
+  on_error: true,
+  include_summary: true,
+  include_details: true,
+  urls: '',
+  tags: '',
+})
+
+const defaultAppriseConfig = (): AppriseNotificationConfig => ({
+  enabled: false,
+  urls: '',
+  features: NOTIFICATION_FEATURE_ORDER.reduce<Record<string, AppriseNotificationFeatureConfig>>((accumulator, key) => {
+    accumulator[key] = defaultAppriseFeatureConfig()
+    return accumulator
+  }, {}),
+})
+
+const normalizeAppriseConfig = (config?: Partial<AppriseNotificationConfig>): AppriseNotificationConfig => {
+  const normalized = defaultAppriseConfig()
+  if (!config) {
+    return normalized
+  }
+
+  normalized.enabled = !!config.enabled
+  normalized.urls = config.urls || ''
+
+  if (config.features) {
+    NOTIFICATION_FEATURE_ORDER.forEach((key) => {
+      const candidate = config.features?.[key]
+      if (!candidate) {
+        return
+      }
+      const defaults = defaultAppriseFeatureConfig()
+      normalized.features[key] = {
+        enabled: !!candidate.enabled,
+        on_success: candidate.on_success ?? defaults.on_success,
+        on_error: candidate.on_error ?? defaults.on_error,
+        include_summary: candidate.include_summary ?? defaults.include_summary,
+        include_details: candidate.include_details ?? defaults.include_details,
+        urls: candidate.urls ?? '',
+        tags: candidate.tags ?? '',
+      }
+    })
+  }
+
+  return normalized
+}
+
+// URL lists grow one line per URL; at one line they size like the inputs beside them
+const autoGrowTextarea = (element: HTMLTextAreaElement | null) => {
+  if (!element) {
+    return
+  }
+  element.style.height = 'auto'
+  element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`
+}
+
 function Settings() {
   const MASKED_VALUE = '***masked***'
 
@@ -270,10 +336,20 @@ function Settings() {
   const [showUnsavedModal, setShowUnsavedModal] = useState(false)
   const [pendingTabChange, setPendingTabChange] = useState<SettingsTab | null>(null)
   const [discordConfig, setDiscordConfig] = useState<DiscordNotificationConfig>(defaultDiscordConfig())
-  const [hasUnsavedNotifications, setHasUnsavedNotifications] = useState(false)
+  const [hasUnsavedDiscord, setHasUnsavedDiscord] = useState(false)
+  const [hasUnsavedApprise, setHasUnsavedApprise] = useState(false)
+  const hasUnsavedNotifications = hasUnsavedDiscord || hasUnsavedApprise
   const [testingDiscord, setTestingDiscord] = useState(false)
   const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
   const [showFeatureWebhooks, setShowFeatureWebhooks] = useState<Record<string, boolean>>({})
+  const [appriseConfig, setAppriseConfig] = useState<AppriseNotificationConfig>(defaultAppriseConfig())
+  const [testingApprise, setTestingApprise] = useState(false)
+  const [showAppriseUrls, setShowAppriseUrls] = useState(false)
+  const [showFeatureAppriseUrls, setShowFeatureAppriseUrls] = useState<Record<string, boolean>>({})
+  const [notificationChannel, setNotificationChannel] = useState<NotificationChannel>(() => {
+    const saved = localStorage.getItem(NOTIFICATION_CHANNEL_STORAGE_KEY)
+    return saved === 'apprise' ? 'apprise' : 'discord'
+  })
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
   const [showFanartKey, setShowFanartKey] = useState(false)
@@ -398,6 +474,7 @@ function Settings() {
     radarr_instances: [{ name: 'Radarr', url: '', api_key: '' }],
   }))
   const discordBaselineRef = useRef<DiscordNotificationConfig>(defaultDiscordConfig())
+  const appriseBaselineRef = useRef<AppriseNotificationConfig>(defaultAppriseConfig())
   
   const { showToast } = useToast()
 
@@ -545,11 +622,13 @@ function Settings() {
     const loadInitialSettings = async () => {
       const coreSnapshotPromise = fetchSettings()
       const discordSnapshotPromise = fetchDiscordNotificationSettings()
+      const appriseSnapshotPromise = fetchAppriseNotificationSettings()
 
       await Promise.all([
         fetchDebugStatus(),
         coreSnapshotPromise,
         discordSnapshotPromise,
+        appriseSnapshotPromise,
         fetchSchedules(),
         fetchDrives(),
         fetchLibraryConfigs(),
@@ -557,6 +636,7 @@ function Settings() {
 
       const coreSnapshot = await coreSnapshotPromise
       const discordSnapshot = await discordSnapshotPromise
+      const appriseSnapshot = await appriseSnapshotPromise
       if (coreSnapshot) {
         rcloneBaselineRef.current = normalizeRcloneSettings(coreSnapshot.rclone)
         mediaBaselineRef.current = normalizeMediaSettings(coreSnapshot.media)
@@ -566,7 +646,11 @@ function Settings() {
       }
       if (discordSnapshot) {
         discordBaselineRef.current = normalizeDiscordConfig(discordSnapshot)
-        setHasUnsavedNotifications(false)
+        setHasUnsavedDiscord(false)
+      }
+      if (appriseSnapshot) {
+        appriseBaselineRef.current = normalizeAppriseConfig(appriseSnapshot)
+        setHasUnsavedApprise(false)
       }
 
       if (cancelled) {
@@ -617,6 +701,18 @@ function Settings() {
     }
   }
 
+  const fetchAppriseNotificationSettings = async (): Promise<AppriseNotificationConfig | null> => {
+    try {
+      const config = await getAppriseNotificationConfig()
+      const normalized = normalizeAppriseConfig(config)
+      setAppriseConfig(normalized)
+      return normalized
+    } catch (error) {
+      console.error('Error fetching Apprise notification settings:', error)
+      return null
+    }
+  }
+
   const {
     editingSchedule,
     scheduleSaving,
@@ -653,12 +749,22 @@ function Settings() {
   useEffect(() => {
     const baseline = normalizeDiscordConfig(discordBaselineRef.current)
     const current = normalizeDiscordConfig(discordConfig)
-    setHasUnsavedNotifications(JSON.stringify(current) !== JSON.stringify(baseline))
+    setHasUnsavedDiscord(JSON.stringify(current) !== JSON.stringify(baseline))
   }, [discordConfig])
+
+  useEffect(() => {
+    const baseline = normalizeAppriseConfig(appriseBaselineRef.current)
+    const current = normalizeAppriseConfig(appriseConfig)
+    setHasUnsavedApprise(JSON.stringify(current) !== JSON.stringify(baseline))
+  }, [appriseConfig])
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_TAB_STORAGE_KEY, activeTab)
   }, [activeTab])
+
+  useEffect(() => {
+    localStorage.setItem(NOTIFICATION_CHANNEL_STORAGE_KEY, notificationChannel)
+  }, [notificationChannel])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -712,7 +818,9 @@ function Settings() {
 
     if (activeTab === 'notifications') {
       setDiscordConfig(normalizeDiscordConfig(discordBaselineRef.current))
-      setHasUnsavedNotifications(false)
+      setHasUnsavedDiscord(false)
+      setAppriseConfig(normalizeAppriseConfig(appriseBaselineRef.current))
+      setHasUnsavedApprise(false)
     }
 
     if (pendingTabChange) {
@@ -760,7 +868,7 @@ function Settings() {
   }
 
   const handleSaveDiscordNotifications = async () => {
-    if (!hasUnsavedNotifications) {
+    if (!hasUnsavedDiscord) {
       return
     }
 
@@ -769,7 +877,7 @@ function Settings() {
       const payload = normalizeDiscordConfig(discordConfig)
       await saveDiscordNotificationConfig(payload)
       discordBaselineRef.current = normalizeDiscordConfig(payload)
-      setHasUnsavedNotifications(false)
+      setHasUnsavedDiscord(false)
       showToast('Discord notification settings saved successfully!', 'success')
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to save Discord notification settings'), 'error')
@@ -864,6 +972,102 @@ function Settings() {
     }
 
     setShowFeatureWebhooks((prev) => ({ ...prev, [featureKey]: !prev[featureKey] }))
+  }
+
+  const updateAppriseFeature = (featureKey: string, patch: Partial<AppriseNotificationFeatureConfig>) => {
+    setAppriseConfig((prev) => ({
+      ...prev,
+      features: {
+        ...prev.features,
+        [featureKey]: { ...prev.features[featureKey], ...patch },
+      },
+    }))
+  }
+
+  const handleSaveAppriseNotifications = async () => {
+    if (!hasUnsavedApprise) {
+      return
+    }
+
+    try {
+      setSaving(true)
+      const payload = normalizeAppriseConfig(appriseConfig)
+      await saveAppriseNotificationConfig(payload)
+      appriseBaselineRef.current = normalizeAppriseConfig(payload)
+      setHasUnsavedApprise(false)
+      showToast('Apprise notification settings saved successfully!', 'success')
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to save Apprise notification settings'), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTestAppriseNotification = async () => {
+    try {
+      setTestingApprise(true)
+      const result = await testAppriseNotification(normalizeAppriseConfig(appriseConfig))
+      showToast(result.message || 'Apprise test notification sent', 'success')
+    } catch (error) {
+      showToast(getApiErrorMessage(error, 'Failed to send Apprise test notification'), 'error')
+    } finally {
+      setTestingApprise(false)
+    }
+  }
+
+  const handleToggleAppriseUrlsVisibility = async () => {
+    const willShow = !showAppriseUrls
+    if (willShow && appriseConfig.urls === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'apprise_notifications_urls' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Apprise URLs available to reveal', 'error')
+          return
+        }
+        appriseBaselineRef.current = normalizeAppriseConfig({ ...appriseBaselineRef.current, urls: revealedValue })
+        setAppriseConfig((prev) => ({ ...prev, urls: revealedValue }))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Apprise URLs'), 'error')
+        return
+      }
+    }
+
+    setShowAppriseUrls((prev) => !prev)
+  }
+
+  const handleToggleFeatureAppriseUrlsVisibility = async (featureKey: string) => {
+    const willShow = !showFeatureAppriseUrls[featureKey]
+    const currentUrls = appriseConfig.features[featureKey]?.urls ?? ''
+
+    if (willShow && currentUrls === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({
+          setting_key: 'apprise_notifications_features',
+          field: 'urls',
+          instance_name: featureKey,
+        })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast(`No saved Apprise URLs for ${featureKey}`, 'error')
+          return
+        }
+        const withRevealed = (config: AppriseNotificationConfig): AppriseNotificationConfig => ({
+          ...config,
+          features: {
+            ...config.features,
+            [featureKey]: { ...config.features[featureKey], urls: revealedValue },
+          },
+        })
+        appriseBaselineRef.current = normalizeAppriseConfig(withRevealed(appriseBaselineRef.current))
+        setAppriseConfig((prev) => withRevealed(prev))
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal feature Apprise URLs'), 'error')
+        return
+      }
+    }
+
+    setShowFeatureAppriseUrls((prev) => ({ ...prev, [featureKey]: !prev[featureKey] }))
   }
 
   return (
@@ -1065,6 +1269,28 @@ function Settings() {
       )}
 
       {activeTab === 'notifications' && (
+        <>
+        <div className="notification-channel-tabs pf-subtabs" role="tablist" aria-label="Notification service">
+          {(['discord', 'apprise'] as NotificationChannel[]).map((channel) => {
+            const unsaved = channel === 'discord' ? hasUnsavedDiscord : hasUnsavedApprise
+            return (
+              <button
+                key={channel}
+                type="button"
+                role="tab"
+                aria-selected={notificationChannel === channel}
+                className={notificationChannel === channel ? 'active' : ''}
+                onClick={() => setNotificationChannel(channel)}
+                title={unsaved ? 'Unsaved changes' : undefined}
+              >
+                {channel === 'discord' ? 'Discord' : 'Apprise'}
+                {unsaved && <span className="notification-channel-unsaved" aria-label="Unsaved changes" />}
+              </button>
+            )
+          })}
+        </div>
+
+        {notificationChannel === 'discord' && (
         <div className="settings-section">
           <div className="settings-section-header">
             <div>
@@ -1075,12 +1301,12 @@ function Settings() {
             </div>
             <button
               type="button"
-              className={`btn-save ${hasUnsavedNotifications ? 'btn-unsaved' : ''}`}
+              className={`btn-save ${hasUnsavedDiscord ? 'btn-unsaved' : ''}`}
               onClick={handleSaveDiscordNotifications}
-              disabled={saving || !hasUnsavedNotifications}
-              title={hasUnsavedNotifications ? 'Save changes' : 'No changes to save'}
+              disabled={saving || !hasUnsavedDiscord}
+              title={hasUnsavedDiscord ? 'Save changes' : 'No changes to save'}
             >
-              {saving ? 'Saving...' : 'Save Notification Settings'}
+              {saving ? 'Saving...' : 'Save Discord Settings'}
             </button>
           </div>
 
@@ -1208,7 +1434,7 @@ function Settings() {
           <div className="notification-section-divider" />
 
           <div className="notification-feature-list">
-            {DISCORD_NOTIFICATION_FEATURE_ORDER.map((featureKey) => {
+            {NOTIFICATION_FEATURE_ORDER.map((featureKey) => {
               const feature = discordConfig.features[featureKey]
               const featureWebhookVisible = showFeatureWebhooks[featureKey] ?? false
               const featureWebhookValue = feature?.webhook_url ?? ''
@@ -1216,12 +1442,12 @@ function Settings() {
                 <div className="notification-feature-item" key={featureKey}>
                   <div className="setting-item">
                     <div className="setting-info">
-                      <label>{DISCORD_NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
-                      {DISCORD_FEATURE_EVENTS[featureKey] && (
+                      <label>{NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
+                      {NOTIFICATION_FEATURE_EVENTS[featureKey] && (
                         <details className="feature-events-disclosure">
                           <summary className="feature-events-summary">What gets sent?</summary>
                           <ul className="feature-events-list">
-                            {DISCORD_FEATURE_EVENTS[featureKey].map((event, index) => (
+                            {NOTIFICATION_FEATURE_EVENTS[featureKey].map((event, index) => (
                               <li key={index} className={`feature-event-item feature-event-${event.type}`}>
                                 <span className="feature-event-icon">{event.type === 'success' ? '✓' : event.type === 'info' ? 'ℹ' : '✗'}</span>
                                 {event.label}
@@ -1362,6 +1588,183 @@ function Settings() {
             })}
           </div>
         </div>
+        )}
+
+        {notificationChannel === 'apprise' && (
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <div>
+              <h2>Apprise Notifications</h2>
+              <p className="setting-description">
+                Send the same notifications through Apprise to Telegram, Pushover, ntfy, Gotify, Slack, email and many more services.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`btn-save ${hasUnsavedApprise ? 'btn-unsaved' : ''}`}
+              onClick={handleSaveAppriseNotifications}
+              disabled={saving || !hasUnsavedApprise}
+              title={hasUnsavedApprise ? 'Save changes' : 'No changes to save'}
+            >
+              {saving ? 'Saving...' : 'Save Apprise Settings'}
+            </button>
+          </div>
+
+          <div className="setting-item">
+            <div className="setting-info">
+              <label>Enable Apprise Notifications</label>
+              <p className="setting-description">
+                Master switch for Apprise notifications across all selected features.
+              </p>
+            </div>
+            <div className="setting-control">
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={appriseConfig.enabled}
+                  onChange={(event) => setAppriseConfig((prev) => ({
+                    ...prev,
+                    enabled: event.target.checked,
+                  }))}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div className="notification-webhook-group">
+            <label>Apprise URLs</label>
+            <p className="notification-global-description">
+              One URL per line. Every enabled feature below sends to these URLs unless it has its own list.
+            </p>
+            <details className="feature-events-disclosure global-events-disclosure">
+              <summary className="feature-events-summary">How does it work?</summary>
+              <ul className="feature-events-list">
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Apprise turns one URL into a delivery to one service. The URL names the service and carries its credentials.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>Find the URL format for your service at <a href="https://appriseit.com/" target="_blank" rel="noreferrer">appriseit.com</a>.</span></li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Lines starting with <code>#</code> are ignored, so you can label your URLs.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span>Running the Apprise API server? Add <code>apprise://HOST:PORT/KEY</code> and manage targets there.</li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>Tags route notifications. Prefix a URL with tags, for example <code>home, urgent = pover://USER_KEY@APP_TOKEN</code>.</span></li>
+                <li className="feature-event-item"><span className="feature-event-icon" style={{ color: '#64b5f6' }}>•</span><span>A feature with tags only sends to URLs carrying one of them. A URL tagged <code>always</code> receives everything.</span></li>
+              </ul>
+            </details>
+            <div className="settings-input-row">
+              <div className="input-with-toggle">
+                <textarea
+                  ref={(element) => autoGrowTextarea(element)}
+                  className={showAppriseUrls ? '' : 'password-textarea'}
+                  value={appriseConfig.urls}
+                  onChange={(event) => setAppriseConfig((prev) => ({
+                    ...prev,
+                    urls: event.target.value,
+                  }))}
+                  placeholder="tgram://BOT_TOKEN/CHAT_ID (one URL per line)"
+                  rows={1}
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="toggle-visibility"
+                  onClick={handleToggleAppriseUrlsVisibility}
+                  title={showAppriseUrls ? 'Hide' : 'Show'}
+                  aria-label={showAppriseUrls ? 'Hide Apprise URLs' : 'Show Apprise URLs'}
+                >
+                  {showAppriseUrls ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary notification-test-inline"
+                onClick={handleTestAppriseNotification}
+                disabled={testingApprise || saving}
+              >
+                {testingApprise ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+          </div>
+
+          <div className="notification-section-divider" />
+
+          <div className="notification-feature-list">
+            {NOTIFICATION_FEATURE_ORDER.map((featureKey) => {
+              const feature = appriseConfig.features[featureKey]
+              const featureUrlsVisible = showFeatureAppriseUrls[featureKey] ?? false
+              return (
+                <div className="notification-feature-item" key={featureKey}>
+                  <div className="setting-item">
+                    <div className="setting-info">
+                      <label>{NOTIFICATION_FEATURE_LABELS[featureKey] || featureKey}</label>
+                      {NOTIFICATION_FEATURE_EVENTS[featureKey] && (
+                        <details className="feature-events-disclosure">
+                          <summary className="feature-events-summary">What gets sent?</summary>
+                          <ul className="feature-events-list">
+                            {NOTIFICATION_FEATURE_EVENTS[featureKey].map((event, index) => (
+                              <li key={index} className={`feature-event-item feature-event-${event.type}`}>
+                                <span className="feature-event-icon">{event.type === 'success' ? '✓' : event.type === 'info' ? 'ℹ' : '✗'}</span>
+                                {event.label}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                    <div className="setting-control">
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={feature.enabled}
+                          onChange={(event) => updateAppriseFeature(featureKey, {
+                            enabled: event.target.checked,
+                            on_success: true,
+                            on_error: true,
+                            include_summary: true,
+                            include_details: true,
+                          })}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="notification-feature-inputs-row">
+                    <div className="notification-feature-webhook">
+                      <div className="input-with-toggle">
+                        <textarea
+                          ref={(element) => autoGrowTextarea(element)}
+                          className={featureUrlsVisible ? '' : 'password-textarea'}
+                          value={feature?.urls ?? ''}
+                          onChange={(event) => updateAppriseFeature(featureKey, { urls: event.target.value })}
+                          placeholder="Override Apprise URLs (optional, one per line)"
+                          rows={1}
+                          spellCheck={false}
+                        />
+                        <button
+                          type="button"
+                          className="toggle-visibility"
+                          onClick={() => handleToggleFeatureAppriseUrlsVisibility(featureKey)}
+                          title={featureUrlsVisible ? 'Hide' : 'Show'}
+                          aria-label={featureUrlsVisible ? 'Hide feature Apprise URLs' : 'Show feature Apprise URLs'}
+                        >
+                          {featureUrlsVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="notification-feature-mention">
+                      <input
+                        type="text"
+                        value={feature?.tags ?? ''}
+                        onChange={(event) => updateAppriseFeature(featureKey, { tags: event.target.value })}
+                        placeholder="Tags: home, urgent (only URLs with one of these)"
+                        spellCheck={false}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        )}
+        </>
       )}
 
       {activeTab === 'media' && (

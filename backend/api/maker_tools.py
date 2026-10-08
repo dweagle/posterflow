@@ -47,7 +47,7 @@ from services import tvdb
 from util.constants import year_regex
 from util.data.extract import extract_ids
 from util.data.normalization import normalize_titles
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 
 router = APIRouter(prefix="/api/maker-tools", tags=["maker-tools"])
 
@@ -3722,7 +3722,7 @@ def _send_monitor_library_report_notification(db: Session, library_result: Maker
     if not lines:
         lines.append("_No upcoming premieres found._")
 
-    send_discord_notification(
+    send_notification(
         db,
         feature_key="maker_monitor",
         event_type="info",
@@ -3784,7 +3784,7 @@ def _send_monitor_summary_notification(
         {"name": "🎨 Action", "value": f"{response.total_needed} Needed", "inline": False},
     ]
 
-    send_discord_notification(
+    send_notification(
         db,
         feature_key="maker_monitor",
         event_type="info",
@@ -3797,7 +3797,7 @@ def _send_monitor_summary_notification(
 
 
 def _send_monitor_error_notification(db: Session, exc: Exception) -> None:
-    send_discord_notification(
+    send_notification(
         db,
         feature_key="maker_monitor",
         event_type="error",

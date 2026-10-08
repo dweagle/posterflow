@@ -15,6 +15,13 @@ from core.logging import LogTags, log_user_action, log_error, log_info, log_warn
 from core.app_timezone import get_app_timezone, parse_timezone, set_app_timezone, timezone_names
 from core.scheduler import update_schedules
 from services.rclone import google_token_problem
+from services.apprise_notifications import (
+    TAG_SPLIT_RE,
+    invalid_apprise_url_lines,
+    parse_apprise_entries,
+    parse_apprise_urls,
+    send_apprise_test_notification,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -30,6 +37,7 @@ SENSITIVE_PLAIN_KEYS: set[str] = {
     "google_client_secret",
     "google_token",
     "discord_notifications_webhook_url",
+    "apprise_notifications_urls",
     "tmdb_api_key",
     "tvdb_api_key",
     "tvdb_pin",
@@ -47,6 +55,7 @@ SENSITIVE_JSON_KEYS: Dict[str, List[str]] = {
     "sonarr_instances": ["api_key"],
     "maker_tools_monitor_config": ["tmdb_api_key"],
     "discord_notifications_features": ["webhook_url"],
+    "apprise_notifications_features": ["urls"],
     "community_discord_identity": ["discord_token"],
 }
 
@@ -181,9 +190,11 @@ def _mask_settings_payload(payload: Dict[str, str]) -> Dict[str, str]:
                                 if item.get(field):
                                     item[field] = MASKED_VALUE
                 elif isinstance(parsed, dict):
-                    for field in sensitive_fields:
-                        if parsed.get(field):
-                            parsed[field] = MASKED_VALUE
+                    # flat dict, or a dict of per-feature dicts
+                    for target in [parsed, *(v for v in parsed.values() if isinstance(v, dict))]:
+                        for field in sensitive_fields:
+                            if target.get(field):
+                                target[field] = MASKED_VALUE
                 result[key] = json.dumps(parsed)
             except (json.JSONDecodeError, TypeError):
                 result[key] = value
@@ -771,6 +782,192 @@ def test_discord_notification(
         raise HTTPException(status_code=400, detail=f"Discord webhook returned {response.status_code}: {detail}")
 
     return {"success": True, "message": "Discord test notification sent successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Apprise notifications
+# ---------------------------------------------------------------------------
+
+
+class AppriseNotificationFeatureConfig(BaseModel):
+    enabled: bool = False
+    on_success: bool = True
+    on_error: bool = True
+    include_summary: bool = True
+    include_details: bool = True
+    urls: str = ""
+    tags: str = ""
+
+
+class AppriseNotificationConfigRequest(BaseModel):
+    enabled: bool = False
+    urls: str = ""
+    features: Dict[str, AppriseNotificationFeatureConfig]
+
+
+def _normalize_apprise_features(features: Dict[str, Any] | None) -> Dict[str, Dict[str, Any]]:
+    normalized = {key: AppriseNotificationFeatureConfig().model_dump() for key in DISCORD_NOTIFICATION_FEATURES}
+    if not isinstance(features, dict):
+        return normalized
+
+    for key in DISCORD_NOTIFICATION_FEATURES:
+        candidate = features.get(key)
+        if isinstance(candidate, BaseModel):
+            candidate = candidate.model_dump()
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            normalized[key] = AppriseNotificationFeatureConfig(**candidate).model_dump()
+        except Exception:
+            continue
+
+    return normalized
+
+
+def _load_json_dict_setting(db: Session, key: str) -> Dict[str, Any]:
+    raw = get_setting(db, key)
+    if not raw or not raw.value:
+        return {}
+    try:
+        parsed = json.loads(raw.value)
+    except json.JSONDecodeError:
+        log_warning(LogTags.API, f"Invalid JSON for {key}; using defaults")
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_apprise_urls(db: Session, incoming: str, *, feature_key: str | None = None) -> str:
+    # the client echoes the mask for untouched secrets; restore the stored text
+    if incoming.strip() != MASKED_VALUE:
+        return incoming.strip()
+    if feature_key is None:
+        existing = get_setting(db, "apprise_notifications_urls")
+        return existing.value.strip() if existing and existing.value else ""
+    stored = _load_json_dict_setting(db, "apprise_notifications_features").get(feature_key)
+    return str(stored.get("urls") or "").strip() if isinstance(stored, dict) else ""
+
+
+def _reject_bad_apprise_urls(raw: str, *, label: str) -> None:
+    bad_lines = invalid_apprise_url_lines(raw)
+    if bad_lines:
+        raise HTTPException(status_code=400, detail=f"{label}: line {bad_lines[0]} is not a valid Apprise URL")
+
+
+def _reject_unmatched_apprise_tags(feature_key: str, feature: Dict[str, Any], *, global_urls: str) -> None:
+    # an enabled feature whose tags no URL carries would never deliver; "always" URLs get everything
+    wanted = set(TAG_SPLIT_RE.split(str(feature.get("tags") or "").strip())) - {""}
+    if not wanted or not feature.get("enabled"):
+        return
+    entries = parse_apprise_entries(feature.get("urls")) or parse_apprise_entries(global_urls)
+    carried = {tag for _, tags in entries for tag in tags}
+    if entries and not (wanted & carried) and "always" not in carried:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tags for '{feature_key}' match no Apprise URL: {', '.join(sorted(wanted))}",
+        )
+
+
+@router.get("/notifications/apprise")
+def get_apprise_notification_config(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Get Apprise notification configuration with every URL list masked."""
+    enabled_raw = get_setting(db, "apprise_notifications_enabled")
+    urls_raw = get_setting(db, "apprise_notifications_urls")
+    enabled = (
+        enabled_raw.value.strip().lower() == "true"
+        if enabled_raw and enabled_raw.value is not None
+        else False
+    )
+    urls = urls_raw.value if urls_raw and urls_raw.value else ""
+    features = _normalize_apprise_features(_load_json_dict_setting(db, "apprise_notifications_features"))
+    return {
+        "enabled": enabled,
+        "urls": MASKED_VALUE if urls else "",
+        "features": {
+            fkey: {**fval, "urls": MASKED_VALUE if fval.get("urls") else ""}
+            for fkey, fval in features.items()
+        },
+    }
+
+
+@router.post("/notifications/apprise")
+def save_apprise_notification_config(
+    payload: AppriseNotificationConfigRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, str]:
+    """Save Apprise notification configuration and per-feature preferences."""
+    urls = _resolve_apprise_urls(db, payload.urls)
+    if payload.enabled and not parse_apprise_urls(urls):
+        raise HTTPException(status_code=400, detail="Add at least one Apprise URL when notifications are enabled")
+    _reject_bad_apprise_urls(urls, label="Apprise URLs")
+
+    features = _normalize_apprise_features(payload.features)
+    for fkey, fval in features.items():
+        fval["urls"] = _resolve_apprise_urls(db, str(fval.get("urls") or ""), feature_key=fkey)
+        fval["tags"] = str(fval.get("tags") or "").strip()
+        _reject_bad_apprise_urls(fval["urls"], label=f"Apprise URLs for '{fkey}'")
+        _reject_unmatched_apprise_tags(fkey, fval, global_urls=urls)
+
+    upsert_setting(db, "apprise_notifications_enabled", "true" if payload.enabled else "false")
+    upsert_setting(db, "apprise_notifications_urls", urls)
+    upsert_setting(db, "apprise_notifications_features", json.dumps(features))
+
+    try:
+        db.commit()
+        log_user_action(
+            "Updated Apprise notification settings",
+            enabled=payload.enabled,
+            url_count=len(parse_apprise_urls(urls)),
+        )
+        log_info(LogTags.API, "Apprise notification settings saved")
+        return {"message": "Apprise notification settings saved"}
+    except Exception as e:
+        db.rollback()
+        log_error(LogTags.API, f"Failed to save Apprise notification settings: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to save Apprise notification settings")
+
+
+@router.post("/notifications/apprise/test")
+def test_apprise_notification(
+    payload: AppriseNotificationConfigRequest,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Send a test through every global Apprise URL and report each service's outcome."""
+    urls_text = _resolve_apprise_urls(db, payload.urls)
+    urls = parse_apprise_urls(urls_text)
+    if not urls:
+        raise HTTPException(status_code=400, detail="Add at least one Apprise URL to test")
+    _reject_bad_apprise_urls(urls_text, label="Apprise URLs")
+
+    enabled_features = [name for name, cfg in _normalize_apprise_features(payload.features).items() if cfg.get("enabled")]
+    body = "\n".join([
+        "Your Apprise URLs are configured correctly.",
+        f"Notifications enabled: {'Yes' if payload.enabled else 'No'}",
+        f"Enabled features: {', '.join(enabled_features) if enabled_features else 'None selected'}",
+    ])
+
+    try:
+        outcome = send_apprise_test_notification(urls, title="PosterFlow Apprise Notifications Test", body=body)
+    except Exception as e:
+        log_error(LogTags.API, f"Apprise test notification failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to send Apprise test notification")
+
+    results = outcome.get("results") or []
+    warnings = outcome.get("warnings") or []
+    failed = [r for r in results if not r.get("ok")]
+    for warning in warnings:
+        log_warning(LogTags.API, f"Apprise test: {warning}")
+    for r in failed:
+        log_warning(LogTags.API, f"Apprise test delivery to {r.get('name')} failed", url=r.get("url"))
+
+    failed_names = ", ".join(str(r.get("name")) for r in failed)
+    reason = f" {warnings[0]}" if warnings else ""
+    if results and len(failed) == len(results):
+        raise HTTPException(status_code=400, detail=f"Apprise test failed for {failed_names}.{reason}")
+    sent = len(results) - len(failed)
+    if failed:
+        return {"success": True, "message": f"Apprise test sent to {sent} of {len(results)} services. Failed: {failed_names}.{reason}"}
+    return {"success": True, "message": f"Apprise test notification sent to {sent} service{'s' if sent != 1 else ''}"}
+
 
 @router.get("/")
 def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:

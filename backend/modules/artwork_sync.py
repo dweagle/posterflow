@@ -7,7 +7,7 @@ from core.job_cancel import JobCancelled
 from models.artwork_drive import ArtworkDrive
 from services.artwork_sync import ArtworkSyncService
 from modules.sync import _build_progress_callback
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 from core.logging import (
     LogTags,
     log_debug,
@@ -38,7 +38,7 @@ def run_artwork_sync_job(drive_id: int, job_id: int, triggered_by: str = "manual
 
         if result.get("success"):
             log_debug(LogTags.SYNC, f"Completed artwork sync '{drive_name}'")
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="success",
@@ -54,7 +54,7 @@ def run_artwork_sync_job(drive_id: int, job_id: int, triggered_by: str = "manual
         else:
             log_warning(LogTags.SYNC, f"Artwork sync failed '{drive_name}': {result.get('error')}")
             error_message = str(result.get("error") or result.get("message") or "Artwork sync failed")
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="sync",
                 event_type="error",
@@ -80,7 +80,7 @@ def run_artwork_sync_job(drive_id: int, job_id: int, triggered_by: str = "manual
         # the notifications below read settings, so recover the session first
         db.rollback()
         log_error(LogTags.SYNC, f"Artwork sync job failed: {str(e)}\n{traceback.format_exc()}")
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="sync",
             event_type="error",

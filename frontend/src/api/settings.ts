@@ -76,6 +76,22 @@ export const revealSensitiveSetting = async (
   return postData('/api/settings/reveal', payload)
 }
 
+export interface AppriseNotificationFeatureConfig {
+  enabled: boolean
+  on_success: boolean
+  on_error: boolean
+  include_summary: boolean
+  include_details: boolean
+  urls: string
+  tags: string
+}
+
+export interface AppriseNotificationConfig {
+  enabled: boolean
+  urls: string
+  features: Record<string, AppriseNotificationFeatureConfig>
+}
+
 export const getDiscordNotificationConfig = async (): Promise<DiscordNotificationConfig> => {
   return getData('/api/settings/notifications/discord')
 }
@@ -86,6 +102,18 @@ export const saveDiscordNotificationConfig = async (config: DiscordNotificationC
 
 export const testDiscordNotification = async (config: DiscordNotificationConfig): Promise<{ success: boolean; message: string }> => {
   return postData('/api/settings/notifications/discord/test', config)
+}
+
+export const getAppriseNotificationConfig = async (): Promise<AppriseNotificationConfig> => {
+  return getData('/api/settings/notifications/apprise')
+}
+
+export const saveAppriseNotificationConfig = async (config: AppriseNotificationConfig) => {
+  return postData('/api/settings/notifications/apprise', config)
+}
+
+export const testAppriseNotification = async (config: AppriseNotificationConfig): Promise<{ success: boolean; message: string }> => {
+  return postData('/api/settings/notifications/apprise/test', config)
 }
 
 export const saveBulkSettings = saveSettings

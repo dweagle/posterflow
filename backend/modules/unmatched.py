@@ -34,7 +34,7 @@ from services.poster_renamer import PosterRenameService
 from services.unmatched_assets import UnmatchedAssetsService
 from services.artwork_scan import ARTWORK_TYPES
 from services.community_reconcile import reconcile_community_lists
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 from core.hooks import run_post_job_hook, HOOK_KEY_UNMATCHED
 
 
@@ -168,7 +168,7 @@ def _run_detection(db: Session, job: Job, job_id: int, media_dict: dict, destina
             pass
 
     if not skip_discord and (poster_fields or artwork_fields):
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="unmatched_assets",
             event_type="info",
@@ -286,7 +286,7 @@ def run_unmatched_detection_background_job(
         )
         db.rollback()  # reset a possibly-poisoned session before reusing it
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="unmatched_assets",
                 event_type="error",

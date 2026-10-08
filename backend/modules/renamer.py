@@ -35,7 +35,7 @@ from models.job import (
     finalize_job_cancelled,
 )
 from services.poster_renamer import PosterRenameService
-from services.discord_notifications import send_discord_notification, send_major_error_notification
+from services.notifications import send_notification, send_major_error_notification
 from services.community_reconcile import reconcile_community_lists
 from core.hooks import run_post_job_hook, HOOK_KEY_RENAMER
 from util.poster_settings import ASSET_TYPES, get_asset_include, get_poster_destination
@@ -797,7 +797,7 @@ def run_rename_background_job(
                 })
             if cleanup_summary:
                 fields.append({"name": "Asset Cleanup", "value": cleanup_summary, "inline": False})
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="poster_renamer",
                 event_type="success",
@@ -817,7 +817,7 @@ def run_rename_background_job(
         log_error(LogTags.RENAMER, f"Background Asset Renamer failed: {e}\n{traceback.format_exc()}")
         db.rollback()  # reset a possibly-poisoned session before reusing it
         if not skip_discord:
-            send_discord_notification(
+            send_notification(
                 db,
                 feature_key="poster_renamer",
                 event_type="error",

@@ -48,7 +48,7 @@ from modules.border import run_border_replacer_background_job
 from modules.unmatched import run_unmatched_detection_background_job
 from modules.upload import run_plex_upload_background_job
 from modules.idarr import run_idarr_workflow_step
-from services.discord_notifications import send_discord_notification, send_discord_workflow_summary, send_major_error_notification
+from services.notifications import send_notification, send_workflow_summary, send_major_error_notification
 from core.hooks import run_post_job_hook, HOOK_KEY_WORKFLOW
 
 
@@ -302,7 +302,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                     if idarr_flow_cfg.get("stop_on_error", False):
                         results["success"] = False
                         update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                        send_discord_notification(
+                        send_notification(
                             db, feature_key="workflow", event_type="error",
                             title="Workflow Failed",
                             description=f"IDarr step failed: {error_msg}",
@@ -384,7 +384,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 if flow_config.get("sync_drives", {}).get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                    send_discord_notification(
+                    send_notification(
                         db,
                         feature_key="workflow",
                         event_type="error",
@@ -472,7 +472,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 if _sync_cfg.get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                    send_discord_notification(
+                    send_notification(
                         db,
                         feature_key="workflow",
                         event_type="error",
@@ -512,7 +512,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
             def _fail_assets_step(error_msg: str) -> None:
                 results["success"] = False
                 update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                send_discord_notification(
+                send_notification(
                     db, feature_key="workflow", event_type="error", title="Workflow Failed",
                     description=f"Rename Assets step failed: {error_msg}",
                     fields=[
@@ -657,7 +657,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 if flow_config.get("border_replacer", {}).get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                    send_discord_notification(
+                    send_notification(
                         db,
                         feature_key="workflow",
                         event_type="error",
@@ -801,7 +801,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 if flow_config.get("plex_upload", {}).get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                    send_discord_notification(
+                    send_notification(
                         db,
                         feature_key="workflow",
                         event_type="error",
@@ -901,7 +901,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                 if flow_config.get("detect_unmatched", {}).get("stop_on_error", False):
                     results["success"] = False
                     update_job_state(db, job, status=JOB_STATUS_FAILED, error=error_msg)
-                    send_discord_notification(
+                    send_notification(
                         db,
                         feature_key="workflow",
                         event_type="error",
@@ -1025,7 +1025,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
         if cleanup_embed:
             all_embeds.append(cleanup_embed)
 
-        send_discord_workflow_summary(db, embeds=all_embeds)
+        send_workflow_summary(db, embeds=all_embeds)
 
         return results
 
@@ -1036,7 +1036,7 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
     except Exception as e:
         log_error(LogTags.WORKFLOW, f"Workflow execution failed: {e}\n{traceback.format_exc()}")
         db.rollback()  # reset a possibly-poisoned session before reusing it
-        send_discord_notification(
+        send_notification(
             db,
             feature_key="workflow",
             event_type="error",
