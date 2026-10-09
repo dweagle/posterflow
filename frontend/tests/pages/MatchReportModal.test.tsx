@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import MatchReportModal from '../../src/components/poster-manager/MatchReportModal'
-import type { MatchReportResponse } from '../../src/api/client'
+import type { MatchReportJobStatus, MatchReportResponse } from '../../src/api/client'
 
 vi.mock('../../src/components/Toast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
@@ -38,18 +38,40 @@ const reportResponse: MatchReportResponse = {
                 files: ['RIPLEY (2024) {tvdb-111}.jpg'], season_numbers: [], found_by: 'title', matched: false,
                 reason: 'id conflict', newest_file: null }],
     },
+    placed: {
+      layout: 'folders', name: 'RIPLEY {tvdb-372727}', files: ['poster.jpg', 'Season01.jpg'], year: null,
+      type: 'collections', tmdb_id: null, tvdb_id: null, imdb_id: null, season_numbers: [], has_main: true,
+      matched: false, reason: '', id_conflicts: [], siblings: [],
+    },
   },
   report_text: 'Posterflow match report — test',
   filename: 'posterflow-match-report_ripley_2026-08-05.txt',
 }
 
+const jobStatus = (overrides: Partial<MatchReportJobStatus>): MatchReportJobStatus => ({
+  job_id: 7, status: 'running', progress: 40, message: null, error: null, result: null, ...overrides,
+})
+
 vi.mock('../../src/api/client', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  fetchUnmatchedMatchReport: vi.fn(),
+  startUnmatchedMatchReport: vi.fn(),
+  getUnmatchedMatchReport: vi.fn(),
   downloadMatchReport: vi.fn(),
 }))
+vi.mock('../../src/api/jobs', () => ({ cancelJob: vi.fn().mockResolvedValue({}) }))
 
 const item = { media_type: 'series' as const, title: 'RIPLEY', year: 2024, tvdb_id: 372727 }
+
+async function mocks() {
+  const client = await import('../../src/api/client')
+  const jobs = await import('../../src/api/jobs')
+  return {
+    start: vi.mocked(client.startUnmatchedMatchReport),
+    get: vi.mocked(client.getUnmatchedMatchReport),
+    download: vi.mocked(client.downloadMatchReport),
+    cancel: vi.mocked(jobs.cancelJob),
+  }
+}
 
 describe('MatchReportModal', () => {
   afterEach(() => {
@@ -57,43 +79,70 @@ describe('MatchReportModal', () => {
     vi.clearAllMocks()
   })
 
-  it('fetches the report on mount and renders verdict + candidate evidence', async () => {
-    const { fetchUnmatchedMatchReport } = await import('../../src/api/client')
-    vi.mocked(fetchUnmatchedMatchReport).mockResolvedValue(reportResponse)
+  it('queues the job, shows its progress, then renders verdict, evidence and the placed folder', async () => {
+    const { start, get } = await mocks()
+    start.mockResolvedValue({ job_id: 7, message: 'Match report queued in background.', status: 'pending' })
+    get
+      .mockResolvedValueOnce(jobStatus({ message: 'Scanning drive 3/44: Drazzilb' }))
+      .mockResolvedValueOnce(jobStatus({ status: 'completed', progress: 100, result: reportResponse }))
 
-    render(<MatchReportModal item={item} onClose={vi.fn()} />)
-    expect(screen.getByText(/Gathering info/)).toBeTruthy()
+    render(<MatchReportModal item={item} onClose={vi.fn()} pollIntervalMs={5} />)
+    expect(screen.getByText(/Queuing the report/)).toBeTruthy()
 
+    await waitFor(() => expect(screen.getByText(/Scanning drive 3\/44: Drazzilb/)).toBeTruthy())
     await waitFor(() => expect(screen.getByText(/DIFFERENT id/)).toBeTruthy())
-    expect(fetchUnmatchedMatchReport).toHaveBeenCalledWith(expect.objectContaining({
-      media_type: 'series', title: 'RIPLEY', tvdb_id: 372727,
-    }))
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'series', title: 'RIPLEY', tvdb_id: 372727 }))
+    expect(get).toHaveBeenCalledWith(7)
     // Candidate line names the conflicting poster tag (ids line + filename line).
     expect(screen.getAllByText(/\{tvdb-111\}/).length).toBeGreaterThan(0)
     expect(screen.getByText(/skipped: no TMDB API key configured/)).toBeTruthy()
-    // Library record rows carry their labels.
-    for (const label of ['ids', 'folder', 'state', 'seasons']) {
-      expect(screen.getByText(label, { selector: 'td' })).toBeTruthy()
+    for (const label of ['ids', 'folder', 'state', 'seasons', 'files', 'matcher']) {
+      expect(screen.getAllByText(label, { selector: 'td' }).length).toBeGreaterThan(0)
     }
+    // The placed folder is shown with its yearless warning.
+    expect(screen.getByText(/RIPLEY \{tvdb-372727\}/)).toBeTruthy()
+    expect(screen.getByText(/no \(year\) in name/)).toBeTruthy()
   })
 
   it('downloads the report file on click', async () => {
-    const { fetchUnmatchedMatchReport, downloadMatchReport } = await import('../../src/api/client')
-    vi.mocked(fetchUnmatchedMatchReport).mockResolvedValue(reportResponse)
+    const { start, get, download } = await mocks()
+    start.mockResolvedValue({ job_id: 7, message: '', status: 'pending' })
+    get.mockResolvedValue(jobStatus({ status: 'completed', progress: 100, result: reportResponse }))
     const user = userEvent.setup()
 
-    render(<MatchReportModal item={item} onClose={vi.fn()} />)
+    render(<MatchReportModal item={item} onClose={vi.fn()} pollIntervalMs={5} />)
     await waitFor(() => expect(screen.getByText(/DIFFERENT id/)).toBeTruthy())
 
     await user.click(screen.getByRole('button', { name: /Download report/ }))
-    expect(downloadMatchReport).toHaveBeenCalledWith(reportResponse)
+    expect(download).toHaveBeenCalledWith(reportResponse)
   })
 
-  it('shows the failure state when the backend errors', async () => {
-    const { fetchUnmatchedMatchReport } = await import('../../src/api/client')
-    vi.mocked(fetchUnmatchedMatchReport).mockRejectedValue(new Error('boom'))
+  it('names the reverse proxy when the start call dies with a 504', async () => {
+    const { start } = await mocks()
+    start.mockRejectedValue({ response: { status: 504 } })
 
-    render(<MatchReportModal item={item} onClose={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/Failed to build the match report/)).toBeTruthy())
+    render(<MatchReportModal item={item} onClose={vi.fn()} pollIntervalMs={5} />)
+    await waitFor(() => expect(screen.getByText(/Failed to start the match report/)).toBeTruthy())
+    expect(screen.getByText(/reverse proxy \(HTTP 504\)/)).toBeTruthy()
+  })
+
+  it('shows the job error when the build fails', async () => {
+    const { start, get } = await mocks()
+    start.mockResolvedValue({ job_id: 7, message: '', status: 'pending' })
+    get.mockResolvedValue(jobStatus({ status: 'failed', error: 'TVDB exploded' }))
+
+    render(<MatchReportModal item={item} onClose={vi.fn()} pollIntervalMs={5} />)
+    await waitFor(() => expect(screen.getByText(/Failed to build the match report: TVDB exploded/)).toBeTruthy())
+  })
+
+  it('cancels a still-running job when the modal closes', async () => {
+    const { start, get, cancel } = await mocks()
+    start.mockResolvedValue({ job_id: 7, message: '', status: 'pending' })
+    get.mockResolvedValue(jobStatus({ message: 'Scanning drive 1/44: Dweagle79' }))
+
+    const view = render(<MatchReportModal item={item} onClose={vi.fn()} pollIntervalMs={5} />)
+    await waitFor(() => expect(screen.getByText(/Scanning drive 1\/44/)).toBeTruthy())
+    view.unmount()
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith(7))
   })
 })

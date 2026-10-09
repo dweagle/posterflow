@@ -30,6 +30,8 @@ from models.job import (
     JOB_TYPE_POSTER_RENAMER,
     JOB_TYPE_BORDER_REPLACER,
     JOB_TYPE_UNMATCHED_DETECTION,
+    JOB_TYPE_MATCH_REPORT,
+    JOB_STATUS_COMPLETED,
     format_start_message,
 )
 from models.drive import Drive
@@ -51,6 +53,8 @@ from models.workflow import (
 from modules.renamer import run_rename_background_job
 from modules.border import run_border_replacer_background_job
 from modules.unmatched import run_unmatched_detection_background_job
+from modules.match_report import item_label as match_report_label, run_match_report_background_job
+from services.match_report_store import get_report as get_stored_match_report
 from modules.flow import run_flow_background_job
 from services.unmatched_assets import UnmatchedAssetsService
 from services.border_replacer import (
@@ -1100,23 +1104,44 @@ class MatchReportRequest(BaseModel):
 
 @router.post("/unmatched-match-report")
 def unmatched_match_report(payload: MatchReportRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Build the single-item "why isn't this matching" report: live library record, source-drive
-    candidate replay, TMDB/TVDB id cross-check, and a ranked verdict. Blocking (arr/TMDB/TVDB
-    calls + drive scan), so a sync handler — FastAPI runs it in the threadpool."""
-    from services.match_report import build_match_report, render_match_report_text, report_filename
-
+    """Queue the single-item "why isn't this matching" report as a background job. The build
+    pulls the library, probes TMDB/TVDB/media servers and rescans every priority drive, which
+    takes minutes on a large library — past any reverse proxy's timeout — so the request
+    returns a job id and the modal polls the job for progress and the finished report."""
     try:
         item = payload.model_dump()
-        report = build_match_report(db, item)
-        log_user_action(f"Generated match report for '{payload.title}'")
-        return {
-            "report": report,
-            "report_text": render_match_report_text(report),
-            "filename": report_filename(item),
-        }
+        label = match_report_label(item)
+        job = create_job(
+            db,
+            job_type=JOB_TYPE_MATCH_REPORT,
+            message=f"Match report queued for {label}",
+        )
+        job_id = job.id
+        log_job_queued(LogTags.UNMATCHED, "Match report", job_id, f": {label}")
+        job_queue.submit(run_match_report_background_job, job_id, job_id, item)
+        return job_started_response(job_id, "Match report queued in background.")
     except Exception as e:
-        log_error(LogTags.UNMATCHED, f"Error building match report: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Error building match report")
+        log_error(LogTags.UNMATCHED, f"Error starting match report: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Error starting match report")
+
+
+@router.get("/unmatched-match-report/{job_id}")
+def unmatched_match_report_status(job_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Job status plus, once completed, the report payload. A completed job whose payload has
+    already expired from the in-memory store reports status "expired"."""
+    job = db.query(Job).filter(Job.id == job_id, Job.job_type == JOB_TYPE_MATCH_REPORT).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Match report job not found")
+    result = get_stored_match_report(job_id) if job.status == JOB_STATUS_COMPLETED else None
+    status = "expired" if job.status == JOB_STATUS_COMPLETED and result is None else job.status
+    return {
+        "job_id": job.id,
+        "status": status,
+        "progress": job.progress,
+        "message": job.message,
+        "error": job.error,
+        "result": result,
+    }
 
 
 @router.post("/detect-unmatched")

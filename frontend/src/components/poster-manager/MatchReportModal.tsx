@@ -6,8 +6,11 @@ import {
   type MatchReportResponse,
   type MatchReportVerdict,
   downloadMatchReport,
-  fetchUnmatchedMatchReport,
+  getApiErrorMessage,
+  getUnmatchedMatchReport,
+  startUnmatchedMatchReport,
 } from '../../api/client'
+import { cancelJob } from '../../api/jobs'
 import { useToast } from '../Toast'
 import { formatDateShortTime } from '../../utils/datetime'
 
@@ -28,9 +31,13 @@ const ARTWORK_SCOPE_LABEL: Record<string, string> = {
   logo: 'Logo', background: 'Background', squareart: 'Square Art',
 }
 
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+
 type MatchReportModalProps = {
   item: MatchReportItem
   onClose: () => void
+  // How often to ask the server about the report job (tests shorten it).
+  pollIntervalMs?: number
 }
 
 type IdBag = { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null }
@@ -82,14 +89,65 @@ function CandidateRow({ candidate }: { candidate: MatchReportCandidate }) {
   )
 }
 
-function MatchReportModal({ item, onClose }: MatchReportModalProps) {
+// A 502/504 is the reverse proxy giving up before Posterflow answered — name it, since
+// "check the app log" sends the user looking for an error that was never written.
+function describeFailure(error: unknown, fallback: string): string {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status
+  if (status === 502 || status === 504) {
+    return `${fallback}: the request timed out at a reverse proxy (HTTP ${status}) before Posterflow answered.`
+  }
+  const detail = getApiErrorMessage(error, '')
+  if (status) return `${fallback} (HTTP ${status})${detail ? `: ${detail}` : ''}.`
+  return detail ? `${fallback}: ${detail}` : `${fallback}. Check the app log for details.`
+}
+
+function MatchReportModal({ item, onClose, pollIntervalMs = 1500 }: MatchReportModalProps) {
   const { showToast } = useToast()
   const [response, setResponse] = useState<MatchReportResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState('Queuing the report…')
 
   useEffect(() => {
     let cancelled = false
-    fetchUnmatchedMatchReport({
+    let finished = false
+    let jobId: number | null = null
+    let timer: number | undefined
+
+    const finish = (apply: () => void) => {
+      finished = true
+      if (!cancelled) apply()
+    }
+
+    const poll = async () => {
+      if (cancelled || jobId == null) return
+      try {
+        const status = await getUnmatchedMatchReport(jobId)
+        if (cancelled) return
+        if (status.status === 'completed' && status.result) {
+          finish(() => setResponse(status.result))
+          return
+        }
+        if (status.status === 'expired') {
+          finish(() => setError('This report expired before it could be shown. Close and open it again.'))
+          return
+        }
+        if (TERMINAL_STATUSES.has(status.status)) {
+          finish(() => setError(
+            status.error
+              ? `Failed to build the match report: ${status.error}`
+              : 'Failed to build the match report. Check the app log for details.',
+          ))
+          return
+        }
+        setProgress(status.message || 'Working…')
+      } catch (err) {
+        finish(() => setError(describeFailure(err, 'Lost track of the match report job')))
+        return
+      }
+      timer = window.setTimeout(poll, pollIntervalMs)
+    }
+
+    startUnmatchedMatchReport({
       media_type: item.media_type,
       title: item.title,
       year: item.year,
@@ -100,9 +158,23 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
       missing_main: item.missing_main ?? false,
       artwork_type: item.artwork_type ?? null,
     })
-      .then((data) => { if (!cancelled) setResponse(data) })
-      .catch(() => { if (!cancelled) setError('Failed to build the match report. Check the app log for details.') })
-    return () => { cancelled = true }
+      .then((started) => {
+        jobId = started.job_id
+        if (cancelled) {
+          cancelJob(started.job_id).catch(() => {})
+          return
+        }
+        setProgress(started.message || 'Queued…')
+        void poll()
+      })
+      .catch((err) => finish(() => setError(describeFailure(err, 'Failed to start the match report'))))
+
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+      // Closing the modal mid-build stops the job instead of leaving it scanning drives.
+      if (jobId != null && !finished) cancelJob(jobId).catch(() => {})
+    }
     // The modal mounts fresh per item; the item identity is fixed for its lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -118,6 +190,7 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
   }
 
   const report = response?.report
+  const placed = report?.placed ?? null
   const scopeSuffix = item.artwork_type ? ` — ${ARTWORK_SCOPE_LABEL[item.artwork_type]}` : ''
   const titleLine = `${item.title}${item.year ? ` (${item.year})` : ''}${scopeSuffix}`
 
@@ -135,7 +208,7 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
           ) : !report ? (
             <div className="match-report-loading">
               <Loader2 size={18} className="spin-icon" />
-              <span>Gathering info from your library, drives, and TMDB/TVDB…</span>
+              <span>{progress}</span>
             </div>
           ) : (
             <>
@@ -197,6 +270,47 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                   ))
                 )}
               </div>
+
+              {!item.artwork_type && (
+                <div className="match-report-section">
+                  <h4>Placed folder</h4>
+                  {!placed ? (
+                    <div className="match-report-muted">No placed poster found in the destination for this title</div>
+                  ) : (
+                    <table className="match-report-table">
+                      <tbody>
+                        <tr>
+                          <td>folder</td>
+                          <td className="match-report-mono">
+                            {placed.name}
+                            {placed.year == null && report.item.media_type !== 'collections' && (
+                              <span className="mr-problem">  ⚠ no (year) in name</span>
+                            )}
+                          </td>
+                        </tr>
+                        <tr><td>files</td><td className="match-report-mono">{placed.files.join(', ') || 'none'}</td></tr>
+                        <tr>
+                          <td>read as</td>
+                          <td className="match-report-mono">
+                            {placed.type ?? 'unknown'}{placed.year ? ` (${placed.year})` : ''} · <IdTags ids={placed} />
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>matcher</td>
+                          <td>
+                            {placed.matched
+                              ? <span className="mr-ok">matched {placed.reason}</span>
+                              : <span className="mr-problem">not matched{placed.reason ? `: ${placed.reason}` : ''}</span>}
+                          </td>
+                        </tr>
+                        {placed.siblings.length > 0 && (
+                          <tr><td>also</td><td className="match-report-muted">{placed.siblings.join(', ')}</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
 
               <div className="match-report-section">
                 <h4>ID cross-check</h4>
@@ -270,7 +384,9 @@ function MatchReportModal({ item, onClose }: MatchReportModalProps) {
                   Drive candidates ({report.candidates.shown} shown, {report.candidates.considered} similar titles checked)
                 </h4>
                 {report.candidates.items.length === 0 ? (
-                  <div className="match-report-muted">No matching or near-miss posters found on the subscribed drives</div>
+                  <div className="match-report-muted">
+                    No matching or near-miss {item.artwork_type ? `${ARTWORK_SCOPE_LABEL[item.artwork_type].toLowerCase()} files` : 'posters'} found on the subscribed drives
+                  </div>
                 ) : (
                   report.candidates.items.map((candidate, idx) => <CandidateRow key={idx} candidate={candidate} />)
                 )}

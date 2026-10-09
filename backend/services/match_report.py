@@ -11,7 +11,7 @@ import re
 import textwrap
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests as http_requests
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from models.setting import get_setting
 from services.tvdb import TvdbError, get_tvdb_credentials, _get as tvdb_get
 from util.constants import season_pattern
 from util.data.extract import extract_ids
+from util.poster_settings import get_poster_destination
 from util.data.normalization import normalize_titles
 from util.posters.assets import get_assets_files
 from util.posters.index import search_matches
@@ -33,7 +34,13 @@ from util.posters.match import (
     collection_title_variants,
     is_match,
 )
-from util.posters.scanner import ARTWORK_TYPE_TO_NAME, _is_asset_folders
+from util.posters.scanner import (
+    ARTWORK_TYPE_TO_NAME,
+    _is_asset_folders,
+    is_artwork_file,
+    parse_file_group,
+    parse_folder_group,
+)
 
 # Human labels for artwork types in verdict text.
 ARTWORK_LABELS = {"logo": "logo", "background": "background", "squareart": "square art"}
@@ -282,6 +289,7 @@ def _fetch_library_records(db: Session, item: Dict[str, Any]) -> List[Dict[str, 
                         service._fetch_media_server_media(
                             instance, media_dict, LogTags.UNMATCHED,
                             selected_libraries=selected_libraries,
+                            media_types=[media_type],
                         )
                 except Exception as exc:
                     log_error(LogTags.UNMATCHED, f"Match report: media server media fetch failed: {exc}", error=str(exc))
@@ -335,7 +343,10 @@ def _synth_media(item: Dict[str, Any]) -> Dict[str, Any]:
     return media
 
 
-def _scan_source_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+def _scan_source_drives(
+    db: Session,
+    per_dir_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
     """Scan the renamer's subscribed priority drives. Returns (drives_info, prefix_index,
     assets, error). ``drives_info`` rows carry name/style/last_synced/missing."""
     from services.poster_renamer import subscribed_priority_drives
@@ -363,7 +374,7 @@ def _scan_source_drives(db: Session) -> Tuple[List[Dict[str, Any]], Optional[Dic
     if not source_dirs:
         return drives_info, None, [], "No subscribed poster drive folders exist locally — sync the drives first."
 
-    assets, prefix_index = get_assets_files(source_dirs)
+    assets, prefix_index = get_assets_files(source_dirs, per_dir_callback=per_dir_callback)
     return drives_info, prefix_index, assets or [], None
 
 
@@ -705,6 +716,7 @@ def _plex_reference(db: Session, item: Dict[str, Any], ids: Dict[str, Any]) -> D
             continue
         hit = None
         hit_library = None
+        lookup_error: Optional[str] = None
         for library in libraries:
             if media_type == "collections":
                 try:
@@ -715,7 +727,11 @@ def _plex_reference(db: Session, item: Dict[str, Any], ids: Dict[str, Any]) -> D
                 except Exception:
                     pass
             else:
-                matches = client.find_by_provider_ids(provider_ids, library.type, library_keys=[library.key])
+                try:
+                    matches = client.find_by_provider_ids(provider_ids, library.type, library_keys=[library.key])
+                except Exception as exc:
+                    lookup_error = str(exc)
+                    break
                 if matches:
                     hit = matches[0]
                 if hit is None and item.get("title"):
@@ -731,6 +747,10 @@ def _plex_reference(db: Session, item: Dict[str, Any], ids: Dict[str, Any]) -> D
             if hit is not None:
                 hit_library = library.title
                 break
+        if lookup_error:
+            errors.append(f"{name}: {lookup_error}")
+            servers.append({"instance": name, "type": server_type, "error": lookup_error})
+            continue
         if hit is not None:
             servers.append({
                 "instance": name,
@@ -785,13 +805,128 @@ def _app_version() -> str:
         return "unknown"
 
 
-def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
+def _placed_folder_report(
+    db: Session,
+    item: Dict[str, Any],
+    media: Dict[str, Any],
+    effective_ids: Dict[str, Any],
+    folder_names: List[str],
+) -> Optional[Dict[str, Any]]:
+    """What the organized destination already holds for this item, parsed by the same scanner
+    the unmatched check uses — so a placed poster that still reads as unmatched (yearless
+    folder, stale id tag) is explained instead of answered with "run the renamer"."""
+    if item.get("artwork_type"):
+        return None
+    destination = get_poster_destination(db)
+    if not os.path.isdir(destination):
+        return None
+    wanted = {
+        _norm_title(t)
+        for t in [item.get("title"), *(media.get("alternate_titles") or []), *folder_names]
+        if t
+    }
+    wanted.discard("")
+
+    def shares_id(text: str) -> bool:
+        tmdb_id, tvdb_id, imdb_id = extract_ids(text)
+        return any(
+            effective_ids.get(key) and value and str(effective_ids[key]) == str(value)
+            for key, value in (("tmdb_id", tmdb_id), ("tvdb_id", tvdb_id), ("imdb_id", imdb_id))
+        )
+
+    def image_files(path: str) -> List[str]:
+        try:
+            return sorted(
+                f.name for f in os.scandir(path)
+                if f.is_file() and not f.name.startswith(".")
+                and os.path.splitext(f.name)[1].lower() in _IMAGE_EXTS
+                and not is_artwork_file(f.name)
+            )
+        except OSError:
+            return []
+
+    try:
+        entries = sorted(os.scandir(destination), key=lambda e: e.name.lower())
+    except OSError:
+        return None
+    # (score, name, parsed asset): an id-tagged hit outranks a title-only one
+    found: List[Tuple[int, str, Dict[str, Any]]] = []
+    if _is_asset_folders(destination):
+        layout = "folders"
+        for entry in entries:
+            if not entry.is_dir() or entry.name.startswith(".") or entry.name == "tmp":
+                continue
+            by_id = shares_id(entry.name)
+            if not by_id and _norm_title(entry.name) not in wanted:
+                continue
+            files = image_files(entry.path)
+            if not files:
+                continue
+            try:
+                parsed = parse_folder_group(entry.path, entry.name, files)
+            except ValueError:
+                continue
+            found.append((2 if by_id else 1, entry.name, parsed))
+    else:
+        layout = "flat"
+        groups: Dict[str, List[str]] = {}
+        for entry in entries:
+            if not entry.is_file() or entry.name.startswith(".") or is_artwork_file(entry.name):
+                continue
+            if os.path.splitext(entry.name)[1].lower() not in _IMAGE_EXTS:
+                continue
+            base = season_pattern.split(os.path.splitext(entry.name)[0])[0].strip()
+            groups.setdefault(base, []).append(entry.name)
+        for base, files in groups.items():
+            by_id = shares_id(base)
+            if not by_id and _norm_title(base) not in wanted:
+                continue
+            try:
+                parsed = parse_file_group(destination, base, sorted(files))
+            except ValueError:
+                continue
+            found.append((2 if by_id else 1, base, parsed))
+    if not found:
+        return None
+    found.sort(key=lambda row: (-row[0], row[1].lower()))
+    _score, name, parsed = found[0]
+    matched, reason = is_match(dict(parsed), media)
+    basenames = [os.path.basename(f) for f in parsed.get("files") or []]
+    placed_ids = {key: parsed.get(key) for key in ("tmdb_id", "tvdb_id", "imdb_id")}
+    return {
+        "layout": layout,
+        "name": name,
+        "files": basenames,
+        "year": parsed.get("year"),
+        "type": parsed.get("type"),
+        **placed_ids,
+        "season_numbers": parsed.get("season_numbers") or [],
+        "has_main": any(not season_pattern.search(f) for f in basenames),
+        "matched": bool(matched),
+        "reason": reason or "",
+        "id_conflicts": [
+            key for key in ("tmdb_id", "tvdb_id", "imdb_id")
+            if placed_ids.get(key) and effective_ids.get(key) and str(placed_ids[key]) != str(effective_ids[key])
+        ],
+        "siblings": [row[1] for row in found[1:]],
+    }
+
+
+def build_match_report(
+    db: Session,
+    item: Dict[str, Any],
+    progress: Optional[Callable[[str, int], None]] = None,
+) -> Dict[str, Any]:
     """Assemble the full single-item report. ``item`` is the unmatched row: media_type
     ('movies'|'series'|'collections'), title, year, tmdb_id, tvdb_id, imdb_id,
-    missing_seasons (optional list)."""
+    missing_seasons (optional list). ``progress(message, percent)`` is the job's status line."""
     media_type = item["media_type"]
     log_info(LogTags.UNMATCHED, f"Building match report for {item.get('title')} ({item.get('year')})",
              media_type=media_type, title=item.get("title"))
+
+    def tick(message: str, percent: int) -> None:
+        if progress is not None:
+            progress(message, percent)
 
     report: Dict[str, Any] = {
         "generated_at": _utc_now_iso(),
@@ -812,6 +947,7 @@ def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
     artwork_type = report["item"]["artwork_type"]
 
     # --- Library side -----------------------------------------------------
+    tick("Fetching the library record", 5)
     records = _fetch_library_records(db, item)
     manual = None if records else _manual_entry_for(db, item)
     library_records = []
@@ -878,6 +1014,7 @@ def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
     ) or "library"
 
     # --- Reference cross-check -------------------------------------------
+    tick("Cross-checking ids with TMDB, TVDB and your media servers", 25)
     ref_probe = {"media_type": media_type, **effective_ids}
     report["reference"] = {
         "tmdb": _tmdb_reference(db, ref_probe),
@@ -885,11 +1022,24 @@ def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
         "plex": _plex_reference(db, {**item, "media_type": media_type}, effective_ids),
     }
 
+    # --- Destination side --------------------------------------------------
+    tick("Checking the placed folder", 35)
+    report["placed"] = _placed_folder_report(
+        db, item, media, effective_ids, [r["folder"] for r in library_records if r.get("folder")]
+    )
+
     # --- Source drives + candidate replay --------------------------------
     if artwork_type:
+        tick("Scanning the artwork drives", 40)
         drives_info, prefix_index, assets, scan_error = _scan_artwork_drives(db)
     else:
-        drives_info, prefix_index, assets, scan_error = _scan_source_drives(db)
+        drives_info, prefix_index, assets, scan_error = _scan_source_drives(
+            db,
+            per_dir_callback=lambda index, total, name: tick(
+                f"Scanning drive {index + 1}/{total}: {name}", 40 + int(45 * index / max(total, 1))
+            ),
+        )
+    tick("Replaying the matcher against the drive candidates", 88)
     report["drives"] = {
         "scanned": drives_info,
         "total_assets": len(assets),
@@ -991,6 +1141,7 @@ def build_match_report(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
                 "files": [os.path.basename(f) for f in (agreeing.get("files") or [])[:3]],
             }
 
+    tick("Building the verdict", 96)
     report["verdicts"] = _build_verdicts(report)
     return report
 
@@ -1067,6 +1218,39 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 f"carries no {label} id to settle it — one mapping is stale or points at a different "
                 f"entry, so a poster tagged with either {label} id may belong to another item. "
                 "Check which entry each id really is before tagging.")
+
+    # Destination side: a poster that IS placed but the unmatched check can't read.
+    placed = report.get("placed")
+    source_name = (library.get("records") or [{}])[0].get("instance") if library.get("records") else None
+    source_name = source_name or "Sonarr/Radarr"
+    if placed:
+        yearless = placed.get("type") == "collections" and item["media_type"] != "collections"
+        if yearless:
+            tags = " ".join(re.findall(r"\{[^}]+\}", placed["name"]))
+            suggested = f"{item.get('title')} ({item.get('year') or 'YEAR'})" + (f" {tags}" if tags else "")
+            add("problem", "placed_yearless",
+                f"The poster is already placed in '{placed['name']}', but that folder has no (year), so "
+                "unmatched detection reads it as a collection and will keep listing this item. "
+                f"Rename the folder in {source_name} to include the year, e.g. '{suggested}', "
+                "then run the Asset Renamer.")
+        elif placed.get("id_conflicts"):
+            add("problem", "placed_tag_conflict",
+                f"The placed folder '{placed['name']}' is tagged {_id_tags(placed)}, but {source_name} says "
+                f"{_id_tags(record_ids)}, so unmatched detection treats them as different items. "
+                f"Rename the folder in {source_name} so its tag matches, then run the Asset Renamer.")
+        elif placed.get("matched"):
+            if item.get("missing_seasons") or item.get("missing_main"):
+                held = ", ".join(placed.get("files") or []) or "no files"
+                add("info", "placed_partial", f"The placed folder '{placed['name']}' currently holds: {held}.")
+            else:
+                add("info", "placed_matches",
+                    f"The placed folder '{placed['name']}' already matches this item, so this row is probably "
+                    "from an older run — re-run unmatched detection.")
+        else:
+            add("problem", "placed_not_matching",
+                f"A placed folder '{placed['name']}' exists, but the matcher rejects it"
+                + (f" ({placed['reason']})" if placed.get("reason") else "")
+                + ". Compare its name and tags with the library record above.")
 
     if drives.get("error"):
         add("problem", "drive_scan_failed", drives["error"])
@@ -1158,6 +1342,10 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
             else:
                 add("ok", "seasons_available",
                     f"Season posters for this item exist on [{best['drive']}] — run the Asset Renamer to place them.")
+        elif placed:
+            add("ok", "poster_placed",
+                f"A poster on [{best['drive']}] matches this item ({best['reason']}) and is already "
+                f"placed in '{placed['name']}'.")
         else:
             add("ok", "poster_available",
                 f"A poster on [{best['drive']}] matches this item ({best['reason']}) — "
@@ -1224,8 +1412,10 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 "Add the tag to the folder name instead.")
     elif not drives.get("error"):
         scanned = len([d for d in drives.get("scanned", []) if not d.get("missing")])
+        what = artwork_label if artwork_type else "poster"
+        kind = "artwork drive(s)" if artwork_type else "drive(s)"
         add("problem", "no_poster_found",
-            f"No poster for this title was found on the {scanned} subscribed drive(s) "
+            f"No {what} for this title was found on the {scanned} subscribed {kind} "
             f"({report['drives']['total_assets']:,} assets scanned, "
             f"{report['candidates']['considered']} similar titles checked). It may not exist yet, "
             "live on a drive you don't subscribe to, or your last sync may predate it.")
@@ -1361,6 +1551,23 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
             lines.append(f"    state    {', '.join(state_bits)}")
     lines.append("")
 
+    if "placed" in report and not item.get("artwork_type"):
+        lines.append("PLACED FOLDER")
+        placed = report.get("placed")
+        if not placed:
+            lines.append("  none found in the destination for this title")
+        else:
+            lines.append(f"  {placed.get('name')}   ({placed.get('layout')} layout)")
+            lines.append(f"    files    {', '.join(placed.get('files') or []) or 'none'}")
+            lines.append(f"    read as  {placed.get('type')}, year {placed.get('year') or 'none'}, ids {_id_tags(placed)}")
+            if placed.get("matched"):
+                lines.append(f"    matcher  ✓ matched {placed.get('reason')}")
+            else:
+                lines.append("    matcher  ✗ not matched" + (f": {placed['reason']}" if placed.get("reason") else ""))
+            if placed.get("siblings"):
+                lines.append(f"    also     {', '.join(placed['siblings'])}")
+        lines.append("")
+
     lines.append("ID CROSS-CHECK")
     ids_label = report.get("library", {}).get("ids_source") or "library"
     label_width = max(10, len(ids_label))
@@ -1444,7 +1651,8 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
     if candidates.get("omitted"):
         lines.append(f"  … and {candidates['omitted']} more near-miss candidate(s) omitted")
     if not candidates.get("items"):
-        lines.append("  no matching or near-miss posters found")
+        what = ARTWORK_LABELS.get(item["artwork_type"], item["artwork_type"]) if item.get("artwork_type") else "posters"
+        lines.append(f"  no matching or near-miss {what} found")
     for hit in report.get("nonpriority_hits") or []:
         hit_year = f" ({hit.get('year')})" if hit.get("year") else ""
         lines.append(f"  ! on NON-PRIORITY drive [{hit.get('drive')}]: {hit.get('title')}{hit_year} — {hit.get('reason')}")

@@ -385,6 +385,25 @@ export interface MatchReportReference {
   missing?: string
 }
 
+// The organized destination's folder for this item, parsed by the same scanner unmatched
+// detection uses, so the report can explain a placed poster that still reads as unmatched.
+export interface MatchReportPlaced {
+  layout: 'folders' | 'flat'
+  name: string
+  files: string[]
+  year: number | null
+  type: string | null
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  season_numbers: number[]
+  has_main: boolean
+  matched: boolean
+  reason: string
+  id_conflicts: string[]
+  siblings: string[]
+}
+
 export interface MatchReport {
   generated_at: string
   app_version: string
@@ -422,6 +441,8 @@ export interface MatchReport {
   unscannable?: { file: string; drive_dir: string; reason: string }[]
   close_titles?: { title: string | null; year: number | null; similarity: number; files: string[] }[]
   collection_id_note?: { title: string | null; files: string[] } | null
+  // null = nothing placed for this title (or an artwork report, which skips the check).
+  placed?: MatchReportPlaced | null
 }
 
 export interface MatchReportResponse {
@@ -430,7 +451,7 @@ export interface MatchReportResponse {
   filename: string
 }
 
-export const fetchUnmatchedMatchReport = async (params: {
+export interface MatchReportRequest {
   media_type: 'movies' | 'series' | 'collections'
   title: string
   year?: number | null
@@ -440,8 +461,28 @@ export const fetchUnmatchedMatchReport = async (params: {
   missing_seasons?: number[] | null
   missing_main?: boolean
   artwork_type?: 'logo' | 'background' | 'squareart' | null
-}): Promise<MatchReportResponse> => {
+}
+
+export interface MatchReportJobStatus {
+  job_id: number
+  // Job statuses plus "expired": the job finished but its report left the server's store.
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'expired' | string
+  progress: number
+  message: string | null
+  error: string | null
+  result: MatchReportResponse | null
+}
+
+// The report runs as a background job (it rescans every priority drive, which outlives a
+// reverse proxy's request timeout on a big library); start it, then poll for the result.
+export const startUnmatchedMatchReport = async (
+  params: MatchReportRequest,
+): Promise<{ job_id: number; message: string; status: string }> => {
   return postData('/api/posterflow/unmatched-match-report', params)
+}
+
+export const getUnmatchedMatchReport = async (jobId: number): Promise<MatchReportJobStatus> => {
+  return getData(`/api/posterflow/unmatched-match-report/${jobId}`)
 }
 
 // Save a generated report as a .txt download (dropped straight into Discord/forums).

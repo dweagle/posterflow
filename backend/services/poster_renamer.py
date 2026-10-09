@@ -805,6 +805,7 @@ class PosterRenameService:
         log_tag: str = LogTags.RENAMER,
         selected_libraries: Optional[List[str]] = None,
         client: Optional[Any] = None,
+        media_types: Optional[List[str]] = None,
     ) -> None:
         """
         Fetch movies/shows from a media server instance (Plex or Jellyfin) as arr-shaped
@@ -816,6 +817,7 @@ class PosterRenameService:
             log_tag: Tag to use for logging (LogTags constant)
             selected_libraries: List of library keys to include (format: "instance_name:library_key")
             client: Already-connected client to reuse (None = connect here)
+            media_types: Only fetch these types ("movies"/"series"); None = both
         """
         instance_name = str(instance.get("name") or "Plex")
         try:
@@ -835,6 +837,8 @@ class PosterRenameService:
                     log_debug(log_tag, f"Skipping library '{library.title}' (not selected)")
                     continue
                 media_type = "movies" if library.type == "movie" else "series"
+                if media_types is not None and media_type not in media_types:
+                    continue
                 try:
                     count = self._add_media_server_library(
                         client, library, media_type, media_dict, instance_name, source, log_tag

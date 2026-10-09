@@ -1021,3 +1021,55 @@ def test_border_preview_corner_radius_clips_outer_corners(client):
         assert rgba.getpixel((0, 0))[3] == 0                  # clipped outer corner
         assert rgba.getpixel((500, 0))[3] == 255              # straight edge stays opaque
         assert rgba.getpixel((26, 26))[:3] == (255, 255, 255)  # art corner filled with the band
+
+
+# ---------------------------------------------------------------------------
+# Match report job endpoints
+# ---------------------------------------------------------------------------
+
+def test_match_report_start_queues_a_job(client, test_db, monkeypatch):
+    """POST returns at once with a job id; the build itself runs through the job queue."""
+    from models.job import JOB_TYPE_MATCH_REPORT
+
+    submitted = []
+    monkeypatch.setattr("api.poster_manager.job_queue.submit", lambda fn, jid, *a, **k: submitted.append((fn.__name__, jid, a)))
+
+    response = client.post(
+        "/api/posterflow/unmatched-match-report",
+        json={"media_type": "series", "title": "Wonder Man", "year": 2026, "tvdb_id": 428629},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    job = test_db.query(Job).filter(Job.id == body["job_id"]).first()
+    assert job is not None and job.job_type == JOB_TYPE_MATCH_REPORT
+    assert "Wonder Man (2026)" in job.message
+    assert submitted and submitted[0][0] == "run_match_report_background_job"
+    assert submitted[0][1] == job.id
+    assert submitted[0][2][1]["tvdb_id"] == 428629
+
+
+def test_match_report_status_reports_progress_result_and_expiry(client, test_db):
+    from models.job import JOB_STATUS_COMPLETED, JOB_STATUS_RUNNING, JOB_TYPE_MATCH_REPORT, create_job
+    from services import match_report_store as store
+
+    store.clear_reports()
+    running = create_job(test_db, job_type=JOB_TYPE_MATCH_REPORT, message="Scanning drive 2/44: Solen",
+                         status=JOB_STATUS_RUNNING, progress=42)
+    body = client.get(f"/api/posterflow/unmatched-match-report/{running.id}").json()
+    assert body["status"] == "running" and body["progress"] == 42 and body["result"] is None
+    assert body["message"] == "Scanning drive 2/44: Solen"
+
+    done = create_job(test_db, job_type=JOB_TYPE_MATCH_REPORT, message="ready", status=JOB_STATUS_COMPLETED, progress=100)
+    # Completed but nothing in the store: the payload aged out.
+    assert client.get(f"/api/posterflow/unmatched-match-report/{done.id}").json()["status"] == "expired"
+    store.store_report(done.id, {"report": {}, "report_text": "txt", "filename": "f.txt"})
+    body = client.get(f"/api/posterflow/unmatched-match-report/{done.id}").json()
+    assert body["status"] == "completed" and body["result"]["report_text"] == "txt"
+
+
+def test_match_report_status_404s_for_other_jobs(client, test_db):
+    from models.job import JOB_TYPE_UNMATCHED_DETECTION, create_job
+
+    other = create_job(test_db, job_type=JOB_TYPE_UNMATCHED_DETECTION, message="x")
+    assert client.get(f"/api/posterflow/unmatched-match-report/{other.id}").status_code == 404
+    assert client.get("/api/posterflow/unmatched-match-report/999999").status_code == 404

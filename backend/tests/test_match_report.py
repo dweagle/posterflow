@@ -1,5 +1,5 @@
 """Tests for services/match_report.py (single-item unmatched diagnosis)."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import services.match_report as match_report
 from services.match_report import (
@@ -121,6 +121,17 @@ class TestVerdicts:
     def test_no_candidates_reports_not_found(self):
         verdicts = _build_verdicts(_base_report())
         assert verdicts[0]["code"] == "no_poster_found"
+
+    def test_no_candidates_in_artwork_mode_names_the_artwork(self):
+        report = _base_report()
+        report["item"]["artwork_type"] = "logo"
+        report["drives"]["scanned"][0]["style_type"] = "ART"
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "no_poster_found"
+        assert verdicts[0]["message"].startswith("No logo for this title was found on the 1 subscribed artwork drive(s)")
+        assert "poster" not in verdicts[0]["message"]
+        report["verdicts"] = verdicts
+        assert "no matching or near-miss logo found" in render_match_report_text(report)
 
     def test_no_candidates_notes_yearless_arr_folder(self):
         report = _base_report()
@@ -334,7 +345,7 @@ class TestVerdicts:
         monkeypatch.setattr(match_report, "_scan_artwork_drives", fake_artwork_scan)
         called = {"poster_scan": False}
         monkeypatch.setattr(match_report, "_scan_source_drives",
-                            lambda db_: called.update(poster_scan=True) or ([], None, [], None))
+                            lambda db_, **kw: called.update(poster_scan=True) or ([], None, [], None))
 
         item = {"media_type": "series", "title": "Boxed Show", "year": 2020, "tmdb_id": None,
                 "tvdb_id": 777, "imdb_id": None, "missing_seasons": [], "artwork_type": "logo"}
@@ -638,7 +649,7 @@ class TestBuildReport:
                  "normalized_title": "ripley", "files": ["/d/a/RIPLEY (2024) {tvdb-372727}.jpg"],
                  "season_numbers": []}
         monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [record])
-        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(asset))
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db, **kw: self._fake_scan(asset))
 
         item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
                 "tmdb_id": None, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
@@ -659,7 +670,7 @@ class TestBuildReport:
                  "normalized_title": "ripleyunderground",
                  "files": ["/d/a/RIPLEY UNDER GROUND (2005) {tmdb-1}.jpg"], "season_numbers": []}
         monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [])
-        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(noise))
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db, **kw: self._fake_scan(noise))
 
         item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
                 "tmdb_id": None, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
@@ -681,7 +692,7 @@ class TestBuildReport:
                  "normalized_title": "ripley", "files": ["/d/a/RIPLEY (2024) {tvdb-111} {tmdb-222}.jpg"],
                  "season_numbers": []}
         monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [record])
-        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(asset))
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db, **kw: self._fake_scan(asset))
 
         item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
                 "tmdb_id": 555, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
@@ -702,7 +713,7 @@ class TestBuildReport:
                  "normalized_title": "ripley", "files": ["/d/a/RIPLEY (2024) {tvdb-372727} {tmdb-222}.jpg"],
                  "season_numbers": []}
         monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [record])
-        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db: self._fake_scan(asset))
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db, **kw: self._fake_scan(asset))
 
         item = {"media_type": "series", "title": "RIPLEY", "year": 2024,
                 "tmdb_id": 555, "tvdb_id": 372727, "imdb_id": None, "missing_seasons": []}
@@ -712,22 +723,236 @@ class TestBuildReport:
 
 
 class TestEndpoint:
-    def test_endpoint_returns_report_and_file(self, client, monkeypatch):
-        report = _base_report()
-        report["verdicts"] = _build_verdicts(report)
-        monkeypatch.setattr(match_report, "build_match_report", lambda db, item: report)
+    def test_endpoint_queues_the_report_job(self, client, monkeypatch):
+        """The build runs as a background job; the request only hands back the job id."""
+        submitted = []
+        monkeypatch.setattr("api.poster_manager.job_queue.submit", lambda fn, jid, *a, **k: submitted.append((jid, a)))
 
         resp = client.post("/api/posterflow/unmatched-match-report", json={
             "media_type": "series", "title": "RIPLEY", "year": 2024, "tvdb_id": 372727,
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert data["report"]["item"]["title"] == "RIPLEY"
-        assert data["filename"].startswith("posterflow-match-report_ripley_")
-        assert data["report_text"].startswith("Posterflow match report")
+        assert data["success"] is True and data["status"] == "pending"
+        assert submitted == [(data["job_id"], (data["job_id"], {
+            "media_type": "series", "title": "RIPLEY", "year": 2024, "tmdb_id": None, "tvdb_id": 372727,
+            "imdb_id": None, "missing_seasons": None, "missing_main": False, "artwork_type": None,
+        }))]
 
     def test_endpoint_rejects_bad_media_type(self, client):
         resp = client.post("/api/posterflow/unmatched-match-report", json={
             "media_type": "banana", "title": "X",
         })
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Destination side: the placed folder
+# ---------------------------------------------------------------------------
+
+def _placed_item(**overrides: Any) -> Dict[str, Any]:
+    item = {"media_type": "series", "title": "Wonder Man", "year": 2026, "tmdb_id": None,
+            "tvdb_id": 428629, "imdb_id": None, "missing_seasons": [], "artwork_type": None}
+    item.update(overrides)
+    return item
+
+
+def _write(folder, *names: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_bytes(b"x")
+
+
+class TestPlacedFolder:
+    def _report(self, tmp_path, monkeypatch, item):
+        monkeypatch.setattr(match_report, "get_poster_destination", lambda db_: str(tmp_path))
+        media = match_report._synth_media(item)
+        ids = {k: item.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id")}
+        return match_report._placed_folder_report(None, item, media, ids, [])
+
+    def test_yearless_folder_is_read_as_a_collection(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Wonder Man {tvdb-428629}", "poster.jpg", "Season01.jpg")
+        placed = self._report(tmp_path, monkeypatch, _placed_item())
+        assert placed["name"] == "Wonder Man {tvdb-428629}" and placed["layout"] == "folders"
+        assert placed["type"] == "collections" and placed["year"] is None
+        assert placed["matched"] is False
+        # A collection read keeps only the main poster: the season file is invisible to it.
+        assert placed["files"] == ["poster.jpg"] and placed["has_main"] is True
+
+    def test_stale_tag_names_the_conflict(self, tmp_path, monkeypatch):
+        _write(tmp_path / "A Teacher (2020) {tvdb-352440}", "poster.jpg")
+        item = _placed_item(title="A Teacher", year=2020, tvdb_id=473725)
+        placed = self._report(tmp_path, monkeypatch, item)
+        assert placed["name"] == "A Teacher (2020) {tvdb-352440}"
+        assert placed["tvdb_id"] == 352440 and placed["id_conflicts"] == ["tvdb_id"]
+        assert placed["matched"] is False and placed["reason"] == ID_CONFLICT
+
+    def test_matching_folder_is_reported_matched(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Wonder Man (2026) {tvdb-428629}", "poster.jpg", "Season01.jpg")
+        _write(tmp_path / "Wonder Woman (2017) {tmdb-297762}", "poster.jpg")
+        placed = self._report(tmp_path, monkeypatch, _placed_item())
+        assert placed["matched"] is True and placed["reason"] == "by tvdb_id"
+        assert placed["season_numbers"] == [1] and placed["siblings"] == []
+
+    def test_id_tagged_folder_outranks_a_title_only_twin(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Wonder Man (2026)", "poster.jpg")
+        _write(tmp_path / "Wonder Man (2026) {tvdb-428629}", "poster.jpg")
+        placed = self._report(tmp_path, monkeypatch, _placed_item())
+        assert placed["name"] == "Wonder Man (2026) {tvdb-428629}"
+        assert placed["siblings"] == ["Wonder Man (2026)"]
+
+    def test_flat_destination_layout(self, tmp_path, monkeypatch):
+        _write(tmp_path, "Wonder Man (2026) {tvdb-428629}.jpg", "Wonder Man (2026) {tvdb-428629} - Season 1.jpg",
+               "Other Show (2001).jpg")
+        placed = self._report(tmp_path, monkeypatch, _placed_item())
+        assert placed["layout"] == "flat" and placed["matched"] is True
+        assert placed["season_numbers"] == [1]
+
+    def test_nothing_placed_returns_none(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Other Show (2001) {tvdb-1}", "poster.jpg")
+        assert self._report(tmp_path, monkeypatch, _placed_item()) is None
+
+    def test_missing_destination_returns_none(self, tmp_path, monkeypatch):
+        assert self._report(tmp_path / "nope", monkeypatch, _placed_item()) is None
+
+    def test_artwork_reports_skip_the_check(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Wonder Man (2026) {tvdb-428629}", "poster.jpg")
+        assert self._report(tmp_path, monkeypatch, _placed_item(artwork_type="logo")) is None
+
+
+class TestPlacedVerdicts:
+    def _report_with(self, placed: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
+        report = _base_report(**overrides)
+        report["placed"] = placed
+        return report
+
+    def _placed(self, **overrides: Any) -> Dict[str, Any]:
+        placed = {"layout": "folders", "name": "RIPLEY (2024) {tvdb-372727}", "files": ["poster.jpg"],
+                  "year": 2024, "type": "series", "tmdb_id": None, "tvdb_id": 372727, "imdb_id": None,
+                  "season_numbers": [], "has_main": True, "matched": True, "reason": "by tvdb_id",
+                  "id_conflicts": [], "siblings": []}
+        placed.update(overrides)
+        return placed
+
+    def test_yearless_placed_folder_leads_with_rename_advice(self):
+        report = self._report_with(self._placed(name="RIPLEY {tvdb-372727}", year=None, type="collections",
+                                                tvdb_id=None, matched=False, reason=""),
+                                   candidates={"considered": 1, "shown": 1, "omitted": 0, "items": [_candidate()]})
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "placed_yearless"
+        assert "'RIPLEY (2024) {tvdb-372727}'" in verdicts[0]["message"]
+        assert "Rename the folder in Sonarr" in verdicts[0]["message"]
+        # The drive side no longer tells the user to run the renamer again.
+        assert any(v["code"] == "poster_placed" for v in verdicts)
+        assert not any(v["code"] == "poster_available" for v in verdicts)
+
+    def test_stale_tag_leads_with_both_tags(self):
+        report = self._report_with(self._placed(name="RIPLEY (2024) {tvdb-111}", tvdb_id=111, matched=False,
+                                                reason=ID_CONFLICT, id_conflicts=["tvdb_id"]))
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "placed_tag_conflict"
+        assert "{tvdb-111}" in verdicts[0]["message"] and "{tvdb-372727}" in verdicts[0]["message"]
+
+    def test_matching_placed_folder_calls_the_row_stale(self):
+        verdicts = _build_verdicts(self._report_with(self._placed()))
+        assert any(v["code"] == "placed_matches" and v["level"] == "info" for v in verdicts)
+
+    def test_partial_row_lists_what_the_folder_holds(self):
+        report = self._report_with(self._placed(files=["poster.jpg", "Season01.jpg"]))
+        report["item"]["missing_seasons"] = [2]
+        verdicts = _build_verdicts(report)
+        note = next(v for v in verdicts if v["code"] == "placed_partial")
+        assert "poster.jpg, Season01.jpg" in note["message"]
+
+    def test_collections_skip_the_yearless_rule(self):
+        report = self._report_with(self._placed(name="Bond Collection", year=None, type="collections", tvdb_id=None))
+        report["item"]["media_type"] = "collections"
+        assert not any(v["code"] == "placed_yearless" for v in _build_verdicts(report))
+
+    def test_no_placed_key_keeps_old_behaviour(self):
+        report = _base_report(candidates={"considered": 1, "shown": 1, "omitted": 0, "items": [_candidate()]})
+        assert _build_verdicts(report)[0]["code"] == "poster_available"
+
+    def test_text_renders_placed_section_between_library_and_ids(self):
+        report = self._report_with(self._placed(name="RIPLEY {tvdb-372727}", year=None, type="collections",
+                                                tvdb_id=None, matched=False, reason=""))
+        report["verdicts"] = _build_verdicts(report)
+        text = render_match_report_text(report)
+        assert text.index("LIBRARY RECORD") < text.index("PLACED FOLDER") < text.index("ID CROSS-CHECK")
+        assert "RIPLEY {tvdb-372727}   (folders layout)" in text
+        assert "read as  collections, year none" in text
+        assert "matcher  ✗ not matched" in text
+
+    def test_text_skips_section_when_not_checked(self):
+        text = render_match_report_text(_base_report(verdicts=[]))
+        assert "PLACED FOLDER" not in text
+
+
+class TestBuildPlumbing:
+    def test_progress_ticks_cover_every_stage(self, test_db, monkeypatch):
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db_, item_: [])
+        monkeypatch.setattr(match_report, "_placed_folder_report", lambda *a, **k: None)
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db_, **kw: ([], None, [], None))
+        seen: List[Tuple[str, int]] = []
+        item = {"media_type": "movies", "title": "Heat", "year": 1995, "tmdb_id": None, "tvdb_id": None,
+                "imdb_id": None, "missing_seasons": []}
+        build_match_report(test_db, item, progress=lambda m, p: seen.append((m, p)))
+        assert seen[0][0] == "Fetching the library record"
+        assert seen[-1][0] == "Building the verdict"
+        percents = [p for _, p in seen]
+        assert percents == sorted(percents) and percents[-1] < 100
+
+    def test_drive_scan_forwards_per_drive_progress(self, test_db, monkeypatch):
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db_, item_: [])
+        monkeypatch.setattr(match_report, "_placed_folder_report", lambda *a, **k: None)
+
+        def fake_scan(db_, per_dir_callback=None):
+            per_dir_callback(0, 2, "DriveA")
+            per_dir_callback(1, 2, "DriveB")
+            return [], None, [], None
+
+        monkeypatch.setattr(match_report, "_scan_source_drives", fake_scan)
+        seen: List[str] = []
+        item = {"media_type": "movies", "title": "Heat", "year": 1995, "tmdb_id": None, "tvdb_id": None,
+                "imdb_id": None, "missing_seasons": []}
+        build_match_report(test_db, item, progress=lambda m, p: seen.append(m))
+        assert "Scanning drive 1/2: DriveA" in seen and "Scanning drive 2/2: DriveB" in seen
+
+    def test_library_fetch_asks_servers_for_the_items_type_only(self, test_db, monkeypatch):
+        import json as _json
+        from models.setting import Setting
+        from services.poster_renamer import PosterRenameService
+        import util.poster_settings as poster_settings
+
+        test_db.add(Setting(key="plex_instances", value=_json.dumps([{"name": "Plex", "url": "http://p", "api_key": "k"}])))
+        test_db.commit()
+        monkeypatch.setattr(poster_settings, "media_server_media_source_enabled", lambda db_: True)
+        captured: Dict[str, Any] = {}
+
+        def fake_fetch(self, instance, media_dict, log_tag, selected_libraries=None, client=None, media_types=None):
+            captured["media_types"] = media_types
+
+        monkeypatch.setattr(PosterRenameService, "_fetch_media_server_media", fake_fetch)
+        match_report._fetch_library_records(test_db, {"media_type": "series", "title": "X", "year": None,
+                                                      "tmdb_id": None, "tvdb_id": None, "imdb_id": None})
+        assert captured["media_types"] == ["series"]
+
+    def test_server_probe_turns_a_failing_lookup_into_a_row(self, test_db, monkeypatch):
+        class Library:
+            key, type, title = "1", "show", "Series"
+
+        class Client:
+            def get_libraries(self):
+                return [Library()]
+
+            def find_by_provider_ids(self, *a, **k):
+                raise RuntimeError("Jellyfin hiccup")
+
+        import util.media_server.client as ms_client
+        monkeypatch.setattr(match_report, "_plex_instances",
+                            lambda db_: [{"name": "Jellyfin", "url": "http://j", "api_key": "k", "type": "jellyfin"}])
+        monkeypatch.setattr(ms_client, "create_media_server_client", lambda *a, **k: Client())
+        result = match_report._plex_reference(test_db, {"media_type": "series", "title": "X", "year": 2020},
+                                              {"tmdb_id": None, "tvdb_id": 5, "imdb_id": None})
+        assert result["servers"][0]["error"] == "Jellyfin hiccup"
+        assert result["error"].startswith("Media server lookup failed")
