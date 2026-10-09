@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-09
+### Added
+- Notifications: Apprise support alongside the native Discord notifications. Add Apprise URLs in Settings to send job notifications to any of the services Apprise supports.
+
+### Fixed
+- IDarr: artwork and PSD drives no longer appear in the poster drive pickers.
+
 ## [0.16.8] - 2026-10-06
 ### Added
 - Settings: a schedule timezone setting — schedules can run in a timezone of your choice, with timestamps stored UTC-aware under the hood. (Thanks, mvanbaak!)
