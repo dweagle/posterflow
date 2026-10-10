@@ -37,7 +37,7 @@ import SettingsScriptsSection from '../components/settings/SettingsScriptsSectio
 import { useSettingsSchedules } from '../hooks/useSettingsSchedules'
 import { useSettingsMedia } from '../hooks/useSettingsMedia'
 import { useSettingsOperations } from '../hooks/useSettingsOperations'
-import { useSettingsCore } from '../hooks/useSettingsCore'
+import { API_KEY_SETTINGS, ApiKeyName, useSettingsCore } from '../hooks/useSettingsCore'
 import './Settings.css'
 
 type SettingsTab = 'basic' | 'notifications' | 'rclone' | 'media' | 'scheduling' | 'backup' | 'maintenance' | 'security' | 'scripts'
@@ -353,6 +353,7 @@ function Settings() {
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
   const [showFanartKey, setShowFanartKey] = useState(false)
+  const [removeApiKey, setRemoveApiKey] = useState<ApiKeyName | null>(null)
 
   const handleToggleTvdbKeyVisibility = async () => {
     const willShow = !showTvdbKey
@@ -609,12 +610,21 @@ function Settings() {
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    savedApiKeys,
+    handleRemoveApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
     appTimezone,
     effectiveTimezone,
     handleSaveAppTimezone,
   } = useSettingsCore({ showToast, setSaving, setMediaSettings })
+
+  const removeApiKeyLabel = removeApiKey ? API_KEY_SETTINGS[removeApiKey].label : ''
+  const handleConfirmRemoveApiKey = async () => {
+    const name = removeApiKey
+    setRemoveApiKey(null)
+    if (name) await handleRemoveApiKey(name)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -1129,6 +1139,16 @@ function Settings() {
                 >
                   Save
                 </button>
+                {savedApiKeys.tmdb && (
+                  <button
+                    className="btn-secondary btn-inline-save"
+                    type="button"
+                    onClick={() => setRemoveApiKey('tmdb')}
+                    disabled={saving}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
             <SourceAttribution source="tmdb" />
@@ -1175,6 +1195,16 @@ function Settings() {
                 >
                   Save
                 </button>
+                {savedApiKeys.tvdb && (
+                  <button
+                    className="btn-secondary btn-inline-save"
+                    type="button"
+                    onClick={() => setRemoveApiKey('tvdb')}
+                    disabled={saving}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
             <SourceAttribution source="tvdb" />
@@ -1214,6 +1244,16 @@ function Settings() {
                 >
                   Save
                 </button>
+                {savedApiKeys.fanart && (
+                  <button
+                    className="btn-secondary btn-inline-save"
+                    type="button"
+                    onClick={() => setRemoveApiKey('fanart')}
+                    disabled={saving}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
             <SourceAttribution source="fanart" />
@@ -1915,6 +1955,17 @@ function Settings() {
         variant="danger"
         onConfirm={handleDatabaseCleanup}
         onCancel={() => setShowCleanupConfirm(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={removeApiKey !== null}
+        title={`Remove ${removeApiKeyLabel} API Key`}
+        message={`Remove the saved ${removeApiKeyLabel} API key${removeApiKey === 'tvdb' ? ' and PIN' : ''}? Features that use it stop working until you add a key again.`}
+        confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={handleConfirmRemoveApiKey}
+        onCancel={() => setRemoveApiKey(null)}
       />
 
       <RestartRequiredModal isOpen={showRestartModal} onClose={() => setShowRestartModal(false)} />

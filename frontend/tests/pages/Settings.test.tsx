@@ -105,7 +105,8 @@ vi.mock('../../src/hooks/useSettingsMedia', () => ({
   }),
 }))
 
-vi.mock('../../src/hooks/useSettingsCore', () => ({
+vi.mock('../../src/hooks/useSettingsCore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/hooks/useSettingsCore')>()),
   useSettingsCore: () => ({
     debugEnabled: false,
     loading: false,
@@ -125,6 +126,8 @@ vi.mock('../../src/hooks/useSettingsCore', () => ({
     confirmSaveRclone: (...args: unknown[]) => mockConfirmSaveRclone(...args),
     handleUploadServiceAccount: vi.fn(),
     uploadingServiceAccount: false,
+    savedApiKeys: { tmdb: false, tvdb: false, fanart: false },
+    handleRemoveApiKey: vi.fn(),
   }),
 }))
 

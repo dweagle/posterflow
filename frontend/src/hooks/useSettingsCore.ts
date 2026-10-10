@@ -11,6 +11,15 @@ import { MediaSettingsState, ServerInstance } from './useSettingsMedia'
 
 type ToastType = 'success' | 'error' | 'info'
 
+export const API_KEY_SETTINGS = {
+  tmdb: { setting: 'tmdb_api_key', label: 'TMDB' },
+  tvdb: { setting: 'tvdb_api_key', label: 'TheTVDB' },
+  fanart: { setting: 'fanart_api_key', label: 'fanart.tv' },
+} as const
+export type ApiKeyName = keyof typeof API_KEY_SETTINGS
+
+const noSavedApiKeys: Record<ApiKeyName, boolean> = { tmdb: false, tvdb: false, fanart: false }
+
 interface RcloneSettings {
   google_client_id: string
   google_client_secret: string
@@ -73,6 +82,7 @@ export const useSettingsCore = ({
   const [tvdbApiKey, setTvdbApiKey] = useState('')
   const [tvdbPin, setTvdbPin] = useState('')
   const [fanartApiKey, setFanartApiKey] = useState('')
+  const [savedApiKeys, setSavedApiKeys] = useState<Record<ApiKeyName, boolean>>(noSavedApiKeys)
   const [appleArtworkEnabled, setAppleArtworkEnabled] = useState(true)
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
@@ -91,13 +101,15 @@ export const useSettingsCore = ({
       }
       setRcloneSettings(nextRcloneSettings)
 
+      // API keys are sensitive so they come back masked when set; masked means configured
       const tmdbKey = (settings.tmdb_api_key || '').trim()
-      // tmdb_api_key is sensitive so it comes back masked if set; treat masked as configured
-      setTmdbApiKey(tmdbKey === '***masked***' ? '***masked***' : tmdbKey)
-      // Also sensitive, so the same masked-means-configured treatment applies.
-      setTvdbApiKey((settings.tvdb_api_key || '').trim())
+      const tvdbKey = (settings.tvdb_api_key || '').trim()
+      const fanartKey = (settings.fanart_api_key || '').trim()
+      setTmdbApiKey(tmdbKey)
+      setTvdbApiKey(tvdbKey)
       setTvdbPin((settings.tvdb_pin || '').trim())
-      setFanartApiKey((settings.fanart_api_key || '').trim())
+      setFanartApiKey(fanartKey)
+      setSavedApiKeys({ tmdb: !!tmdbKey, tvdb: !!tvdbKey, fanart: !!fanartKey })
       setAppleArtworkEnabled((settings.apple_artwork_enabled || '').trim().toLowerCase() !== 'false')
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
@@ -200,14 +212,24 @@ export const useSettingsCore = ({
     }
   }
 
+  const markApiKeySaved = (name: ApiKeyName, saved: boolean) =>
+    setSavedApiKeys((prev) => ({ ...prev, [name]: saved }))
+
+  const rejectBlankApiKey = (name: ApiKeyName): false => {
+    showToast(
+      savedApiKeys[name] ? 'Enter a new key, or click Remove to clear the saved one.' : 'Enter a key first.',
+      'info'
+    )
+    return false
+  }
+
   const handleSaveTmdbApiKey = async (): Promise<boolean> => {
     const valueToSave = tmdbApiKey.trim()
-    if (!valueToSave || valueToSave === '***masked***') {
-      return false
-    }
+    if (!valueToSave || valueToSave === '***masked***') return rejectBlankApiKey('tmdb')
     try {
       setSaving(true)
       await saveBulkSettings({ tmdb_api_key: valueToSave })
+      markApiKeySaved('tmdb', true)
       showToast('TMDB API key saved!')
       return true
     } catch (error) {
@@ -221,9 +243,7 @@ export const useSettingsCore = ({
 
   const handleSaveTvdbApiKey = async (): Promise<boolean> => {
     const valueToSave = tvdbApiKey.trim()
-    if (!valueToSave || valueToSave === '***masked***') {
-      return false
-    }
+    if (!valueToSave || valueToSave === '***masked***') return rejectBlankApiKey('tvdb')
     try {
       setSaving(true)
       const payload: Record<string, string> = { tvdb_api_key: valueToSave }
@@ -232,6 +252,7 @@ export const useSettingsCore = ({
       const pin = tvdbPin.trim()
       if (pin !== '***masked***') payload.tvdb_pin = pin
       await saveBulkSettings(payload)
+      markApiKeySaved('tvdb', true)
       showToast('TheTVDB API key saved!')
       return true
     } catch (error) {
@@ -245,17 +266,44 @@ export const useSettingsCore = ({
 
   const handleSaveFanartApiKey = async (): Promise<boolean> => {
     const valueToSave = fanartApiKey.trim()
-    if (!valueToSave || valueToSave === '***masked***') {
-      return false
-    }
+    if (!valueToSave || valueToSave === '***masked***') return rejectBlankApiKey('fanart')
     try {
       setSaving(true)
       await saveBulkSettings({ fanart_api_key: valueToSave })
+      markApiKeySaved('fanart', true)
       showToast('fanart.tv API key saved!')
       return true
     } catch (error) {
       console.error('Error saving fanart.tv API key:', error)
       showToast('Failed to save fanart.tv API key', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const apiKeySetters: Record<ApiKeyName, (value: string) => void> = {
+    tmdb: setTmdbApiKey,
+    tvdb: setTvdbApiKey,
+    fanart: setFanartApiKey,
+  }
+
+  const handleRemoveApiKey = async (name: ApiKeyName): Promise<boolean> => {
+    const { setting, label } = API_KEY_SETTINGS[name]
+    const payload: Record<string, string> = { [setting]: '' }
+    // the PIN only means something next to a TheTVDB key
+    if (name === 'tvdb') payload.tvdb_pin = ''
+    try {
+      setSaving(true)
+      await saveBulkSettings(payload)
+      apiKeySetters[name]('')
+      if (name === 'tvdb') setTvdbPin('')
+      markApiKeySaved(name, false)
+      showToast(`${label} API key removed`)
+      return true
+    } catch (error) {
+      console.error(`Error removing ${label} API key:`, error)
+      showToast(`Failed to remove ${label} API key`, 'error')
       return false
     } finally {
       setSaving(false)
@@ -382,6 +430,8 @@ export const useSettingsCore = ({
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    savedApiKeys,
+    handleRemoveApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
     psdExportFolder,
