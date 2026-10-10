@@ -16,6 +16,7 @@ import requests
 
 from core.rate_limiter import TokenBucket
 from models.setting import get_setting
+from services.rejected_keys import warn_rejected_key
 
 FANART_API = "https://webservice.fanart.tv/v3"
 FANART_ASSET_HOST = "assets.fanart.tv"
@@ -90,6 +91,7 @@ def _get(path: str, api_key: str, *, what: str) -> Optional[dict]:
     if resp.status_code == 404:
         data = None
     elif resp.status_code in (401, 403):
+        warn_rejected_key("fanart", api_key)
         raise FanartError("fanart.tv rejected the API key.", status=401)
     elif resp.status_code != 200:
         raise FanartError(f"fanart.tv {what} lookup failed (HTTP {resp.status_code}).")

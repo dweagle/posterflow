@@ -21,6 +21,7 @@ import requests
 from core.logging import LogTags, log_warning
 from core.rate_limiter import TokenBucket, tmdb_bucket
 from models.setting import get_setting
+from services.rejected_keys import note_tmdb_response
 
 UTS_API = "https://uts-api.itunes.apple.com/uts/v2"
 # The web finder's fixed query; Apple checks that utsk is present, not what it says.
@@ -196,6 +197,7 @@ def _tmdb(path: str, params: dict[str, str], *, ttl: float, what: str) -> dict:
         if resp.status_code == 404:
             data = {}
         else:
+            note_tmdb_response(resp, params.get("api_key"))
             resp.raise_for_status()
             data = resp.json()
     except (requests.RequestException, ValueError) as exc:

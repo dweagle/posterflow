@@ -37,6 +37,7 @@ from models.idarr import (
     upsert_idarr_pending_match,
 )
 from models.setting import get_setting
+from services.rejected_keys import note_tmdb_response
 from util.data.normalization import normalize_titles
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
@@ -1654,6 +1655,7 @@ class IdarrRunner:
                     cls._tmdb_note_success()  # TMDB responded — it's up
                     return None
 
+                note_tmdb_response(response, api_key)
                 response.raise_for_status()
                 payload = response.json()
                 cls._tmdb_note_success()

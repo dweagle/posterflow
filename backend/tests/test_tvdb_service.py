@@ -6,6 +6,7 @@ transports rather than live calls.
 """
 import pytest
 
+import services.rejected_keys as rejected_keys
 import services.tvdb as tvdb
 
 
@@ -17,6 +18,7 @@ def _reset_tvdb_caches():
     tvdb._types_cache = None
     tvdb._consecutive_failures = 0
     tvdb._circuit_open_until = 0.0
+    rejected_keys._logged_at.clear()
     yield
     tvdb._seasons_cache.clear()
 
@@ -403,6 +405,47 @@ def test_bearer_logs_in_once_for_concurrent_callers(monkeypatch):
         t.join()
 
     assert len(logins) == 1
+
+
+def test_login_warns_once_per_rejected_key(monkeypatch):
+    class Resp:
+        status_code = 401
+
+    monkeypatch.setattr(tvdb.requests, "post", lambda *a, **k: Resp())
+    warnings = []
+    monkeypatch.setattr(rejected_keys, "log_warning", lambda tag, msg, **kw: warnings.append(msg))
+
+    for _ in range(3):
+        with pytest.raises(tvdb.TvdbError) as excinfo:
+            tvdb._login("legacy-key", "")
+        assert excinfo.value.status == 401
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("TheTVDB rejected the API key.")
+    assert "Legacy v3 keys" in warnings[0]
+    assert "Settings > General > API Keys" in warnings[0]
+
+    # A different key or PIN is a new attempt and gets its own line.
+    with pytest.raises(tvdb.TvdbError):
+        tvdb._login("legacy-key", "1234")
+    assert len(warnings) == 2
+    assert warnings[1].startswith("TheTVDB rejected the API key and PIN.")
+
+
+def test_login_warns_again_after_the_interval(monkeypatch):
+    class Resp:
+        status_code = 401
+
+    monkeypatch.setattr(tvdb.requests, "post", lambda *a, **k: Resp())
+    warnings = []
+    monkeypatch.setattr(rejected_keys, "log_warning", lambda tag, msg, **kw: warnings.append(msg))
+
+    with pytest.raises(tvdb.TvdbError):
+        tvdb._login("k", "")
+    rejected_keys._logged_at[("tvdb", "k")] -= rejected_keys.INTERVAL + 1
+    with pytest.raises(tvdb.TvdbError):
+        tvdb._login("k", "")
+    assert len(warnings) == 2
 
 
 def test_bearer_reuses_the_cached_token(monkeypatch):

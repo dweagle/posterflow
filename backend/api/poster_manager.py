@@ -38,6 +38,7 @@ from models.drive import Drive
 from models.manual_media import ManualMediaEntry
 from models.poster import Poster
 from models.setting import get_setting, upsert_setting
+from services.rejected_keys import note_tmdb_response
 from util.poster_settings import (
     DEFAULT_POSTER_DESTINATION,
     SETTING_POSTER_DESTINATION,
@@ -1446,6 +1447,7 @@ def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Dep
             params={"api_key": tmdb_api_key, **query_params},
             timeout=20,
         )
+        note_tmdb_response(response)
         response.raise_for_status()
         tmdb_data = response.json()
     except http_requests.RequestException as exc:
@@ -1499,6 +1501,7 @@ def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Dep
                 params={"api_key": tmdb_api_key},
                 timeout=12,
             )
+            note_tmdb_response(ext_resp)
             ext_resp.raise_for_status()
             ext_data = ext_resp.json()
             if isinstance(ext_data, dict):
@@ -1530,6 +1533,7 @@ def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Dep
                     params={"api_key": tmdb_api_key},
                     timeout=12,
                 )
+                note_tmdb_response(resp)
                 resp.raise_for_status()
                 data = resp.json()
                 if isinstance(data, dict) and isinstance(data.get("id"), int):
@@ -1545,6 +1549,7 @@ def search_unmatched_tmdb(payload: UnmatchedTmdbSearchRequest, db: Session = Dep
                     params={"api_key": tmdb_api_key, "external_source": external_source},
                     timeout=12,
                 )
+                note_tmdb_response(resp)
                 resp.raise_for_status()
                 find_data = resp.json()
                 if isinstance(find_data, dict):

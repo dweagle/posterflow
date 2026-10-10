@@ -14,6 +14,7 @@ from pathvalidate import is_valid_filename, sanitize_filename
 
 from core.logging import logger, LogTags, log_success, log_error, log_info, log_warning, log_debug, log_phase, log_section_start, log_section_end
 from models.setting import get_setting, upsert_setting
+from services.rejected_keys import note_tmdb_response
 from sqlalchemy.orm import Session
 from util.arr.client import create_arr_client
 from util.constants import illegal_chars_regex
@@ -1834,6 +1835,7 @@ class PosterRenameService:
                 params={"api_key": api_key, "query": title, "include_adult": "false"},
                 timeout=20,
             )
+            note_tmdb_response(response)
             response.raise_for_status()
             data = response.json()
         except (requests.RequestException, ValueError) as e:

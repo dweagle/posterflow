@@ -43,6 +43,7 @@ from models.job import (
 from models.setting import get_setting, get_setting_value, upsert_setting
 from services import apple_tv
 from services import fanart
+from services.rejected_keys import note_tmdb_response
 from services import tvdb
 from util.constants import year_regex
 from util.data.extract import extract_ids
@@ -1294,6 +1295,7 @@ def _tmdb_fetch_json(url: str, params: dict[str, Any], context: str, timeout: in
             time.sleep(min(max(retry_after, 0.5 * (attempt + 1)), 10.0))
             attempt += 1
             continue
+        note_tmdb_response(resp, str(params.get("api_key") or ""))
         if resp.status_code != 200:
             reason = _tmdb_failure_reason(context, status=resp.status_code)
             _log_tmdb_failure(reason, level=_tmdb_log_level(status=resp.status_code))

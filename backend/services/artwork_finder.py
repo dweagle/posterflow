@@ -28,6 +28,7 @@ from models.setting import get_setting
 from services import apple_tv as apple_service
 from services import fanart as fanart_service
 from services import tvdb as tvdb_service
+from services.rejected_keys import note_tmdb_response
 
 Image.MAX_IMAGE_PIXELS = None  # some TMDB logos are 12000px wide
 
@@ -166,6 +167,7 @@ def _tmdb_get(path: str, api_key: str, **params: Any) -> Optional[dict]:
             continue
         if r.status_code == 404:
             return None
+        note_tmdb_response(r, api_key)
         if r.ok:
             try:
                 return r.json()

@@ -25,6 +25,7 @@ from core.job_queue import job_queue
 from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_RECENT_TERMINAL, JOB_TYPE_IDARR
 from modules.idarr import run_idarr_file_upload_job
 from models.setting import Setting, get_setting, upsert_setting
+from services.rejected_keys import note_tmdb_response
 from util.data.normalization import normalize_titles
 
 router = APIRouter(prefix="/api/idarr", tags=["idarr"])
@@ -1845,6 +1846,7 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                         params={"api_key": tmdb_api_key_for_resolve},
                         timeout=10,
                     )
+                    note_tmdb_response(tmdb_resp)
                     tmdb_resp.raise_for_status()
                     tmdb_data = tmdb_resp.json()
                     if isinstance(tmdb_data, dict):
@@ -1873,6 +1875,7 @@ def resolve_pending_matches(payload: IdarrPendingResolveRequest, db: Session, sc
                         params={"api_key": tmdb_api_key_for_resolve, "external_source": external_source},
                         timeout=10,
                     )
+                    note_tmdb_response(find_resp)
                     find_resp.raise_for_status()
                     find_data = find_resp.json()
                     if isinstance(find_data, dict):
@@ -2201,6 +2204,7 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
                 params={"api_key": tmdb_api_key},
                 timeout=12,
             )
+            note_tmdb_response(external_response)
             external_response.raise_for_status()
             external_payload = external_response.json()
             if isinstance(external_payload, dict):
@@ -2235,6 +2239,7 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
                 params={"api_key": tmdb_api_key, **query_params},
                 timeout=20,
             )
+            note_tmdb_response(response)
             response.raise_for_status()
             payload_json = response.json()
         except requests.RequestException as exc:
@@ -2253,6 +2258,7 @@ def get_maker_idarr_pending_candidates(payload: IdarrPendingCandidatesRequest, d
                     params={"api_key": tmdb_api_key, **fallback_params},
                     timeout=20,
                 )
+                note_tmdb_response(fallback_resp)
                 fallback_resp.raise_for_status()
                 fallback_json = fallback_resp.json()
                 results = fallback_json.get("results") if isinstance(fallback_json, dict) else []

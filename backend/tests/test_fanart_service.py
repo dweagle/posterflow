@@ -285,3 +285,18 @@ def test_get_maps_failures_to_fanart_errors(monkeypatch):
     with pytest.raises(fanart.FanartError) as exc:
         fanart._get("/movies/1", "k", what="movie")
     assert "Could not reach" in str(exc.value)
+
+
+def test_get_warns_once_about_a_rejected_key(monkeypatch):
+    import services.rejected_keys as rk
+    rk._logged_at.clear()
+    lines = []
+    monkeypatch.setattr(rk, "log_warning", lambda tag, msg, **kw: lines.append(msg))
+    _patch_get(monkeypatch, _Resp(401, {"error": "invalid API key"}))
+
+    for _ in range(2):
+        with pytest.raises(fanart.FanartError):
+            fanart._get("/movies/603", "personal", what="movie")
+
+    assert len(lines) == 1
+    assert lines[0].startswith("fanart.tv rejected the API key.")

@@ -18,6 +18,7 @@ import requests
 from core.logging import LogTags, log_info, log_warning
 from core.rate_limiter import TokenBucket
 from models.setting import get_setting
+from services.rejected_keys import warn_rejected_key
 
 TVDB_API = "https://api4.thetvdb.com/v4"
 TVDB_ARTWORK_HOST = "artworks.thetvdb.com"
@@ -96,6 +97,11 @@ def get_tvdb_credentials(db) -> tuple[str, str]:
 
 # ------------------------------------------------------------------ auth + transport
 
+def _warn_rejected_key(api_key: str, pin: str) -> None:
+    warn_rejected_key("tvdb", f"{api_key}/{pin}" if pin else api_key,
+                      what="API key and PIN" if pin else "API key")
+
+
 def _login(api_key: str, pin: str) -> str:
     payload: dict[str, str] = {"apikey": api_key}
     if pin:
@@ -106,6 +112,7 @@ def _login(api_key: str, pin: str) -> str:
     except Exception as exc:
         raise TvdbError(f"Could not reach TheTVDB: {exc}")
     if resp.status_code == 401:
+        _warn_rejected_key(api_key, pin)
         raise TvdbError("TheTVDB rejected the API key (and PIN, if this is a subscriber key).", status=401)
     if resp.status_code != 200:
         raise TvdbError(f"TheTVDB login failed (HTTP {resp.status_code}).")

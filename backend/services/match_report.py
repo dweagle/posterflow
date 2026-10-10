@@ -20,6 +20,7 @@ from core.logging import LogTags, log_error, log_info
 from models.manual_media import ManualMediaEntry
 from models.setting import get_setting
 from services.tvdb import TvdbError, get_tvdb_credentials, _get as tvdb_get
+from services.rejected_keys import note_tmdb_response
 from util.constants import season_pattern
 from util.data.extract import extract_ids
 from util.poster_settings import get_poster_destination
@@ -543,6 +544,7 @@ def _tmdb_reference(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
                 f"https://api.themoviedb.org/3/find/{ext_id}",
                 params={"api_key": api_key, "external_source": source}, timeout=12,
             )
+            note_tmdb_response(resp)
             resp.raise_for_status()
             found = resp.json() or {}
             hits = found.get("tv_results" if entity == "tv" else "movie_results") or []
@@ -559,6 +561,7 @@ def _tmdb_reference(db: Session, item: Dict[str, Any]) -> Dict[str, Any]:
         )
         if resp.status_code == 404:
             return {"error": f"TMDB has no {entity} with id {tmdb_id} (deleted or wrong namespace)"}
+        note_tmdb_response(resp)
         resp.raise_for_status()
         detail = resp.json()
     except http_requests.RequestException as exc:

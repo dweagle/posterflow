@@ -3675,3 +3675,23 @@ def test_poster_exports_serve_rejects_bad_requests(client, test_db):
         assert client.get("/api/maker-tools/poster-exports/missing.jpg").status_code == 404
         assert client.get("/api/maker-tools/poster-exports/missing.jpg", params={"source": "nope"}).status_code == 400
         assert client.get("/api/maker-tools/poster-exports/missing.jpg", params={"source": "cl2k"}).status_code == 400
+
+
+def test_tmdb_fetch_json_warns_once_about_a_rejected_key():
+    import pytest
+    from unittest.mock import MagicMock, patch
+    import services.rejected_keys as rk
+    from api.maker_tools import TmdbUpstreamError, _tmdb_fetch_json
+
+    rk._logged_at.clear()
+    lines = []
+    resp = MagicMock()
+    resp.status_code = 401
+    with patch("api.maker_tools.requests.get", return_value=resp), \
+         patch("services.rejected_keys.log_warning", side_effect=lambda tag, msg, **kw: lines.append(msg)):
+        for _ in range(2):
+            with pytest.raises(TmdbUpstreamError):
+                _tmdb_fetch_json("https://api.themoviedb.org/3/tv/1", {"api_key": "k"}, "show status")
+
+    assert len(lines) == 1
+    assert lines[0].startswith("TMDB rejected the API key.")
