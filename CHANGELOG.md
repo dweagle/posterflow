@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-10
+### Changed
+- Match Report: reports now build as a background job instead of making the modal wait, and they inspect the item's placed folder with verdicts on what's actually there. Artwork wording cleaned up.
+
+### Fixed
+- Settings: saved API keys can be removed again from the Settings page.
+
 ## [0.17.0] - 2026-10-09
 ### Added
 - Notifications: Apprise support alongside the native Discord notifications. Add Apprise URLs in Settings to send job notifications to any of the services Apprise supports.
