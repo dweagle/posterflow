@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List, Optional
 
 from util.media_server.client import MediaServerClient
@@ -33,8 +34,39 @@ MEDIA_TYPE_TO_SECTION_TYPE = {
 }
 
 
+# Legacy-agent guid strings, the only ids a library on TheTVDB/TheMovieDB/IMDb (retired) or
+# HAMA carries: "com.plexapp.agents.hama://tvdb-267440?lang=en". The new agents' Guid children
+# never appear on those items, so without this they look id-less.
+_LEGACY_GUID_RE = re.compile(r"^com\.plexapp\.agents\.(?P<agent>[a-z0-9]+)://(?P<value>[^?]+)")
+# HAMA prefixes: tvdb (tvdb2..tvdb5 are season-mapping modes of the same TVDB id), tmdb/tsdb
+# (TMDB movie/show), imdb. anidb-N has no TVDB equivalent here and is left unmapped.
+_HAMA_VALUE_RE = re.compile(r"^(?P<source>tvdb|tmdb|tsdb|imdb)\d?-(?P<id>[a-z0-9]+)$")
+
+
+def legacy_guid_ids(guid: Any) -> Dict[str, str]:
+    """tmdb/tvdb/imdb ids from a legacy agent guid string, or {} for anything else."""
+    match = _LEGACY_GUID_RE.match(str(guid or "").strip().lower())
+    if not match:
+        return {}
+    agent, value = match.group("agent"), match.group("value")
+    if agent == "hama":
+        hama = _HAMA_VALUE_RE.match(value)
+        if not hama:
+            return {}
+        source = {"tsdb": "tmdb"}.get(hama.group("source"), hama.group("source"))
+        value = hama.group("id")
+    else:
+        source = {"thetvdb": "tvdb", "themoviedb": "tmdb", "imdb": "imdb"}.get(agent, "")
+    if source == "imdb":
+        return {"imdb": value} if value.startswith("tt") else {}
+    if source in ("tmdb", "tvdb") and value.isdigit():
+        return {source: value}
+    return {}
+
+
 def extract_provider_ids(item: Any) -> Dict[str, str]:
-    """tmdb/tvdb/imdb ids from plexapi guids + *id attrs (same parse as _extract_plex_id_keys)."""
+    """tmdb/tvdb/imdb ids from plexapi guids + *id attrs (same parse as _extract_plex_id_keys),
+    with the legacy guid string filling any gap."""
     ids: Dict[str, str] = {}
     try:
         raw_guids = getattr(item, "guids", None) or []
@@ -64,6 +96,12 @@ def extract_provider_ids(item: Any) -> Dict[str, str]:
         normalized = str(value).strip().lower()
         if normalized and normalized != "0":
             ids.setdefault(source, normalized)
+    try:
+        legacy = legacy_guid_ids(getattr(item, "guid", None))
+    except Exception:
+        legacy = {}
+    for source, value in legacy.items():
+        ids.setdefault(source, value)
     return ids
 
 

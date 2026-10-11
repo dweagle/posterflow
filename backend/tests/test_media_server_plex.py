@@ -107,6 +107,37 @@ def test_extract_provider_ids_guids_and_attrs():
     assert extract_provider_ids(item) == {"tmdb": "949", "imdb": "tt001"}
 
 
+def test_extract_provider_ids_reads_legacy_agent_guids():
+    # HAMA keys its TVDB-mapped shows in the legacy guid string and exposes no Guid children.
+    hama = FakeItem(guids=[], guid="com.plexapp.agents.hama://tvdb-267440?lang=en")
+    assert extract_provider_ids(hama) == {"tvdb": "267440"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.hama://tvdb2-267440?lang=en")) == {"tvdb": "267440"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.hama://tsdb-1429?lang=en")) == {"tmdb": "1429"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.hama://tmdb-949?lang=en")) == {"tmdb": "949"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.hama://imdb-tt0113277?lang=en")) == {"imdb": "tt0113277"}
+    # AniDB-keyed HAMA shows have no TVDB equivalent in the guid; they stay id-less.
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.hama://anidb-10261?lang=en")) == {}
+    # The retired first-party agents.
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.thetvdb://79126?lang=en")) == {"tvdb": "79126"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.themoviedb://949?lang=en")) == {"tmdb": "949"}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.imdb://tt0113277?lang=en")) == {"imdb": "tt0113277"}
+    # Modern and unmatched guids contribute nothing through this path.
+    assert extract_provider_ids(FakeItem(guids=[], guid="plex://movie/5d7768274de0ee001fcc8cc8")) == {}
+    assert extract_provider_ids(FakeItem(guids=[], guid="local://1234")) == {}
+    assert extract_provider_ids(FakeItem(guids=[], guid="com.plexapp.agents.none://1234?lang=en")) == {}
+
+
+def test_legacy_guid_never_overrides_a_modern_guid():
+    item = FakeItem(guids=[FakeGuid("tvdb://999")], guid="com.plexapp.agents.thetvdb://79126?lang=en")
+    assert extract_provider_ids(item) == {"tvdb": "999"}
+
+
+def test_parse_item_uses_legacy_guid_for_provider_ids():
+    client = make_client([])
+    parsed = client._parse_item(make_movie(guids=[], guid="com.plexapp.agents.hama://tvdb-267440?lang=en"))
+    assert parsed.provider_ids == {"tvdb": "267440"}
+
+
 def test_parse_item_fields():
     client = make_client([])
     parsed = client._parse_item(make_movie())
