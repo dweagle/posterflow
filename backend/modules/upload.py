@@ -2320,7 +2320,8 @@ def run_plex_upload_background_job(
                 collections = int(row.get("collections", 0))
                 log_info(
                     LogTags.UPLOADER,
-                    f"- {instance_name} / {library_name} ({section_type}) | items={items}, collections={collections}",
+                    f"- {instance_name} / {library_name} ({section_type}) | items={items}, collections={collections}"
+                    + (f", no ids={int(row.get('no_ids', 0))}" if int(row.get("no_ids", 0) or 0) else ""),
                 )
 
         embed = build_plex_upload_embed(stats, dry_run=dry_run)

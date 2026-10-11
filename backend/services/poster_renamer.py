@@ -892,7 +892,7 @@ class PosterRenameService:
 
         library_roots = {norm_path(loc) for loc in (getattr(library, "locations", None) or []) if loc}
 
-        count = 0
+        count = no_ids = 0
         for item in items:
             title = unidecode(html.unescape(item.title))
             if not title:
@@ -955,6 +955,14 @@ class PosterRenameService:
                 entry["has_episodes"] = bool(seasons)
             media_dict[media_type].append(entry)
             count += 1
+            no_ids += not any(entry.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id", "tmdb_id_ref"))
+        if no_ids:
+            log_warning(
+                log_tag,
+                f"{no_ids} of {count} {media_type} in '{library.title}' ({instance_name}) carry no TMDB/TVDB/IMDb id "
+                "(legacy metadata agent?) — they can only merge with other sources and match posters by title and year",
+                instance=instance_name, library=str(library.title), no_ids=no_ids, items=count,
+            )
         return count
 
     @staticmethod
@@ -970,6 +978,29 @@ class PosterRenameService:
             if name not in known:
                 existing.setdefault("extra_folders", []).append(name)
                 known.add(name)
+
+    @staticmethod
+    def _note_unmergeable_twin(by_title_year: Dict[str, MediaItem], entry: MediaItem, log_tag: str) -> None:
+        """Same title and year as an entry already kept, but one side has no id to merge on:
+        say so, since the pair otherwise shows up as a silent duplicate."""
+        key = f"{normalize_titles(str(entry.get('title') or ''))}_{entry.get('year')}"
+        twin = by_title_year.get(key)
+        if twin is None:
+            by_title_year[key] = entry
+            return
+
+        def has_ids(item: MediaItem) -> bool:
+            return any(item.get(k) for k in ("tmdb_id", "tvdb_id", "imdb_id", "tmdb_id_ref"))
+
+        if has_ids(twin) != has_ids(entry):
+            idless, keyed = (entry, twin) if not has_ids(entry) else (twin, entry)
+            log_warning(
+                log_tag,
+                f"Kept '{entry.get('title')} ({entry.get('year')})' from {idless.get('instance')} as a separate item: "
+                f"it carries no TMDB/TVDB/IMDb id, so it can't merge with the {keyed.get('instance')} entry",
+                title=entry.get("title"), year=entry.get("year"),
+                idless_instance=idless.get("instance"), keyed_instance=keyed.get("instance"),
+            )
 
     def _merge_duplicate_series(self, series_list: List[MediaItem], log_tag: str = LogTags.RENAMER) -> List[MediaItem]:
         """
@@ -989,7 +1020,8 @@ class PosterRenameService:
         # Group series by unique identifier (tvdb_id preferred, fallback to title+year)
         series_map: Dict[str, Dict[str, Any]] = {}
         merged_sources: set = set()
-        
+        by_title_year: Dict[str, Dict[str, Any]] = {}
+
         for series in series_list:
             # Create unique key - prefer TVDB ID, fallback to title+year
             tvdb_id = series.get("tvdb_id")
@@ -1034,7 +1066,8 @@ class PosterRenameService:
             else:
                 # First time seeing this series
                 series_map[key] = series
-        
+                self._note_unmergeable_twin(by_title_year, series, log_tag)
+
         merged_list = list(series_map.values())
         
         if len(merged_list) < len(series_list):
@@ -1064,6 +1097,7 @@ class PosterRenameService:
         # Group movies by unique identifier (tmdb_id preferred, fallback to title+year)
         movies_map: Dict[str, Dict[str, Any]] = {}
         merged_sources: set = set()
+        by_title_year: Dict[str, Dict[str, Any]] = {}
 
         for movie in movies_list:
             # Create unique key - prefer TMDB ID, fallback to title+year
@@ -1092,7 +1126,8 @@ class PosterRenameService:
             else:
                 # First time seeing this movie
                 movies_map[key] = movie
-        
+                self._note_unmergeable_twin(by_title_year, movie, log_tag)
+
         merged_list = list(movies_map.values())
         
         if len(merged_list) < len(movies_list):
@@ -1328,20 +1363,31 @@ class PosterRenameService:
                         if new_file_path in written_dest_paths:
                             src_drive = os.path.basename(os.path.dirname(os.path.dirname(file)))
                             src_folder = os.path.basename(os.path.dirname(file))
-                            winning_file = written_dest_paths[new_file_path]
-                            log_warning(
-                                LogTags.RENAMER,
-                                f"Skipping '{item_name}' from [{src_drive}/{src_folder}] — "
-                                f"'{new_file_name}' was already written by a higher-priority source this run. "
-                                f"This is normal when multiple sources with different file names match the same media. "
-                                f"Winner: '{winning_file}' | Skipped: '{file_name}'",
-                                media=item_name,
-                                source_folder=src_folder,
-                                drive=src_drive,
-                                dest=new_file_path,
-                                winning_file=winning_file,
-                                skipped_file=file_name,
-                            )
+                            winning_path = written_dest_paths[new_file_path]
+                            winning_file = os.path.basename(winning_path)
+                            if winning_path == file:
+                                # Same source file again: two library entries resolved to this folder
+                                # (a server copy that couldn't merge with the arr's), not a poster clash.
+                                log_debug(
+                                    LogTags.RENAMER,
+                                    f"'{new_file_name}' for '{item_name}' was already written from this same file "
+                                    f"this run — two library entries resolve to the same folder",
+                                    media=item_name, dest=new_file_path, source_file=file_name,
+                                )
+                            else:
+                                log_warning(
+                                    LogTags.RENAMER,
+                                    f"Skipping '{item_name}' from [{src_drive}/{src_folder}] — "
+                                    f"'{new_file_name}' was already written by a higher-priority source this run. "
+                                    f"This is normal when multiple sources with different file names match the same media. "
+                                    f"Winner: '{winning_file}' | Skipped: '{file_name}'",
+                                    media=item_name,
+                                    source_folder=src_folder,
+                                    drive=src_drive,
+                                    dest=new_file_path,
+                                    winning_file=winning_file,
+                                    skipped_file=file_name,
+                                )
                             if not is_artwork:
                                 outranked_source_files.append((new_file_path, file))
                             else:
@@ -1418,7 +1464,7 @@ class PosterRenameService:
                                     source=file_name, dest=new_file_name
                                 )
 
-                        written_dest_paths[new_file_path] = file_name
+                        written_dest_paths[new_file_path] = file
                         _tmdb_type = "movie" if asset_type == "movies" else ("collection" if asset_type == "collections" else "show")
                         if not is_artwork:
                             winning_source_files[new_file_path] = (
@@ -2128,6 +2174,7 @@ class PosterRenameService:
                 "total_assets": len(assets_dict),
                 "total_media": sum(len(v) for v in media_dict.values()),
                 "total_matched": total_renamed,
+                "already_placed": files_skipped,
                 "movies": len(output.get("movies", [])),
                 "series": len(output.get("series", [])),
                 "collections": len(output.get("collections", [])),
@@ -2297,8 +2344,8 @@ class PosterRenameService:
             mode = "DRY RUN" if dry_run else action_type.upper()
             log_success(
                 LogTags.RENAMER,
-                f"Completed: {stats['total_matched']} matched "
-                f"(Movies: {stats['movies']}, Series: {stats['series']}, Collections: {stats['collections']}) - Mode: {mode}",
+                f"Completed: {stats['total_matched']} poster(s) placed this run, {stats['already_placed']:,} already in place "
+                f"(new — Movies: {stats['movies']}, Series: {stats['series']}, Collections: {stats['collections']}) - Mode: {mode}",
                 matched=stats['total_matched'], movies=stats['movies'], 
                 series=stats['series'], collections=stats['collections'], mode=mode
             )

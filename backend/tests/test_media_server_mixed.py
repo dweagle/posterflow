@@ -123,8 +123,27 @@ def test_build_index_over_jellyfin_instance(test_db, monkeypatch):
     assert [m.item_id for m in index["movies"]["heat"]] == ["m1"]
     assert [m.item_id for m in index["movies"]["id:tmdb:949"]] == ["m1"]
     assert totals == [
-        {"instance": "J", "library": "Movies", "section_type": "movie", "items": 1, "collections": 0}
+        {"instance": "J", "library": "Movies", "section_type": "movie", "items": 1, "collections": 0, "no_ids": 0}
     ]
+
+
+def test_build_index_warns_about_a_library_whose_items_carry_no_ids(test_db, monkeypatch):
+    """A legacy-agent library arrives with no provider ids at all; say so once per library,
+    because every downstream stage quietly degrades to title-only matching for it."""
+    import services.plex_upload as pu
+
+    _patch_jellyfin(monkeypatch)
+    captured = []
+    monkeypatch.setattr(pu, "log_warning", lambda tag, msg, **kw: captured.append(msg))
+    service = PlexUploadService(test_db)
+    client = service._connect_media_server_client({"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"})
+    client.movie.provider_ids = {}
+    monkeypatch.setattr(service, "_connect_media_server_client", lambda instance: client)
+
+    _, totals = service._build_plex_index([{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}], {})
+
+    assert totals[0]["no_ids"] == 1
+    assert any("J / Movies: 1 of 1 movies carry no TMDB/TVDB/IMDb id" in m for m in captured)
 
 
 def test_targeted_index_over_jellyfin_instance(test_db, monkeypatch):

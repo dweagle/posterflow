@@ -772,7 +772,7 @@ def run_rename_background_job(
             fields = []
             if do_posters:
                 desc_bits.append(
-                    f"Matched {stats.get('total_matched', 0)} poster(s): "
+                    f"Placed {stats.get('total_matched', 0)} poster(s) this run, {stats.get('already_placed', 0):,} already in place: "
                     f"movies={stats.get('movies', 0)}, series={stats.get('series', 0)}, collections={stats.get('collections', 0)}"
                 )
                 fields.extend([

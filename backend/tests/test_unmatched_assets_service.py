@@ -1023,3 +1023,9 @@ def test_truly_missing_item_has_no_attention(test_db, monkeypatch):
     result = _run_detection(test_db, monkeypatch, [], {"movies": [], "series": [_attention_media()], "collections": []})
     assert "attention" not in result["unmatched"]["series"][0]
     assert result["summary"]["grand_total"]["attention"] == 0
+
+
+def test_season_list_names_specials_and_sorts():
+    assert UnmatchedAssetsService._season_list([5, 0, 2]) == " [Specials, 2, 5]"
+    assert UnmatchedAssetsService._season_list([]) == ""
+

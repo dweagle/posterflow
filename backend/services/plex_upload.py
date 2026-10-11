@@ -1585,7 +1585,8 @@ class PlexUploadService:
                     collection_count = 0
 
                 if library.type == "movie":
-                    movie_count = self._index_movies(client, library, index["movies"])
+                    movie_count, no_ids = self._index_movies(client, library, index["movies"])
+                    self._warn_idless_library(instance_name, str(library.title), "movie", movie_count, no_ids)
                     library_totals.append(
                         {
                             "instance": instance_name,
@@ -1593,10 +1594,12 @@ class PlexUploadService:
                             "section_type": "movie",
                             "items": movie_count,
                             "collections": collection_count,
+                            "no_ids": no_ids,
                         }
                     )
                 else:
-                    show_count = self._index_shows(client, library, index["shows"])
+                    show_count, no_ids = self._index_shows(client, library, index["shows"])
+                    self._warn_idless_library(instance_name, str(library.title), "show", show_count, no_ids)
                     library_totals.append(
                         {
                             "instance": instance_name,
@@ -1604,6 +1607,7 @@ class PlexUploadService:
                             "section_type": "show",
                             "items": show_count,
                             "collections": collection_count,
+                            "no_ids": no_ids,
                         }
                     )
 
@@ -1849,33 +1853,50 @@ class PlexUploadService:
                 return True
         return False
 
-    def _index_movies(self, client: MediaServerClient, library: Any, movie_index: Dict[str, List[Any]]) -> int:
-        indexed = 0
+    def _index_movies(self, client: MediaServerClient, library: Any, movie_index: Dict[str, List[Any]]) -> Tuple[int, int]:
+        """(items indexed, items carrying no provider id at all)."""
+        indexed = no_ids = 0
         try:
             for movie in client.get_library_items(library.key):
                 key = self._movie_folder_key(movie)
                 if key:
                     movie_index.setdefault(key, []).append(movie)
-                for id_key in self._extract_plex_id_keys(movie):
+                id_keys = self._extract_plex_id_keys(movie)
+                for id_key in id_keys:
                     movie_index.setdefault(id_key, []).append(movie)
                 indexed += 1
+                no_ids += not id_keys
         except Exception as e:
             log_warning(LogTags.UPLOADER, f"Failed indexing movie section '{library.title}': {e}")
-        return indexed
+        return indexed, no_ids
 
-    def _index_shows(self, client: MediaServerClient, library: Any, show_index: Dict[str, List[Any]]) -> int:
-        indexed = 0
+    def _index_shows(self, client: MediaServerClient, library: Any, show_index: Dict[str, List[Any]]) -> Tuple[int, int]:
+        """(items indexed, items carrying no provider id at all)."""
+        indexed = no_ids = 0
         try:
             for show in client.get_library_items(library.key):
                 key = self._show_folder_key(show)
                 if key:
                     show_index.setdefault(key, []).append(show)
-                for id_key in self._extract_plex_id_keys(show):
+                id_keys = self._extract_plex_id_keys(show)
+                for id_key in id_keys:
                     show_index.setdefault(id_key, []).append(show)
                 indexed += 1
+                no_ids += not id_keys
         except Exception as e:
             log_warning(LogTags.UPLOADER, f"Failed indexing show section '{library.title}': {e}")
-        return indexed
+        return indexed, no_ids
+
+    @staticmethod
+    def _warn_idless_library(instance_name: str, library_title: str, kind: str, indexed: int, no_ids: int) -> None:
+        if no_ids:
+            log_warning(
+                LogTags.UPLOADER,
+                f"{instance_name} / {library_title}: {no_ids:,} of {indexed:,} {kind}s carry no TMDB/TVDB/IMDb id "
+                "(legacy metadata agent?) — posters reach them only by folder name or title, and season "
+                "posters are withheld",
+                instance=instance_name, library=library_title, no_ids=no_ids, items=indexed,
+            )
 
     def _index_collections(self, client: MediaServerClient, library: Any, collection_index: Dict[str, List[Any]]) -> int:
         indexed = 0

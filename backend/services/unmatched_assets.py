@@ -440,6 +440,13 @@ class UnmatchedAssetsService:
         return self._detect_combined(media_dict, source_dirs, progress_callback, check_posters, artwork_types, asset_folders)
 
     @staticmethod
+    def _season_list(numbers: List[int]) -> str:
+        """' [Specials, 2, 5]' for a log line, or '' when nothing is missing."""
+        if not numbers:
+            return ""
+        return " [" + ", ".join("Specials" if n == 0 else str(n) for n in sorted(numbers)) + "]"
+
+    @staticmethod
     def _build_attention_index(assets: List[Dict[str, Any]]) -> Dict[str, Dict[Any, List[Dict[str, Any]]]]:
         """Placed folders by id and by normalized title, to name the ones detection can't use."""
         by_id: Dict[Any, List[Dict[str, Any]]] = {}
@@ -557,7 +564,7 @@ class UnmatchedAssetsService:
                         log_debug(
                             LogTags.UNMATCHED,
                             f"  ⚠ Partial match: {media['title']} ({media.get('year')}) - "
-                            f"missing {len(missing_seasons)} seasons, main poster: {has_main_poster}",
+                            f"missing {len(missing_seasons)} season(s){self._season_list(missing_seasons)}, main poster: {has_main_poster}",
                             title=media['title'],
                             missing_seasons=missing_seasons,
                             has_main=has_main_poster
@@ -638,7 +645,8 @@ class UnmatchedAssetsService:
                                 )
                                 log_debug(
                                     LogTags.UNMATCHED,
-                                    f"  ⚠ Partial match: {media['title']} - missing {len(missing_seasons)} seasons",
+                                    f"  ⚠ Partial match: {media['title']} - missing {len(missing_seasons)} season(s)"
+                                    f"{self._season_list(missing_seasons)}",
                                     missing_seasons=missing_seasons
                                 )
                                 unmatched[media_type].append({

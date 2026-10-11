@@ -568,7 +568,8 @@ def run_flow_background_job(job_id: int, dry_run: bool = False, on_finish: Optio
                             "event_type": "success",
                             "title": "Asset Renamer Notification",
                             "description": (
-                                f"Matched {int(_rs.get('total_matched', 0))} poster(s): "
+                                f"Placed {int(_rs.get('total_matched', 0))} poster(s) this run, "
+                                f"{int(_rs.get('already_placed', 0) or 0):,} already in place: "
                                 f"movies={int(_rs.get('movies', 0))}, "
                                 f"series={int(_rs.get('series', 0))}, "
                                 f"collections={int(_rs.get('collections', 0))}"

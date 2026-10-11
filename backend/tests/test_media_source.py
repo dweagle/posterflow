@@ -216,6 +216,49 @@ def test_fetch_carries_the_servers_original_title_as_an_alternate(test_db, monke
     assert heat["alternate_titles"].count("Heat") == 1
 
 
+def test_fetch_warns_once_per_library_about_idless_items(test_db, monkeypatch):
+    import services.poster_renamer as pr
+
+    captured = []
+    monkeypatch.setattr(pr, "log_warning", lambda tag, msg, **kw: captured.append(msg))
+    run_fetch(test_db, monkeypatch, default_sections())
+    # "No Guid Film" is the one Movies entry without any id.
+    assert [m for m in captured if "carry no TMDB/TVDB/IMDb id" in m] == [
+        "1 of 6 movies in 'Movies' (Plex) carry no TMDB/TVDB/IMDb id (legacy metadata agent?) — they can only "
+        "merge with other sources and match posters by title and year"
+    ]
+
+
+def test_dedupe_names_the_idless_twin_it_could_not_merge(test_db, monkeypatch):
+    """A HAMA copy with no id and the Sonarr entry share title+year but can't merge; the log
+    should say which side lacks the id instead of leaving a silent duplicate."""
+    import services.poster_renamer as pr
+
+    captured = []
+    monkeypatch.setattr(pr, "log_warning", lambda tag, msg, **kw: captured.append(msg))
+    service = PosterRenameService(test_db)
+    sonarr = {"title": "Attack on Titan", "year": 2013, "tvdb_id": 267440, "instance": "sonarr-anime", "seasons": [], "folder": "/tv/Attack on Titan (2013)"}
+    plex = {"title": "Attack on Titan", "year": 2013, "tvdb_id": None, "instance": "plex (Anime)", "seasons": [], "folder": "Attack on Titan (2013)"}
+    merged = service._merge_duplicate_series([sonarr, plex])
+    assert len(merged) == 2
+    assert captured == [
+        "Kept 'Attack on Titan (2013)' from plex (Anime) as a separate item: it carries no TMDB/TVDB/IMDb id, "
+        "so it can't merge with the sonarr-anime entry"
+    ]
+
+    captured.clear()
+    radarr = {"title": "Heat", "year": 1995, "tmdb_id": 949, "instance": "radarr", "folder": "/movies/Heat (1995)"}
+    plex_movie = {"title": "Heat", "year": 1995, "tmdb_id": None, "instance": "plex (Movies)", "folder": "Heat (1995)"}
+    assert len(service._merge_duplicate_movies([radarr, plex_movie])) == 2
+    assert captured and "from plex (Movies) as a separate item" in captured[0]
+
+    # Two id-less copies merge by title+year as before and say nothing.
+    captured.clear()
+    a = {"title": "Heat", "year": 1995, "tmdb_id": None, "instance": "plex (Movies)", "folder": "Heat (1995)"}
+    b = {"title": "Heat", "year": 1995, "tmdb_id": None, "instance": "Jellyfin (Movies)", "folder": "Heat (1995)"}
+    assert len(service._merge_duplicate_movies([a, b])) == 1 and captured == []
+
+
 def test_fetch_keeps_guidless_items(test_db, monkeypatch):
     _, media_dict = run_fetch(test_db, monkeypatch, default_sections())
     no_guid = next(m for m in media_dict["movies"] if m["title"] == "No Guid Film")
