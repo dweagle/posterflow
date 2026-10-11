@@ -112,6 +112,18 @@ def test_items_pagination(monkeypatch):
     assert [i.item_id for i in items] == ["i0", "i1", "i2"]
     assert items[0].library_key == "srv123:lib1"
     assert items[0].original_title == "O0"
+    assert items[0].virtual is False
+
+
+def test_seasons_flag_virtual_placeholders(monkeypatch):
+    rows = [
+        {"Id": "s1", "Type": "Season", "Name": "Season 1", "IndexNumber": 1, "SeriesId": "show", "ChildCount": 8, "LocationType": "FileSystem"},
+        {"Id": "s2", "Type": "Season", "Name": "Season 2", "IndexNumber": 2, "SeriesId": "show", "ChildCount": 10, "LocationType": "Virtual"},
+        {"Id": "s3", "Type": "Season", "Name": "Season 3", "IndexNumber": 3, "SeriesId": "show", "ChildCount": 1, "IsVirtualItem": True},
+    ]
+    client, _ = make_client(monkeypatch, {"/Items": lambda params, _d: {"Items": rows, "TotalRecordCount": len(rows)}})
+    seasons = client.get_library_seasons("lib1")
+    assert [(s.index, s.virtual) for s in seasons] == [(1, False), (2, True), (3, True)]
 
 
 def test_find_by_provider_ids_title_pass(monkeypatch):

@@ -340,6 +340,33 @@ def test_fetch_show_mapping(test_db, monkeypatch):
     assert all(s["season_has_episodes"] and s["monitored"] for s in wire["seasons"])
 
 
+def test_fetch_marks_virtual_seasons_as_having_no_episodes(test_db):
+    """Jellyfin lists a placeholder season for unaired episodes with a child count; it must not
+    read as a season that is missing a poster."""
+    from core.logging import LogTags
+    from util.media_server.types import MediaServerItem, MediaServerLibrary
+
+    class Client:
+        def get_library_items(self, key, item_types=None):
+            return [MediaServerItem(item_id="show", item_type="show", title="Severance", year=2022,
+                                    provider_ids={"tvdb": "371980"}, paths=["/tv/Severance (2022)"])]
+
+        def get_library_seasons(self, key):
+            return [
+                MediaServerItem(item_id="s1", item_type="season", title="Season 1", index=1, parent_id="show", child_count=9),
+                MediaServerItem(item_id="s2", item_type="season", title="Season 2", index=2, parent_id="show", child_count=10),
+                MediaServerItem(item_id="s3", item_type="season", title="Season 3", index=3, parent_id="show", child_count=10, virtual=True),
+            ]
+
+    service = PosterRenameService(test_db)
+    media_dict = {"movies": [], "series": [], "collections": []}
+    library = MediaServerLibrary(key="1", title="Series", type="show", locations=["/tv"])
+    service._add_media_server_library(Client(), library, "series", media_dict, "Jellyfin", "jellyfin", LogTags.RENAMER)
+    show = media_dict["series"][0]
+    assert {s["season_number"]: s["season_has_episodes"] for s in show["seasons"]} == {1: True, 2: True, 3: False}
+    assert show["has_episodes"] is True
+
+
 def test_fetch_respects_selected_libraries(test_db, monkeypatch):
     _, media_dict = run_fetch(test_db, monkeypatch, default_sections(), selected_libraries=["Plex:1"])
     assert media_dict["movies"]

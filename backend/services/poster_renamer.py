@@ -879,8 +879,10 @@ class PosterRenameService:
                     continue
                 if season.child_count is not None and season.child_count <= 0:
                     continue
+                # A virtual season (Jellyfin "display missing episodes") has a child count but no
+                # files; carry it like a Sonarr unaired season, listed but not expecting a poster.
                 seasons_by_show.setdefault(season.parent_id, []).append(
-                    {"season_number": season.index, "season_has_episodes": True, "monitored": True}
+                    {"season_number": season.index, "season_has_episodes": not season.virtual, "monitored": True}
                 )
 
         # Flat movie layouts: the parent dir is the library root, never a folder name.

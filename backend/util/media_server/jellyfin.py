@@ -224,6 +224,7 @@ class JellyfinClient(MediaServerClient):
             child_count=int(data["ChildCount"]) if data.get("ChildCount") is not None else None,
             thumb_path=thumb_path,
             original_title=str(data.get("OriginalTitle") or "").strip() or None,
+            virtual=str(data.get("LocationType") or "") == "Virtual" or bool(data.get("IsVirtualItem")),
             native=data,
             client=self,
         )
