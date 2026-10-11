@@ -108,6 +108,29 @@ describe('UnmatchedItemsModal heading', () => {
   })
 })
 
+describe('UnmatchedItemsModal needs-attention badge', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('flags a row whose placed folder keeps it unmatched and explains it on hover', () => {
+    const stats = posterStats()
+    stats.unmatched.movies = [{
+      title: 'Ballerina', year: 2025, instance: 'radarr-1080',
+      attention: { reason: 'unfindable', folder: 'From the World of John Wick Ballerina (2025) {imdb-tt7181546}',
+                   message: "A poster is placed in 'From the World of John Wick Ballerina (2025) {imdb-tt7181546}' and matches this item, but detection can't look that folder up." },
+    }]
+    renderModal('movies', stats)
+    const badge = screen.getByText('Needs attention')
+    expect(badge.getAttribute('title')).toContain('From the World of John Wick Ballerina')
+  })
+
+  it('shows no badge for a plainly missing poster', () => {
+    renderModal('movies', posterStats())
+    expect(screen.queryByText('Needs attention')).toBeNull()
+  })
+})
+
 describe('UnmatchedItemsModal ignore button', () => {
   afterEach(() => {
     cleanup()

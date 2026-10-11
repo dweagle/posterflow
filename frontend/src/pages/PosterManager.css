@@ -3798,6 +3798,13 @@ img.drive-usage-compare-piece-img {
   border: 1px solid rgba(149, 117, 205, 0.3);
 }
 
+.unmatched-cat-badge--attention {
+  background: rgba(255, 167, 38, 0.15);
+  color: #ffb74d;
+  border: 1px solid rgba(255, 167, 38, 0.35);
+  cursor: help;
+}
+
 /* Purple, matching the collection color on Community Requests. */
 .unmatched-cat-badge--collection {
   background: rgba(186, 104, 200, 0.15);

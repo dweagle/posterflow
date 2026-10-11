@@ -102,6 +102,12 @@
   margin: 0;
 }
 
+.poster-coverage-card .coverage-attention {
+  color: #ffb74d;
+  font-size: 0.78rem;
+  margin: 0.25rem 0 0;
+}
+
 .poster-coverage-card .view-details-link {
   color: #64b5f6;
   background: transparent;

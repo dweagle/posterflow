@@ -937,3 +937,89 @@ def test_filter_ignored_results_noop_without_ignore_list(test_db):
     service = UnmatchedAssetsService(test_db)
     result = service._empty_result()
     assert service.filter_ignored_results(result) is result
+
+
+# ---------------------------------------------------------------------------
+# "Needs attention": unmatched rows that already have a placed folder
+# ---------------------------------------------------------------------------
+
+def _attention_media(**overrides):
+    media = {
+        "title": "Wonder Man", "normalized_title": "wonderman", "alternate_titles": [],
+        "normalized_alternate_titles": [], "year": 2026, "tmdb_id": None, "tvdb_id": 428629,
+        "imdb_id": None, "status": "continuing", "instance": "sonarr-1080",
+        "folder": "/tv/Wonder Man {tvdb-428629}", "seasons": [{"season_number": 1, "season_has_episodes": True}],
+        "has_episodes": True,
+    }
+    media.update(overrides)
+    return media
+
+
+def _run_detection(test_db, monkeypatch, assets, media_dict):
+    service = UnmatchedAssetsService(test_db)
+    monkeypatch.setattr("services.unmatched_assets.get_assets_files",
+                        lambda _dirs, merge=False, exclude_artwork=False, artwork_out=None: (assets, {"x": assets}))
+    # The real lookup never returns these folders — that's the situation being flagged.
+    monkeypatch.setattr("services.unmatched_assets.search_matches", lambda *a, **k: [])
+    return service.detect_unmatched(media_dict, ["/assets"])
+
+
+def test_yearless_placed_folder_is_flagged_for_attention(test_db, monkeypatch):
+    placed = {"type": "collections", "title": "Wonder Man", "normalized_title": "wonderman", "year": None,
+              "tmdb_id": None, "tvdb_id": None, "imdb_id": None, "files": ["/assets/Wonder Man {tvdb-428629}/poster.jpg"],
+              "folder": "Wonder Man {tvdb-428629}", "media_folder": None, "season_numbers": []}
+    result = _run_detection(test_db, monkeypatch, [placed],
+                            {"movies": [], "series": [_attention_media()], "collections": []})
+    row = result["unmatched"]["series"][0]
+    assert row["attention"]["reason"] == "yearless_folder"
+    assert row["attention"]["folder"] == "Wonder Man {tvdb-428629}"
+    assert "no (year)" in row["attention"]["message"] and "sonarr-1080" in row["attention"]["message"]
+    assert result["summary"]["series"]["attention"] == 1
+    assert result["summary"]["grand_total"]["attention"] == 1
+
+
+def test_stale_tag_placed_folder_is_flagged_for_attention(test_db, monkeypatch):
+    placed = {"type": "series", "title": "A Teacher", "normalized_title": "ateacher", "year": 2020,
+              "tmdb_id": None, "tvdb_id": 352440, "imdb_id": None,
+              "files": ["/assets/A Teacher (2020) {tvdb-352440}/poster.jpg"],
+              "folder": "A Teacher (2020) {tvdb-352440}", "media_folder": None, "season_numbers": []}
+    media = _attention_media(title="A Teacher", normalized_title="ateacher", year=2020, tvdb_id=473725,
+                             folder="/tv/A Teacher (2020) {tvdb-352440}")
+    result = _run_detection(test_db, monkeypatch, [placed], {"movies": [], "series": [media], "collections": []})
+    assert result["unmatched"]["series"][0]["attention"]["reason"] == "stale_tag"
+
+
+def test_imdb_only_folder_under_another_name_is_flagged_unfindable(test_db, monkeypatch):
+    placed = {"type": "movies", "title": "From the World of John Wick Ballerina",
+              "normalized_title": "fromtheworldofjohnwickballerina", "year": 2025,
+              "tmdb_id": None, "tvdb_id": None, "imdb_id": "tt7181546",
+              "files": ["/assets/From the World of John Wick Ballerina (2025) {imdb-tt7181546}/poster.jpg"],
+              "folder": "From the World of John Wick Ballerina (2025) {imdb-tt7181546}", "media_folder": None}
+    media = {"title": "Ballerina", "normalized_title": "ballerina", "alternate_titles": [],
+             "normalized_alternate_titles": [], "year": 2025, "tmdb_id": 541671, "tvdb_id": None,
+             "imdb_id": "tt7181546", "status": "released", "instance": "radarr-1080", "has_file": True,
+             "folder": "/movies/From the World of John Wick Ballerina (2025) {imdb-tt7181546}"}
+    result = _run_detection(test_db, monkeypatch, [placed], {"movies": [media], "series": [], "collections": []})
+    row = result["unmatched"]["movies"][0]
+    assert row["attention"]["reason"] == "unfindable"
+    assert "radarr-1080" in row["attention"]["message"]
+    assert result["summary"]["movies"]["attention"] == 1
+
+
+def test_same_titled_other_film_is_not_attention(test_db, monkeypatch):
+    placed = {"type": "movies", "title": "Ballerina", "normalized_title": "ballerina", "year": 2016,
+              "tmdb_id": 342473, "tvdb_id": None, "imdb_id": "tt2261287",
+              "files": ["/assets/Ballerina (2016) {imdb-tt2261287}/poster.jpg"],
+              "folder": "Ballerina (2016) {imdb-tt2261287}", "media_folder": None}
+    media = {"title": "Ballerina", "normalized_title": "ballerina", "alternate_titles": [],
+             "normalized_alternate_titles": [], "year": 2025, "tmdb_id": 541671, "tvdb_id": None,
+             "imdb_id": "tt7181546", "status": "released", "instance": "radarr-1080", "has_file": True}
+    result = _run_detection(test_db, monkeypatch, [placed], {"movies": [media], "series": [], "collections": []})
+    assert "attention" not in result["unmatched"]["movies"][0]
+    assert result["summary"]["grand_total"]["attention"] == 0
+
+
+def test_truly_missing_item_has_no_attention(test_db, monkeypatch):
+    result = _run_detection(test_db, monkeypatch, [], {"movies": [], "series": [_attention_media()], "collections": []})
+    assert "attention" not in result["unmatched"]["series"][0]
+    assert result["summary"]["grand_total"]["attention"] == 0

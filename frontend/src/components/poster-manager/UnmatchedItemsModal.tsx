@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, FileQuestion, Loader2, ListPlus, ListChecks, Search, Star, X } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import { type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, tmdbCandidateLink, type ListItemInput } from '../../api/client'
+import { type UnmatchedAttention,
+  type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, tmdbCandidateLink, type ListItemInput } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
@@ -45,6 +46,8 @@ interface NormalizedItem {
   source?: string | null
   added?: string | null
   releaseDate?: string | null
+  // Set when a placed folder exists but detection can't use it; the folder name needs fixing.
+  attention?: UnmatchedAttention | null
 }
 
 type UnmatchedItemsModalProps = {
@@ -87,8 +90,9 @@ function getModalTitle(modalType: UnmatchedModalType, typeNoun: string, hasSeaso
 }
 
 // Authoritative refs (IDs + poster + dates) carried from Plex/*arr, normalized to null.
-function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }) {
+function srcRefs(item: { tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null; attention?: UnmatchedAttention | null }) {
   return {
+    attention: item.attention ?? null,
     tmdb_id: item.tmdb_id ?? null,
     tvdb_id: item.tvdb_id ?? null,
     imdb_id: item.imdb_id ?? null,
@@ -530,6 +534,11 @@ function UnmatchedItemsModal({
             )}
             <CommunityStatusBadge status={getClaimStatus({ tmdb_id: item.tmdb_id, tvdb_id: item.tvdb_id, media_type: item.type, title: item.title, year: item.year })} />
             <ArrMissingBadge available={item.available} source={item.source} />
+            {item.attention && (
+              <span className="unmatched-cat-badge unmatched-cat-badge--attention" title={item.attention.message}>
+                Needs attention
+              </span>
+            )}
           </div>
           <div className="unmatched-item-actions">
           <button

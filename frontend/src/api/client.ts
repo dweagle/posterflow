@@ -178,6 +178,7 @@ export {
   type ArtworkSearchType,
   type PosterSearchItem,
   type TmdbCandidate,
+  type UnmatchedAttention,
   type UnmatchedIgnoreItem,
   type UnmatchedStats,
   type Workflow,

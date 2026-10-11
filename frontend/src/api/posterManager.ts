@@ -29,13 +29,21 @@ export interface DrivePriority {
   enabled_styles: string[]
 }
 
+// An unmatched row that already has a placed folder detection can't use (yearless folder,
+// stale id tag, or a name it can't look up). The folder name is what needs fixing.
+export interface UnmatchedAttention {
+  reason: 'yearless_folder' | 'stale_tag' | 'unfindable' | string
+  folder: string
+  message: string
+}
+
 export interface UnmatchedStats {
   summary: {
-    movies: { total: number; unmatched: number; percent_complete: number; released?: number; unreleased?: number }
-    series: { total: number; unmatched: number; percent_complete: number; continuing?: number; upcoming?: number }
+    movies: { total: number; unmatched: number; percent_complete: number; released?: number; unreleased?: number; attention?: number }
+    series: { total: number; unmatched: number; percent_complete: number; continuing?: number; upcoming?: number; attention?: number }
     seasons: { total: number; unmatched: number; percent_complete: number }
-    collections: { total: number; unmatched: number; percent_complete: number }
-    grand_total: { total: number; unmatched: number; percent_complete: number }
+    collections: { total: number; unmatched: number; percent_complete: number; attention?: number }
+    grand_total: { total: number; unmatched: number; percent_complete: number; attention?: number }
     by_library: {
       [libraryName: string]: {
         movies?: { total: number; unmatched: number; percent_complete: number }
@@ -45,9 +53,9 @@ export interface UnmatchedStats {
     }
   }
   unmatched: {
-    movies: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
-    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
-    collections: Array<{ title: string; year: number; instance: string; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
+    movies: Array<{ title: string; year: number; instance: string; attention?: UnmatchedAttention | null; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
+    series: Array<{ title: string; year: number; missing_seasons: number[]; missing_main_poster: boolean; instance: string; attention?: UnmatchedAttention | null; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
+    collections: Array<{ title: string; year: number; instance: string; attention?: UnmatchedAttention | null; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null; poster_url?: string | null; thumb_url?: string | null; available?: boolean | null; source?: string | null; added?: string | null; release_date?: string | null }>
   }
   last_run: string | null
 }

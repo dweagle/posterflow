@@ -32,7 +32,7 @@ vi.mock('../../src/contexts/AppEventsContext', () => ({
         series: { total: 5, unmatched: 1, percent_complete: 80 },
         seasons: { total: 0, unmatched: 0, percent_complete: 0 },
         collections: { total: 0, unmatched: 0, percent_complete: 0 },
-        grand_total: { total: 15, unmatched: 3, percent_complete: 80 },
+        grand_total: { total: 15, unmatched: 3, percent_complete: 80, attention: 2 },
       },
       last_run: '2026-02-15T00:00:00Z',
     },
@@ -114,6 +114,12 @@ describe('Dashboard', () => {
 
     expect(mockShowToast).toHaveBeenCalledWith('Starting workflow...', 'info')
     expect(mockShowToast).toHaveBeenCalledWith('Workflow started! Check Job Logs for progress.', 'success')
+  })
+
+  it('calls out unmatched items whose placed folder needs attention', async () => {
+    render(<Dashboard />)
+    await screen.findByText('Dashboard')
+    expect(screen.getByText(/2 unmatched items need attention/)).toBeTruthy()
   })
 
   it('navigates to unmatched tab when view details is clicked', async () => {

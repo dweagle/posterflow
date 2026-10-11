@@ -608,6 +608,11 @@ function Dashboard() {
               <p className="last-checked">
                 {activeCoverage?.last_run ? `Last checked: ${formatDateTime(activeCoverage.last_run)}` : 'Not checked yet'}
               </p>
+              {coverageScope === 'posters' && (activeCoverage?.summary?.grand_total?.attention ?? 0) > 0 && (
+                <p className="coverage-attention" title="These items have a placed folder detection can't use: no year in the name, a stale id tag, or a name it can't look up.">
+                  {activeCoverage!.summary.grand_total.attention} unmatched {activeCoverage!.summary.grand_total.attention === 1 ? 'item needs' : 'items need'} attention: a placed folder exists but its name keeps it unmatched. Open the Match Report on each for the fix.
+                </p>
+              )}
             </div>
             <div className="coverage-header-center">
               {activeCoverage?.summary && (

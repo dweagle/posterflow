@@ -5,7 +5,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -13,10 +13,11 @@ from core.logging import LogTags, log_section_start, log_section_end, log_succes
 from models.setting import get_setting, upsert_setting
 from util.constants import season_pattern
 from util.posters.assets import get_assets_files
+from util.data.normalization import normalize_titles
 from util.posters.scanner import _is_asset_folders
 from util.posters.index import create_new_empty_index, search_matches
 from util.posters.match import (
-    collection_title_variants, is_match, match_assets_to_media, media_source_refs,
+    ID_CONFLICT, NO_SHARED_ID, collection_title_variants, is_match, match_assets_to_media, media_source_refs,
 )
 from services.artwork_scan import (
     scan_destination_artwork, build_artwork_index, assets_from_names, ARTWORK_TYPES,
@@ -438,6 +439,62 @@ class UnmatchedAssetsService:
         (when check_posters) plus ``artwork`` (when any artwork_types)."""
         return self._detect_combined(media_dict, source_dirs, progress_callback, check_posters, artwork_types, asset_folders)
 
+    @staticmethod
+    def _build_attention_index(assets: List[Dict[str, Any]]) -> Dict[str, Dict[Any, List[Dict[str, Any]]]]:
+        """Placed folders by id and by normalized title, to name the ones detection can't use."""
+        by_id: Dict[Any, List[Dict[str, Any]]] = {}
+        by_title: Dict[str, List[Dict[str, Any]]] = {}
+        for asset in assets or []:
+            for key in ("tmdb_id", "tvdb_id", "imdb_id"):
+                if asset.get(key):
+                    by_id.setdefault((key, str(asset[key])), []).append(asset)
+            title = asset.get("normalized_title") or normalize_titles(asset.get("title") or "")
+            if title:
+                by_title.setdefault(title, []).append(asset)
+        return {"by_id": by_id, "by_title": by_title}
+
+    @staticmethod
+    def _placed_attention(
+        media: Dict[str, Any], media_type: str, index: Dict[str, Dict[Any, List[Dict[str, Any]]]]
+    ) -> Optional[Dict[str, str]]:
+        """Why an unmatched item that HAS a placed folder still reads as unmatched. The folder
+        name is what needs fixing, so the row says that instead of looking like a missing poster."""
+        seen: set = set()
+        candidates: List[Dict[str, Any]] = []
+        for key in ("tmdb_id", "tvdb_id", "imdb_id"):
+            if media.get(key):
+                for asset in index["by_id"].get((key, str(media[key])), []):
+                    if id(asset) not in seen:
+                        seen.add(id(asset))
+                        candidates.append(asset)
+        titles = [media.get("title"), *(media.get("alternate_titles") or []),
+                  os.path.basename(str(media.get("folder") or "").rstrip("/"))]
+        for title in titles:
+            if not title:
+                continue
+            for asset in index["by_title"].get(normalize_titles(title), []):
+                if id(asset) not in seen:
+                    seen.add(id(asset))
+                    candidates.append(asset)
+        source = str(media.get("instance") or "").strip() or "your media source"
+        for asset in candidates:
+            name = asset.get("media_folder") or asset.get("folder") or asset.get("title") or ""
+            if asset.get("type") == "collections" and media_type != "collections" and asset.get("year") is None:
+                return {"reason": "yearless_folder", "folder": name,
+                        "message": f"A poster is placed in '{name}', but the folder has no (year), so detection "
+                                   f"reads it as a collection. Rename the folder in {source} to include the year."}
+            matched, reason = is_match(dict(asset), media)
+            if matched:
+                return {"reason": "unfindable", "folder": name,
+                        "message": f"A poster is placed in '{name}' and matches this item, but detection can't look "
+                                   f"that folder up by this item's ids or title. Add the TMDB/TVDB id to the folder "
+                                   f"name in {source}, or rename it to the current title."}
+            if reason in (ID_CONFLICT, NO_SHARED_ID):
+                return {"reason": "stale_tag", "folder": name,
+                        "message": f"A poster is placed in '{name}', but its id tag disagrees with {source}. "
+                                   f"Rename the folder so the tag matches."}
+        return None
+
     def _match_poster_item(self, media: Dict[str, Any], media_type: str, prefix_index: Dict[str, Any],
                            unmatched: Dict[str, List[Dict[str, Any]]], match_stats: Dict[str, Any]) -> None:
         """Poster per-item match — moved verbatim from the old poster loop (logging unchanged).
@@ -813,6 +870,8 @@ class UnmatchedAssetsService:
             if prefix_index is None:
                 prefix_index = create_new_empty_index()
             poster_match_active = check_posters
+            attention_index = self._build_attention_index(poster_assets) if check_posters else None
+            attention_count = 0
 
             # Artwork indexes: from the shared walk when posters ran (fallback re-scan on structure
             # mismatch), else its own walk for an artwork-only run.
@@ -907,7 +966,15 @@ class UnmatchedAssetsService:
                             continue
 
                         if poster_match_active:
+                            unmatched_before = match_stats[media_type]["unmatched"]
                             self._match_poster_item(media, media_type, prefix_index, unmatched, match_stats)
+                            if match_stats[media_type]["unmatched"] > unmatched_before and attention_index is not None:
+                                attention = self._placed_attention(media, media_type, attention_index)
+                                if attention:
+                                    unmatched[media_type][-1]["attention"] = attention
+                                    attention_count += 1
+                                    log_debug(LogTags.UNMATCHED, f"      ↳ needs attention: {attention['message']}",
+                                              title=media.get("title"), reason=attention["reason"], folder=attention["folder"])
 
                         if enabled_art:
                             matched_types: List[str] = []
@@ -929,6 +996,14 @@ class UnmatchedAssetsService:
                             f"  {media_type.title()} complete: {stats['matched']:,} matched, {stats['unmatched']:,} unmatched{partial_str}, {stats['skipped']:,} skipped | {type_time:.2f}s",
                             media_type=media_type, **stats, time_sec=f"{type_time:.2f}",
                         )
+
+            if attention_count:
+                log_warning(
+                    LogTags.UNMATCHED,
+                    f"{attention_count} unmatched item(s) already have a placed folder detection can't use "
+                    "(yearless folder, stale id tag, or a name it can't look up) — flagged 'Needs attention'",
+                    count=attention_count,
+                )
 
             if progress_callback:
                 progress_callback("calculating", 90, 100, "Calculating statistics...")
@@ -1145,6 +1220,11 @@ class UnmatchedAssetsService:
         # Calculate stats by library instance
         by_library = self._calculate_stats_by_library(unmatched, media_dict)
 
+        # Unmatched rows that have a placed folder anyway: the folder name is the problem.
+        attention_movies = sum(1 for m in unmatched.get("movies", []) if m.get("attention"))
+        attention_series = sum(1 for s in unmatched.get("series", []) if s.get("attention"))
+        attention_collections = sum(1 for c in unmatched.get("collections", []) if c.get("attention"))
+
         return {
             "movies": {
                 "total": total_movies,
@@ -1152,6 +1232,7 @@ class UnmatchedAssetsService:
                 "percent_complete": percent_movies,
                 "released": movies_released,
                 "unreleased": movies_unreleased,
+                "attention": attention_movies,
             },
             "series": {
                 "total": total_series,
@@ -1159,6 +1240,7 @@ class UnmatchedAssetsService:
                 "percent_complete": percent_series,
                 "continuing": series_continuing,
                 "upcoming": series_upcoming,
+                "attention": attention_series,
             },
             "seasons": {
                 "total": total_seasons,
@@ -1169,11 +1251,13 @@ class UnmatchedAssetsService:
                 "total": total_collections,
                 "unmatched": unmatched_collections,
                 "percent_complete": percent_collections,
+                "attention": attention_collections,
             },
             "grand_total": {
                 "total": grand_total,
                 "unmatched": grand_unmatched,
                 "percent_complete": grand_percent,
+                "attention": attention_movies + attention_series + attention_collections,
             },
             "by_library": by_library,
         }
