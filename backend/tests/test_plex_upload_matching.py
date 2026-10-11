@@ -1044,6 +1044,7 @@ def test_process_assets_accumulates_reasons_and_plex_targets(test_db, monkeypatc
         "type_unresolved": 0,
         "edition_pending": 0,
         "collection_shadowed": 0,
+        "season_numbering_unverified": 0,
     }
     # Buckets partition the scan: nothing is double-counted, nothing vanishes.
     assert stats["uploaded_files"] == 2
@@ -1263,3 +1264,140 @@ def test_shadowed_collection_poster_never_misapplied_keeps_caches(test_db, tmp_p
     service._upload_asset(shadowed, _dark_knight_index(False), dry_run=False)
 
     assert test_db.query(PlexUploadRecord).count() == 2
+
+
+# ---------------------------------------------------------------------------
+# Id-less server items matched by their exact on-disk folder name
+# ---------------------------------------------------------------------------
+
+def _idless_show(title, year, location, rating_key, library="Anime"):
+    show = _FakePlexItem("show", title, year=year, library=library, rating_key=rating_key)
+    show.paths = [location]
+    return show
+
+
+def test_resolve_index_candidates_keeps_idless_folder_twin_beside_id_hit(test_db):
+    """HAMA/legacy-agent Plex items carry no ids and live only under the plain key; an exact
+    folder-name match keeps them beside the Jellyfin id hit instead of being skipped silently."""
+    service = PlexUploadService(test_db)
+    jellyfin = _FakePlexItem("show", "Attack on Titan", year=2013, library="Anime", rating_key="jf1")
+    jellyfin.provider_ids = {"tvdb": "267440"}
+    plex = _idless_show("Attack on Titan", 2013, "/data/anime/Attack on Titan (2013) {tvdb-267440}", "px1")
+    index_map = {"id:tvdb:267440": [jellyfin], "attackontitan": [jellyfin, plex]}
+
+    both = service._resolve_index_candidates(
+        index_map, media_key="attackontitan", asset_id_keys=["id:tvdb:267440"], folder_year=2013,
+        folder_name="Attack on Titan (2013) {tvdb-267440}",
+    )
+    assert both == [jellyfin, plex]
+    # Without a folder name the id hit alone is returned, as before.
+    assert service._resolve_index_candidates(
+        index_map, media_key="attackontitan", asset_id_keys=["id:tvdb:267440"], folder_year=2013,
+    ) == [jellyfin]
+
+
+def test_resolve_index_candidates_folder_twin_ignores_the_servers_year(test_db):
+    """Plex reported 1970 for Pokemon; the folder is still 'Pokémon (1997) {tvdb-76703}'."""
+    service = PlexUploadService(test_db)
+    plex = _idless_show("Pokemon", 1970, "/data/anime/Pokémon (1997) {tvdb-76703}", "px2")
+    index_map = {"pokemon": [plex]}
+
+    assert service._resolve_index_candidates(
+        index_map, media_key="pokemon", asset_id_keys=["id:tvdb:76703"], folder_year=1997,
+        folder_name="Pokémon (1997) {tvdb-76703}",
+    ) == [plex]
+    # The old behaviour without a folder name: nothing, so the retry loop waits.
+    assert service._resolve_index_candidates(
+        index_map, media_key="pokemon", asset_id_keys=["id:tvdb:76703"], folder_year=1997,
+    ) == []
+
+
+def test_resolve_index_candidates_folder_twin_needs_exact_name_and_no_ids(test_db):
+    """Years deliberately disagree with the folder, so only the twin rule could return these."""
+    service = PlexUploadService(test_db)
+    other_name = _idless_show("Attack on Titan", 1970, "/data/anime/Shingeki no Kyojin", "px3")
+    tagged = _FakePlexItem("show", "Attack on Titan", year=1970, library="Anime", rating_key="px4")
+    tagged.provider_ids = {"tvdb": "999"}
+    tagged.paths = ["/data/anime/Attack on Titan (2013) {tvdb-267440}"]
+    index_map = {"attackontitan": [other_name, tagged]}
+
+    assert service._resolve_index_candidates(
+        index_map, media_key="attackontitan", asset_id_keys=["id:tvdb:267440"], folder_year=2013,
+        folder_name="Attack on Titan (2013) {tvdb-267440}",
+    ) == []
+
+
+def test_parse_asset_folder_file_records_the_folder_name(test_db):
+    service = PlexUploadService(test_db)
+    parsed = service._parse_asset_folder_file(Path("/assets/Attack on Titan (2013) {tvdb-267440}/Season01.jpg"))
+    assert parsed["folder_name"] == "Attack on Titan (2013) {tvdb-267440}"
+    assert parsed["asset_type"] == "season" and parsed["folder_year"] == 2013
+
+
+def test_upload_asset_withholds_season_posters_from_idless_folder_twin(test_db):
+    """The show poster can go to a folder-matched item; season posters can't, because an id-less
+    item's season numbering (AniDB mode) can't be checked against the poster set's. The server's
+    year is wrong here, so only the folder rule reaches the show."""
+    service = PlexUploadService(test_db)
+    plex = _idless_show("Attack on Titan", 1970, "/data/anime/Attack on Titan (2013) {tvdb-267440}", "px5")
+    index = {"movies": {}, "shows": {"attackontitan": [plex]}, "collections": {}}
+    asset = {
+        "media_key": "attackontitan", "asset_type": "season", "season_number": 1,
+        "path": "/assets/Attack on Titan (2013) {tvdb-267440}/Season01.jpg",
+        "display_name": "Attack on Titan (2013) {tvdb-267440}", "folder_year": 2013,
+        "folder_name": "Attack on Titan (2013) {tvdb-267440}",
+    }
+
+    outcome = service._upload_asset(asset, index, dry_run=True)
+
+    assert outcome.uploaded == 0 and outcome.matched is False
+    assert outcome.skip_reason == "season_numbering_unverified"
+    assert format_unmatched_reasons({"season_numbering_unverified": 1}) == "1 season numbering unverified"
+
+
+def test_upload_asset_keeps_season_posters_for_idless_show_matched_by_title_and_year(test_db):
+    """A Personal Media style show matched by the long-standing title+year path keeps getting
+    season posters; the withholding only covers shows reachable through the folder rule."""
+    service = PlexUploadService(test_db)
+
+    class _FakeSeason:
+        def __init__(self, index):
+            self.index = index
+
+    class _ShowWithSeason(_FakePlexItem):
+        def seasons(self):
+            return [_FakeSeason(1)]
+
+    plex = _ShowWithSeason("show", "Attack on Titan", year=2013, library="Anime", rating_key="px7")
+    plex.paths = ["/data/anime/Attack on Titan (2013) {tvdb-267440}"]
+    index = {"movies": {}, "shows": {"attackontitan": [plex]}, "collections": {}}
+    asset = {
+        "media_key": "attackontitan", "asset_type": "season", "season_number": 1,
+        "path": "/assets/Attack on Titan (2013) {tvdb-267440}/Season01.jpg",
+        "display_name": "Attack on Titan (2013) {tvdb-267440}", "folder_year": 2013,
+        "folder_name": "Attack on Titan (2013) {tvdb-267440}",
+    }
+
+    outcome = service._upload_asset(asset, index, dry_run=True)
+
+    assert outcome.matched is True and outcome.uploaded == 1
+
+
+def test_upload_asset_applies_main_poster_to_idless_folder_twin(test_db):
+    service = PlexUploadService(test_db)
+    jellyfin = _FakePlexItem("show", "Attack on Titan", year=2013, library="Anime", rating_key="jf6", server_id="jf")
+    jellyfin.provider_ids = {"tvdb": "267440"}
+    plex = _idless_show("Attack on Titan", 2013, "/data/anime/Attack on Titan (2013) {tvdb-267440}", "px6")
+    index = {"movies": {}, "shows": {"id:tvdb:267440": [jellyfin], "attackontitan": [jellyfin, plex]}, "collections": {}}
+    asset = {
+        "media_key": "attackontitan", "asset_type": "main", "season_number": None,
+        "path": "/assets/Attack on Titan (2013) {tvdb-267440}/poster.jpg",
+        "display_name": "Attack on Titan (2013) {tvdb-267440}", "folder_year": 2013,
+        "folder_name": "Attack on Titan (2013) {tvdb-267440}",
+    }
+
+    outcome = service._upload_asset(asset, index, dry_run=True, media_type_filter="series")
+
+    assert outcome.matched is True
+    assert outcome.plex_targets == 2
+    assert outcome.uploaded == 2

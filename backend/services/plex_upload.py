@@ -40,6 +40,7 @@ PlexUploadProgressCallback = Callable[[int, int, Dict[str, int], str], None]
 # the index covers selected libraries only, so "absent from Plex" is never said.
 UNMATCHED_REASONS = (
     "no_plex_match", "year_mismatch", "not_downloaded", "type_unresolved", "edition_pending", "collection_shadowed",
+    "season_numbering_unverified",
 )
 UNMATCHED_REASON_LABELS = {
     "no_plex_match": "no server match",
@@ -48,6 +49,7 @@ UNMATCHED_REASON_LABELS = {
     "type_unresolved": "type unresolved",
     "edition_pending": "edition pending",
     "collection_shadowed": "stale collection folder",
+    "season_numbering_unverified": "season numbering unverified",
 }
 # The same reasons spelled out, for the log where there is room to be unambiguous.
 UNMATCHED_REASON_DETAIL = {
@@ -59,6 +61,8 @@ UNMATCHED_REASON_DETAIL = {
     "edition_pending": "waiting for a specific movie edition to appear in Plex",
     "collection_shadowed": "a folder with no year or ID tokens (the collection convention) whose title also has a "
                            "year-tagged folder; the server has no collection by that name, so it was not applied to the movie/show",
+    "season_numbering_unverified": "the show matched by folder name only (the server item carries no ids), so its season "
+                                   "numbering can't be checked against the poster set; the show poster still applies",
 }
 
 
@@ -179,6 +183,7 @@ class PlexUploadService:
         self._expected_edition: Optional[str] = None
         self._series_show_poster_status: Optional[str] = None
         self._logged_missing_show_keys: set[str] = set()
+        self._logged_unverified_season_keys: set[str] = set()
         self._quiet_unmatched_logging: bool = False
         self._preflight_context_cache: Optional[
             Tuple[
@@ -242,6 +247,7 @@ class PlexUploadService:
         # Single-target = a webhook job's many passes share one dedupe scope, so don't reset it.
         if not single_target:
             self._logged_missing_show_keys = set()
+            self._logged_unverified_season_keys = set()
 
     @staticmethod
     def _empty_media_upload_counts() -> Dict[str, int]:
@@ -854,9 +860,10 @@ class PlexUploadService:
 
         media_key = str(asset.get("media_key") or "")
         folder_year = asset.get("folder_year")
+        folder_name = asset.get("folder_name")
         asset_id_keys = self._extract_asset_id_keys(asset)
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name)
+        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name)
         collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
 
         if str(asset.get("asset_type") or "").lower() == "season":
@@ -1410,6 +1417,7 @@ class PlexUploadService:
                 "asset_type": "season",
                 "season_number": season_number,
                 "folder_year": folder_year,
+                "folder_name": folder_name,
             }
 
         return {
@@ -1419,6 +1427,7 @@ class PlexUploadService:
             "asset_type": "main",
             "season_number": None,
             "folder_year": folder_year,
+            "folder_name": folder_name,
         }
 
     def _parse_root_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
@@ -2010,12 +2019,40 @@ class PlexUploadService:
         uploaded_media_types = set(uploaded_record.get("uploaded_media_types", []))
 
         folder_year = asset.get("folder_year")
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+        folder_name = asset.get("folder_name")
+        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name)
+        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name)
         collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
 
         if asset["asset_type"] == "season":
             shows = self._dedupe_plex_items(shows_raw)
+            # A show reached ONLY through its folder name carries no ids, so its season numbering
+            # can't be checked against the poster set's (an AniDB-numbered HAMA show): keep seasons
+            # off it. Shows the title+year path already returned keep their seasons as before.
+            unverified: List[Any] = []
+            if folder_name and any(not (getattr(show, "provider_ids", None) or {}) for show in shows):
+                baseline = self._dedupe_plex_items(
+                    self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+                )
+                baseline_ids = {id(show) for show in baseline}
+                unverified = [
+                    show for show in shows
+                    if not (getattr(show, "provider_ids", None) or {}) and id(show) not in baseline_ids
+                ]
+            if unverified:
+                skip_ids = {id(show) for show in unverified}
+                shows = [show for show in shows if id(show) not in skip_ids]
+                if media_key not in self._logged_unverified_season_keys:
+                    self._logged_unverified_season_keys.add(media_key)
+                    labels = ", ".join(self._library_labels_for_items(unverified)) or "the server"
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"Season posters for '{asset.get('display_name') or media_key}' withheld on {labels}: "
+                        "the item carries no ids, so its season numbering can't be verified",
+                        file=file_path,
+                    )
+                if not shows:
+                    return AssetOutcome(0, False, 0, media_counts, skip_reason="season_numbering_unverified")
             if not shows:
                 # Undownloaded shows are absent from Plex because of that — blame *arr,
                 # not the match, so seasons agree with the show's own poster.
@@ -2184,6 +2221,15 @@ class PlexUploadService:
                 0, False, 0, media_counts,
                 skip_reason=self._diagnose_no_match(index, media_key, asset_id_keys, folder_year),
             )
+
+        for item in matched_items:
+            if not (getattr(item, "provider_ids", None) or {}):
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"Matched {self._item_server_label(item)} '{item.title}' in "
+                    f"{self._item_library_name(item) or 'library'} by folder name or title (item carries no ids)",
+                    file=file_path,
+                )
 
         if inferred_filter == "movie" and self._expected_edition is not None:
             expected = self._normalize_edition(self._expected_edition)
@@ -2904,18 +2950,48 @@ class PlexUploadService:
 
         return sorted(id_keys)
 
+    @staticmethod
+    def _item_folder_names(item: Any) -> set[str]:
+        """Basenames of the item's on-disk folder(s): a show's location, a movie file's parent."""
+        names: set[str] = set()
+        for raw in (getattr(item, "paths", None) or []):
+            path = Path(str(raw))
+            names.add(path.name.casefold())
+            names.add(path.parent.name.casefold())
+        return names
+
+    def _folder_twins(self, plain_results: List[Any], folder_name: Optional[str]) -> List[Any]:
+        """Id-less server items whose on-disk folder is named exactly like the placed folder: the
+        same directory, so the same item, whatever year or ids the agent failed to attach."""
+        if not folder_name:
+            return []
+        wanted = folder_name.casefold()
+        return [
+            item for item in plain_results
+            if not (getattr(item, "provider_ids", None) or {}) and wanted in self._item_folder_names(item)
+        ]
+
     def _resolve_index_candidates(
         self,
         index_map: Dict[str, List[Any]],
         media_key: str,
         asset_id_keys: List[str],
         folder_year: Optional[int] = None,
+        folder_name: Optional[str] = None,
     ) -> List[Any]:
         def _item_year(item: Any) -> Optional[int]:
             try:
                 return getattr(item, "year", None)
             except Exception:
                 return None
+
+        plain_results = index_map.get(media_key, [])
+        # Id-less items (legacy agents, Personal Media) live only under the plain key; an exact
+        # folder-name match keeps them beside the id hits instead of being skipped silently.
+        twins = self._folder_twins(plain_results, folder_name)
+
+        def _with_twins(items: List[Any]) -> List[Any]:
+            return self._dedupe_plex_items(list(items) + twins) if twins else items
 
         if asset_id_keys:
             id_candidates: List[Any] = []
@@ -2926,12 +3002,12 @@ class PlexUploadService:
                 if folder_year is not None:
                     year_filtered = [item for item in deduped_id_candidates if _item_year(item) == folder_year]
                     if year_filtered:
-                        return year_filtered
+                        return _with_twins(year_filtered)
                     # ID matched but folder year disagrees with Plex (e.g. folder
                     # "Michael (2025)" vs Plex year 2026). A unique ID match is
                     # authoritative — trust it over the folder year rather than
                     # discarding it and falling back to a title+year lookup.
-                return deduped_id_candidates
+                return _with_twins(deduped_id_candidates)
             # IDs were present but nothing matched in the Plex index. Two possible causes:
             # (a) Plex hasn't scanned the item yet — we must not fall back to a same-title
             #     different-year item (e.g. plex_1957 when we want plex_2007).
@@ -2939,26 +3015,24 @@ class PlexUploadService:
             #     title+year match is still safe and correct.
             # Try a year-filtered title-key lookup to distinguish the two cases.
             # If it finds a year-correct item, return it (case b).
-            # If nothing matches the year, return [] to trigger a retry (case a).
+            # If nothing matches the year, return only exact folder twins (or nothing, to retry).
             if folder_year is not None:
-                plain_results = index_map.get(media_key, [])
                 if plain_results:
                     year_filtered = [item for item in plain_results if _item_year(item) == folder_year]
                     if year_filtered:
-                        return year_filtered
-                return []
+                        return _with_twins(year_filtered)
+                return twins
 
-        plain_results = index_map.get(media_key, [])
         # When the asset has a folder_year, filter plain-key results to only Plex items
         # matching that year. This prevents uploading a 1957 poster to a 2007 Plex item
         # (and vice versa) for same-title movies not tracked in any ARR instance.
         if folder_year is not None and plain_results:
             year_filtered = [item for item in plain_results if _item_year(item) == folder_year]
             if year_filtered:
-                return year_filtered
-            # No year match — Plex item not yet scanned or metadata year differs.
-            # Return empty so the retry mechanism handles it rather than using the wrong movie.
-            return []
+                return _with_twins(year_filtered)
+            # No year match — Plex item not yet scanned or metadata year differs. Only an exact
+            # folder twin is trusted; otherwise return empty so the retry handles it.
+            return twins
         return plain_results
 
     def _asset_has_arr_availability(
