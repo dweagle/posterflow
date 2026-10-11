@@ -1,3 +1,4 @@
+import axios from 'axios'
 import client, { API_URL, getData, postData, putData, deleteData } from './http'
 
 // Poster types and functions
@@ -287,6 +288,11 @@ export const tmdbCandidateLink = (c: TmdbCandidate): { url: string; label: 'TMDB
     : 'tv'
   return { url: `https://www.themoviedb.org/${seg}/${c.tmdb_id}`, label: 'TMDB' }
 }
+
+// The search endpoint rejects with a 400 naming the key when none is saved; callers show the
+// no-key hint off that rather than guessing from settings that may not have loaded yet.
+export const isTmdbKeyMissingError = (err: unknown): boolean =>
+  axios.isAxiosError(err) && err.response?.status === 400 && /api key/i.test(String(err.response.data?.detail ?? ''))
 
 export const searchUnmatchedTmdb = async (params: {
   title: string
@@ -782,14 +788,22 @@ export interface DriveUsage {
 
 export interface PosterStyleStats {
   style_counts: Record<string, number>
-  style_fallbacks: Record<string, FallbackItem[]>
   drive_usage?: DriveUsage[]
-  drive_outranked?: Record<string, FallbackItem[]>
   artwork_drive_usage?: DriveUsage[]
-  artwork_drive_items?: Record<string, FallbackItem[]>
-  artwork_drive_outranked?: Record<string, FallbackItem[]>
+}
+
+// The last rename's per-item lists; megabytes on a big library, so only the views that show them fetch these
+export interface PosterStatsItems {
+  style_fallbacks: Record<string, FallbackItem[]>
+  drive_outranked: Record<string, FallbackItem[]>
+  artwork_drive_items: Record<string, FallbackItem[]>
+  artwork_drive_outranked: Record<string, FallbackItem[]>
 }
 
 export const getPosterStats = async (): Promise<PosterStyleStats> => {
   return getData('/api/posterflow/stats')
+}
+
+export const getPosterStatsItems = async (): Promise<PosterStatsItems> => {
+  return getData('/api/posterflow/stats/items')
 }

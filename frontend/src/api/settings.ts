@@ -62,8 +62,20 @@ export const saveSettings = async (settings: Record<string, string>) => {
   return postData('/api/settings/bulk', settings)
 }
 
+// Several readers ask for settings in the same render pass (Poster Manager mounts three at once);
+// calls landing in the same task share one request. A later task always fetches fresh, so a save
+// followed by a reload never sees the earlier response.
+let sharedSettings: Promise<Record<string, string>> | null = null
+
 export const getSettings = async (): Promise<Record<string, string>> => {
-  return getData('/api/settings/')
+  if (!sharedSettings) {
+    const request = getData<Record<string, string>>('/api/settings/')
+    sharedSettings = request
+    const release = () => { if (sharedSettings === request) sharedSettings = null }
+    setTimeout(release, 0)
+    request.then(release, release)
+  }
+  return sharedSettings
 }
 
 export const getTimezones = async (): Promise<string[]> => {

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from core.config import settings
@@ -168,6 +169,12 @@ def download_job_log(job_type: str, filename: str) -> FileResponse:
 JOB_LOG_WS_HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
+def _read_log_text(path: Path) -> str:
+    # Whole-file reads can be megabytes after a long job; they run in the threadpool, not on the event loop
+    with open(path, 'r') as f:
+        return f.read()
+
+
 @router.websocket("/{job_type}/live")
 async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
     """WebSocket endpoint for live-tailing the current job log file."""
@@ -188,8 +195,7 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
 
         # Send existing content of the current log file
         if log_file.exists():
-            with open(log_file, 'r') as f:
-                content = f.read()
+            content = await run_in_threadpool(_read_log_text, log_file)
             if content:
                 try:
                     await websocket.send_json({'type': 'content', 'content': content})
@@ -216,8 +222,7 @@ async def websocket_job_log_live(websocket: WebSocket, job_type: str) -> None:
             # File was rotated (new job started) — reload from scratch
             if current_size < last_position:
                 last_position = 0
-                with open(log_file, 'r') as f:
-                    content = f.read()
+                content = await run_in_threadpool(_read_log_text, log_file)
                 if content:
                     try:
                         await websocket.send_json({'type': 'reset', 'content': content})

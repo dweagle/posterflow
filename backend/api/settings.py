@@ -172,6 +172,23 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "request_export_picker",
 })
 
+# Job output and caches the UI reads through their own routes; they run to megabytes and never belong in a settings fetch
+INTERNAL_SETTING_KEYS: frozenset[str] = frozenset({
+    "poster_renamer_stats",
+    "poster_renamer_last_output",
+    "poster_unmatched_stats",
+    "artwork_unmatched_stats",
+    "plex_upload_stats",
+    "maker_tools_monitor_status_cache",
+    "maker_tools_monitor_last_result",
+    "maker_tools_idarr_ignored_titles",
+    "poster_collection_tmdb_cache",
+    "plex_webhook_dedupe_cache",
+    "plex_webhook_stats",
+    "poster_cleanup_stats",
+    "unmatched_last_stats",
+})
+
 
 def _mask_settings_payload(payload: Dict[str, str]) -> Dict[str, str]:
     """Return a copy of the settings dict with sensitive values replaced."""
@@ -971,8 +988,8 @@ def test_apprise_notification(
 
 @router.get("/")
 def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
-    """Get all settings (sensitive values are masked)"""
-    settings = db.query(Setting).all()
+    """Get all settings (sensitive values are masked, internal job output left out)"""
+    settings = db.query(Setting).filter(Setting.key.notin_(INTERNAL_SETTING_KEYS)).all()
     payload: Dict[str, str] = {}
     for setting in settings:
         payload[setting.key] = setting.value

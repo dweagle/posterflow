@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { CompareCandidate, CompareTarget, DriveUsage, FallbackItem, PosterStyleStats } from '../api/posterManager'
+import { CompareCandidate, CompareTarget, DriveUsage, FallbackItem, PosterStatsItems, PosterStyleStats } from '../api/posterManager'
 
 const targetKey = (it: Pick<FallbackItem, 'type' | 'tmdb_id' | 'title' | 'year'>, target: CompareTarget) =>
   `${it.type}::${it.tmdb_id ?? `${it.title}::${it.year ?? ''}`}::${target.season ?? null}::${target.slot ?? ''}`
@@ -54,26 +54,26 @@ function buildUsageData(
 }
 
 // Poster-scope accessors for the Drive Usage report.
-export function usePosterUsageData(styleStats: PosterStyleStats | null) {
+export function usePosterUsageData(styleStats: PosterStyleStats | null, items: PosterStatsItems | null) {
   return useMemo(() => {
     const driveUsage = styleStats?.drive_usage ?? []
     const itemsByDrive: Record<string, FallbackItem[]> = {}
-    for (const it of Object.values(styleStats?.style_fallbacks ?? {}).flat()) {
+    for (const it of Object.values(items?.style_fallbacks ?? {}).flat()) {
       if (it.drive_id) (itemsByDrive[it.drive_id] ??= []).push(it)
     }
-    return buildUsageData(driveUsage, itemsByDrive, styleStats?.drive_outranked ?? {})
-  }, [styleStats])
+    return buildUsageData(driveUsage, itemsByDrive, items?.drive_outranked ?? {})
+  }, [styleStats, items])
 }
 
 // Artwork-scope accessors, same shape.
-export function useArtworkUsageData(styleStats: PosterStyleStats | null) {
+export function useArtworkUsageData(styleStats: PosterStyleStats | null, items: PosterStatsItems | null) {
   return useMemo(
     () =>
       buildUsageData(
         styleStats?.artwork_drive_usage ?? [],
-        styleStats?.artwork_drive_items ?? {},
-        styleStats?.artwork_drive_outranked ?? {},
+        items?.artwork_drive_items ?? {},
+        items?.artwork_drive_outranked ?? {},
       ),
-    [styleStats]
+    [styleStats, items]
   )
 }

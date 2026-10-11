@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from typing import Any, Callable, Dict, List
@@ -94,6 +95,30 @@ def _run_job_task(job_id: int, start_msg: str, run_fn: Callable[[], None]) -> No
             task_db.close()
 
 
+def _recent_jobs_snapshot() -> List[Dict[str, Any]]:
+    # Active jobs plus those finished in the last 2 minutes, shaped as the websocket payload rows
+    db = SessionLocal()
+    try:
+        two_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=2)
+        jobs = db.query(Job).filter(
+            (Job.status.in_(JOB_STATUSES_ACTIVE)) |
+            ((Job.status.in_(JOB_STATUSES_RECENT_TERMINAL)) & (Job.completed_at >= two_minutes_ago))
+        ).order_by(Job.started_at.desc(), Job.id.desc()).all()
+        return [
+            {
+                'id': job.id,
+                'job_type': job.job_type,
+                'status': job.status,
+                'progress': job.progress,
+                'message': job.message or '',
+                'error': job.error
+            }
+            for job in jobs
+        ]
+    finally:
+        db.close()
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time job progress updates"""
@@ -114,30 +139,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             if disconnected.is_set():
                 return
-            # Create new DB session for this update
-            db = SessionLocal()
             try:
-                # Get active AND recently completed jobs (last 2 minutes)
-                two_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=2)
-                
-                jobs = db.query(Job).filter(
-                    (Job.status.in_(JOB_STATUSES_ACTIVE)) |
-                    ((Job.status.in_(JOB_STATUSES_RECENT_TERMINAL)) & (Job.completed_at >= two_minutes_ago))
-                ).order_by(Job.started_at.desc(), Job.id.desc()).all()
-                
-                # Send job updates
-                jobs_data = [
-                    {
-                        'id': job.id,
-                        'job_type': job.job_type,
-                        'status': job.status,
-                        'progress': job.progress,
-                        'message': job.message or '',
-                        'error': job.error
-                    }
-                    for job in jobs
-                ]
-
+                # The query runs in the threadpool so a slow or locked database never stalls the event loop
+                jobs_data = await run_in_threadpool(_recent_jobs_snapshot)
+            except SQLAlchemyOperationalError as e:
+                if "database is locked" not in str(e):
+                    raise
+                # SQLite is busy with a heavy write (e.g. bulk border processing); skip this poll and back off
+                log_debug(LogTags.WEBSOCKET, f"Job WS #{conn_id} DB busy, skipping poll cycle", conn_id=conn_id)
+                sleep_seconds = 1.0
+            else:
                 payload = {'jobs': jobs_data}
                 snapshot = json.dumps(payload, sort_keys=True)
                 now = asyncio.get_running_loop().time()
@@ -159,17 +170,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     if has_active_jobs
                     else settings.job_ws_poll_interval_idle
                 )
-            except SQLAlchemyOperationalError as e:
-                if "database is locked" in str(e):
-                    # SQLite is busy with a heavy write (e.g. bulk border processing).
-                    # Skip this poll cycle and retry after a short back-off rather
-                    # than crashing the WebSocket connection.
-                    log_debug(LogTags.WEBSOCKET, f"Job WS #{conn_id} DB busy, skipping poll cycle", conn_id=conn_id)
-                    sleep_seconds = 1.0
-                else:
-                    raise
-            finally:
-                db.close()
 
             # Sleep, but wake immediately if the server is shutting down
             try:

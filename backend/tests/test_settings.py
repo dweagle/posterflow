@@ -95,6 +95,21 @@ def test_get_settings_masks_sensitive_values(client, test_db):
     assert data["plex_url"] == "http://localhost:32400"
 
 
+def test_get_settings_omits_internal_job_output(client, test_db):
+    """Stats and caches have their own routes; the settings fetch must not ship them."""
+    test_db.add_all([
+        Setting(key="poster_renamer_stats", value='{"total_matched": 1}'),
+        Setting(key="maker_tools_monitor_status_cache", value="{}"),
+        Setting(key="plex_url", value="http://localhost:32400"),
+    ])
+    test_db.commit()
+
+    data = client.get("/api/settings/").json()
+    assert "poster_renamer_stats" not in data
+    assert "maker_tools_monitor_status_cache" not in data
+    assert data["plex_url"] == "http://localhost:32400"
+
+
 def test_save_bulk_with_masked_placeholder_preserves_original_secret(client, test_db):
     """Posting the masked placeholder for a sensitive key must not overwrite the real value."""
     test_db.add(Setting(key="google_client_secret", value="real-secret"))

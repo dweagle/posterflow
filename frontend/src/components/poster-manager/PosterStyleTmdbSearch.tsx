@@ -3,7 +3,7 @@ import { AlertCircle, Check, Copy, ExternalLink, Loader2, Search, Star } from 'l
 import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateLink } from '../../api/client'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { googleSearchUrl, tpdbSearchUrl } from '../../utils/searchLinks'
-import { type FallbackItem } from '../../api/posterManager'
+import { type FallbackItem, isTmdbKeyMissingError } from '../../api/posterManager'
 import { type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
 import { useToast } from '../Toast'
 import CommunityStatusBadge from './CommunityStatusBadge'
@@ -71,8 +71,9 @@ export default function PosterStyleTmdbSearch({ item, tmdbApiKeyConfigured, seas
         tvdb_fallback: true,
       })
       setCandidates(result.candidates)
-    } catch {
-      setCandidates([])
+    } catch (err) {
+      if (isTmdbKeyMissingError(err)) setIsNoKey(true)
+      else setCandidates([])
     } finally {
       setIsLoading(false)
     }

@@ -92,14 +92,14 @@ export const usePosterManagerLibraries = ({
 
   const fetchLibraryConfigs = async () => {
     try {
-      const data = await getPlexLibraryConfigs()
+      // both start now so the settings read shares the page's mount-time request
+      const [data, settings] = await Promise.all([getPlexLibraryConfigs(), getSettings()])
       setLibraryConfigs(data.configs)
 
       const settingKey =
         activeTab === 'unmatched' ? 'unmatched_assets_libraries'
         : 'asset_renamer_libraries'
 
-      const settings = await getSettings()
       let finalSelection: Set<string> = new Set()
 
       // Seed the unified asset selection from the user's existing poster selection on first use.

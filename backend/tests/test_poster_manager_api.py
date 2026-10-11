@@ -28,6 +28,37 @@ def _tmdb_movie_result(tmdb_id: int, title: str, year: int, popularity: float = 
 # TMDB search endpoint tests
 # ---------------------------------------------------------------------------
 
+def test_poster_stats_keeps_item_lists_off_the_summary(client, test_db):
+    test_db.add(Setting(key="poster_renamer_stats", value=json.dumps({
+        "total_matched": 2,
+        "style_counts": {"CL2K": 2},
+        "style_fallbacks": {"MM2K": [{"title": "A", "year": 2020, "type": "movie"}]},
+        "drive_usage": [{"drive_id": "d1", "name": "Drive 1", "count": 2}],
+        "drive_outranked": {"d1": []},
+        "artwork_drive_items": {"d2": [{"title": "B", "year": None, "type": "show"}]},
+        "artwork_drive_outranked": {},
+    })))
+    test_db.commit()
+
+    summary = client.get("/api/posterflow/stats").json()
+    assert summary["matched_posters"] == 2
+    assert summary["style_counts"] == {"CL2K": 2}
+    assert summary["drive_usage"][0]["drive_id"] == "d1"
+    for key in ("style_fallbacks", "drive_outranked", "artwork_drive_items", "artwork_drive_outranked"):
+        assert key not in summary
+
+    items = client.get("/api/posterflow/stats/items").json()
+    assert items["style_fallbacks"]["MM2K"][0]["title"] == "A"
+    assert items["artwork_drive_items"]["d2"][0]["title"] == "B"
+    assert items["drive_outranked"] == {"d1": []}
+    assert items["artwork_drive_outranked"] == {}
+
+
+def test_poster_stats_items_without_a_rename_yet(client):
+    items = client.get("/api/posterflow/stats/items").json()
+    assert items == {"style_fallbacks": {}, "drive_outranked": {}, "artwork_drive_items": {}, "artwork_drive_outranked": {}}
+
+
 def test_unmatched_tmdb_search_rejects_missing_api_key(client):
     """Should return 400 when TMDB API key is not configured."""
     response = client.post(

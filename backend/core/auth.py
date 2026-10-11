@@ -5,10 +5,12 @@ Passwords are stored as PBKDF2-HMAC-SHA256 hashes (stdlib only, no extra deps).
 The middleware guards all /api/* routes when a password has been configured.
 Routes under /api/auth/ and a few utility endpoints are always exempt.
 """
+import asyncio
 import hashlib
 import hmac
 import secrets
 import time
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -219,12 +221,21 @@ def verify_psd_access_token(db: Session, filename: str, token: str, exp: str) ->
 _CACHE_TTL = 5.0  # seconds
 
 class _PasswordCache:
-    __slots__ = ("hash_val", "salt_val", "loaded_at")
+    __slots__ = ("hash_val", "salt_val", "loaded_at", "token_ok")
 
     def __init__(self) -> None:
         self.hash_val: str = ""
         self.salt_val: str = ""
         self.loaded_at: float = 0.0
+        # digest of the last bearer token PBKDF2 approved, so later requests skip the slow hash
+        self.token_ok: str = ""
+
+    def token_digest(self, token: str) -> str:
+        # bound to the hash it was checked against, so a changed password never inherits an approval
+        return hashlib.sha256(f"{self.hash_val}:{token}".encode("utf-8")).hexdigest()
+
+    def token_verified(self, token: str) -> bool:
+        return bool(self.token_ok) and hmac.compare_digest(self.token_ok, self.token_digest(token))
 
     def is_fresh(self) -> bool:
         return (time.monotonic() - self.loaded_at) < _CACHE_TTL
@@ -238,9 +249,20 @@ class _PasswordCache:
 
     def invalidate(self) -> None:
         self.loaded_at = 0.0
+        self.token_ok = ""
 
 
 _cache = _PasswordCache()
+# one reload per expiry, however many requests notice it at once
+_refresh_lock = asyncio.Lock()
+
+
+def _refresh_password_cache() -> None:
+    db: Session = SessionLocal()
+    try:
+        _cache.load(db)
+    finally:
+        db.close()
 
 
 def invalidate_auth_cache() -> None:
@@ -272,13 +294,11 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
             if request.method == method and path.startswith(prefix):
                 return await call_next(request)
 
-        # Load cached password (refresh from DB if stale)
-        db: Session = SessionLocal()
-        try:
-            if not _cache.is_fresh():
-                _cache.load(db)
-        finally:
-            db.close()
+        # Load cached password (refresh from DB if stale), off the event loop like any other DB read
+        if not _cache.is_fresh():
+            async with _refresh_lock:
+                if not _cache.is_fresh():
+                    await run_in_threadpool(_refresh_password_cache)
 
         # If no password is configured, allow everything through
         if not _cache.hash_val:
@@ -291,8 +311,11 @@ class AppAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
         token = auth_header[7:]
-        if not verify_password(token, _cache.salt_val, _cache.hash_val):
-            log_warning(LogTags.API, f"Unauthorized API request – invalid token ({path})")
-            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        # PBKDF2 is deliberately slow; it runs in the threadpool and only until the token is known good
+        if not _cache.token_verified(token):
+            if not await run_in_threadpool(verify_password, token, _cache.salt_val, _cache.hash_val):
+                log_warning(LogTags.API, f"Unauthorized API request – invalid token ({path})")
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+            _cache.token_ok = _cache.token_digest(token)
 
         return await call_next(request)

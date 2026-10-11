@@ -1,9 +1,9 @@
 import { ChevronRight, Download, GripVertical, List, Minus, Plus, Trash2 } from 'lucide-react'
 import PriorityHeader from './PriorityHeader'
 import { type PriorityScope } from './PriorityScopeSelector'
-import { DragEvent, TouchEvent as ReactTouchEvent, useState } from 'react'
+import { DragEvent, TouchEvent as ReactTouchEvent, useEffect, useState } from 'react'
 import { Drive } from '../../api/client'
-import { FallbackItem, PosterStyleStats } from '../../api/posterManager'
+import { FallbackItem, PosterStyleStats, getPosterStatsItems } from '../../api/posterManager'
 import PosterStyleModal from './PosterStyleModal'
 import { downloadText } from './DriveUsagePanel'
 
@@ -67,10 +67,21 @@ function PriorityTab({
   const PREVIEW_LIMIT = 5
   const [openFallbackStyle, setOpenFallbackStyle] = useState<string | null>(null)
   const [fallbackOpen, setFallbackOpen] = useState(false)
+  // Per-item fallback lists are megabytes on a big library, so they load only once the section is opened
+  const [styleFallbacks, setStyleFallbacks] = useState<Record<string, FallbackItem[]> | null>(null)
+  const [fallbackLoadFailed, setFallbackLoadFailed] = useState(false)
+  useEffect(() => {
+    if (!fallbackOpen || styleFallbacks) return
+    let cancelled = false
+    setFallbackLoadFailed(false)
+    getPosterStatsItems()
+      .then((r) => { if (!cancelled) setStyleFallbacks(r.style_fallbacks) })
+      .catch(() => { if (!cancelled) setFallbackLoadFailed(true) })
+    return () => { cancelled = true }
+  }, [fallbackOpen, styleFallbacks])
 
   // Compute style usage data outside JSX for clean modal access
   const styleCounts = styleStats?.style_counts ?? {}
-  const styleFallbacks = styleStats?.style_fallbacks ?? {}
   const styleTotal = Object.values(styleCounts).reduce((a, b) => a + b, 0)
   const COMMUNITY_STYLES = ['MM2K', 'CL2K']
   const priorityStyles = [...new Set(priorityList.map(d => d.style_type).filter(Boolean))]
@@ -85,7 +96,7 @@ function PriorityTab({
     return (styleCounts[b] ?? 0) - (styleCounts[a] ?? 0)
   })
   const fallbackEntries = styleEntries.slice(1).filter(([style, n]) => n > 0 && COMMUNITY_STYLES.includes(style))
-  const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks[openFallbackStyle] ?? []) : []
+  const openFallbackItems: FallbackItem[] = openFallbackStyle ? (styleFallbacks?.[openFallbackStyle] ?? []) : []
 
   const handleDownload = (style: string, items: FallbackItem[]) => {
     downloadText(`missing-${preferredStyle.toLowerCase()}-posters.txt`, [
@@ -149,7 +160,12 @@ function PriorityTab({
                     {fallbackEntries.reduce((a, [, n]) => a + n, 0).toLocaleString()} posters using fallback styles
                   </span>
                 </button>
-                {fallbackOpen && fallbackEntries.map(([style, count]) => {
+                {fallbackOpen && !styleFallbacks && (
+                  <div className="style-usage-preview-more">
+                    {fallbackLoadFailed ? 'Fallback lists could not be loaded. Close and reopen this section to retry.' : 'Loading fallback lists…'}
+                  </div>
+                )}
+                {fallbackOpen && styleFallbacks && fallbackEntries.map(([style, count]) => {
                   const items: FallbackItem[] = styleFallbacks[style] ?? []
                   // Distinct titles (a show's seasons collapse to one) vs the raw poster count.
                   const titleCount = new Set(items.map((it) => `${it.type}::${it.title}::${it.year}`)).size

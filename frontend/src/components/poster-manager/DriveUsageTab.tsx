@@ -5,7 +5,7 @@ import PriorityScopeSelector, { type PriorityScope } from './PriorityScopeSelect
 import { TITLE, DESCRIPTION } from './PriorityHeader'
 import DriveUsagePanel from './DriveUsagePanel'
 import PosterOverridesModal from './PosterOverridesModal'
-import { PosterStyleStats, getPosterOverrides } from '../../api/posterManager'
+import { PosterStatsItems, PosterStyleStats, getPosterOverrides, getPosterStatsItems } from '../../api/posterManager'
 import { useArtworkUsageData, usePosterUsageData } from '../../hooks/usePosterUsageData'
 
 type DriveUsageTabProps = {
@@ -16,8 +16,18 @@ type DriveUsageTabProps = {
 
 // Drive Usage view of the Drive Priority tab: both last-rename reports side by side.
 function DriveUsageTab({ scope, onScopeChange, styleStats }: DriveUsageTabProps) {
-  const poster = usePosterUsageData(styleStats)
-  const artwork = useArtworkUsageData(styleStats)
+  // The per-item lists are fetched here, not with the summary, so only this view pays for them
+  const [items, setItems] = useState<PosterStatsItems | null>(null)
+  const [itemsFailed, setItemsFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getPosterStatsItems()
+      .then((r) => { if (!cancelled) setItems(r) })
+      .catch(() => { if (!cancelled) setItemsFailed(true) })
+    return () => { cancelled = true }
+  }, [])
+  const poster = usePosterUsageData(styleStats, items)
+  const artwork = useArtworkUsageData(styleStats, items)
   const [showOverrides, setShowOverrides] = useState(false)
   const [overrideCount, setOverrideCount] = useState<number | null>(null)
 
@@ -58,6 +68,8 @@ function DriveUsageTab({ scope, onScopeChange, styleStats }: DriveUsageTabProps)
             No drive usage recorded yet - the reports populate on the next rename run.
           </p>
         )}
+        {items === null && !itemsFailed && <p className="drive-usage-hint">Loading item lists…</p>}
+        {itemsFailed && <p className="drive-usage-hint">Item lists could not be loaded. Reload the page to retry.</p>}
         <div className="drive-usage-tab-grid">
           <DriveUsagePanel
             usage={poster.driveUsage}

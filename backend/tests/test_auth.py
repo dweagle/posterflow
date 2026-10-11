@@ -318,3 +318,55 @@ def test_stats_image_routes_exempt_from_password(client):
         _cache.hash_val = ""
         _cache.salt_val = ""
         _cache.loaded_at = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Token memo: PBKDF2 runs once per token, bound to the hash it was checked against
+# ---------------------------------------------------------------------------
+
+class TestAuthTokenMemo:
+    def _seed(self, password: str) -> None:
+        salt_hex, hash_hex = hash_password(password)
+        _cache.hash_val = hash_hex
+        _cache.salt_val = salt_hex
+        _cache.loaded_at = time.monotonic()
+        _cache.token_ok = ""
+
+    def _clear(self) -> None:
+        _cache.hash_val = ""
+        _cache.salt_val = ""
+        _cache.loaded_at = 0.0
+        _cache.token_ok = ""
+
+    def test_repeat_requests_hash_the_password_once(self, client):
+        from unittest.mock import patch
+        self._seed("testpass")
+        try:
+            with patch("core.auth.verify_password", wraps=verify_password) as spy:
+                for _ in range(3):
+                    assert client.get("/api/drives/", headers={"Authorization": "Bearer testpass"}).status_code != 401
+            assert spy.call_count == 1
+        finally:
+            self._clear()
+
+    def test_wrong_token_still_rejected_after_a_good_one(self, client):
+        self._seed("testpass")
+        try:
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer testpass"}).status_code != 401
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer nope"}).status_code == 401
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer testpass"}).status_code != 401
+        finally:
+            self._clear()
+
+    def test_memo_dies_with_the_password(self, client):
+        self._seed("testpass")
+        try:
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer testpass"}).status_code != 401
+            # the hash changes underneath (password change + cache reload) but the memo is left in place
+            _cache.salt_val, _cache.hash_val = hash_password("newpass")
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer testpass"}).status_code == 401
+            assert client.get("/api/drives/", headers={"Authorization": "Bearer newpass"}).status_code != 401
+            invalidate_auth_cache()
+            assert _cache.token_ok == ""
+        finally:
+            self._clear()

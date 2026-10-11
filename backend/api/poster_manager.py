@@ -631,12 +631,8 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
         movies = 0
         series = 0
         style_counts: Dict[str, Any] = {}
-        style_fallbacks: Dict[str, Any] = {}
         drive_usage: List[Dict[str, Any]] = []
-        drive_outranked: Dict[str, Any] = {}
         artwork_drive_usage: List[Dict[str, Any]] = []
-        artwork_drive_items: Dict[str, Any] = {}
-        artwork_drive_outranked: Dict[str, Any] = {}
 
         if stats_setting and stats_setting.value:
             try:
@@ -646,12 +642,8 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 movies = stored_stats.get("movies", 0)
                 series = stored_stats.get("series", 0)
                 style_counts = stored_stats.get("style_counts", {})
-                style_fallbacks = stored_stats.get("style_fallbacks", {})
                 drive_usage = stored_stats.get("drive_usage", [])
-                drive_outranked = stored_stats.get("drive_outranked", {})
                 artwork_drive_usage = stored_stats.get("artwork_drive_usage", [])
-                artwork_drive_items = stored_stats.get("artwork_drive_items", {})
-                artwork_drive_outranked = stored_stats.get("artwork_drive_outranked", {})
             except json.JSONDecodeError:
                 pass
         else:
@@ -696,17 +688,32 @@ def get_poster_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "series": series,
             "last_scan": last_scan.isoformat() if last_scan else None,
             "style_counts": style_counts,
-            "style_fallbacks": style_fallbacks,
             "drive_usage": drive_usage,
-            "drive_outranked": drive_outranked,
             "artwork_drive_usage": artwork_drive_usage,
-            "artwork_drive_items": artwork_drive_items,
-            "artwork_drive_outranked": artwork_drive_outranked,
         }
 
     except Exception as e:
         log_error(LogTags.RENAMER, f"Error getting poster stats: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Error getting poster stats")
+
+
+# Per-item lists from the last rename; megabytes on a big library, so only the views that show them fetch these
+STATS_ITEM_LISTS = ("style_fallbacks", "drive_outranked", "artwork_drive_items", "artwork_drive_outranked")
+
+
+@router.get("/stats/items")
+def get_poster_stats_items(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Fallback, drive-item and outranked lists from the last rename, kept off /stats"""
+    stats_setting = get_setting(db, SETTING_POSTER_RENAMER_STATS)
+    stored: Dict[str, Any] = {}
+    if stats_setting and stats_setting.value:
+        try:
+            stored = json.loads(stats_setting.value)
+        except json.JSONDecodeError:
+            stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return {key: stored.get(key) or {} for key in STATS_ITEM_LISTS}
 
 
 @router.get("/drive-image")

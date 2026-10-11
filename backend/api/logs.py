@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi.concurrency import run_in_threadpool
 from typing import List, Optional
 from pydantic import BaseModel
 from pathlib import Path
@@ -216,7 +217,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
 
         # Initial backlog as ONE batch frame, with the history cursor so the page can
         # lazy-load older chunks via GET /api/logs/history when scrolled to the top.
-        entries, cursor = read_log_window()
+        entries, cursor = await run_in_threadpool(read_log_window)
         if entries:
             try:
                 await websocket.send_json({'type': 'batch', 'entries': entries, 'history_cursor': cursor})

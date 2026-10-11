@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle, Copy, Check, ExternalLink, EyeOff, FileQuesti
 import type { MouseEvent } from 'react'
 import { type UnmatchedAttention,
   type UnmatchedStats, type TmdbCandidate, type UnmatchedIgnoreItem, addUnmatchedIgnoreItem, searchUnmatchedTmdb, tmdbCandidateLink, type ListItemInput } from '../../api/client'
+import { isTmdbKeyMissingError } from '../../api/posterManager'
 import { mediaTypeToTmdbFilter } from '../../api/makerTools'
 import { tpdbSearchUrl } from '../../utils/searchLinks'
 import { useToast } from '../Toast'
@@ -346,8 +347,9 @@ function UnmatchedItemsModal({
           tvdb_fallback: true,
         })
         setCandidatesMap((prev) => ({ ...prev, [key]: result.candidates }))
-      } catch {
-        setCandidatesMap((prev) => ({ ...prev, [key]: [] }))
+      } catch (err) {
+        if (isTmdbKeyMissingError(err)) setNoKeyItems((prev) => new Set(prev).add(key))
+        else setCandidatesMap((prev) => ({ ...prev, [key]: [] }))
       } finally {
         setLoadingKeys((prev) => {
           const next = new Set(prev)

@@ -346,3 +346,22 @@ def test_start_idarr_targeted_queues_behind_active_job_but_full_run_blocked(clie
     full = client.post("/api/jobs/idarr", json={"dry_run": False, "sync_target_index": 0})
     assert full.status_code == 409
     assert "already" in full.json()["detail"]
+
+
+def test_recent_jobs_snapshot_rows(test_db, monkeypatch):
+    from api import jobs as jobs_module
+    now = datetime.now(timezone.utc)
+    test_db.add_all([
+        Job(job_type="Sync All", status="running", progress=40, message="Working", started_at=now),
+        Job(job_type="Rename", status="completed", progress=100, message="Done",
+            started_at=now - timedelta(minutes=1), completed_at=now - timedelta(seconds=30)),
+        Job(job_type="Cleanup", status="completed", progress=100, message="Old",
+            started_at=now - timedelta(hours=1), completed_at=now - timedelta(minutes=10)),
+    ])
+    test_db.commit()
+    monkeypatch.setattr(jobs_module, "SessionLocal", lambda: test_db)
+
+    rows = jobs_module._recent_jobs_snapshot()
+    assert [(r["job_type"], r["status"]) for r in rows] == [("Sync All", "running"), ("Rename", "completed")]
+    assert rows[0]["progress"] == 40
+    assert rows[0]["error"] is None

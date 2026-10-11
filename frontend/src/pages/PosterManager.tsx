@@ -87,7 +87,8 @@ function PosterManager() {
   }
   const [config, setConfig] = useState<PosterConfig | null>(null)
   const [showUnmatchedModal, setShowUnmatchedModal] = useState<UnmatchedModalType>(null)
-  const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState(false)
+  // null until settings arrive; the search endpoint is the authority on the key, so unknown never reads as missing
+  const [tmdbApiKeyConfigured, setTmdbApiKeyConfigured] = useState<boolean | null>(null)
   const [styleStats, setStyleStats] = useState<PosterStyleStats | null>(null)
   const [drives, setDrives] = useState<Drive[]>([])
   const [renaming, setRenaming] = useState(false)
@@ -576,7 +577,7 @@ function PosterManager() {
               onAddAllStyle={handleAddAllStyle}
               onRemoveAllStyle={handleRemoveAllStyle}
               styleStats={styleStats}
-              tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+              tmdbApiKeyConfigured={tmdbApiKeyConfigured !== false}
             />
           )}
         </>
@@ -618,7 +619,7 @@ function PosterManager() {
           modalType={showUnmatchedModal}
           unmatchedStats={activeUnmatchedStats}
           modalDisplayLimit={MODAL_DISPLAY_LIMIT}
-          tmdbApiKeyConfigured={tmdbApiKeyConfigured}
+          tmdbApiKeyConfigured={tmdbApiKeyConfigured !== false}
           onClose={() => setShowUnmatchedModal(null)}
           hideCommunity={!isPosterScope}
           typeNoun={UNMATCHED_TYPE_NOUN[unmatchedScope]}
