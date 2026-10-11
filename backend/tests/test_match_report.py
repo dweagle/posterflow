@@ -792,7 +792,26 @@ class TestPlacedFolder:
         _write(tmp_path / "Wonder Woman (2017) {tmdb-297762}", "poster.jpg")
         placed = self._report(tmp_path, monkeypatch, _placed_item())
         assert placed["matched"] is True and placed["reason"] == "by tvdb_id"
+        assert placed["retrievable"] is True and placed["retrieved_by"] == "tvdb id"
         assert placed["season_numbers"] == [1] and placed["siblings"] == []
+
+    def test_imdb_only_folder_under_another_title_is_unfindable(self, tmp_path, monkeypatch):
+        # Radarr named the folder by an older title with only an imdb tag: the matcher accepts it
+        # by imdb, but the unmatched lookup (tmdb/tvdb id or title prefix) never sees it.
+        _write(tmp_path / "From the World of John Wick Ballerina (2025) {imdb-tt7181546}", "poster.jpg")
+        item = _placed_item(media_type="movies", title="Ballerina", year=2025, tmdb_id=541671,
+                            tvdb_id=None, imdb_id="tt7181546")
+        placed = self._report(tmp_path, monkeypatch, item)
+        assert placed["matched"] is True and placed["reason"] == "by imdb_id"
+        assert placed["retrievable"] is False and placed["retrieved_by"] is None
+
+    def test_title_lookup_counts_as_findable(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Ballerina (2025) {imdb-tt7181546}", "poster.jpg")
+        item = _placed_item(media_type="movies", title="Ballerina", year=2025, tmdb_id=541671,
+                            tvdb_id=None, imdb_id="tt7181546")
+        placed = self._report(tmp_path, monkeypatch, item)
+        assert placed["matched"] is True
+        assert placed["retrievable"] is True and placed["retrieved_by"] == "title 'Ballerina'"
 
     def test_id_tagged_folder_outranks_a_title_only_twin(self, tmp_path, monkeypatch):
         _write(tmp_path / "Wonder Man (2026)", "poster.jpg")
@@ -800,6 +819,17 @@ class TestPlacedFolder:
         placed = self._report(tmp_path, monkeypatch, _placed_item())
         assert placed["name"] == "Wonder Man (2026) {tvdb-428629}"
         assert placed["siblings"] == ["Wonder Man (2026)"]
+
+    def test_same_titled_other_film_is_not_a_sibling(self, tmp_path, monkeypatch):
+        _write(tmp_path / "From the World of John Wick Ballerina (2025) {imdb-tt7181546}", "poster.jpg")
+        _write(tmp_path / "Ballerina (2016) {imdb-tt2261287}", "poster.jpg")
+        _write(tmp_path / "Ballerina (2025)", "poster.jpg")
+        item = _placed_item(media_type="movies", title="Ballerina", year=2025, tmdb_id=541671,
+                            tvdb_id=None, imdb_id="tt7181546")
+        placed = self._report(tmp_path, monkeypatch, item)
+        assert placed["name"] == "From the World of John Wick Ballerina (2025) {imdb-tt7181546}"
+        # The tagless twin could be a duplicate; the 2016 film's ids disagree, so it is left out.
+        assert placed["siblings"] == ["Ballerina (2025)"]
 
     def test_flat_destination_layout(self, tmp_path, monkeypatch):
         _write(tmp_path, "Wonder Man (2026) {tvdb-428629}.jpg", "Wonder Man (2026) {tvdb-428629} - Season 1.jpg",
@@ -830,7 +860,7 @@ class TestPlacedVerdicts:
         placed = {"layout": "folders", "name": "RIPLEY (2024) {tvdb-372727}", "files": ["poster.jpg"],
                   "year": 2024, "type": "series", "tmdb_id": None, "tvdb_id": 372727, "imdb_id": None,
                   "season_numbers": [], "has_main": True, "matched": True, "reason": "by tvdb_id",
-                  "id_conflicts": [], "siblings": []}
+                  "retrievable": False, "retrieved_by": None, "id_conflicts": [], "siblings": []}
         placed.update(overrides)
         return placed
 
@@ -854,11 +884,23 @@ class TestPlacedVerdicts:
         assert "{tvdb-111}" in verdicts[0]["message"] and "{tvdb-372727}" in verdicts[0]["message"]
 
     def test_matching_placed_folder_calls_the_row_stale(self):
-        verdicts = _build_verdicts(self._report_with(self._placed()))
+        verdicts = _build_verdicts(self._report_with(self._placed(retrievable=True, retrieved_by="tvdb id")))
         assert any(v["code"] == "placed_matches" and v["level"] == "info" for v in verdicts)
 
+    def test_unfindable_placed_folder_gets_rename_advice(self):
+        report = self._report_with(self._placed(name="From the World of John Wick Ballerina (2025) {imdb-tt7181546}",
+                                                tvdb_id=None, imdb_id="tt7181546", reason="by imdb_id",
+                                                retrievable=False, retrieved_by=None))
+        report["item"].update({"media_type": "movies", "title": "Ballerina", "year": 2025, "tmdb_id": 541671})
+        report["library"]["effective_ids"] = {"tmdb_id": 541671, "tvdb_id": None, "imdb_id": "tt7181546"}
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "placed_unfindable" and verdicts[0]["level"] == "problem"
+        assert "'Ballerina (2025) {tmdb-541671} {imdb-tt7181546}'" in verdicts[0]["message"]
+        assert "Sonarr" in verdicts[0]["message"]
+        assert not any(v["code"] == "placed_matches" for v in verdicts)
+
     def test_partial_row_lists_what_the_folder_holds(self):
-        report = self._report_with(self._placed(files=["poster.jpg", "Season01.jpg"]))
+        report = self._report_with(self._placed(files=["poster.jpg", "Season01.jpg"], retrievable=True, retrieved_by="tvdb id"))
         report["item"]["missing_seasons"] = [2]
         verdicts = _build_verdicts(report)
         note = next(v for v in verdicts if v["code"] == "placed_partial")
@@ -882,6 +924,7 @@ class TestPlacedVerdicts:
         assert "RIPLEY {tvdb-372727}   (folders layout)" in text
         assert "read as  collections, year none" in text
         assert "matcher  ✗ not matched" in text
+        assert "lookup   ✗ not found by tmdb/tvdb id or by title" in text
 
     def test_text_skips_section_when_not_checked(self):
         text = render_match_report_text(_base_report(verdicts=[]))

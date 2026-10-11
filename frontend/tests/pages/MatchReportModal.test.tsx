@@ -41,7 +41,7 @@ const reportResponse: MatchReportResponse = {
     placed: {
       layout: 'folders', name: 'RIPLEY {tvdb-372727}', files: ['poster.jpg', 'Season01.jpg'], year: null,
       type: 'collections', tmdb_id: null, tvdb_id: null, imdb_id: null, season_numbers: [], has_main: true,
-      matched: false, reason: '', id_conflicts: [], siblings: [],
+      matched: false, reason: '', retrievable: false, retrieved_by: null, id_conflicts: [], siblings: [],
     },
   },
   report_text: 'Posterflow match report — test',
@@ -96,12 +96,13 @@ describe('MatchReportModal', () => {
     // Candidate line names the conflicting poster tag (ids line + filename line).
     expect(screen.getAllByText(/\{tvdb-111\}/).length).toBeGreaterThan(0)
     expect(screen.getByText(/skipped: no TMDB API key configured/)).toBeTruthy()
-    for (const label of ['ids', 'folder', 'state', 'seasons', 'files', 'matcher']) {
+    for (const label of ['ids', 'folder', 'state', 'seasons', 'files', 'matcher', 'lookup']) {
       expect(screen.getAllByText(label, { selector: 'td' }).length).toBeGreaterThan(0)
     }
     // The placed folder is shown with its yearless warning.
     expect(screen.getByText(/RIPLEY \{tvdb-372727\}/)).toBeTruthy()
     expect(screen.getByText(/no \(year\) in name/)).toBeTruthy()
+    expect(screen.getByText(/not found by tmdb\/tvdb id or by title/)).toBeTruthy()
   })
 
   it('downloads the report file on click', async () => {

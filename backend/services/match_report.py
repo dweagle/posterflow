@@ -26,7 +26,7 @@ from util.data.extract import extract_ids
 from util.poster_settings import get_poster_destination
 from util.data.normalization import normalize_titles
 from util.posters.assets import get_assets_files
-from util.posters.index import search_matches
+from util.posters.index import build_search_index, create_new_empty_index, search_matches
 from util.posters.match import (
     ID_CONFLICT,
     NO_SHARED_ID,
@@ -894,6 +894,24 @@ def _placed_folder_report(
     found.sort(key=lambda row: (-row[0], row[1].lower()))
     _score, name, parsed = found[0]
     matched, reason = is_match(dict(parsed), media)
+    # Replay the unmatched check's LOOKUP as well: it finds placed folders by tmdb/tvdb id or by
+    # the title's first letters, so a folder the matcher accepts can still be invisible to it.
+    lookup = create_new_empty_index()
+    build_search_index(lookup, parsed.get("title") or "", parsed)
+    retrieved_by: Optional[str] = None
+    media_title = media.get("title") or ""
+    if media.get("tmdb_id") or media.get("tvdb_id"):
+        if search_matches(lookup, media_title, tmdb_id=media.get("tmdb_id"), tvdb_id=media.get("tvdb_id")):
+            retrieved_by = "tmdb id" if media.get("tmdb_id") else "tvdb id"
+    if retrieved_by is None:
+        if item["media_type"] == "collections":
+            titles = collection_title_variants(media_title) + list(media.get("alternate_titles") or [])
+        else:
+            titles = [media_title] + list(media.get("alternate_titles") or [])
+        for title in titles:
+            if title and search_matches(lookup, title):
+                retrieved_by = f"title '{title}'"
+                break
     basenames = [os.path.basename(f) for f in parsed.get("files") or []]
     placed_ids = {key: parsed.get(key) for key in ("tmdb_id", "tvdb_id", "imdb_id")}
     return {
@@ -907,11 +925,20 @@ def _placed_folder_report(
         "has_main": any(not season_pattern.search(f) for f in basenames),
         "matched": bool(matched),
         "reason": reason or "",
+        "retrievable": retrieved_by is not None,
+        "retrieved_by": retrieved_by,
         "id_conflicts": [
             key for key in ("tmdb_id", "tvdb_id", "imdb_id")
             if placed_ids.get(key) and effective_ids.get(key) and str(placed_ids[key]) != str(effective_ids[key])
         ],
-        "siblings": [row[1] for row in found[1:]],
+        # Possible duplicates only: a twin whose ids disagree is another title sharing the name.
+        "siblings": [
+            row[1] for row in found[1:]
+            if not any(
+                row[2].get(key) and effective_ids.get(key) and str(row[2][key]) != str(effective_ids[key])
+                for key in ("tmdb_id", "tvdb_id", "imdb_id")
+            )
+        ],
     }
 
 
@@ -1241,6 +1268,21 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 f"The placed folder '{placed['name']}' is tagged {_id_tags(placed)}, but {source_name} says "
                 f"{_id_tags(record_ids)}, so unmatched detection treats them as different items. "
                 f"Rename the folder in {source_name} so its tag matches, then run the Asset Renamer.")
+        elif placed.get("matched") and placed.get("retrievable") is False:
+            want = "tvdb" if item["media_type"] == "series" else "tmdb"
+            want_id = record_ids.get(f"{want}_id")
+            existing = " ".join(re.findall(r"\{[^}]+\}", placed["name"]))
+            suggested = (
+                f"{item.get('title')} ({item.get('year') or 'YEAR'})"
+                + (f" {{{want}-{want_id}}}" if want_id else "")
+                + (f" {existing}" if existing else "")
+            )
+            add("problem", "placed_unfindable",
+                f"The poster is placed in '{placed['name']}' and matches this item {placed.get('reason')}, but "
+                "unmatched detection cannot find that folder: it looks placed folders up by TMDB/TVDB id or by "
+                f"the title's first letters, and this one carries {_id_tags(placed)} under a different name. "
+                f"Add the {want.upper()} id to the folder name in {source_name}, e.g. '{suggested}', or rename "
+                "the folder to the current title, then run the Asset Renamer.")
         elif placed.get("matched"):
             if item.get("missing_seasons") or item.get("missing_main"):
                 held = ", ".join(placed.get("files") or []) or "no files"
@@ -1567,8 +1609,13 @@ def render_match_report_text(report: Dict[str, Any]) -> str:
                 lines.append(f"    matcher  ✓ matched {placed.get('reason')}")
             else:
                 lines.append("    matcher  ✗ not matched" + (f": {placed['reason']}" if placed.get("reason") else ""))
+            if placed.get("retrievable") is not None:
+                lines.append("    lookup   " + (
+                    f"✓ found by {placed.get('retrieved_by')}" if placed.get("retrievable")
+                    else "✗ not found by tmdb/tvdb id or by title"
+                ))
             if placed.get("siblings"):
-                lines.append(f"    also     {', '.join(placed['siblings'])}")
+                lines.append(f"    same title  {', '.join(placed['siblings'])}")
         lines.append("")
 
     lines.append("ID CROSS-CHECK")

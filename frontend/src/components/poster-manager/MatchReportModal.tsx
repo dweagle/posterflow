@@ -303,8 +303,18 @@ function MatchReportModal({ item, onClose, pollIntervalMs = 1500 }: MatchReportM
                               : <span className="mr-problem">not matched{placed.reason ? `: ${placed.reason}` : ''}</span>}
                           </td>
                         </tr>
+                        {placed.retrievable != null && (
+                          <tr>
+                            <td>lookup</td>
+                            <td>
+                              {placed.retrievable
+                                ? <span className="mr-ok">found by {placed.retrieved_by}</span>
+                                : <span className="mr-problem">not found by tmdb/tvdb id or by title</span>}
+                            </td>
+                          </tr>
+                        )}
                         {placed.siblings.length > 0 && (
-                          <tr><td>also</td><td className="match-report-muted">{placed.siblings.join(', ')}</td></tr>
+                          <tr><td>same title</td><td className="match-report-muted">{placed.siblings.join(', ')}</td></tr>
                         )}
                       </tbody>
                     </table>

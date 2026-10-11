@@ -400,6 +400,9 @@ export interface MatchReportPlaced {
   has_main: boolean
   matched: boolean
   reason: string
+  // Whether unmatched detection's lookup (tmdb/tvdb id or title prefix) would find this folder.
+  retrievable?: boolean | null
+  retrieved_by?: string | null
   id_conflicts: string[]
   siblings: string[]
 }
