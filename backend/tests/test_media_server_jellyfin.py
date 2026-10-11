@@ -98,11 +98,12 @@ def test_get_libraries_maps_types(monkeypatch):
 
 
 def test_items_pagination(monkeypatch):
-    rows = [{"Id": f"i{n}", "Type": "Movie", "Name": f"M{n}"} for n in range(3)]
+    rows = [{"Id": f"i{n}", "Type": "Movie", "Name": f"M{n}", "OriginalTitle": f"O{n}"} for n in range(3)]
 
     def items_handler(params, _data):
         # v12 folds box-set members out of listings unless explicitly disabled
         assert params.get("collapseBoxSetItems") == "false"
+        assert "OriginalTitle" in str(params.get("fields", ""))
         start = int(params.get("startIndex", 0))
         return {"Items": rows[start:start + 2], "TotalRecordCount": len(rows)}
 
@@ -110,6 +111,7 @@ def test_items_pagination(monkeypatch):
     items = client.get_library_items("lib1")
     assert [i.item_id for i in items] == ["i0", "i1", "i2"]
     assert items[0].library_key == "srv123:lib1"
+    assert items[0].original_title == "O0"
 
 
 def test_find_by_provider_ids_title_pass(monkeypatch):

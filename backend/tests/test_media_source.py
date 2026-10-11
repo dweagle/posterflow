@@ -200,6 +200,22 @@ def test_fetch_movie_mapping(test_db, monkeypatch):
     assert "alternate_titles" in heat and "normalized_alternate_titles" in heat
 
 
+def test_fetch_carries_the_servers_original_title_as_an_alternate(test_db, monkeypatch):
+    seven = make_movie(107, "Seven", 1995, "/data/movies/Se7en (1995) {imdb-tt0114369}/Se7en.mkv",
+                       guids=["tmdb://807", "imdb://tt0114369"])
+    seven.originalTitle = "Se7en"
+    same = make_movie(108, "Heat", 1995, "/data/movies/Heat (1995)/Heat.mkv", guids=["tmdb://949"])
+    same.originalTitle = "Heat"
+    sections = [FakeSection(1, "Movies", "movie", items=[seven, same], locations=["/data/movies"])]
+    _, media_dict = run_fetch(test_db, monkeypatch, sections)
+    entry = next(m for m in media_dict["movies"] if m["title"] == "Seven")
+    assert "Se7en" in entry["alternate_titles"]
+    assert "se7en" in entry["normalized_alternate_titles"]
+    # An original title equal to the title is not added a second time.
+    heat = next(m for m in media_dict["movies"] if m["title"] == "Heat")
+    assert heat["alternate_titles"].count("Heat") == 1
+
+
 def test_fetch_keeps_guidless_items(test_db, monkeypatch):
     _, media_dict = run_fetch(test_db, monkeypatch, default_sections())
     no_guid = next(m for m in media_dict["movies"] if m["title"] == "No Guid Film")

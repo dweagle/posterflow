@@ -48,7 +48,7 @@ MEDIA_TYPE_TO_ITEM_KINDS = {
 
 CONTENT_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
-ITEM_FIELDS = "ProviderIds,Path,Tags,DateCreated"
+ITEM_FIELDS = "ProviderIds,Path,Tags,DateCreated,OriginalTitle"
 PAGE_SIZE = 500
 
 
@@ -223,6 +223,7 @@ class JellyfinClient(MediaServerClient):
             release_date=data.get("PremiereDate"),
             child_count=int(data["ChildCount"]) if data.get("ChildCount") is not None else None,
             thumb_path=thumb_path,
+            original_title=str(data.get("OriginalTitle") or "").strip() or None,
             native=data,
             client=self,
         )

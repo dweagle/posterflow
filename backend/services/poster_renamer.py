@@ -896,6 +896,13 @@ class PosterRenameService:
             if not title:
                 continue
             title_variants = generate_title_variants(title)
+            # The agent's original title (Plex shows 'Seven', original 'Se7en') is a name a
+            # placed folder or poster may carry, so lookups get it as an alternate.
+            original = unidecode(html.unescape(item.original_title or "")).strip() if item.original_title else ""
+            if original and normalize_titles(original) != normalize_titles(title) \
+                    and original not in title_variants["alternate_titles"]:
+                title_variants["alternate_titles"].append(original)
+                title_variants["normalized_alternate_titles"].append(normalize_titles(original))
             candidates = self._media_server_folder_candidates(item, media_type)
             flat_roots = [c for c in candidates if media_type == "movies" and norm_path(c[1]) in library_roots]
             candidates = [c for c in candidates if c not in flat_roots]

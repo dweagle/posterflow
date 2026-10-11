@@ -50,6 +50,7 @@ class MediaServerItem:
     child_count: Optional[int] = None  # episode count for seasons; None = unknown
     smart: bool = False  # Plex smart collections; always False elsewhere
     thumb_path: Optional[str] = None  # server-relative image path for proxying
+    original_title: Optional[str] = None  # the agent's original title (Plex 'Seven' vs original 'Se7en')
     native: Any = field(default=None, repr=False)
     client: Any = field(default=None, repr=False)  # owning MediaServerClient (multi-instance indexes)
 

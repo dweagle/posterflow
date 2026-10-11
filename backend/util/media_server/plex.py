@@ -173,6 +173,7 @@ class PlexClient(MediaServerClient):
             child_count=int(child_count) if child_count is not None else None,
             smart=bool(g(item, "smart", False)),
             thumb_path=g(item, "thumb"),
+            original_title=str(g(item, "originalTitle", "") or "").strip() or None,
             native=item,
             client=self,
         )

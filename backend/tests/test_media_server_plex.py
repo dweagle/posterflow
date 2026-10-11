@@ -119,6 +119,14 @@ def test_parse_item_fields():
     assert parsed.edition_title == "Director's Cut"
     assert parsed.tags == ["Overlay"]
     assert parsed.added_at == "2026-01-02T03:04:05"
+    assert parsed.original_title is None
+
+
+def test_parse_item_carries_original_title():
+    client = make_client([])
+    parsed = client._parse_item(make_movie(title="Seven", originalTitle="Se7en"))
+    assert parsed.title == "Seven" and parsed.original_title == "Se7en"
+    assert client._parse_item(make_movie(originalTitle="")).original_title is None
 
 
 def test_find_by_provider_ids_guid_search():
