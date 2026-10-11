@@ -490,3 +490,71 @@ def test_artwork_image_thumbnail_keeps_transparency(client, test_db):
     assert full_response.status_code == 200
     with Image.open(io.BytesIO(full_response.content)) as full:
         assert full.size == (800, 200)
+
+
+def test_thumb_cache_sweep_keeps_recent_files_under_the_cap(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from api import stats
+
+    now = time.time()
+    ages = {"newest.jpg": 10, "recent.jpg": 60, "older.jpg": 3600, "expired.png": 40 * 86400}
+    for name, age in ages.items():
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        os.utime(path, (now - age, now - age))
+    monkeypatch.setattr(stats, "_THUMB_CACHE_MAX_FILES", 2)
+
+    assert stats._sweep_thumb_cache(tmp_path, now=now) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["newest.jpg", "recent.jpg"]
+
+
+def test_thumbnail_requests_touch_hits_and_sweep_hourly(client, test_db, monkeypatch):
+    import os
+    import time
+
+    from PIL import Image
+
+    from api import stats
+
+    drive = Drive(name="Sweep Drive", drive_id="thumb-sweep-1", style_type="CL2K", subscribed=True, is_custom=False)
+    test_db.add(drive)
+    test_db.flush()
+    drive_root = drive.get_local_path(validate=False)
+    drive_root.mkdir(parents=True, exist_ok=True)
+    poster_file = drive_root / "Sweep Poster (2024).jpg"
+    Image.new("RGB", (400, 600), (10, 20, 30)).save(poster_file, "JPEG")
+    poster = Poster(
+        drive_id=drive.drive_id,
+        file_name=poster_file.name,
+        file_path=str(poster_file),
+        downloaded_at=datetime.now(timezone.utc),
+    )
+    test_db.add(poster)
+    test_db.commit()
+
+    cache_dir = settings.config_dir / "cache" / "poster_thumbs"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    expired = cache_dir / "999999_1_320.jpg"
+    old = time.time() - 40 * 86400
+    expired.write_bytes(b"x")
+    os.utime(expired, (old, old))
+    monkeypatch.setattr(stats, "_next_thumb_sweep", 0.0)
+
+    # A cache miss runs the sweep: the expired thumb goes, the new one stays
+    assert client.get(f"/api/stats/posters/{poster.id}/image?w=100").status_code == 200
+    assert not expired.exists()
+    (thumb,) = cache_dir.glob(f"{poster.id}_*_100.jpg")
+
+    # A hit refreshes the thumb's last-used time so hot items survive the sweep
+    os.utime(thumb, (old, old))
+    assert client.get(f"/api/stats/posters/{poster.id}/image?w=100").status_code == 200
+    assert thumb.stat().st_mtime > old + 86400
+
+    # The sweep is throttled: another miss within the hour leaves an expired file alone
+    expired.write_bytes(b"x")
+    os.utime(expired, (old, old))
+    assert client.get(f"/api/stats/posters/{poster.id}/image?w=120").status_code == 200
+    assert expired.exists()
+    expired.unlink()

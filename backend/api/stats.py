@@ -9,10 +9,12 @@ import html
 import os
 import re
 import threading
+import time
 from unidecode import unidecode
 from PIL import Image, UnidentifiedImageError
 from core.app_timezone import day_bounds_utc, get_app_timezone
 from core.config import settings as app_settings
+from core.logging import LogTags, log_info
 from database import get_db
 from util.constants import common_words, illegal_chars_regex, remove_special_chars
 from models.job import (
@@ -429,9 +431,42 @@ _NO_CACHE_HEADERS = {
 }
 
 
+_THUMB_CACHE_MAX_FILES = 500  # the dashboard carousels show at most 4 x 100 items at one width
+_THUMB_CACHE_MAX_AGE = 30 * 86400
+_THUMB_SWEEP_INTERVAL = 3600
+_next_thumb_sweep = 0.0
+
+
+def _sweep_thumb_cache(cache_dir: Path, now: Optional[float] = None) -> int:
+    """Keep the most recently used thumbs under the file cap and drop any unused for a month.
+    Thumbs are pure cache: a swept one is regenerated on its next request."""
+    now = now or time.time()
+    entries = []
+    for entry in os.scandir(cache_dir):
+        try:
+            if entry.is_file():
+                entries.append((entry.stat().st_mtime, entry.path))
+        except OSError:
+            continue
+    entries.sort(reverse=True)
+    removed = 0
+    for rank, (mtime, path) in enumerate(entries):
+        if rank < _THUMB_CACHE_MAX_FILES and now - mtime <= _THUMB_CACHE_MAX_AGE:
+            continue
+        try:
+            os.unlink(path)
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        log_info(LogTags.API, f"Swept {removed} unused poster thumbnail(s) from the cache")
+    return removed
+
+
 def _thumbnail_for(cache_key: str, image_path: Path, width: int) -> Path:
     """Cached LANCZOS-downscaled thumbnail, regenerated when the source changes. Images with
     transparency (logos) stay PNG; everything else becomes JPEG."""
+    global _next_thumb_sweep
     cache_dir = app_settings.config_dir / "cache" / "poster_thumbs"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -440,6 +475,10 @@ def _thumbnail_for(cache_key: str, image_path: Path, width: int) -> Path:
     for ext in ("jpg", "png"):
         cached = cache_dir / f"{stem}.{ext}"
         if cached.is_file():
+            try:
+                os.utime(cached)  # last-used marker for the sweep
+            except OSError:
+                pass
             return cached
 
     with Image.open(image_path) as img:
@@ -461,6 +500,12 @@ def _thumbnail_for(cache_key: str, image_path: Path, width: int) -> Path:
     for stale in cache_dir.glob(f"{cache_key}_*_{width}.*"):
         if stale != thumb_path:
             stale.unlink(missing_ok=True)
+
+    # The cache only grows on a miss, so a miss is when it gets swept (at most hourly)
+    now = time.monotonic()
+    if now >= _next_thumb_sweep:
+        _next_thumb_sweep = now + _THUMB_SWEEP_INTERVAL
+        _sweep_thumb_cache(cache_dir)
 
     return thumb_path
 
