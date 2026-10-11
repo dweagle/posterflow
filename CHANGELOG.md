@@ -6,6 +6,22 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-10-11
+### Added
+- Unmatched Assets: a "Needs attention" badge and dashboard note for placed folders detection can't use.
+- Media Servers: the agent's original title is carried as an alternate title for better matching.
+
+### Changed
+- Performance: job output stays out of the settings fetch and per-item stats lazy-load, making Settings and page loads much lighter.
+- Logging: warns when a source rejects its API key, and says when a library's items carry no ids so run summaries stop misleading.
+
+### Fixed
+- Plex: ids are now read from legacy agent GUIDs (HAMA, TheTVDB, TheMovieDB, IMDb), so legacy-agent libraries match and upload correctly instead of being silently skipped.
+- Asset Upload: posters apply to id-less server items that share the placed folder's name.
+- Jellyfin: virtual (future) seasons no longer count as missing posters when "display missing episodes" is on.
+- Match Report: replays the unmatched lookup on the placed folder.
+- Stats: the thumbnail cache is swept so it stops growing.
+
 ## [0.17.1] - 2026-10-10
 ### Changed
 - Match Report: reports now build as a background job instead of making the modal wait, and they inspect the item's placed folder with verdicts on what's actually there. Artwork wording cleaned up.
