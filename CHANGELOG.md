@@ -6,6 +6,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-10-12
+### Changed
+- Asset Upload: full runs now scope each placed folder to its Arr instance's libraries.  No upload behavior changes, but this cleans up logging.
+- Asset Upload: the Plex index is built from lightweight listing rows instead of full plexapi objects, roughly halving the memory peak (730 → 335 MiB on a large library) and speeding up indexing.
+
 ## [0.17.2] - 2026-10-11
 ### Added
 - Unmatched Assets: a "Needs attention" badge and dashboard note for placed folders detection can't use.
