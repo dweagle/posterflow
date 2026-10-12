@@ -7,7 +7,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -180,6 +180,11 @@ class PlexUploadService:
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
+        # Arr media folder basename (lowercased) -> instances it belongs to; filled by the availability build
+        self._arr_folder_instances: Dict[str, Set[str]] = {}
+        self._instance_allowance_cache: Dict[str, Optional[Dict[str, Set[str]]]] = {}
+        self._instance_scope_warned: Set[str] = set()
+        self._instance_scoped_paths: Set[str] = set()
         self._expected_edition: Optional[str] = None
         self._series_show_poster_status: Optional[str] = None
         self._logged_missing_show_keys: set[str] = set()
@@ -565,6 +570,11 @@ class PlexUploadService:
                 progress_callback=progress_callback,
             )
             # Full runs log artwork from the job layer; run_single_upload has no summary.
+        if self._instance_scoped_paths:
+            log_info(
+                LogTags.UPLOADER,
+                f"Instance map kept {len(self._instance_scoped_paths):,} asset(s) to their own Arr instance's libraries",
+            )
         stats["year_discrepancies"] = list(self._year_discrepancies)
 
         self._persist_upload_cache()
@@ -824,11 +834,14 @@ class PlexUploadService:
             if record.get("uploaded_to_libraries") or record.get("uploaded_to_library_keys") or uploaded_rating_keys:
                 saw_prior_upload = True
                 shows = self._dedupe_plex_items(
-                    self._resolve_index_candidates(
-                        index["shows"],
-                        str(asset.get("media_key") or ""),
-                        self._extract_asset_id_keys(asset),
-                        asset.get("folder_year"),
+                    self._scope_candidates_to_asset(
+                        asset,
+                        self._resolve_index_candidates(
+                            index["shows"],
+                            str(asset.get("media_key") or ""),
+                            self._extract_asset_id_keys(asset),
+                            asset.get("folder_year"),
+                        ),
                     )
                 )
                 if any(self._rating_key_indicates_change(self._item_rating_key(s), uploaded_rating_keys) for s in shows):
@@ -862,9 +875,12 @@ class PlexUploadService:
         folder_year = asset.get("folder_year")
         folder_name = asset.get("folder_name")
         asset_id_keys = self._extract_asset_id_keys(asset)
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name)
-        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
+        movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
+            asset,
+            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
+        )
 
         if str(asset.get("asset_type") or "").lower() == "season":
             shows = self._dedupe_plex_items(shows_raw)
@@ -1237,27 +1253,10 @@ class PlexUploadService:
         if not isinstance(arr_instance, str) or not arr_instance.strip():
             return selected_libraries, None
 
-        instance_map = self._load_json_setting(
-            self.SETTING_INSTANCE_LIBRARY_MAP,
-            missing_default={},
-            invalid_json_log_level="warning",
-        )
-        if not isinstance(instance_map, dict):
-            return selected_libraries, None
-
-        mapping = instance_map.get(arr_instance.strip())
-        if not isinstance(mapping, list) or not mapping:
+        allowed = self._instance_library_allowance(arr_instance)
+        if allowed is None:
             # No mapping for this instance — keep current behavior (all selected libraries).
             return selected_libraries, None
-
-        allowed: Dict[str, set[str]] = {}
-        for entry in mapping:
-            if not isinstance(entry, dict):
-                continue
-            plex_instance = str(entry.get("plex_instance", "")).strip()
-            library_key = str(entry.get("library_key", "")).strip()
-            if plex_instance and library_key:
-                allowed.setdefault(plex_instance, set()).add(library_key)
 
         filtered: Dict[str, List[Dict[str, Any]]] = {}
         for plex_instance, libraries in selected_libraries.items():
@@ -1282,6 +1281,91 @@ class PlexUploadService:
             libraries=sum(len(libs) for libs in filtered.values()),
         )
         return filtered, None
+
+    def _instance_library_allowance(self, arr_instance: str) -> Optional[Dict[str, Set[str]]]:
+        """Mapped {plex instance: {library key}} for an Arr instance; None when it has no mapping."""
+        name = arr_instance.strip()
+        if name in self._instance_allowance_cache:
+            return self._instance_allowance_cache[name]
+        instance_map = self._load_json_setting(
+            self.SETTING_INSTANCE_LIBRARY_MAP,
+            missing_default={},
+            invalid_json_log_level="warning",
+        )
+        mapping = instance_map.get(name) if isinstance(instance_map, dict) else None
+        allowed: Optional[Dict[str, Set[str]]] = None
+        if isinstance(mapping, list) and mapping:
+            allowed = {}
+            for entry in mapping:
+                if not isinstance(entry, dict):
+                    continue
+                plex_instance = str(entry.get("plex_instance", "")).strip()
+                library_key = str(entry.get("library_key", "")).strip()
+                if plex_instance and library_key:
+                    allowed.setdefault(plex_instance, set()).add(library_key)
+        self._instance_allowance_cache[name] = allowed
+        return allowed
+
+    def _record_arr_folder(self, arr_instance: str, folder: Any) -> None:
+        name = Path(str(folder or "")).name.strip().lower()
+        if name and arr_instance:
+            self._arr_folder_instances.setdefault(name, set()).add(arr_instance)
+
+    def _asset_arr_instances(self, asset: Dict[str, Any]) -> Set[str]:
+        """Arr instances whose media folder name the asset's placed folder mirrors."""
+        folder = Path(str(asset.get("path") or "")).parent.name.strip().lower()
+        return self._arr_folder_instances.get(folder, set()) if folder else set()
+
+    @staticmethod
+    def _item_plex_instance(item: Any) -> str:
+        return str(getattr(getattr(item, "client", None), "instance_name", "") or "").strip()
+
+    @staticmethod
+    def _item_library_id(item: Any) -> str:
+        # "<server>:/library/sections/2", "<server>:2" and "2" all name section 2
+        key = str(getattr(item, "library_key", "") or "")
+        return key.rsplit(":", 1)[-1].rsplit("/", 1)[-1].strip()
+
+    def _asset_library_allowance(self, asset: Dict[str, Any]) -> Optional[Dict[str, Set[str]]]:
+        """Libraries the asset may target, from the Arr instance its folder mirrors; None means no scoping."""
+        instances = self._asset_arr_instances(asset)
+        if not instances:
+            return None
+        allowed: Dict[str, Set[str]] = {}
+        for instance in sorted(instances):
+            allowance = self._instance_library_allowance(instance)
+            if allowance is None:
+                return None
+            for plex_instance, keys in allowance.items():
+                allowed.setdefault(plex_instance, set()).update(keys)
+        return allowed
+
+    def _scope_candidate_lists(self, asset: Dict[str, Any], *lists: List[Any]) -> Tuple[List[Any], ...]:
+        """Drop candidates outside the asset's mapped libraries; if that empties every list, keep them all and warn once."""
+        allowed = self._asset_library_allowance(asset)
+        if allowed is None or not any(lists):
+            return tuple(lists)
+        scoped = tuple(
+            [item for item in items if self._item_library_id(item) in allowed.get(self._item_plex_instance(item), set())]
+            for items in lists
+        )
+        if not any(scoped):
+            label = ", ".join(sorted(self._asset_arr_instances(asset)))
+            if label not in self._instance_scope_warned:
+                self._instance_scope_warned.add(label)
+                log_warning(
+                    LogTags.UPLOADER,
+                    f"Instance map for '{label}' names no library holding a match for {self._asset_label(asset)}; "
+                    "using every matched library",
+                    arr_instance=label,
+                )
+            return tuple(lists)
+        if sum(len(items) for items in scoped) < sum(len(items) for items in lists):
+            self._instance_scoped_paths.add(str(asset.get("path") or ""))
+        return scoped
+
+    def _scope_candidates_to_asset(self, asset: Dict[str, Any], items: List[Any]) -> List[Any]:
+        return self._scope_candidate_lists(asset, items)[0]
 
     def _load_plex_upload_library_override(self) -> Tuple[bool, List[Dict[str, Any]], Optional[str]]:
         invalid_marker = object()
@@ -2012,9 +2096,12 @@ class PlexUploadService:
 
         folder_year = asset.get("folder_year")
         folder_name = asset.get("folder_name")
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name)
-        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
+        movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
+            asset,
+            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
+        )
 
         if asset["asset_type"] == "season":
             shows = self._dedupe_plex_items(shows_raw)
@@ -2024,7 +2111,7 @@ class PlexUploadService:
             unverified: List[Any] = []
             if folder_name and any(not (getattr(show, "provider_ids", None) or {}) for show in shows):
                 baseline = self._dedupe_plex_items(
-                    self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
+                    self._scope_candidates_to_asset(asset, self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year))
                 )
                 baseline_ids = {id(show) for show in baseline}
                 unverified = [
@@ -2450,9 +2537,12 @@ class PlexUploadService:
         asset_id_keys = self._extract_asset_id_keys(asset)
         folder_year = asset.get("folder_year")
 
-        movies_raw = self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year)
-        shows_raw = self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year)
-        collections_raw = self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year)
+        movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
+            asset,
+            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year),
+            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year),
+            self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
+        )
 
         inferred_filter, resolution_reason = self._resolve_target_media_type(
             asset,
@@ -3094,6 +3184,7 @@ class PlexUploadService:
                     )
                     continue
                 for movie in client.get_parsed_media(include_unmonitored=True):
+                    self._record_arr_folder(str(instance.get("name") or ""), movie.get("folder"))
                     movie_keys = self._availability_keys_for_item(
                         title=str(movie.get("title", "")),
                         year=movie.get("year"),
@@ -3129,6 +3220,7 @@ class PlexUploadService:
                     )
                     continue
                 for show in client.get_parsed_media(include_unmonitored=True):
+                    self._record_arr_folder(str(instance.get("name") or ""), show.get("folder"))
                     show_keys = self._availability_keys_for_item(
                         title=str(show.get("title", "")),
                         year=show.get("year"),
