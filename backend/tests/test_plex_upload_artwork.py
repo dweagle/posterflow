@@ -4,7 +4,7 @@ from pathlib import Path
 
 from models.setting import Setting
 from services.plex_upload import PlexUploadService
-from plex_upload_fakes import wrap_item
+from plex_upload_fakes import reset_wrap_calls, uploads, wrap_item
 
 
 class _FakeArtItem:
@@ -20,21 +20,6 @@ class _FakeArtItem:
         self.librarySectionID = 1
         self._server = self._FakeServer("srv1")
         self.ratingKey = rating_key
-        self.logo_calls: list[str] = []
-        self.art_calls: list[str] = []
-        self.square_calls: list[str] = []
-
-    def uploadPoster(self, filepath):
-        pass
-
-    def uploadLogo(self, filepath):
-        self.logo_calls.append(filepath)
-
-    def uploadArt(self, filepath):
-        self.art_calls.append(filepath)
-
-    def uploadSquareArt(self, filepath):
-        self.square_calls.append(filepath)
 
 
 def _svc(db):
@@ -112,6 +97,7 @@ def _prep_matching(svc, idx, wrapped, monkeypatch):
 
 def test_upload_artwork_logo_and_dedupes(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
+    reset_wrap_calls()
     item = _FakeArtItem()
     wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
@@ -124,18 +110,18 @@ def test_upload_artwork_logo_and_dedupes(test_db, tmp_path, monkeypatch):
     }
     outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
     assert outcome.matched and outcome.uploaded == 1
-    assert item.logo_calls == [str(d / "logo.png")]
-    assert item.art_calls == [] and item.square_calls == []
+    assert uploads("123") == [("123", "clearLogos", b"l")]
 
     # Second run (cache cleared → reads persisted record) must skip.
     svc.invalidate_record_cache()
     outcome2 = svc._upload_artwork_asset(asset, idx, dry_run=False)
     assert outcome2.uploaded == 0
-    assert item.logo_calls == [str(d / "logo.png")]  # not re-uploaded
+    assert uploads("123") == [("123", "clearLogos", b"l")]  # not re-uploaded
 
 
 def test_upload_artwork_background_uses_uploadart(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
+    reset_wrap_calls()
     item = _FakeArtItem()
     wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
@@ -148,8 +134,7 @@ def test_upload_artwork_background_uses_uploadart(test_db, tmp_path, monkeypatch
     }
     outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
     assert outcome.uploaded == 1 and outcome.matched
-    assert item.art_calls == [str(d / "background.jpg")]
-    assert item.logo_calls == [] and item.square_calls == []
+    assert uploads("123") == [("123", "arts", b"b")]
 
 
 def _stub_single_upload(svc, tmp_path, monkeypatch, *, artwork):
@@ -221,6 +206,7 @@ def test_cache_gate_cached_when_artwork_present(test_db, tmp_path, monkeypatch):
 
 def test_upload_artwork_dry_run_does_not_call_plex(test_db, tmp_path, monkeypatch):
     svc = _svc(test_db)
+    reset_wrap_calls()
     item = _FakeArtItem()
     wrapped = wrap_item(item)
     idx = {"movies": {}, "shows": {}, "collections": {}}
@@ -233,7 +219,7 @@ def test_upload_artwork_dry_run_does_not_call_plex(test_db, tmp_path, monkeypatc
     }
     outcome = svc._upload_artwork_asset(asset, idx, dry_run=True)
     assert outcome.uploaded == 1 and outcome.matched
-    assert item.square_calls == []  # dry run: no actual upload
+    assert uploads("123") == []  # dry run: no actual upload
 
 
 # ---------------------------------------------------------------------------

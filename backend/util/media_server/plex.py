@@ -1,5 +1,6 @@
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 from util.media_server.client import MediaServerClient
 from util.media_server.types import (
@@ -17,12 +18,12 @@ from util.media_server.types import (
     MediaServerLibrary,
 )
 
-# Image kind → the plexapi upload method for it (all take filepath=)
-UPLOAD_METHODS = {
-    IMAGE_KIND_POSTER: "uploadPoster",
-    IMAGE_KIND_LOGO: "uploadLogo",
-    IMAGE_KIND_BACKGROUND: "uploadArt",
-    IMAGE_KIND_SQUAREART: "uploadSquareArt",
+# Image kind → the /library/metadata/<ratingKey>/<endpoint> plexapi's upload methods POST to
+UPLOAD_ENDPOINTS = {
+    IMAGE_KIND_POSTER: "posters",
+    IMAGE_KIND_LOGO: "clearLogos",
+    IMAGE_KIND_BACKGROUND: "arts",
+    IMAGE_KIND_SQUAREART: "squareArts",
 }
 
 MEDIA_TYPE_TO_SECTION_TYPE = {
@@ -132,6 +133,12 @@ class PlexClient(MediaServerClient):
         self.server_version = str(getattr(server, "version", "") or "")
         self.connect_status = True
         self._sections_cache: Optional[List[Any]] = None
+        self._labeled_ids_cache: Dict[Tuple[str, str], Set[str]] = {}
+
+    # Rows per listing request; one page of plexapi objects is alive at a time
+    LISTING_PAGE = 500
+    # Rating keys per multi-key metadata request
+    METADATA_BATCH = 100
 
     def get_server_info(self) -> Optional[MediaServerInfo]:
         return MediaServerInfo(server_id=self.server_id, name=self.server_name, version=self.server_version)
@@ -143,6 +150,8 @@ class PlexClient(MediaServerClient):
 
     def _find_section(self, library_key: str) -> Optional[Any]:
         local_id = self._local_library_id(str(library_key))
+        if local_id.startswith("/library/sections/"):
+            local_id = local_id.rsplit("/", 1)[-1]
         for section in self._sections():
             if str(section.key) == local_id or str(section.title) == local_id:
                 return section
@@ -156,14 +165,21 @@ class PlexClient(MediaServerClient):
         except Exception:
             return default
 
-    def _parse_item(self, item: Any, section: Any = None) -> MediaServerItem:
+    def _parse_item(self, item: Any, section: Any = None, *, bulk: bool = False) -> MediaServerItem:
         g = self._safe_getattr
+        if bulk:
+            # Read the row as delivered: plexapi otherwise refetches full metadata on the first empty attribute
+            try:
+                item._autoReload = False
+            except Exception:
+                pass
         # Prefer the item-level _server machineIdentifier (test fakes carry it there)
         item_server = g(item, "_server")
         server_id = str(g(item_server, "machineIdentifier", "") or "").strip() or self.server_id
         section_id = str(g(item, "librarySectionID", "") or "").strip()
         section_key = str(g(item, "librarySectionKey", "") or "").strip()
-        identity = section_key or section_id
+        # Listing rows carry only the id; upload records key libraries by the full-object form
+        identity = section_key or (f"/library/sections/{section_id}" if section_id else "")
         library_name = str(g(item, "librarySectionTitle", "") or "").strip()
         if not library_name and section is not None:
             library_name = str(section.title)
@@ -212,9 +228,43 @@ class PlexClient(MediaServerClient):
             smart=bool(g(item, "smart", False)),
             thumb_path=g(item, "thumb"),
             original_title=str(g(item, "originalTitle", "") or "").strip() or None,
-            native=item,
+            native=None if bulk else item,
             client=self,
         )
+
+    def _iter_listing(self, section: Any, **filters: Any) -> Iterator[Any]:
+        start = 0
+        while True:
+            page = section.search(
+                includeGuids=1,
+                container_start=start,
+                container_size=self.LISTING_PAGE,
+                maxresults=self.LISTING_PAGE,
+                **filters,
+            )
+            yield from page
+            if len(page) < self.LISTING_PAGE:
+                return
+            start += len(page)
+
+    def _fill_show_paths(self, shows: List[MediaServerItem]) -> None:
+        # Section listings carry no Location for shows; the multi-key metadata endpoint does
+        by_id = {s.item_id: s for s in shows if s.item_id and not s.paths}
+        ids = list(by_id)
+        for i in range(0, len(ids), self.METADATA_BATCH):
+            chunk = ids[i : i + self.METADATA_BATCH]
+            try:
+                data = self.server.query(f"/library/metadata/{','.join(chunk)}")
+            except Exception as ex:
+                if self.logger:
+                    self.logger.warning(f"Plex show locations fetch failed ({len(chunk)} shows): {ex}")
+                continue
+            for element in data if data is not None else []:
+                show = by_id.get(str(element.get("ratingKey") or ""))
+                if show is not None:
+                    show.paths = [
+                        str(loc.get("path")) for loc in element if loc.tag == "Location" and loc.get("path")
+                    ]
 
     def get_libraries(self) -> List[MediaServerLibrary]:
         return [
@@ -233,7 +283,10 @@ class PlexClient(MediaServerClient):
         section = self._find_section(library_key)
         if section is None:
             return []
-        return [self._parse_item(item, section) for item in section.all(includeGuids=1)]
+        items = [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, libtype=str(section.type))]
+        if str(section.type) == "show":
+            self._fill_show_paths(items)
+        return items
 
     def get_collections(self, library_key: Optional[str] = None) -> List[MediaServerItem]:
         if library_key is not None:
@@ -278,12 +331,15 @@ class PlexClient(MediaServerClient):
         return items
 
     def get_seasons(self, show: MediaServerItem) -> List[MediaServerItem]:
-        native = show.native or self._fetch_native(show)
-        if native is None:
+        if not show.item_id:
             return []
+        from plexapi.video import Season
+
+        # The request Show.seasons() makes, without needing the Show object
+        rows = self.server.fetchItems(f"/library/metadata/{show.item_id}/children?excludeAllLeaves=1&includeGuids=1", Season)
         seasons = []
-        for row in native.seasons():
-            season = self._parse_item(row)
+        for row in rows:
+            season = self._parse_item(row, bulk=True)
             season.parent_title = season.parent_title or show.title
             season.library_key = season.library_key or show.library_key
             season.library_name = season.library_name or show.library_name
@@ -294,7 +350,7 @@ class PlexClient(MediaServerClient):
         section = self._find_section(library_key)
         if section is None or str(section.type) != "show":
             return []
-        return [self._parse_item(row, section) for row in section.search(libtype="season")]
+        return [self._parse_item(row, section, bulk=True) for row in self._iter_listing(section, libtype="season")]
 
     def get_item(self, item_id: str) -> Optional[MediaServerItem]:
         try:
@@ -407,30 +463,60 @@ class PlexClient(MediaServerClient):
             return None
 
     def upload_image(self, item: MediaServerItem, kind: str, filepath: str) -> bool:
-        method_name = UPLOAD_METHODS.get(kind)
-        if not method_name:
+        endpoint = UPLOAD_ENDPOINTS.get(kind)
+        if not endpoint or not item.item_id:
             return False
-        native = item.native or self._fetch_native(item)
-        if native is None:
-            return False
-        method = getattr(native, method_name, None)
-        if not callable(method):
-            if self.logger:
-                self.logger.warning(f"Plex item {item.title} has no {method_name} (plexapi too old?)")
-            return False
+        with open(filepath, "rb") as fh:
+            data = fh.read()
         # Transport errors propagate so callers keep their per-asset error accounting
-        method(filepath=filepath)
+        self.server.query(f"/library/metadata/{item.item_id}/{endpoint}", method=self.server._session.post, data=data)
         return True
 
+    def labeled_item_ids(self, library_key: str, label: str) -> Set[str]:
+        cache_key = (str(library_key), label)
+        cached = self._labeled_ids_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        ids: Set[str] = set()
+        section = self._find_section(str(library_key))
+        if section is not None:
+            # Listings carry no Label children; the server-side label filter names the carriers
+            libtypes = [str(section.type), "collection"]
+            if str(section.type) == "show":
+                libtypes.insert(1, "season")
+            for libtype in libtypes:
+                try:
+                    for row in self._iter_listing(section, libtype=libtype, label=label):
+                        rating_key = str(self._safe_getattr(row, "ratingKey", "") or "")
+                        if rating_key:
+                            ids.add(rating_key)
+                except Exception as ex:
+                    if self.logger:
+                        self.logger.warning(f"Plex label lookup '{label}' ({libtype}) failed in '{section.title}': {ex}")
+        self._labeled_ids_cache[cache_key] = ids
+        return ids
+
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
-        native = item.native or self._fetch_native(item)
-        if native is None:
+        if not item.item_id:
+            return False
+        labeled = self.labeled_item_ids(str(item.library_key or ""), label)
+        if item.item_id not in labeled:
+            return False
+        section = self._find_section(str(item.library_key or ""))
+        if section is None:
             return False
         try:
-            labels = [str(getattr(entry, "tag", entry)) for entry in (getattr(native, "labels", None) or [])]
-            if label not in labels:
-                return False
-            native.removeLabel(label)
+            from plexapi.utils import joinArgs, searchType
+
+            # The request plexapi's removeLabel() sends, without needing the item object
+            params = {
+                "id": item.item_id,
+                "type": searchType(item.item_type),
+                "label[].tag.tag-": quote(label),
+                "label.locked": 1,
+            }
+            self.server.query(f"/library/sections/{section.key}/all{joinArgs(params)}", method=self.server._session.put)
+            labeled.discard(item.item_id)
             return True
         except Exception as ex:
             if self.logger:

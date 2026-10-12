@@ -43,10 +43,9 @@ class FakeSection:
     def all(self, includeGuids=None):
         return self.items
 
-    def search(self, libtype=None, guid=None, title=None):
-        if libtype == "season":
-            return self.seasons
-        return self.items
+    def search(self, libtype=None, guid=None, title=None, container_start=0, maxresults=None, **kwargs):
+        rows = list(self.seasons if libtype == "season" else self.items)[container_start:]
+        return rows[:maxresults] if maxresults is not None else rows
 
 
 class FakeLibrary:
@@ -431,10 +430,10 @@ def test_fetch_library_failure_marks_that_type(test_db, monkeypatch):
 
     sections = default_sections()
 
-    def boom(includeGuids=None):
+    def boom(**kwargs):
         raise RuntimeError("section listing failed")
 
-    sections[1].all = boom
+    sections[1].search = boom
     client = PlexClient("http://plex.local", "token", server=FakeServer(sections))
     monkeypatch.setattr(media_server_module, "create_media_server_client", lambda instance: client)
     service = PosterRenameService(test_db)

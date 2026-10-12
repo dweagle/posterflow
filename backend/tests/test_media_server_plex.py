@@ -1,4 +1,5 @@
 from datetime import datetime
+from xml.etree.ElementTree import Element, SubElement
 
 from util.media_server.plex import PlexClient, extract_provider_ids
 from util.media_server.types import (
@@ -20,19 +21,8 @@ class FakeLabel:
 
 class FakeItem:
     def __init__(self, **attrs):
-        self.uploads = []
-        self.removed_labels = []
         for key, value in attrs.items():
             setattr(self, key, value)
-
-    def uploadPoster(self, filepath=None):
-        self.uploads.append(("uploadPoster", filepath))
-
-    def uploadSquareArt(self, filepath=None):
-        self.uploads.append(("uploadSquareArt", filepath))
-
-    def removeLabel(self, label):
-        self.removed_labels.append(label)
 
 
 class FakeSection:
@@ -42,19 +32,27 @@ class FakeSection:
         self.type = section_type
         self.items = items or []
         self.collections_list = collections or []
-
-    def all(self, includeGuids=None):
-        return self.items
+        self.search_calls = []
 
     def collections(self):
         return self.collections_list
 
-    def search(self, guid=None, title=None):
+    def search(self, libtype=None, guid=None, title=None, label=None, container_start=0, maxresults=None, **kwargs):
+        self.search_calls.append({"libtype": libtype, "label": label, "container_start": container_start, "maxresults": maxresults})
+        if libtype == "collection":
+            rows = list(self.collections_list)
+        elif libtype == "season":
+            rows = [season for show in self.items for season in getattr(show, "seasons_list", [])]
+        else:
+            rows = list(self.items)
         if guid is not None:
-            return [i for i in self.items if guid in [g.id for g in getattr(i, "guids", [])]]
+            rows = [i for i in rows if guid in [g.id for g in getattr(i, "guids", [])]]
         if title is not None:
-            return [i for i in self.items if getattr(i, "title", "") == title]
-        return self.items
+            rows = [i for i in rows if getattr(i, "title", "") == title]
+        if label is not None:
+            rows = [i for i in rows if label in [lab.tag for lab in getattr(i, "labels", [])]]
+        rows = rows[container_start:]
+        return rows[:maxresults] if maxresults is not None else rows
 
 
 class FakeLibrary:
@@ -65,12 +63,53 @@ class FakeLibrary:
         return self._sections
 
 
+class FakeSession:
+    def post(self, *args, **kwargs):
+        return None
+
+    def put(self, *args, **kwargs):
+        return None
+
+
 class FakeServer:
     def __init__(self, sections):
         self.machineIdentifier = "machine1"
         self.friendlyName = "Test Plex"
         self.version = "1.41.0"
         self.library = FakeLibrary(sections)
+        self.calls = []  # (key, http method name, data)
+        self._session = FakeSession()
+
+    def _all_raw(self):
+        for section in self.library.sections():
+            yield from section.items
+            yield from section.collections_list
+            for show in section.items:
+                yield from getattr(show, "seasons_list", [])
+
+    def _raw(self, rating_key):
+        return next((i for i in self._all_raw() if str(getattr(i, "ratingKey", "")) == str(rating_key)), None)
+
+    def query(self, key, method=None, data=None, headers=None, params=None):
+        self.calls.append((key, getattr(method, "__name__", None), data))
+        root = Element("MediaContainer")
+        if method is None and key.startswith("/library/metadata/") and "/" not in key[len("/library/metadata/"):]:
+            for rating_key in key[len("/library/metadata/"):].split(","):
+                raw = self._raw(rating_key)
+                if raw is None:
+                    continue
+                el = SubElement(root, "Directory", ratingKey=rating_key)
+                # Full metadata carries Location; the fakes keep it apart from the listing row
+                for path in getattr(raw, "full_locations", None) or []:
+                    SubElement(el, "Location", path=str(path))
+        return root
+
+    def fetchItems(self, key, cls=None, **kwargs):
+        prefix = "/library/metadata/"
+        if key.startswith(prefix) and "/children" in key:
+            raw = self._raw(key[len(prefix):].split("/")[0])
+            return list(getattr(raw, "seasons_list", []) or [])
+        return []
 
     def search(self, query, mediatype=None, limit=None):
         results = []
@@ -199,24 +238,64 @@ def test_get_collections_smart_flag():
     assert collections[0].library_name == "Movies"
 
 
-def test_upload_image_dispatch():
+def test_upload_image_posts_to_the_rating_key(tmp_path):
     client = make_client([])
-    native = make_movie()
-    item = MediaServerItem(item_id="101", item_type="movie", title="Heat", native=native)
-    assert client.upload_image(item, IMAGE_KIND_POSTER, "/tmp/p.png")
-    assert client.upload_image(item, IMAGE_KIND_SQUAREART, "/tmp/s.png")
-    assert native.uploads == [("uploadPoster", "/tmp/p.png"), ("uploadSquareArt", "/tmp/s.png")]
-    assert not client.upload_image(item, "bogus", "/tmp/x.png")
+    poster = tmp_path / "p.png"
+    poster.write_bytes(b"poster-bytes")
+    square = tmp_path / "s.png"
+    square.write_bytes(b"square-bytes")
+    # No plexapi object needed: the card's id is enough
+    item = MediaServerItem(item_id="101", item_type="movie", title="Heat")
+    assert client.upload_image(item, IMAGE_KIND_POSTER, str(poster))
+    assert client.upload_image(item, IMAGE_KIND_SQUAREART, str(square))
+    assert client.server.calls == [
+        ("/library/metadata/101/posters", "post", b"poster-bytes"),
+        ("/library/metadata/101/squareArts", "post", b"square-bytes"),
+    ]
+    assert not client.upload_image(item, "bogus", str(poster))
+    assert not client.upload_image(MediaServerItem(item_id="", item_type="movie", title="?"), IMAGE_KIND_POSTER, str(poster))
 
 
 def test_remove_label_only_when_present():
-    client = make_client([])
-    native = make_movie()
-    item = MediaServerItem(item_id="101", item_type="movie", title="Heat", native=native)
-    assert client.remove_label(item, "Overlay")
-    assert native.removed_labels == ["Overlay"]
-    assert not client.remove_label(item, "Missing")
-    assert native.removed_labels == ["Overlay"]
+    section = FakeSection(1, "Movies", "movie", items=[make_movie(), make_movie(ratingKey=102, title="Thief", labels=[])])
+    client = make_client([section])
+    heat, thief = client.get_library_items("1")
+    assert client.remove_label(heat, "Overlay")
+    assert client.server.calls[-1] == (
+        "/library/sections/1/all?id=101&label.locked=1&label[].tag.tag-=Overlay&type=1",
+        "put",
+        None,
+    )
+    assert not client.remove_label(heat, "Overlay")  # gone now
+    assert not client.remove_label(heat, "Missing")
+    assert not client.remove_label(thief, "Overlay")
+    assert len([c for c in client.server.calls if c[1] == "put"]) == 1
+
+
+def test_labeled_item_ids_covers_shows_seasons_and_collections():
+    season = FakeItem(ratingKey=401, type="season", title="Season 1", index=1, labels=[FakeLabel("Overlay")])
+    show = FakeItem(ratingKey=400, type="show", title="The Wire", labels=[FakeLabel("Overlay")], seasons_list=[season])
+    plain = FakeItem(ratingKey=500, type="show", title="Plain", labels=[], seasons_list=[])
+    collection = FakeItem(ratingKey=900, type="collection", title="HBO", labels=[FakeLabel("Overlay")])
+    section = FakeSection(2, "TV", "show", items=[show, plain], collections=[collection])
+    client = make_client([section])
+    assert client.labeled_item_ids("2", "Overlay") == {"400", "401", "900"}
+    assert [c["libtype"] for c in section.search_calls] == ["show", "season", "collection"]
+    assert client.labeled_item_ids("machine1:2", "Overlay") == {"400", "401", "900"}
+    assert client.labeled_item_ids("2", "Other") == set()
+
+
+def test_get_library_items_pages_and_keeps_only_the_card():
+    rows = [make_movie(ratingKey=100 + n, title=f"Movie {n}") for n in range(5)]
+    section = FakeSection(1, "Movies", "movie", items=rows)
+    client = make_client([section])
+    client.LISTING_PAGE = 2
+    items = client.get_library_items("1")
+    assert [i.item_id for i in items] == ["100", "101", "102", "103", "104"]
+    assert [(c["container_start"], c["maxresults"]) for c in section.search_calls] == [(0, 2), (2, 2), (4, 2)]
+    assert all(i.native is None for i in items)
+    assert all(row._autoReload is False for row in rows)
+    assert items[0].paths == ["/movies/Heat (1995)/Heat.mkv"]
 
 
 def test_get_libraries_and_seasons():
@@ -225,14 +304,31 @@ def test_get_libraries_and_seasons():
         type="show",
         title="The Wire",
         guids=[FakeGuid("tvdb://79126")],
+        librarySectionID=2,
+        full_locations=["/tv/The Wire (2002)"],
         seasons_list=[
             FakeItem(ratingKey=401, type="season", title="Season 1", index=1, parentTitle="The Wire"),
         ],
     )
-    show_native.seasons = lambda: show_native.seasons_list
     section = FakeSection(2, "TV", "show", items=[show_native])
     client = make_client([section])
     assert [(l.key, l.type) for l in client.get_libraries()] == [("2", "show")]
     show = client.get_library_items("2")[0]
+    assert show.native is None
+    assert show.paths == ["/tv/The Wire (2002)"]
     seasons = client.get_seasons(show)
-    assert [(s.item_id, s.index, s.parent_title) for s in seasons] == [("401", 1, "The Wire")]
+    # Listing rows only carry the section id; the key keeps the full-object form upload records use
+    assert show.library_key == "machine1:/library/sections/2"
+    assert [(s.item_id, s.index, s.parent_title, s.library_key) for s in seasons] == [("401", 1, "The Wire", "machine1:/library/sections/2")]
+    assert client.get_seasons(MediaServerItem(item_id="", item_type="show", title="?")) == []
+
+
+def test_get_library_items_fills_show_paths_in_one_batch():
+    shows = [FakeItem(ratingKey=400 + n, type="show", title=f"Show {n}", full_locations=[f"/tv/Show {n} (2000)"]) for n in range(3)]
+    shows.append(FakeItem(ratingKey=499, type="show", title="No files", full_locations=[]))
+    section = FakeSection(2, "TV", "show", items=shows)
+    client = make_client([section])
+    items = client.get_library_items("2")
+    # Listings carry no Location for shows; one multi-key metadata request fills them
+    assert [c[0] for c in client.server.calls] == ["/library/metadata/400,401,402,499"]
+    assert [i.paths for i in items] == [["/tv/Show 0 (2000)"], ["/tv/Show 1 (2000)"], ["/tv/Show 2 (2000)"], []]

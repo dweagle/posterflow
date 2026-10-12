@@ -1,6 +1,6 @@
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, FrozenSet, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Set
 
 from util.media_server.types import (
     MediaServerInfo,
@@ -121,6 +121,10 @@ class MediaServerClient(ABC):
     def image_url(self, item: MediaServerItem, max_width: Optional[int] = None) -> Optional[str]:
         """Server-relative image path for backend proxying, or None."""
         ...
+
+    def labeled_item_ids(self, library_key: str, label: str) -> Set[str]:
+        """Ids of the library's items carrying a label; empty by default."""
+        return set()
 
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
         """Remove a label/tag from an item; True only if it was present and removed. No-op by default."""

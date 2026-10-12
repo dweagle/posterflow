@@ -889,84 +889,16 @@ def test_show_folder_key_uses_locations_when_available(test_db):
     assert service._show_folder_key(wrap_item(_FakeShow())) == "fridaynightlights"
 
 
-def test_show_folder_key_episode_traversal_with_season_subfolder(test_db):
-    """Fallback: episode path has a Season subfolder → return its parent (the show folder)."""
+def test_show_folder_key_falls_back_to_title_and_year_without_paths(test_db):
+    """No location from the server: the title+year key stands in for the folder name."""
     service = PlexUploadService(test_db)
-
-    class _FakePart:
-        file = "/tv/Friday Night Lights (2006)/Season 01/s01e01.mkv"
-
-    class _FakeMedia:
-        parts = [_FakePart()]
-
-    class _FakeEpisode:
-        media = [_FakeMedia()]
-
-    class _FakeSeason:
-        def episodes(self):
-            return [_FakeEpisode()]
 
     class _FakeShow:
         locations = None
         title = "Friday Night Lights"
         year = 2006
-
-        def seasons(self):
-            return [_FakeSeason()]
 
     assert service._show_folder_key(wrap_item(_FakeShow())) == "fridaynightlights"
-
-
-def test_show_folder_key_episode_traversal_flat_layout(test_db):
-    """Flat layout fix: episodes stored directly in show folder (no Season subfolder) must
-    return the show folder name, not the TV root directory above it."""
-    service = PlexUploadService(test_db)
-
-    class _FakePart:
-        file = "/tv/Friday Night Lights (2006)/s01e01.mkv"  # flat — no Season xx
-
-    class _FakeMedia:
-        parts = [_FakePart()]
-
-    class _FakeEpisode:
-        media = [_FakeMedia()]
-
-    class _FakeSeason:
-        def episodes(self):
-            return [_FakeEpisode()]
-
-    class _FakeShow:
-        locations = None
-        title = "Friday Night Lights"
-        year = 2006
-
-        def seasons(self):
-            return [_FakeSeason()]
-
-    # Must be the show folder name, not the parent "tv" directory
-    key = service._show_folder_key(wrap_item(_FakeShow()))
-    assert key == "fridaynightlights"
-    assert key != "tv"
-
-
-def test_show_folder_key_locations_takes_priority_over_episode_traversal(test_db):
-    """When locations is present, episode traversal should not be used even if seasons() exists."""
-    service = PlexUploadService(test_db)
-
-    traversal_called = {"value": False}
-
-    class _FakeShow:
-        locations = ["/tv/Ghosts (2021)"]
-        title = "Ghosts"
-        year = 2021
-
-        def seasons(self):
-            traversal_called["value"] = True
-            return []
-
-    key = service._show_folder_key(wrap_item(_FakeShow()))
-    assert key == "ghosts"
-    assert traversal_called["value"] is False
 
 
 # ---------------------------------------------------------------------------

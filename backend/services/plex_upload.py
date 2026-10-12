@@ -1927,43 +1927,14 @@ class PlexUploadService:
         except Exception:
             return self._title_year_key(movie)
 
-    _SEASON_FOLDER_RE = re.compile(r"^(season\s*\d+|specials?|extras?|featurettes?)$", re.IGNORECASE)
-
     def _show_folder_key(self, show: MediaServerItem) -> Optional[str]:
-        # Prefer the show's location paths — available when the bulk library
-        # listing includes location data, gives the show folder directly.
+        # The client fills show paths (Plex: batch metadata; Jellyfin: the listing itself)
         try:
             if show.paths:
                 return normalize_titles(Path(show.paths[0]).name)
         except Exception:
             pass
-
-        # Fall back to navigating episode file paths via the native plexapi
-        # object (handles older plexapi versions or servers that don't return
-        # locations in bulk queries).
-        try:
-            native = show.native
-            seasons = native.seasons()
-            if not seasons:
-                return normalize_titles(show.title)
-            for season in seasons:
-                episodes = season.episodes()
-                if not episodes:
-                    continue
-                part_file = episodes[0].media[0].parts[0].file
-                episode_path = Path(part_file)
-                parent = episode_path.parent
-                # Episodes may be stored flat inside the show folder (no season
-                # subfolder) or inside a named season subfolder. Detect which
-                # layout is in use so we always return the show-level folder name.
-                if self._SEASON_FOLDER_RE.match(parent.name):
-                    folder_name = parent.parent.name
-                else:
-                    folder_name = parent.name
-                return normalize_titles(folder_name)
-            return self._title_year_key(show)
-        except Exception:
-            return self._title_year_key(show)
+        return self._title_year_key(show)
 
     @contextmanager
     def _upload_ready(self, file_path: str):
@@ -2716,21 +2687,11 @@ class PlexUploadService:
             raise RuntimeError(f"{kind} upload not supported for this media server item")
 
     def _remove_overlay_label_if_present(self, item: MediaServerItem, *, file_path: str) -> None:
+        client = item.client
+        if client is None:
+            return
         try:
-            native = item.native
-            if native is None:
-                return
-            labels = getattr(native, "labels", None)
-            if not labels:
-                return
-
-            has_overlay_label = any(str(getattr(label, "tag", "")).strip().lower() == "overlay" for label in labels)
-            if not has_overlay_label:
-                return
-
-            remove_label = getattr(native, "removeLabel", None)
-            if callable(remove_label):
-                remove_label(["Overlay"])
+            client.remove_label(item, "Overlay")
         except Exception as e:
             log_warning(
                 LogTags.UPLOADER,
