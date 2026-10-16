@@ -122,3 +122,7 @@ docker run -d \
 | `ALLOWED_FRAME_ORIGINS` | *(empty)* | Comma-separated origins allowed to embed the app in an iframe (e.g. an Organizr/Homarr dashboard). Format `http(s)://host[:port]` — no paths or wildcards; invalid entries are ignored with a startup warning. Empty keeps embedding blocked for all other sites. |
 
 > Debug mode state is persisted in the database and restored on restart. You can toggle it from Settings without restarting the container.
+
+## License
+
+PosterFlow is released under the [MIT License](LICENSE).
