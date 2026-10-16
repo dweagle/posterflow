@@ -896,3 +896,125 @@ def test_webhook_retry_skips_arr_reconnect_when_availability_complete(test_db, m
 def test_webhook_retry_rebuilds_arr_when_availability_was_incomplete(test_db, monkeypatch):
     # A prior incomplete build -> retry invalidates (1) + end-of-job cleanup (1) = 2.
     assert _run_retry_job_counting_invalidations(test_db, monkeypatch, incomplete=True) == 2
+
+
+def _season_gate_service(state, season_stats):
+    """Series webhook in bootstrap mode whose requested season poster is missing until the rename pass places it."""
+
+    class _FakePlexUploadService:
+        run_calls = []
+
+        def __init__(self, _db, **_kwargs):
+            pass
+
+        def prepare_webhook_context(self, **_kwargs):
+            return None
+
+        def is_single_target_fully_cached(self, **_kwargs):
+            return False
+
+        def is_series_show_poster_cached(self, **_kwargs):
+            return False
+
+        def run_single_upload(self, **kwargs):
+            season = kwargs.get("season_number")
+            self.__class__.run_calls.append(season)
+            stats = season_stats(season)
+            return {"success": True, "stats": {"plex_targets": 1, "multi_library_assets": 0, "skipped": 0, "errors": 0, **stats}}
+
+        def set_arr_instance_scope(self, _arr_instance=None):
+            pass
+
+        def invalidate_preflight_cache(self) -> None:
+            pass
+
+        def invalidate_arr_availability_cache(self) -> None:
+            pass
+
+        def invalidate_local_assets_cache(self) -> None:
+            pass
+
+        def _get_destination_dir(self):
+            return Path("/tmp")
+
+        def _get_local_assets(self, _destination):
+            return [{"media_key": "placeholder", "asset_type": "main"}]
+
+        def _select_local_assets_for_target(self, assets, **kwargs):
+            if kwargs.get("season_number") == 4 and not state["season_placed"]:
+                return []
+            return assets
+
+    return _FakePlexUploadService
+
+
+def _run_season_gate_job(test_db, monkeypatch, service_cls, rename_result, places_season):
+    import modules.upload as upload_module
+
+    job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    job_id = job.id
+
+    monkeypatch.setattr("modules.upload.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr("modules.upload.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("modules.upload.PlexUploadService", service_cls)
+
+    state = rename_result["state"]
+
+    def _fake_rename(_db, _job, _payload, dry_run=False):
+        state["rename_calls"] += 1
+        state["season_placed"] = places_season
+        return {"rename": {"attempted": True, "matched": 1 if places_season else 0}, "border": {"enabled": False}}
+
+    monkeypatch.setattr("modules.upload._run_webhook_preupload_rename_pass", _fake_rename)
+
+    upload_module.run_plex_webhook_background_job(
+        job_id,
+        {"media_type": "series", "title": "The Diplomat (US)", "year": 2023, "season_number": 4, "tmdb_id": None, "tvdb_id": 415239, "imdb_id": None},
+        False,
+        True,
+        2,
+        1,
+    )
+    return test_db.query(Job).filter(Job.id == job_id).first()
+
+
+def test_webhook_runs_rename_pass_when_only_the_new_season_poster_is_missing(test_db, monkeypatch):
+    """A show poster already on disk must not skip the rename pass that places the new season's poster."""
+    state = {"season_placed": False, "rename_calls": 0}
+
+    def _stats(season):
+        uploaded = 1 if season == 4 else 0
+        return {"scanned": 1, "matched": 1, "uploaded": uploaded}
+
+    service_cls = _season_gate_service(state, _stats)
+    refreshed = _run_season_gate_job(test_db, monkeypatch, service_cls, {"state": state}, places_season=True)
+
+    assert refreshed.status == "completed"
+    assert state["rename_calls"] == 1
+    assert service_cls.run_calls == [4, None]
+    assert "Webhook upload complete" in (refreshed.message or "")
+    assert "no local poster" not in (refreshed.message or "")
+
+
+def test_webhook_names_the_missing_season_poster_when_no_drive_has_it(test_db, monkeypatch):
+    """When the rename pass finds no source for the season, the outcome says which poster is missing."""
+    state = {"season_placed": False, "rename_calls": 0}
+
+    def _stats(season):
+        if season == 4:
+            return {"scanned": 0, "matched": 0, "uploaded": 0}
+        return {"scanned": 2, "matched": 2, "uploaded": 0}
+
+    service_cls = _season_gate_service(state, _stats)
+    refreshed = _run_season_gate_job(test_db, monkeypatch, service_cls, {"state": state}, places_season=False)
+
+    assert refreshed.status == "completed"
+    assert state["rename_calls"] == 1
+    assert service_cls.run_calls == [4, None]
+    assert "Webhook skipped (no local poster)" in (refreshed.message or "")
+    assert "Season 04" in (refreshed.message or "")
+    assert "performed no upload" not in (refreshed.message or "")

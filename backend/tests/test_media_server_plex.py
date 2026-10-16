@@ -24,6 +24,13 @@ class FakeItem:
         for key, value in attrs.items():
             setattr(self, key, value)
 
+    def matches(self, agent=None, title=None, **kwargs):
+        # Plex's match endpoint: "tmdb-949" → the plex:// guid of the item carrying that id
+        wanted = str(title or "").replace("-", "://", 1)
+        section_items = getattr(getattr(self, "_section", None), "items", [])
+        hits = [i for i in section_items if wanted in [g.id for g in getattr(i, "guids", [])]]
+        return [FakeItem(guid=getattr(i, "guid", "")) for i in hits]
+
 
 class FakeSection:
     def __init__(self, key, title, section_type, items=None, collections=None):
@@ -33,6 +40,8 @@ class FakeSection:
         self.items = items or []
         self.collections_list = collections or []
         self.search_calls = []
+        for item in self.items:
+            item._section = self
 
     def collections(self):
         return self.collections_list
@@ -46,7 +55,8 @@ class FakeSection:
         else:
             rows = list(self.items)
         if guid is not None:
-            rows = [i for i in rows if guid in [g.id for g in getattr(i, "guids", [])]]
+            # like Plex: only the primary guid is filterable, never the tmdb/tvdb/imdb Guid children
+            rows = [i for i in rows if getattr(i, "guid", None) == guid]
         if title is not None:
             rows = [i for i in rows if getattr(i, "title", "") == title]
         if label is not None:
@@ -138,6 +148,7 @@ def make_movie(**overrides):
         "addedAt": datetime(2026, 1, 2, 3, 4, 5),
     }
     attrs.update(overrides)
+    attrs.setdefault("guid", f"plex://movie/{attrs['ratingKey']}")
     return FakeItem(**attrs)
 
 
@@ -199,13 +210,21 @@ def test_parse_item_carries_original_title():
     assert client._parse_item(make_movie(originalTitle="")).original_title is None
 
 
-def test_find_by_provider_ids_guid_search():
+def test_find_by_provider_ids_translates_external_id_to_plex_guid():
     movie = make_movie()
     other = make_movie(ratingKey=102, title="Heat", guids=[FakeGuid("tmdb://555")])
     section = FakeSection(1, "Movies", "movie", items=[movie, other])
     client = make_client([section, FakeSection(2, "TV", "show")])
-    matches = client.find_by_provider_ids({"tmdb": "949"}, "movie")
-    assert [m.item_id for m in matches] == ["101"]
+    # The external id never hits Plex's guid filter directly; it goes through matches() first
+    assert section.search(guid="tmdb://949") == []
+    assert [m.item_id for m in client.find_by_provider_ids({"tmdb": "949"}, "movie")] == ["101"]
+    assert [m.item_id for m in client.find_by_provider_ids({"imdb": "tt0113277"}, "movie")] == ["101"]
+    assert client.find_by_provider_ids({"tmdb": "999"}, "movie") == []
+
+
+def test_find_by_provider_ids_handles_empty_section():
+    client = make_client([FakeSection(1, "Movies", "movie", items=[])])
+    assert client.find_by_provider_ids({"tmdb": "949"}, "movie") == []
 
 
 def test_find_by_title_returns_unconfirmed_matches():

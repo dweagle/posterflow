@@ -164,12 +164,28 @@ class _FakePlexSection:
         self._title_results = title_results or []
         self.key = f"fake_key_{title}"
 
-    def search(self, *, guid=None, title=None):
+    def search(self, *, guid=None, title=None, maxresults=None):
         if guid is not None:
-            return list(self._guid_results)
+            # like Plex: only a plex:// guid is filterable; the client translates external ids first
+            return list(self._guid_results) if str(guid).startswith("plex://") else []
         if title is not None:
             return list(self._title_results)
-        return []
+        return [_FakeProbeItem(self)]
+
+
+class _FakeProbeItem:
+    """The item the external-id → plex guid translation hangs off."""
+
+    def __init__(self, section):
+        self._section = section
+
+    def matches(self, agent=None, title=None, **kwargs):
+        return [_FakeMatch("plex://fake/1")] if self._section._guid_results else []
+
+
+class _FakeMatch:
+    def __init__(self, guid):
+        self.guid = guid
 
 
 class _FakePlexLibrary:

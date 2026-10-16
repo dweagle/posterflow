@@ -1730,7 +1730,7 @@ class PlexUploadService:
     ) -> Tuple[Dict[str, Dict[str, List[Any]]], List[Dict[str, Any]]]:
         """Build a minimal Plex index scoped to a single title/ID.
 
-        Uses ``section.search(guid=...)`` to fetch only the matching item(s)
+        Resolves each provider id through the client's external-id lookup
         rather than iterating the entire library.  Falls back to a title search
         when no GUID results are found (e.g. legacy Plex agents).  If the
         targeted search yields nothing at all the caller should fall back to

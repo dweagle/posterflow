@@ -2531,6 +2531,29 @@ def _build_destination_presence_checks(
     return checks
 
 
+def _missing_target_labels(checks: list[Dict[str, Any]]) -> list[str]:
+    labels: list[str] = []
+    for check in checks:
+        if check.get("exists"):
+            continue
+        label = str(check.get("label") or "target")
+        labels.append("show poster" if label == "series-bootstrap" else label)
+    return labels
+
+
+def _webhook_completion_message(title: str | None, match_detail: str, uploaded_count: int, missing_targets: list[str]) -> str:
+    missing = ", ".join(missing_targets)
+    if uploaded_count > 0:
+        note = f"; no local poster for {missing}" if missing else ""
+        return format_complete_message("Webhook upload", f"{title} — {match_detail}{note}")
+    if missing:
+        return format_complete_message(
+            "Webhook skipped (no local poster)",
+            f"{title} — {missing} not found in drive priority; {match_detail}",
+        )
+    return format_complete_message("Webhook matched an item but performed no upload", f"{title} — {match_detail}")
+
+
 def _handle_radarr_upgrade_edition_check(
     service: PlexUploadService,
     parsed_payload: Dict[str, Any],
@@ -2877,14 +2900,17 @@ def run_plex_webhook_background_job(
             )
 
         destination_has_any_target = any(bool(check.get("exists", False)) for check in destination_presence_checks)
+        missing_targets = _missing_target_labels(destination_presence_checks)
 
-        if not destination_has_any_target and rename_then_upload:
+        # A new season's poster is never placed before the import (the renamer waits for the
+        # Arr to report episodes), so a present show poster must not skip the rename pass
+        if missing_targets and rename_then_upload:
             rename_summary = _run_webhook_preupload_rename_pass(db, job, parsed_payload, dry_run=False)
             service.invalidate_local_assets_cache()
 
             rename_info = rename_summary.get("rename", {}) if isinstance(rename_summary, dict) else {}
             rename_matched = int(rename_info.get("matched", 0)) if isinstance(rename_info, dict) else 0
-            if rename_matched <= 0:
+            if rename_matched <= 0 and not destination_has_any_target:
                 log_warning(
                     LogTags.UPLOADER,
                     "Webhook skipped upload passes: rename pre-upload found no matching source assets; skipping destination re-check",
@@ -2901,6 +2927,7 @@ def run_plex_webhook_background_job(
             destination_presence_checks = _build_destination_presence_checks(webhook_targets, service, media_type, title, parsed_payload)
 
             destination_has_any_target = any(bool(check.get("exists", False)) for check in destination_presence_checks)
+            missing_targets = _missing_target_labels(destination_presence_checks)
 
             if not destination_has_any_target:
                 log_warning(
@@ -2916,6 +2943,17 @@ def run_plex_webhook_background_job(
                 success = True
                 return
 
+            if missing_targets:
+                log_warning(
+                    LogTags.UPLOADER,
+                    f"Webhook: no local poster for {', '.join(missing_targets)} after rename pre-upload (none in drive priority); uploading the rest",
+                    media_type=media_type,
+                    title=title,
+                    season_number=season_number,
+                    rename_attempted=bool(rename_info.get("attempted", False)) if isinstance(rename_info, dict) else False,
+                    rename_matched=rename_matched,
+                )
+
         if not destination_has_any_target and not rename_then_upload:
             log_warning(
                 LogTags.UPLOADER,
@@ -2927,6 +2965,15 @@ def run_plex_webhook_background_job(
             _complete_no_local_assets_warning(db, job, job_id, media_type, title, season_number)
             success = True
             return
+
+        if missing_targets and not rename_then_upload:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Webhook: no local poster for {', '.join(missing_targets)} and rename pre-upload is disabled; uploading the rest",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+            )
 
         attempts = _coerce_webhook_retry_int(
             retry_attempts,
@@ -3286,24 +3333,18 @@ def run_plex_webhook_background_job(
             job,
             status=JOB_STATUS_COMPLETED,
             progress=100,
-            message=(
-                format_complete_message(
-                    "Webhook upload",
-                    f"{title} — {match_detail}",
-                )
-                if uploaded_count > 0
-                else format_complete_message(
-                    "Webhook matched an item but performed no upload",
-                    f"{title} — {match_detail}",
-                )
-            ),
+            message=_webhook_completion_message(title, match_detail, uploaded_count, missing_targets),
             completed_at=datetime.now(timezone.utc),
         )
 
         if matched_count > 0 and uploaded_count == 0:
             log_warning(
                 LogTags.UPLOADER,
-                "Webhook matched an item but performed no upload",
+                (
+                    f"Webhook found the item but has no local poster for {', '.join(missing_targets)}; nothing uploaded"
+                    if missing_targets
+                    else "Webhook matched an item but performed no upload"
+                ),
                 media_type=media_type,
                 title=title,
                 season_number=season_number,

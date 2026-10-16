@@ -134,6 +134,7 @@ class PlexClient(MediaServerClient):
         self.connect_status = True
         self._sections_cache: Optional[List[Any]] = None
         self._labeled_ids_cache: Dict[Tuple[str, str], Set[str]] = {}
+        self._probe_item_cache: Dict[str, Any] = {}
 
     # Rows per listing request; one page of plexapi objects is alive at a time
     LISTING_PAGE = 500
@@ -395,14 +396,50 @@ class PlexClient(MediaServerClient):
                 value = wanted.get(source)
                 if not value:
                     continue
-                try:
-                    matches = section.search(guid=f"{source}://{value}")
-                except Exception:
-                    continue
+                matches = self._search_external_guid(section, f"{source}://{value}")
                 if matches:
                     results.extend(self._parse_item(item, section) for item in matches)
                     break
         return results
+
+    def _search_external_guid(self, section: Any, external_guid: str) -> List[Any]:
+        # Plex's guid filter only matches the primary plex:// guid, so the external id is
+        # translated through the agent's match endpoint first (what plexapi's getGuid does)
+        probe = self._section_probe_item(section)
+        if probe is None:
+            return []
+        try:
+            candidates = probe.matches(agent=getattr(section, "agent", None), title=external_guid.replace("://", "-"))
+        except Exception:
+            return []
+        wanted = external_guid.lower()
+        for candidate in candidates or []:
+            plex_guid = str(getattr(candidate, "guid", "") or "")
+            if not plex_guid.startswith("plex://"):
+                continue
+            try:
+                items = section.search(guid=plex_guid)
+            except Exception:
+                continue
+            hits = []
+            for item in items:
+                guids = {str(getattr(g, "id", "") or "").lower() for g in (self._safe_getattr(item, "guids") or [])}
+                if not guids or wanted in guids:
+                    hits.append(item)
+            if hits:
+                return hits
+        return []
+
+    def _section_probe_item(self, section: Any) -> Optional[Any]:
+        # matches() hangs off an item, not the section; any item in the section will do
+        key = str(getattr(section, "key", ""))
+        if key not in self._probe_item_cache:
+            try:
+                found = section.search(maxresults=1)
+            except Exception:
+                found = []
+            self._probe_item_cache[key] = found[0] if found else None
+        return self._probe_item_cache[key]
 
     def find_by_title(
         self,
