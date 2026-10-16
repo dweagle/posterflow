@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-10-16
+### Added
+- License: the project now ships an MIT License file, noted in the README.
+
+### Fixed
+- Webhooks: new season posters now upload correctly for shows whose Sonarr title differs from the Plex title (like "(US)" or year suffixes).
+
 ## [0.17.3] - 2026-10-12
 ### Changed
 - Asset Upload: full runs now scope each placed folder to its Arr instance's libraries.  No upload behavior changes, but this cleans up logging.
