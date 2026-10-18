@@ -30,6 +30,19 @@ export interface CommunityRequest {
   updated_at: string
 }
 
+// What the server owner's "Match" fills into an id-less request: the picked
+// TMDB/TVDB entry's identity. media_type is the candidate's own; a season
+// request keeps its season type server-side.
+export interface RequestMatch {
+  tmdb_id: number | null
+  tvdb_id: number | null
+  imdb_id: string | null
+  title: string
+  year: number | null
+  poster_path: string | null
+  media_type: 'movie' | 'show' | 'collection' | 'person'
+}
+
 export interface SubmitRequestPayload {
   tmdb_id?: number | null
   media_type: string

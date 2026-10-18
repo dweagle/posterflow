@@ -22,12 +22,17 @@
  *   DISCORD_GUILD_ID
  *   DISCORD_MAKER_ROLE_ID
  *   DISCORD_JWT_SECRET
+ *
+ * Optional:
+ *   DISCORD_MOD_ROLE_IDS  comma-separated role ids whose holders get is_mod in
+ *                         the token (owner-level request actions, e.g. Match)
  */
 
 const CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')!
 const CLIENT_SECRET = Deno.env.get('DISCORD_CLIENT_SECRET')!
 const GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')!
 const MAKER_ROLE_ID = Deno.env.get('DISCORD_MAKER_ROLE_ID')!
+const MOD_ROLE_IDS = (Deno.env.get('DISCORD_MOD_ROLE_IDS') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')!
 
@@ -200,13 +205,16 @@ Deno.serve(async (req) => {
 
   // ── Step 4: Check guild member roles ─────────────────────────────────────
   let isMaker = false
+  let isMod = false
   const memberResp = await fetch(
     `https://discord.com/api/v10/users/@me/guilds/${GUILD_ID}/member`,
     { headers: { Authorization: `Bearer ${access_token}` } },
   )
   if (memberResp.ok) {
     const member = await memberResp.json()
-    isMaker = (member.roles as string[]).includes(MAKER_ROLE_ID)
+    const roles = member.roles as string[]
+    isMaker = roles.includes(MAKER_ROLE_ID)
+    isMod = roles.some((r) => MOD_ROLE_IDS.includes(r))
   }
 
   // Is this the Discord server owner? (Exempt from the claimer-only completion rule.)
@@ -230,6 +238,7 @@ Deno.serve(async (req) => {
     discord_username: discordUsername,
     is_maker: isMaker,
     is_owner: isOwner,
+    is_mod: isMod,
     exp: Math.floor(Date.now() / 1000) + 86400 * 30,
   }
   const token = await createToken(payload)

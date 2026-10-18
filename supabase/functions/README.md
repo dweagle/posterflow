@@ -13,10 +13,10 @@ webhook), not Supabase's built‑in JWT gate.
 
 | Function | Purpose | Invoked by | Extra secrets (beyond the auto ones) |
 |----------|---------|------------|--------------------------------------|
-| `discord-oauth` | OAuth popup: exchange Discord code, confirm guild membership + Maker role, **mint the signed app token** | Browser (popup) | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
+| `discord-oauth` | OAuth popup: exchange Discord code, confirm guild membership + Maker role (+ moderator role → `is_mod`), **mint the signed app token** | Browser (popup) | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET`, `DISCORD_MOD_ROLE_IDS` (optional) |
 | `submit-request` | Insert a poster request (RPC) + per‑user/IP rate limits | FastAPI proxy (`/api/community/requests`) | `DISCORD_JWT_SECRET` |
 | `submit-list-items` | Bulk‑publish items to the Lists tab | FastAPI proxy (`/api/community/lists`) | `DISCORD_JWT_SECRET` |
-| `update-request-status` | claim / complete / reject / close / **remove** / **release** + Discord thread updates | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
+| `update-request-status` | claim / complete / reject / close / **remove** (requester or moderator) / **release** / **match** (moderator fills in an id‑less request's TMDB/TVDB ids) + Discord thread updates | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET`, `DISCORD_MOD_ROLE_IDS` (optional) |
 | `update-list-item` | claim / complete / release / reject / remove / **remove_mine** for list items | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
 | `post-poster` | Maker uploads finished poster file(s) to a request's thread | Browser (direct) | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MAKER_ROLE_ID`, `DISCORD_JWT_SECRET` |
 | `notify-discord` | Create the forum thread when a request is inserted | **DB webhook** on `poster_requests` INSERT | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_CHANNEL_ID` |
@@ -40,6 +40,7 @@ project). Auto‑injected ones are marked.
 | `DISCORD_CLIENT_SECRET` | OAuth2 client secret (Developer Portal → OAuth2). |
 | `DISCORD_GUILD_ID` | The PosterFlow Discord server (guild) id. Used for role checks + owner lookup. |
 | `DISCORD_MAKER_ROLE_ID` | The "Poster Maker" role id in that guild. |
+| `DISCORD_MOD_ROLE_IDS` | **Optional.** Comma‑separated role ids (e.g. a "Mod" role) whose holders can run owner‑level request actions: **match** on id‑less requests and **remove** on anyone's request. The guild owner always can. `discord-oauth` stamps `is_mod` into the token for the UI; `update-request-status` re‑checks the role live on every call. Users who get the role must reconnect Discord once in the app to pick up the flag. |
 | `DISCORD_CHANNEL_ID` | The forum channel id where request threads are created. |
 | `SUPABASE_URL` | **Auto‑injected.** |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Auto‑injected.** Bypasses RLS — never expose client‑side. |

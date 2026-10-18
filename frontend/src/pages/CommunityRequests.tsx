@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
-import { getCommunityRequests, type CommunityRequest } from '../api/community'
+import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2 } from 'lucide-react'
+import { getCommunityRequests, type CommunityRequest, type RequestMatch } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../api/makerTools'
 import { useDiscordAuth } from '../hooks/useDiscordAuth'
@@ -14,6 +14,7 @@ import { useCommunityClaimStatus } from '../hooks/useCommunityClaimStatus'
 import { useIdarrQuickAdd, uploadActionAddsToIdarr, uploadActionPostsToDiscord, uploadActionHint, uploadDoneLabel } from '../components/community/useIdarrQuickAdd'
 import NewCommunityRequestModal from '../components/poster-manager/NewCommunityRequestModal'
 import RequestUploadPickerModal from '../components/community/RequestUploadPickerModal'
+import MatchRequestModal from '../components/community/MatchRequestModal'
 import { useToast } from '../components/Toast'
 import './CommunityRequests.css'
 
@@ -75,7 +76,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 
 export default function CommunityRequests() {
   const { showToast } = useToast()
-  const { isConnected, isMaker, isOwner, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus } = useDiscordAuth()
+  const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus, matchRequest } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useAppEvents()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
@@ -108,6 +109,9 @@ export default function CommunityRequests() {
   // Upload picker over the server's export folders; only offered when one is configured.
   const [exportPickerAvailable, setExportPickerAvailable] = useState(false)
   const [pickerRequestId, setPickerRequestId] = useState<string | null>(null)
+  // Owner-only Match: the id-less request being linked to a TMDB/TVDB entry.
+  const [matchRequestId, setMatchRequestId] = useState<string | null>(null)
+  const [matchSubmitting, setMatchSubmitting] = useState(false)
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
   const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
@@ -325,6 +329,21 @@ export default function CommunityRequests() {
     }
   }, [updateRequestStatus])
 
+  const handleMatch = useCallback(async (requestId: string, match: RequestMatch) => {
+    setMatchSubmitting(true)
+    try {
+      const updated = await matchRequest(requestId, match)
+      // The edge function returns the whole row; merge so ids/poster/title all refresh in place.
+      setRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, ...updated } : r)))
+      setMatchRequestId(null)
+      showToast(`Matched to ${updated.title}${updated.year ? ` (${updated.year})` : ''}`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Match failed', 'error')
+    } finally {
+      setMatchSubmitting(false)
+    }
+  }, [matchRequest, showToast])
+
   const handleDrop = useCallback((e: React.DragEvent, requestId: string) => {
     e.preventDefault()
     setDragOverId(null)
@@ -334,6 +353,7 @@ export default function CommunityRequests() {
   }, [doUpload])
 
   const pickerRequest = pickerRequestId ? requests.find((r) => r.id === pickerRequestId) ?? null : null
+  const matchTarget = matchRequestId ? requests.find((r) => r.id === matchRequestId) ?? null : null
 
   const fetchRequests = useCallback(async () => {
     setLoading(true)
@@ -808,8 +828,23 @@ export default function CommunityRequests() {
                       </div>
                     )
                   })()}
-                  {/* Remove button — requester or server owner; hidden once fulfilled */}
-                  {isConnected && discordUserId && (req.requested_by_discord_id === discordUserId || isOwner) && req.status !== 'fulfilled' && (() => {
+                  {/* Match button — owner or moderator links a request that came in with no ids */}
+                  {isConnected && (isOwner || isMod) && req.tmdb_id == null && req.tvdb_id == null && req.status !== 'rejected' && (
+                    <div className="request-status-actions">
+                      <button
+                        type="button"
+                        className="request-action-btn action-match"
+                        disabled={matchSubmitting && matchRequestId === req.id}
+                        data-tooltip="No TMDB/TVDB id. Match it to fill in ids, poster and title (moderator)"
+                        onClick={() => setMatchRequestId(req.id)}
+                      >
+                        <Link2 size={11} />
+                        <span>Match</span>
+                      </button>
+                    </div>
+                  )}
+                  {/* Remove button — requester, server owner or moderator; hidden once fulfilled */}
+                  {isConnected && discordUserId && (req.requested_by_discord_id === discordUserId || isOwner || isMod) && req.status !== 'fulfilled' && (() => {
                     const as_ = actionStates.get(req.id)
                     const actionLoading = as_ === 'loading'
                     const removeError = typeof as_ === 'string' && as_ !== 'loading' ? as_ : null
@@ -820,7 +855,7 @@ export default function CommunityRequests() {
                           type="button"
                           className="request-action-btn action-reject"
                           disabled={actionLoading}
-                          data-tooltip={isRequester ? 'Remove your request' : 'Remove this request (server owner)'}
+                          data-tooltip={isRequester ? 'Remove your request' : 'Remove this request (moderator)'}
                           onClick={() => handleStatusAction(req.id, 'remove')}
                         >
                           {actionLoading ? <Loader2 size={11} className="spin-icon" /> : null}
@@ -892,6 +927,14 @@ export default function CommunityRequests() {
         onClose={() => setPickerRequestId(null)}
         onPost={(files) => { setPickerRequestId(null); doUpload(pickerRequest.id, files) }}
         onPickFromComputer={() => { setPickerRequestId(null); openFileDialog(pickerRequest.id) }}
+      />
+    )}
+    {matchTarget && (
+      <MatchRequestModal
+        request={matchTarget}
+        submitting={matchSubmitting}
+        onCancel={() => { if (!matchSubmitting) setMatchRequestId(null) }}
+        onConfirm={(match) => handleMatch(matchTarget.id, match)}
       />
     )}
     {archiveConfirm && (() => {

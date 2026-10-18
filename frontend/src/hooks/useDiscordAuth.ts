@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { storeDiscordIdentity, clearCommunityCache } from '../api/community'
+import { storeDiscordIdentity, clearCommunityCache, type CommunityRequest, type RequestMatch } from '../api/community'
 
 const STORAGE_KEY = 'posterflow_discord_auth'
 const RESULT_KEY = 'discord_oauth_result'
@@ -15,6 +15,8 @@ interface DiscordAuth {
   discord_username: string
   is_maker: boolean
   is_owner: boolean
+  // Holds one of the server's configured moderator roles (DISCORD_MOD_ROLE_IDS).
+  is_mod: boolean
   exp: number
 }
 
@@ -49,6 +51,7 @@ function parseStoredToken(token: string): Omit<DiscordAuth, 'token'> | null {
       discord_username: payload.discord_username,
       is_maker: payload.is_maker,
       is_owner: payload.is_owner ?? false,
+      is_mod: payload.is_mod ?? false,
       exp: payload.exp,
     }
   } catch {
@@ -202,6 +205,27 @@ export function useDiscordAuth() {
     [auth],
   )
 
+  // Server owner only: link an id-less (custom) request to a TMDB/TVDB entry.
+  // Same endpoint as the status actions; returns the updated row.
+  const matchRequest = useCallback(
+    async (requestId: string, match: RequestMatch): Promise<CommunityRequest> => {
+      if (!auth?.token) throw new Error('Not connected to Discord')
+
+      const resp = await fetch(UPDATE_STATUS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: auth.token, request_id: requestId, action: 'match', match }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        throw new Error((data as { error?: string }).error ?? 'Match failed')
+      }
+      void clearCommunityCache().catch(() => {})
+      return (data as { request: CommunityRequest }).request
+    },
+    [auth],
+  )
+
   // Community list-item actions — mirrors updateRequestStatus, different endpoint.
   // 'remove' is publisher-or-owner; 'remove_mine' (no itemId) clears all the
   // caller's own items; the maker actions require the Maker role.
@@ -231,6 +255,7 @@ export function useDiscordAuth() {
     isConnected: auth !== null,
     isMaker: auth?.is_maker ?? false,
     isOwner: auth?.is_owner ?? false,
+    isMod: auth?.is_mod ?? false,
     username: auth?.discord_username ?? null,
     discordUserId: auth?.discord_user_id ?? null,
     token: auth?.token ?? null,
@@ -240,6 +265,7 @@ export function useDiscordAuth() {
     logout,
     uploadPoster,
     updateRequestStatus,
+    matchRequest,
     updateListItem,
   }
 }
