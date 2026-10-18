@@ -6,7 +6,8 @@ from services.sync_base import BaseSyncService
 from models.artwork_drive import ArtworkDrive, ARTWORK_TYPES, ARTWORK_TYPE_SUBFOLDERS
 from models.artwork import Artwork
 from util.data.extract import extract_ids, extract_year
-from core.logging import LogTags, log_debug
+from util.fs_scan import iter_file_entries
+from core.logging import LogTags, log_debug, log_warning
 
 # Artwork image extensions (logos are PNG, backgrounds/squareart are JPG/WEBP).
 ARTWORK_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
@@ -20,6 +21,16 @@ _ID_TAG_RE = re.compile(r"\{[^}]*\}")
 _YEAR_PAREN_RE = re.compile(r"\(\d{4}\)")
 
 
+def _subtype_folders(folder: Path, types: list[str] | None) -> list[tuple[str, Path]]:
+    if not folder.is_dir():
+        return []
+    return [
+        (subtype, folder / subfolder_name)
+        for subtype, subfolder_name in ARTWORK_SUBFOLDER_SUBTYPES
+        if (types is None or subtype in types) and (folder / subfolder_name).is_dir()
+    ]
+
+
 def scan_artwork_files(folder: Path, types: list[str] | None = None) -> list[dict[str, Any]]:
     """Walk the logos/backgrounds/squareart subfolders and return one dict per image file.
 
@@ -28,29 +39,26 @@ def scan_artwork_files(folder: Path, types: list[str] | None = None) -> list[dic
     `types` limits the walk to a drive's subscribed artwork types (None = all).
     """
     results: list[dict[str, Any]] = []
-    if not folder.exists() or not folder.is_dir():
-        return results
-    for subtype, subfolder_name in ARTWORK_SUBFOLDER_SUBTYPES:
-        if types is not None and subtype not in types:
-            continue
-        sub = folder / subfolder_name
-        if not sub.is_dir():
-            continue
-        for f in sub.rglob('*'):
-            if not (f.is_file() and f.suffix.lower() in ARTWORK_IMAGE_EXTENSIONS):
-                continue
+    for subtype, sub in _subtype_folders(folder, types):
+        for entry in iter_file_entries(sub, ARTWORK_IMAGE_EXTENSIONS):
             try:
-                st = f.stat()
+                st = entry.stat()  # right after the listing, so NFS answers from its attribute cache
             except OSError:
                 continue
             results.append({
-                'name': f.name,
-                'path': str(f),
+                'name': entry.name,
+                'path': entry.path,
                 'size': st.st_size,
                 'mtime': st.st_mtime,
                 'artwork_type': subtype,
             })
     return results
+
+
+def scan_artwork_keys(folder: Path, types: list[str] | None = None) -> set[str]:
+    """File paths on disk for the pre-sync cleanup: listings only, no per-file stat.
+    Raises OSError if any folder can't be read, so a flaky share never looks empty."""
+    return {entry.path for _subtype, sub in _subtype_folders(folder, types) for entry in iter_file_entries(sub, ARTWORK_IMAGE_EXTENSIONS, strict=True)}
 
 
 def artwork_group_stem(file_name: str) -> str:
@@ -97,8 +105,12 @@ class ArtworkSyncService(BaseSyncService):
     def _scan_local_files(self, folder: Path, drive=None) -> list[dict[str, Any]]:
         return scan_artwork_files(folder, self._drive_types(drive))
 
-    def _disk_keys(self, folder: Path, drive=None) -> set:
-        return {s['path'] for s in scan_artwork_files(folder, self._drive_types(drive))}
+    def _disk_keys(self, folder: Path, drive=None) -> set | None:
+        try:
+            return scan_artwork_keys(folder, self._drive_types(drive))
+        except OSError as e:
+            log_warning(LogTags.SYNC, f"Could not scan folder before sync, keeping its index as-is: {folder}: {e}", folder=str(folder))
+            return None
 
     def _remote_exclude_dirs(self, drive) -> list[str]:
         """Skip the subfolders for artwork types this drive isn't subscribed to."""

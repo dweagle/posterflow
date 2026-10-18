@@ -35,6 +35,7 @@ from core.logging import (
 )
 from models.setting import get_setting, upsert_setting
 from util.posters.scanner import artwork_type_of
+from util.fs_scan import iter_file_entries
 
 try:
     from PIL import Image, ImageDraw, UnidentifiedImageError
@@ -1466,26 +1467,22 @@ class BorderReplacerService:
                 log_info(LogTags.BORDER_REPLACER, "Building list of files needing processing...")
                 files_needing_processing = set()
                 
-                # Walk source directory to get all source files with their mtimes
+                # One stat per file, right after the listing, so a network share answers from cache
                 source_files_with_mtime = {}
-                for root, dirs, files in os.walk(source_dir):
-                    rel_path = os.path.relpath(root, source_dir)
+                for entry in iter_file_entries(source_dir, (".jpg", ".jpeg", ".png")):
+                    file = entry.name
+                    if not _is_poster_image(file):
+                        continue
+                    rel_path = os.path.relpath(os.path.dirname(entry.path), source_dir)
                     folder = None if rel_path == "." else rel_path
-                    
-                    for file in files:
-                        if not _is_poster_image(file):
-                            continue
-                        
-                        input_file = os.path.join(root, file)
-                        dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
-                        
-                        try:
-                            source_mtime = os.path.getmtime(input_file)
-                            source_size = os.path.getsize(input_file)
-                            source_files_with_mtime[dest_file] = (input_file, source_mtime, source_size, folder)
-                        except OSError:
-                            # If can't get mtime, add to processing list
-                            files_needing_processing.add(dest_file)
+                    input_file = entry.path
+                    dest_file = os.path.join(destination_dir, folder, file) if folder else os.path.join(destination_dir, file)
+                    try:
+                        st = entry.stat()
+                        source_files_with_mtime[dest_file] = (input_file, st.st_mtime, st.st_size, folder)
+                    except OSError:
+                        # If can't get mtime, add to processing list
+                        files_needing_processing.add(dest_file)
                 
                 # Query database for all tracked files in one go
                 dest_paths = list(source_files_with_mtime.keys())

@@ -3,10 +3,14 @@ index into the `artwork` table with the right type + parsed title/ids, self-heal
 and emit the shared progress format ("Syncing files: X/Y transferred | <file>").
 """
 
+import os
+
+import pytest
+
 from models.artwork_drive import ArtworkDrive
 from models.artwork import Artwork
 from models.job import Job
-from services.artwork_sync import ArtworkSyncService
+from services.artwork_sync import ArtworkSyncService, scan_artwork_files, scan_artwork_keys
 
 
 def _drive_and_job(test_db, folder, drive_id="maker-a", name="MakerA"):
@@ -165,3 +169,41 @@ def test_sync_indexes_only_the_drives_selected_types(test_db, monkeypatch, tmp_p
     assert captured["exclude_dirs"] == ["backgrounds", "squareart"]
     rows = test_db.query(Artwork).filter(Artwork.artwork_drive_id == "maker-a").all()
     assert [r.artwork_type for r in rows] == ["logo"]
+
+
+def test_scan_artwork_keys_matches_scan_paths_and_respects_types(tmp_path):
+    folder = tmp_path / "MakerK"
+    (folder / "logos" / "nested").mkdir(parents=True)
+    (folder / "backgrounds").mkdir()
+    (folder / "logos" / "A (2010) {tmdb-1} - logo.png").write_bytes(b"i")
+    (folder / "logos" / "nested" / "B (2011) {tmdb-2} - logo.png").write_bytes(b"i")
+    (folder / "logos" / "readme.txt").write_bytes(b"t")
+    (folder / "backgrounds" / "A (2010) {tmdb-1} - background.jpg").write_bytes(b"i")
+    (folder / "stray.jpg").write_bytes(b"i")  # outside the type subfolders: ignored by both
+
+    files = scan_artwork_files(folder)
+    assert len(files) == 3
+    assert scan_artwork_keys(folder) == {f["path"] for f in files}
+    assert scan_artwork_keys(folder, ["background"]) == {str(folder / "backgrounds" / "A (2010) {tmdb-1} - background.jpg")}
+    assert scan_artwork_keys(tmp_path / "missing") == set()
+
+
+def test_scan_artwork_keys_raises_where_the_index_scan_skips(test_db, monkeypatch, tmp_path):
+    """The index scan tolerates an unreadable subfolder (as rglob did). The pre-sync key scan
+    must not, or a flaky share would read as 'files gone' and the cleanup would drop their rows."""
+    folder = tmp_path / "MakerF"
+    (folder / "logos" / "broken").mkdir(parents=True)
+    (folder / "logos" / "A - logo.png").write_bytes(b"i")
+    real_scandir = os.scandir
+
+    def _scandir(path):
+        if str(path).endswith("broken"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr("util.fs_scan.os.scandir", _scandir)
+
+    assert [f["name"] for f in scan_artwork_files(folder)] == ["A - logo.png"]
+    with pytest.raises(OSError):
+        scan_artwork_keys(folder)
+    assert ArtworkSyncService(test_db)._disk_keys(folder) is None

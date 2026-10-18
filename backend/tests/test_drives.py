@@ -412,3 +412,26 @@ def test_update_drive_omitting_custom_path_leaves_it_unchanged(client, test_db):
     test_db.refresh(drive)
     assert drive.custom_path == "/keep/this/path"
 
+
+
+def test_update_file_counts_counts_images_recursively_and_skips_junk(test_db, tmp_path):
+    from api.drives import update_file_counts
+
+    folder = tmp_path / "Count_Drive"
+    (folder / "nested").mkdir(parents=True)
+    (folder / "Movie (2020).jpg").write_bytes(b"i")
+    (folder / "nested" / "Show (2021).webp").write_bytes(b"i")
+    (folder / ".DS_Store").write_bytes(b"j")
+    (folder / "notes.txt").write_bytes(b"t")
+    counted = Drive(name="Count Drive", drive_id="count-1", style_type="MM2K", subscribed=True, custom_path=str(folder))
+    missing = Drive(name="Gone Drive", drive_id="count-2", style_type="MM2K", subscribed=True,
+                    custom_path=str(tmp_path / "nope"), sync_file_count=7)
+    test_db.add_all([counted, missing])
+    test_db.commit()
+
+    result = update_file_counts(test_db)
+
+    assert result == {"success": True, "drives_checked": 2, "total_files": 2}
+    test_db.expire_all()
+    assert test_db.query(Drive).filter(Drive.drive_id == "count-1").first().sync_file_count == 2
+    assert test_db.query(Drive).filter(Drive.drive_id == "count-2").first().sync_file_count == 0

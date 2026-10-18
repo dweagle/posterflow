@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from typing import Literal
 from uuid import uuid4
+import os
 import traceback
 import shutil
 import json
@@ -21,6 +22,7 @@ from models.setting import get_setting, upsert_setting
 from core.logging import LogTags, log_info, log_debug, log_warning, log_error, log_user_action
 from core.job_queue import job_queue
 from services.drive_loader import get_drive_descriptions
+from services.poster_sync import IMAGE_EXTENSIONS
 from services.new_drives import (
     clear_new_drives, forget_new_drives, load_new_drives, mark_new_drives_seen, record_new_drives,
 )
@@ -617,14 +619,11 @@ def update_file_counts(db: Session) -> Dict[str, Any]:
             drive_path = drive.get_local_path(validate=False)
             
             if drive_path.exists():
-                # Count image files. Match the sync scan's extension set and include
-                # dot-prefixed titles (e.g. "...ing (2003)") so this stays consistent
-                # with poster_count; non-image junk (.DS_Store, temp files) is already
-                # excluded by the suffix check.
+                # Same extension set as the sync scan; os.walk needs no per-file stat (NFS)
                 file_count = sum(
-                    1 for f in drive_path.rglob('*')
-                    if f.is_file()
-                    and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
+                    1 for _root, _dirs, names in os.walk(drive_path)
+                    for name in names
+                    if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS
                 )
                 drive.sync_file_count = file_count
                 total_files += file_count

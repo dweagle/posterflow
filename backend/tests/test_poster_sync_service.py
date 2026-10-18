@@ -611,3 +611,78 @@ def test_sync_single_manual_drive_skips_rclone(test_db, monkeypatch, tmp_path):
     assert result["success"] is True
     assert result["added"] == 1
     assert test_db.query(Poster).filter(Poster.drive_id == "manual-xyz").count() == 1
+
+
+def test_disk_keys_lists_top_level_images_only(test_db, tmp_path):
+    folder = tmp_path / "drive"
+    (folder / "nested").mkdir(parents=True)
+    (folder / "Movie (2020).jpg").write_bytes(b"i")
+    (folder / "Show (2021).PNG").write_bytes(b"i")
+    (folder / "notes.txt").write_bytes(b"t")
+    (folder / "nested" / "deep.jpg").write_bytes(b"i")
+
+    service = PosterSyncService(test_db)
+    assert service._disk_keys(folder) == {"Movie (2020).jpg", "Show (2021).PNG"}
+    assert service._disk_keys(tmp_path / "missing") == set()
+
+
+def test_disk_keys_returns_none_when_folder_cannot_be_read(test_db, monkeypatch, tmp_path):
+    folder = tmp_path / "drive"
+    folder.mkdir()
+
+    def _io_error(path):
+        raise OSError(5, "Input/output error", str(path))
+
+    monkeypatch.setattr("services.poster_sync.os.scandir", _io_error)
+    assert PosterSyncService(test_db)._disk_keys(folder) is None
+
+
+def test_pre_sync_cleanup_keeps_rows_when_the_folder_scan_fails(test_db, monkeypatch, tmp_path):
+    """A soft NFS mount can fail a listing part way through. That must read as 'unknown',
+    not 'folder is empty', or the cleanup would drop every row for the drive."""
+    folder = tmp_path / "drive"
+    folder.mkdir()
+    drive, _ = _make_drive_and_job(test_db, drive_id="scan-fail-1", name="ScanFail")
+    test_db.add(Poster(drive_id=drive.drive_id, file_name="kept.jpg", file_path=str(folder / "kept.jpg"), file_size=1, file_mtime=1.0))
+    test_db.commit()
+
+    failing = PosterSyncService(test_db)
+    monkeypatch.setattr(failing, "_disk_keys", lambda folder, drive=None: None)
+    assert failing._pre_sync_cleanup(folder, drive, drive.drive_id, drive.name) is None
+    assert test_db.query(Poster).filter(Poster.drive_id == drive.drive_id).count() == 1
+
+    # A real (empty) listing still removes the stale row and reports what it saw on disk.
+    assert PosterSyncService(test_db)._pre_sync_cleanup(folder, drive, drive.drive_id, drive.name) == 0
+    assert test_db.query(Poster).filter(Poster.drive_id == drive.drive_id).count() == 0
+
+
+def test_sync_multiple_drives_names_each_drive_while_preparing(test_db, monkeypatch, tmp_path):
+    """The preparing phase reports which folder it is listing, so a slow share shows as a
+    moving counter in the job message instead of a frozen bar."""
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "gdrive_dir", tmp_path / "posters")
+
+    d1, _ = _make_drive_and_job(test_db, drive_id="prep-1", name="PrepA")
+    d2, _ = _make_drive_and_job(test_db, drive_id="prep-2", name="PrepB")
+    job = Job(job_type="Sync All", status="pending", progress=0, message="queued")
+    test_db.add(job)
+    test_db.commit()
+    test_db.refresh(job)
+    for name in ("PrepA", "PrepB"):
+        (tmp_path / "posters" / "MM2K" / name).mkdir(parents=True)
+
+    service = PosterSyncService(test_db)
+    monkeypatch.setattr(service.rclone, "sync_multiple_folders",
+        lambda tasks, max_workers=1, progress_callback=None: {t["result_key"]: {"success": True, "files_transferred": 0} for t in tasks})
+
+    messages = []
+    result = service.sync_multiple_drives([d1.id, d2.id], job_id=job.id,
+        progress_callback=lambda phase, current, total, message: messages.append((phase, message)))
+
+    assert result["success"] is True
+    assert [m for p, m in messages if p == "preparing"] == [
+        "Preparing drives for sync...",
+        "Preparing drives (1/2): PrepA",
+        "Preparing drives (2/2): PrepB",
+    ]
+    assert messages.index(("preparing", "Preparing drives (2/2): PrepB")) < messages.index(("syncing", "Syncing 2 drives..."))

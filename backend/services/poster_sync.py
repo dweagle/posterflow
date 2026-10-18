@@ -36,15 +36,19 @@ class PosterSyncService(BaseSyncService):
                     files.append({'name': entry.name, 'path': Path(entry.path), 'size': st.st_size, 'mtime': st.st_mtime})
         return files
 
-    def _disk_keys(self, folder: Path, drive=None) -> set:
+    def _disk_keys(self, folder: Path, drive=None) -> set | None:
+        if not folder.is_dir():
+            return set()
         keys: set = set()
-        if folder.exists() and folder.is_dir():
-            try:
-                for fp in folder.iterdir():
-                    if fp.is_file() and fp.suffix.lower() in IMAGE_EXTENSIONS:
-                        keys.add(fp.name)
-            except Exception as e:
-                log_warning(LogTags.SYNC, f"Could not scan folder before sync: {folder}: {e}", folder=str(folder))
+        try:
+            # scandir's own type check needs no per-file stat (one NFS round trip per poster)
+            with os.scandir(folder) as it:
+                for entry in it:
+                    if entry.is_file() and Path(entry.name).suffix.lower() in IMAGE_EXTENSIONS:
+                        keys.add(entry.name)
+        except Exception as e:
+            log_warning(LogTags.SYNC, f"Could not scan folder before sync, keeping its index as-is: {folder}: {e}", folder=str(folder))
+            return None
         return keys
 
     def _file_key(self, file_info: dict) -> Any:

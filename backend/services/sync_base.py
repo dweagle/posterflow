@@ -35,6 +35,7 @@ MTIME_TOLERANCE = 1.0  # seconds; filesystem mtime quirks
 # Indent a drive's per-step logs so they read as sub-items under the "Processing drive N/M:
 # <name>" header. Fixed spaces (not a tab) so the offset is consistent in the log viewer.
 STEP_INDENT = "    "
+SLOW_FOLDER_SCAN_SECONDS = 5.0  # a pre-sync folder listing slower than this gets its own INFO line
 
 
 class BaseSyncService:
@@ -71,9 +72,35 @@ class BaseSyncService:
         `drive` lets a subclass narrow the scan to what that drive subscribes to."""
         raise NotImplementedError
 
-    def _disk_keys(self, folder: Path, drive=None) -> set:
-        """Match keys currently on disk — a light scan for the pre-sync cleanup."""
+    def _disk_keys(self, folder: Path, drive=None) -> set | None:
+        """Match keys currently on disk — a light scan for the pre-sync cleanup.
+        None means the folder couldn't be read; the caller then leaves the index alone."""
         raise NotImplementedError
+
+    def _pre_sync_cleanup(self, folder: Path, drive, drive_id: str, drive_name: str) -> int | None:
+        """Drop DB rows for files missing from disk so a re-download counts as "added".
+        Returns the number of files seen on disk, or None when the scan failed (index kept)."""
+        started = time.monotonic()
+        disk_keys = self._disk_keys(folder, drive)
+        elapsed = time.monotonic() - started
+        if disk_keys is None:
+            return None
+        if elapsed >= SLOW_FOLDER_SCAN_SECONDS:
+            log_info(self.log_tag, f"{STEP_INDENT}Slow folder listing for '{drive_name}': {len(disk_keys)} files in {elapsed:.1f}s", drive=drive_name, files=len(disk_keys), seconds=round(elapsed, 1))
+        else:
+            log_debug(self.log_tag, f"{STEP_INDENT}'{drive_name}': {len(disk_keys)} files on disk ({elapsed:.1f}s)", drive=drive_name, files=len(disk_keys))
+        db_key_ids = (
+            self.db.query(self.content_model.id, self._key_col)
+            .filter(self._drive_col == drive_id)
+            .all()
+        )
+        ids_to_delete = [r[0] for r in db_key_ids if r[1] not in disk_keys]
+        if ids_to_delete:
+            log_info(self.log_tag, f"Pre-sync cleanup: Removing {len(ids_to_delete)} DB records for missing files", drive=drive_name, missing_count=len(ids_to_delete))
+            self.db.query(self.content_model).filter(self.content_model.id.in_(ids_to_delete)).delete(synchronize_session=False)
+            self.db.commit()
+            log_debug(self.log_tag, "Cleared records for files to be re-downloaded", drive=drive_name, deleted=len(ids_to_delete))
+        return len(disk_keys)
 
     def _remote_exclude_dirs(self, drive) -> list[str]:
         """Top-level remote folders rclone should skip for this drive (none by default)."""
@@ -141,20 +168,7 @@ class BaseSyncService:
 
             local_folder = self._get_local_path(drive)
 
-            # Pre-sync cleanup: drop DB rows for files missing from disk so a re-download counts as "added".
-            disk_keys = self._disk_keys(local_folder, drive)
-            db_key_ids = (
-                self.db.query(self.content_model.id, self._key_col)
-                .filter(self._drive_col == drive.drive_id)
-                .all()
-            )
-            ids_to_delete = [r[0] for r in db_key_ids if r[1] not in disk_keys]
-            if ids_to_delete:
-                log_info(self.log_tag, f"Pre-sync cleanup: Removing {len(ids_to_delete)} DB records for missing files",
-                         drive=drive.name, missing_count=len(ids_to_delete))
-                self.db.query(self.content_model).filter(self.content_model.id.in_(ids_to_delete)).delete(synchronize_session=False)
-                self.db.commit()
-                log_debug(self.log_tag, "Cleared records for files to be re-downloaded", drive=drive.name, deleted=len(ids_to_delete))
+            self._pre_sync_cleanup(local_folder, drive, drive.drive_id, drive.name)
 
             local_folder.mkdir(parents=True, exist_ok=True)
 
@@ -478,20 +492,16 @@ class BaseSyncService:
         for idx, task in enumerate(sync_tasks):
             task['task_index'] = idx
 
-        # Pre-sync cleanup per drive.
-        for task in sync_tasks:
-            disk_keys = self._disk_keys(task['local_folder'], drives_by_db_id.get(task['db_id']))
-            db_key_ids = (
-                self.db.query(self.content_model.id, self._key_col)
-                .filter(self._drive_col == task['drive_id'])
-                .all()
-            )
-            ids_to_delete = [r[0] for r in db_key_ids if r[1] not in disk_keys]
-            if ids_to_delete:
-                log_info(self.log_tag, f"Pre-sync cleanup: Removing {len(ids_to_delete)} DB records for missing files", drive=task['drive_name'], missing_count=len(ids_to_delete))
-                self.db.query(self.content_model).filter(self.content_model.id.in_(ids_to_delete)).delete(synchronize_session=False)
-                self.db.commit()
-                log_debug(self.log_tag, "Cleared records for files to be re-downloaded", drive=task['drive_name'], deleted=len(ids_to_delete))
+        # Pre-sync cleanup per drive. The job message names the drive being listed so a slow
+        # share reads as a moving counter, and each callback is a cancel checkpoint.
+        prep_started = time.monotonic()
+        files_on_disk = 0
+        for idx, task in enumerate(sync_tasks, start=1):
+            if progress_callback:
+                progress_callback("preparing", 0, 100, f"Preparing drives ({idx}/{len(sync_tasks)}): {task['drive_name']}")
+            seen = self._pre_sync_cleanup(task['local_folder'], drives_by_db_id.get(task['db_id']), task['drive_id'], task['drive_name'])
+            files_on_disk += seen or 0
+        log_info(self.log_tag, f"Listed {len(sync_tasks)} drive folders ({files_on_disk:,} files on disk) in {time.monotonic() - prep_started:.1f}s", drives=len(sync_tasks), files=files_on_disk)
 
         if progress_callback:
             progress_callback("syncing", 5, 100, f"Syncing {len(sync_tasks)} drives...")

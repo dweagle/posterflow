@@ -240,3 +240,30 @@ def test_idarr_runner_load_cache_rows_for_selected_filters(test_db, tmp_path):
     assert "movie::unrelatedtitle::2001::tmdb=999" in keys  # tmdb id match
     assert "movie::otherthing::2005" in keys          # filename held in payload
     assert "movie::nothing::1990" not in keys
+
+
+def test_idarr_runner_flat_scan_is_name_sorted_and_skips_dotfiles_and_folders(test_db, tmp_path):
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "b.jpg").write_bytes(b"x")
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / ".hidden.jpg").write_bytes(b"x")
+    (tmp_path / "notes.txt").write_bytes(b"x")
+    (tmp_path / "nested" / "c.jpg").write_bytes(b"x")
+
+    assets = IdarrRunner(test_db).scan_files_in_flat_folder(tmp_path)
+    assert [a["file_path"].name for a in assets] == ["a.png", "b.jpg"]
+
+
+def test_idarr_runner_remove_non_images_leaves_images_and_folders(test_db, tmp_path):
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "a.jpg").write_bytes(b"x")
+    (tmp_path / "junk.txt").write_bytes(b"x")
+    (tmp_path / "nested" / "deep.txt").write_bytes(b"x")
+    runner = IdarrRunner(test_db)
+
+    assert runner._remove_non_images(tmp_path, dry_run=True) == (0, 1)
+    assert (tmp_path / "junk.txt").exists()
+    assert runner._remove_non_images(tmp_path, dry_run=False) == (1, 0)
+    assert not (tmp_path / "junk.txt").exists()
+    assert (tmp_path / "a.jpg").exists()
+    assert (tmp_path / "nested" / "deep.txt").exists()

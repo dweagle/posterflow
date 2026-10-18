@@ -1333,3 +1333,19 @@ def test_upload_asset_applies_main_poster_to_idless_folder_twin(test_db):
     assert outcome.matched is True
     assert outcome.plex_targets == 2
     assert outcome.uploaded == 2
+
+
+def test_plex_upload_discovery_skips_tmp_folders_regardless_of_case_and_keeps_root_files(test_db, tmp_path):
+    destination = tmp_path / "root"
+    kept_folder = destination / "Zootopia (2016)" / "poster.jpg"
+    kept_root = destination / "Zootopia (2016).jpg"
+    staged = destination / "TMP" / "Zootopia (2016)" / "poster.jpg"
+    for path in (kept_folder, staged):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    kept_folder.write_bytes(b"p")
+    kept_root.write_bytes(b"p")
+    staged.write_bytes(b"s")
+
+    assets = PlexUploadService(test_db)._discover_local_assets(destination)
+
+    assert {str(a.get("path")) for a in assets} == {str(kept_folder), str(kept_root)}

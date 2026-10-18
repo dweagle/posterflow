@@ -32,6 +32,7 @@ from util.media_server.types import (
 )
 from util.posters.match import collection_title_variants
 from util.posters.scanner import artwork_type_of, artwork_flat_base
+from util.fs_scan import iter_file_entries
 
 
 PlexUploadProgressCallback = Callable[[int, int, Dict[str, int], str], None]
@@ -1392,17 +1393,17 @@ class PlexUploadService:
 
         return enabled, configs, None
 
+    def _iter_destination_images(self, destination: Path):
+        # Types come from the listing (no per-file stat on a network share); tmp pruned at any depth
+        for entry in iter_file_entries(destination, self.IMAGE_EXTENSIONS, skip_dirs={"tmp"}):
+            yield Path(entry.path)
+
     def _discover_local_assets(self, destination: Path) -> List[Dict[str, Any]]:
         assets: List[Dict[str, Any]] = []
+        log_info(LogTags.UPLOADER, f"Scanning placed posters under {destination}")
+        started = time.monotonic()
 
-        for file_path in destination.rglob("*"):
-            if not file_path.is_file() or file_path.suffix.lower() not in self.IMAGE_EXTENSIONS:
-                continue
-
-            rel_parts = file_path.relative_to(destination).parts
-            if any(part.lower() == "tmp" for part in rel_parts):
-                continue
-
+        for file_path in self._iter_destination_images(destination):
             # Artwork (logo/background/squareart) shares the item folders but must never be
             # uploaded as a poster — it's handled by the separate artwork upload pass.
             if artwork_type_of(file_path.name):
@@ -1416,11 +1417,11 @@ class PlexUploadService:
             if parsed:
                 assets.append(parsed)
 
-        # rglob() order is arbitrary; sort by title, main before seasons, seasons ascending.
+        # Listing order is arbitrary; sort by title, main before seasons, seasons ascending.
         assets.sort(key=self._asset_sort_key)
         self._mark_shadowed_collection_assets(assets)
 
-        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local poster assets", count=len(assets))
+        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local poster assets in {time.monotonic() - started:.1f}s", count=len(assets))
         return assets
 
     @staticmethod
@@ -1558,18 +1559,16 @@ class PlexUploadService:
         the existing Plex-matching helpers apply unchanged. Artwork is per-title (no seasons).
         """
         assets: List[Dict[str, Any]] = []
-        for file_path in destination.rglob("*"):
-            if not file_path.is_file() or file_path.suffix.lower() not in self.IMAGE_EXTENSIONS:
-                continue
-            if any(part.lower() == "tmp" for part in file_path.relative_to(destination).parts):
-                continue
+        log_info(LogTags.UPLOADER, f"Scanning placed artwork under {destination}")
+        started = time.monotonic()
+        for file_path in self._iter_destination_images(destination):
             parsed = self._parse_local_artwork_file(file_path, destination)
             if parsed:
                 assets.append(parsed)
         assets.sort(key=lambda a: (str(a.get("media_key") or ""), str(a.get("artwork_type") or "")))
         # A movie folder may hold only a poster, so the poster list supplies year-tagged siblings too.
         self._mark_shadowed_collection_assets(assets, self._local_assets_cache.get(str(destination)) or [])
-        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local artwork files", count=len(assets))
+        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local artwork files in {time.monotonic() - started:.1f}s", count=len(assets))
         return assets
 
     def _parse_local_artwork_file(self, file_path: Path, destination: Path) -> Optional[Dict[str, Any]]:

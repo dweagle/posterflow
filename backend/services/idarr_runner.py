@@ -39,6 +39,7 @@ from models.idarr import (
 from models.setting import get_setting
 from services.rejected_keys import note_tmdb_response
 from util.data.normalization import normalize_titles
+from util.fs_scan import iter_file_entries
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".psd"}
 UNSUPPORTED_IMAGE_EXTENSIONS = {".svg", ".gif", ".bmp", ".tiff", ".tif", ".ico", ".heic", ".heif", ".avif", ".eps"}
@@ -517,20 +518,22 @@ class IdarrRunner:
             "imdb_id": imdb_match.group(1) if imdb_match else None,
         }
 
+    @staticmethod
+    def _flat_source_images(source_dir: Path, only_filenames: set[str] | None = None) -> list[Path]:
+        """Top-level image files of a source folder, name-sorted, dotfiles out. The listing
+        supplies the type, so this costs no per-file stat on a network share."""
+        return [
+            Path(entry.path)
+            for entry in sorted(iter_file_entries(source_dir, IMAGE_EXTENSIONS, recursive=False, strict=True), key=lambda e: e.name)
+            if not entry.name.startswith(".")
+            and (only_filenames is None or entry.name.strip().lower() in only_filenames)
+        ]
+
     def _scan_assets(self, source_dir: Path, only_filenames: set[str] | None = None) -> list[dict[str, Any]]:
         assets: list[dict[str, Any]] = []
         grouped_indexes: dict[str, list[int]] = {}
 
-        for entry in sorted(source_dir.iterdir()):
-            if not entry.is_file():
-                continue
-            if entry.name.startswith("."):
-                continue
-            if entry.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
-            if only_filenames is not None and entry.name.strip().lower() not in only_filenames:
-                continue
-
+        for entry in self._flat_source_images(source_dir, only_filenames):
             asset = self._parse_asset(entry)
             assets.append(asset)
 
@@ -816,15 +819,7 @@ class IdarrRunner:
         """
         assets: list[dict[str, Any]] = []
 
-        for entry in sorted(source_dir.iterdir()):
-            if not entry.is_file():
-                continue
-            if entry.name.startswith("."):
-                continue
-            if entry.suffix.lower() not in IMAGE_EXTENSIONS:
-                continue
-            if only_filenames is not None and entry.name.strip().lower() not in only_filenames:
-                continue
+        for entry in self._flat_source_images(source_dir, only_filenames):
             assets.append(self._parse_asset_no_season_hint(entry))
 
         if only_filenames is None:
@@ -3139,30 +3134,26 @@ class IdarrRunner:
         else:
             dirs_to_scan = [source_dir]
         for scan_dir in dirs_to_scan:
-            try:
-                for entry in scan_dir.iterdir():
-                    if entry.is_file() and not entry.name.startswith(".") and entry.suffix.lower() in UNSUPPORTED_IMAGE_EXTENSIONS:
-                        result.append(entry)
-            except Exception:
-                pass
+            result.extend(
+                Path(entry.path)
+                for entry in iter_file_entries(scan_dir, UNSUPPORTED_IMAGE_EXTENSIONS, recursive=False)
+                if not entry.name.startswith(".")
+            )
         return result
 
     def _remove_non_images(self, source_dir: Path, dry_run: bool) -> tuple[int, int]:
         removed_count = 0
         skipped_count = 0
 
-        for entry in source_dir.iterdir():
-            if not entry.is_file():
-                continue
-
-            if entry.suffix.lower() in IMAGE_EXTENSIONS:
+        for entry in iter_file_entries(source_dir, recursive=False, strict=True):
+            if Path(entry.name).suffix.lower() in IMAGE_EXTENSIONS:
                 continue
 
             if dry_run:
                 skipped_count += 1
                 continue
 
-            entry.unlink(missing_ok=True)
+            Path(entry.path).unlink(missing_ok=True)
             removed_count += 1
 
         return removed_count, skipped_count
@@ -3659,8 +3650,8 @@ class IdarrRunner:
     def _prune_inactive_cache_keys_for_source(self, source_dir: Path, active_keys: set[str]) -> dict[str, int]:
         source_files = {
             entry.name
-            for entry in source_dir.iterdir()
-            if entry.is_file() and not entry.name.startswith(".")
+            for entry in iter_file_entries(source_dir, recursive=False, strict=True)
+            if not entry.name.startswith(".")
         }
         if not source_files:
             return {"removed_cache": 0, "removed_pending": 0}
@@ -4417,8 +4408,8 @@ class IdarrRunner:
             # a top-level listing would see none of them and prune the whole scope.
             current_files = {
                 entry.name
-                for entry in source_dir.rglob("*")
-                if entry.is_file() and not entry.name.startswith(".")
+                for entry in iter_file_entries(source_dir)
+                if not entry.name.startswith(".")
             }
         except Exception as exc:
             log_warning(LogTags.IDARR, f"Failed to list source directory for orphan prune: {exc}")
