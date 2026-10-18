@@ -1018,6 +1018,21 @@
   font-weight: 500;
 }
 
+/* Original-language ask: the title's TMDB language, shown above the notes */
+.request-original-language {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #80cbc4;
+  margin-top: 0.5rem;
+}
+
+.request-original-language + .request-notes {
+  margin-top: 0.25rem;
+}
+
 .request-notes {
   font-size: 0.82rem;
   color: #bbb;

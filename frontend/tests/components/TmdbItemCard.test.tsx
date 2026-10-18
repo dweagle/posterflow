@@ -47,7 +47,7 @@ describe('TmdbItemCard description with hideTitle', () => {
   afterEach(() => { cleanup() })
 
   it('shows a lazily fetched description when the item carried none', async () => {
-    mockedOverview.mockResolvedValue({ overview: 'A fetched synopsis.', poster_url: null })
+    mockedOverview.mockResolvedValue({ overview: 'A fetched synopsis.', poster_url: null, original_language: 'en' })
     const { container } = mount()
 
     expect(await screen.findByText('A fetched synopsis.')).toBeTruthy()
@@ -204,6 +204,36 @@ describe('TmdbItemCard gallery sources', () => {
     const badge = container.querySelector('.tmdb-gallery-origin-badge')
     expect(badge?.textContent).toBe('The Avengers')
     expect(badge?.getAttribute('title')).toBe('From The Avengers')
+  })
+
+  it('opens the gallery in the host\'s default language', async () => {
+    mockedTmdbImages.mockResolvedValue({ posters: [], backdrops: [], logos: [] })
+    const { container } = render(
+      <TmdbItemCard item={item({ tmdb_id: 153312, media_type: 'tv' })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview defaultGalleryLanguage="all" />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+
+    await waitFor(() => expect(mockedTmdbImages).toHaveBeenCalledWith(153312, 'tv', 'all'))
+    const select = container.querySelector<HTMLSelectElement>('.tmdb-gallery-lang-select')
+    expect(select?.value).toBe('all')
+  })
+
+  it('lights up the badges of the highlighted language', async () => {
+    const poster = (file_path: string, language: string | null) =>
+      ({ file_path, width: 680, height: 1000, language, vote_average: 0, url_thumb: `https://x${file_path}`, url_full: `https://x${file_path}` })
+    mockedTmdbImages.mockResolvedValue({ posters: [poster('/ko.jpg', 'ko'), poster('/en.jpg', 'en'), poster('/tl.jpg', null)], backdrops: [], logos: [] })
+    const { container } = render(
+      <TmdbItemCard item={item({ tmdb_id: 93405, media_type: 'tv' })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview highlightLanguage="ko" />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+
+    await waitFor(() => expect(container.querySelectorAll('.tmdb-gallery-lang').length).toBe(3))
+    const lit = container.querySelectorAll('.tmdb-gallery-lang--original')
+    expect(lit.length).toBe(1)
+    expect(lit[0].textContent).toBe('KO')
+    expect(lit[0].getAttribute('title')).toBe('Original language')
   })
 
   it('only lists sources that can be asked', async () => {

@@ -1,8 +1,10 @@
 import { ReactNode } from 'react'
-import { ExternalLink, ImageOff, Upload } from 'lucide-react'
+import { ExternalLink, ImageOff, Languages, Upload } from 'lucide-react'
 import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
 import { type PosterAvailability, type TmdbSearchResult } from '../../api/makerTools'
+import { useOriginalLanguage } from '../../hooks/useCardOverview'
 import { formatMediumDateTime } from '../../utils/datetime'
+import { languageName } from '../../utils/language'
 
 export type CardMediaType = 'movie' | 'show' | 'season' | 'collection' | 'person'
 
@@ -117,6 +119,9 @@ export default function RequestItemCard({
   const tmdbLink = tmdbLinkFor(mediaType, tmdbId)
   const tvdbLink = tvdbLinkFor(tvdbId)
   const tmdbMediaType = mediaType === 'movie' ? 'movie' : mediaType === 'collection' ? 'collection' : 'tv'
+  // Only an original-language ask needs the title's language; it rides the cached details read.
+  const originalLanguageCode = useOriginalLanguage(tmdbId, tmdbMediaType, !!originalLanguage)
+  const originalLanguageName = languageName(originalLanguageCode)
   const cardItem: TmdbSearchResult = {
     tmdb_id: tmdbId ?? 0,
     media_type: tmdbMediaType,
@@ -191,6 +196,12 @@ export default function RequestItemCard({
             </div>
           )}
           {infoLines}
+          {originalLanguage && originalLanguageName && (
+            <div className="request-original-language" title="The title's original language on TMDB">
+              <Languages size={12} />
+              <span>Original language: {originalLanguageName}</span>
+            </div>
+          )}
           {notes && <div className="request-notes">{notes}</div>}
           <div className="request-timestamp">{formatMediumDateTime(createdAt)}</div>
         </div>
@@ -205,6 +216,8 @@ export default function RequestItemCard({
                 posterAvailability={posterAvailability}
                 posterAvailabilityChecked={posterAvailabilityChecked}
                 collapseSignal={collapseSignal}
+                defaultGalleryLanguage={originalLanguage ? 'all' : undefined}
+                highlightLanguage={originalLanguage ? originalLanguageCode : null}
                 hidePoster
                 hideTitle
                 hideOverview

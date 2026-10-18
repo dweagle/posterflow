@@ -1971,6 +1971,8 @@ class TmdbOverview(BaseModel):
     overview: str = ""
     # Public CDN poster from the same details response
     poster_url: Optional[str] = None
+    # ISO 639-1 code from the same details response (movies and TV; collections carry none)
+    original_language: Optional[str] = None
 
 
 @router.get("/tmdb/overview", response_model=TmdbOverview)
@@ -1997,6 +1999,7 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
     return TmdbOverview(
         overview=str(data.get("overview") or ""),
         poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path.startswith("/") else None,
+        original_language=str(data.get("original_language") or "").strip().lower() or None,
     )
 
 

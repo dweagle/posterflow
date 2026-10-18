@@ -194,13 +194,17 @@ export type TmdbItemCardProps = {
   galleryPortalId?: string
   /** Bump this (e.g. when the parent request is completed) to auto-close the image gallery. */
   collapseSignal?: number
+  /** Gallery language on first open (a TMDB_IMAGE_LANGUAGES value). Undefined → English + Textless. */
+  defaultGalleryLanguage?: string
+  /** ISO 639-1 code whose per-image language badges light up (a request's original-language ask). */
+  highlightLanguage?: string | null
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal, idarrDrop = true }: TmdbItemCardProps) {
+export default function TmdbItemCard({ item, posterAvailability, posterAvailabilityChecked, psdConfig: psdConfigProp, posterStyle, hidePoster, hideTitle, hideOverview, galleryPortalId, collapseSignal, defaultGalleryLanguage, highlightLanguage, idarrDrop = true }: TmdbItemCardProps) {
   const dropTarget = useIdarrDrop({ enabled: idarrDrop })
   const { showToast } = useToast()
 
@@ -223,7 +227,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const galleryImages = imagesBySource[imageSource] ?? (galleryEmptyFallback ? EMPTY_IMAGES : null)
   const galleryLoading = loadingSource === imageSource
   const [activeGalleryTab, setActiveGalleryTab] = useState<'posters' | 'backdrops' | 'logos' | 'season-posters'>('posters')
-  const [galleryLanguage, setGalleryLanguage] = useState('en+textless')
+  const [galleryLanguage, setGalleryLanguage] = useState(defaultGalleryLanguage ?? 'en+textless')
   const [galleryPreview, setGalleryPreview] = useState<TmdbImage | null>(null)
   const [galleryPreviewIsLogo, setGalleryPreviewIsLogo] = useState(false)
   // remember what the previewed image is, so its Download button
@@ -757,6 +761,18 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       ? 'aired'
       : null
 
+  // Per-image language chip: TL for textless, else the code; the highlighted language lights up.
+  const langBadge = (language: string | null | undefined) => {
+    if (language === null) return <span className="tmdb-gallery-lang">TL</span>
+    if (!language) return null
+    const match = !!highlightLanguage && language.toLowerCase() === highlightLanguage.toLowerCase()
+    return (
+      <span className={`tmdb-gallery-lang${match ? ' tmdb-gallery-lang--original' : ''}`} title={match ? 'Original language' : undefined}>
+        {language.toUpperCase()}
+      </span>
+    )
+  }
+
   const galleryTabs: Array<{ id: 'posters' | 'backdrops' | 'logos' | 'season-posters'; label: string; count: number | null }> =
     galleryImages
       ? [
@@ -1240,12 +1256,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                     </div>
                                     <div className="tmdb-gallery-item-meta">
                                       <div className="tmdb-gallery-meta-row">
-                                        {img.language === null
-                                          ? <span className="tmdb-gallery-lang">TL</span>
-                                          : img.language
-                                            ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
-                                            : null
-                                        }
+                                        {langBadge(img.language)}
                                         <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
                                         <button
                                           type="button"
@@ -1331,12 +1342,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                         </div>
                         <div className="tmdb-gallery-item-meta">
                           <div className="tmdb-gallery-meta-row">
-                            {img.language === null
-                              ? <span className="tmdb-gallery-lang">TL</span>
-                              : img.language
-                                ? <span className="tmdb-gallery-lang">{img.language.toUpperCase()}</span>
-                                : null
-                            }
+                            {langBadge(img.language)}
                             <span className="tmdb-gallery-dims">{img.width}×{img.height}</span>
                             <button
                               type="button"
@@ -1405,7 +1411,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               alt="Preview"
             />
             <div className="tmdb-gallery-lightbox-actions">
-              {galleryPreview.language && <span className="tmdb-gallery-lang">{galleryPreview.language.toUpperCase()}</span>}
+              {galleryPreview.language && langBadge(galleryPreview.language)}
               <span className="tmdb-gallery-dims">{galleryPreview.width}×{galleryPreview.height}</span>
               <button
                 type="button"

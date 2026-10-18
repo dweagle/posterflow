@@ -807,6 +807,32 @@ def test_tmdb_tv_details_returns_seasons(client, test_db):
     assert s2["poster_url"] is None
 
 
+def test_overview_carries_the_original_language(client, test_db):
+    """The request card shows a title's original language next to an original-language ask."""
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"overview": "Seoul.", "poster_path": "/p.jpg", "original_language": "KO"}
+
+    with patch("api.maker_tools.requests.get", return_value=resp):
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=1&media_type=tv").json()
+
+    assert data["original_language"] == "ko"
+    assert data["poster_url"] == "https://image.tmdb.org/t/p/w185/p.jpg"
+
+
+def test_overview_without_an_original_language_returns_none(client, test_db):
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"overview": "A collection."}
+
+    with patch("api.maker_tools.requests.get", return_value=resp):
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=2&media_type=collection").json()
+
+    assert data["original_language"] is None
+
+
 # --- TMDB response cache -----------------------------------------------------------------
 # A list view mounts ~50 cards, each fetching details + an overview, and revisiting the page
 # used to repeat every one of them.

@@ -212,13 +212,14 @@ export interface TmdbTvDetails {
 export interface TmdbCardMeta {
   overview: string
   poster_url: string | null
+  original_language: string | null   // ISO 639-1; null for collections
 }
 
 export const getTmdbOverview = async (tmdb_id: number, media_type: string): Promise<TmdbCardMeta> => {
-  const data = await getData<{ overview: string; poster_url?: string | null }>(
+  const data = await getData<{ overview: string; poster_url?: string | null; original_language?: string | null }>(
     `/api/maker-tools/tmdb/overview?tmdb_id=${tmdb_id}&media_type=${encodeURIComponent(media_type)}`,
   )
-  return { overview: data.overview ?? '', poster_url: data.poster_url ?? null }
+  return { overview: data.overview ?? '', poster_url: data.poster_url ?? null, original_language: data.original_language ?? null }
 }
 
 /**
