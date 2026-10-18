@@ -118,6 +118,22 @@ class TestVerdicts:
         assert "[Sonarr] RIPLEY" in verdicts[0]["message"]
         assert "year_mismatch" not in [v["code"] for v in verdicts]
 
+    def test_collection_with_only_film_posters_asks_for_a_collection_poster(self):
+        films = [_candidate(title="Shaft", year=y, type="movies", tvdb_id=None, tmdb_id=t, matched=False,
+                            reason=YEAR_MISMATCH, found_by="title", files=[f"Shaft ({y}) {{tmdb-{t}}}.jpg"])
+                 for y, t in ((1971, 482), (2000, 479), (2019, 486131))]
+        report = _base_report(candidates={"considered": 107, "shown": 3, "omitted": 0, "id_pool": 0, "items": films})
+        report["item"].update({"media_type": "collections", "title": "Shaft", "year": None, "tvdb_id": None, "tmdb_id": 495})
+        report["library"]["records"] = [{"instance": "Plex (Movies)", "title": "Shaft", "year": None, "folder": None,
+                                         "folder_has_year": False, "tmdb_id": None, "tvdb_id": None, "imdb_id": None,
+                                         "monitored": None, "status": None, "available": None,
+                                         "alternate_titles": ["Shaft Collection"], "seasons_with_episodes": []}]
+        report["library"]["effective_ids"] = {"tmdb_id": 495, "tvdb_id": None, "imdb_id": None}
+        verdicts = _build_verdicts(report)
+        assert verdicts[0]["code"] == "no_collection_poster" and verdicts[0]["level"] == "problem"
+        assert "Shaft (2000)" in verdicts[0]["message"] and "'Shaft Collection'" in verdicts[0]["message"]
+        assert "year_mismatch" not in [v["code"] for v in verdicts]
+
     def test_no_candidates_reports_not_found(self):
         verdicts = _build_verdicts(_base_report())
         assert verdicts[0]["code"] == "no_poster_found"
@@ -849,6 +865,19 @@ class TestPlacedFolder:
         _write(tmp_path / "Wonder Man (2026) {tvdb-428629}", "poster.jpg")
         assert self._report(tmp_path, monkeypatch, _placed_item(artwork_type="logo")) is None
 
+    def test_collection_skips_the_same_named_film_folder(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Shaft (2000) {tmdb-479}", "poster.jpg")
+        item = _placed_item(media_type="collections", title="Shaft", year=None, tmdb_id=495, tvdb_id=None)
+        assert self._report(tmp_path, monkeypatch, item) is None
+
+    def test_collection_folder_is_found_under_either_name_and_ignores_tags(self, tmp_path, monkeypatch):
+        _write(tmp_path / "Shaft (2000) {tmdb-479}", "poster.jpg")
+        _write(tmp_path / "Shaft Collection {tmdb-479}", "poster.jpg")
+        item = _placed_item(media_type="collections", title="Shaft", year=None, tmdb_id=495, tvdb_id=None)
+        placed = self._report(tmp_path, monkeypatch, item)
+        assert placed["name"] == "Shaft Collection {tmdb-479}" and placed["type"] == "collections"
+        assert placed["matched"] is True and placed["id_conflicts"] == []
+
 
 class TestPlacedVerdicts:
     def _report_with(self, placed: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
@@ -999,3 +1028,36 @@ class TestBuildPlumbing:
                                               {"tmdb_id": None, "tvdb_id": 5, "imdb_id": None})
         assert result["servers"][0]["error"] == "Jellyfin hiccup"
         assert result["error"].startswith("Media server lookup failed")
+
+
+class TestExcludedByFilter:
+    def _scan(self):
+        asset = {"type": "movies", "title": "Other Film", "year": 1999, "tmdb_id": 1, "normalized_title": "otherfilm",
+                 "files": ["/d/a/Other Film (1999) {tmdb-1}.jpg"], "season_numbers": []}
+        index = create_new_empty_index()
+        build_search_index(index, asset["title"], asset)
+        drives = [{"name": "DriveA", "style_type": "CL2K", "local_path": "/d/a", "last_synced": None, "missing": False}]
+        return drives, index, [asset], None
+
+    def test_unmonitored_filter_only_drops_movies_and_series_reporting_false(self, test_db, monkeypatch):
+        from services.unmatched_assets import UnmatchedAssetsService
+        monkeypatch.setattr(UnmatchedAssetsService, "_get_bool_setting",
+                            lambda self, key, default=False: key == "unmatched_ignore_unmonitored")
+        monkeypatch.setattr(UnmatchedAssetsService, "_get_list_setting", lambda self, key: [])
+        monkeypatch.setattr(match_report, "_scan_source_drives", lambda db, **kw: self._scan())
+
+        collection = {"type": "collections", "instance": "Plex (Movies)", "title": "Shaft", "year": None,
+                      "tmdb_id_ref": 495, "monitored": None, "normalized_title": "shaft",
+                      "alternate_titles": ["Shaft Collection"], "normalized_alternate_titles": ["shaftcollection"]}
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [collection])
+        item = {"media_type": "collections", "title": "Shaft", "year": None, "tmdb_id": 495,
+                "tvdb_id": None, "imdb_id": None, "missing_seasons": []}
+        assert build_match_report(test_db, item)["library"]["excluded_by"] == []
+
+        movie = {"type": "movies", "instance": "Radarr", "title": "Shaft", "year": 2000, "folder": "/m/Shaft (2000)",
+                 "tmdb_id": 479, "imdb_id": None, "monitored": False, "normalized_title": "shaft",
+                 "alternate_titles": [], "normalized_alternate_titles": []}
+        monkeypatch.setattr(match_report, "_fetch_library_records", lambda db, item: [movie])
+        item = {"media_type": "movies", "title": "Shaft", "year": 2000, "tmdb_id": 479,
+                "tvdb_id": None, "imdb_id": None, "missing_seasons": []}
+        assert build_match_report(test_db, item)["library"]["excluded_by"] == ["unmonitored filter (item is unmonitored)"]

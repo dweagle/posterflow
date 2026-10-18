@@ -823,11 +823,11 @@ def _placed_folder_report(
     destination = get_poster_destination(db)
     if not os.path.isdir(destination):
         return None
-    wanted = {
-        _norm_title(t)
-        for t in [item.get("title"), *(media.get("alternate_titles") or []), *folder_names]
-        if t
-    }
+    is_collection = item["media_type"] == "collections"
+    titles = [item.get("title"), *(media.get("alternate_titles") or []), *folder_names]
+    if is_collection:
+        titles += collection_title_variants(item.get("title") or "")
+    wanted = {_norm_title(t) for t in titles if t}
     wanted.discard("")
 
     def shares_id(text: str) -> bool:
@@ -869,6 +869,8 @@ def _placed_folder_report(
                 parsed = parse_folder_group(entry.path, entry.name, files)
             except ValueError:
                 continue
+            if is_collection and parsed.get("type") != "collections":
+                continue  # a same-named film's folder is not this collection's poster
             found.append((2 if by_id else 1, entry.name, parsed))
     else:
         layout = "flat"
@@ -887,6 +889,8 @@ def _placed_folder_report(
             try:
                 parsed = parse_file_group(destination, base, sorted(files))
             except ValueError:
+                continue
+            if is_collection and parsed.get("type") != "collections":
                 continue
             found.append((2 if by_id else 1, base, parsed))
     if not found:
@@ -927,7 +931,8 @@ def _placed_folder_report(
         "reason": reason or "",
         "retrievable": retrieved_by is not None,
         "retrieved_by": retrieved_by,
-        "id_conflicts": [
+        # Collection posters match on title only, so a tag on their folder is never a conflict.
+        "id_conflicts": [] if is_collection else [
             key for key in ("tmdb_id", "tvdb_id", "imdb_id")
             if placed_ids.get(key) and effective_ids.get(key) and str(placed_ids[key]) != str(effective_ids[key])
         ],
@@ -1015,7 +1020,9 @@ def build_match_report(
         ignore_roots = service._get_list_setting("unmatched_ignore_root_folders")
         if service._matches_ignored_root(records[0].get("root_folder"), ignore_roots):
             excluded_by.append(f"root folder filter ({records[0].get('root_folder')})")
-        if service._get_bool_setting("unmatched_ignore_unmonitored", default=False) and not records[0].get("monitored"):
+        # Same rule as detection: only movies/series that report monitored=False are dropped.
+        if (media_type != "collections" and records[0].get("monitored") is False
+                and service._get_bool_setting("unmatched_ignore_unmonitored", default=False)):
             excluded_by.append("unmonitored filter (item is unmonitored)")
 
     report["library"] = {
@@ -1433,7 +1440,20 @@ def _build_verdicts(report: Dict[str, Any]) -> List[Dict[str, str]]:
                     "poster. If the ID cross-check above also disagrees with the library's ids, the "
                     "library record is the side that is remapped.")
         elif best["reason"] == YEAR_MISMATCH:
-            if best.get("year") is None and item["media_type"] != "collections":
+            if item["media_type"] == "collections":
+                films = ", ".join(
+                    f"{c.get('title')} ({c.get('year')})" for c in candidates
+                    if c.get("reason") == YEAR_MISMATCH and c.get("year")
+                )
+                variants = collection_title_variants(item.get("title") or "")
+                suggested = next((v for v in variants if v.lower().endswith(" collection")), item.get("title"))
+                scanned = len([d for d in drives.get("scanned", []) if not d.get("missing")])
+                add("problem", "no_collection_poster",
+                    f"No collection poster for this title was found on the {scanned} subscribed drive(s). "
+                    f"The only posters with this title are the individual films ({films}). A collection "
+                    f"poster has no year, so those cannot stand in for it. Make or request one named "
+                    f"'{suggested}', or add this collection to the unmatched ignore list.")
+            elif best.get("year") is None:
                 add("problem", "yearless_poster",
                     "A poster with this title has no '(Year)' in its filename. Without a year, "
                     "Posterflow can't confirm it is the same item (and treats yearless posters as "
