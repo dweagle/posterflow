@@ -492,6 +492,28 @@ describe('CommunityRequestModal', () => {
       )
     })
 
+    it('submits a person picked from the fallback results as its own request, never as a season', async () => {
+      // Person 500 is not the show with TMDB id 500: the pick must not become a season request for it.
+      mockSearchUnmatchedTmdb.mockImplementation(async ({ type }: { type: string }) => (
+        type === 'person'
+          ? { candidates: [{ tmdb_id: 500, title: 'Tom Cruise', year: null, media_type: 'person', poster_url: null, imdb_id: null, tvdb_id: null }] }
+          : { candidates: [
+              { tmdb_id: 500, title: 'Some Show', year: 2020, media_type: 'show', poster_url: null, imdb_id: null, tvdb_id: null },
+              { tmdb_id: 501, title: 'Some Show Too', year: 2021, media_type: 'show', poster_url: null, imdb_id: null, tvdb_id: null },
+            ] }
+      ))
+      mockDiscordAuth = { ...mockDiscordAuth, isConnected: true, username: 'testuser', token: 'test-discord-token' }
+      const user = userEvent.setup()
+      renderModal({ title: 'Some Show', year: 2020, tmdbType: 'show', seasonNumbers: [1, 2], tmdbApiKeyConfigured: true })
+      await user.click(await screen.findByRole('button', { name: /tom cruise/i }))
+      await user.click(screen.getByRole('button', { name: 'CL2K' }))
+      await user.click(screen.getByRole('button', { name: /request poster/i }))
+      await waitFor(() => expect(mockSubmitCommunityRequest).toHaveBeenCalledOnce())
+      const payload = mockSubmitCommunityRequest.mock.calls[0][0]
+      expect(payload).toMatchObject({ tmdb_id: 500, media_type: 'person', title: 'Tom Cruise', year: null, season_number: null })
+      expect(payload.notes ?? '').not.toContain('Seasons:')
+    })
+
     it('stacks both flags on a collection request', async () => {
       const user = userEvent.setup()
       renderModal({ title: 'Alien Collection', year: null, tmdbType: 'collection' })

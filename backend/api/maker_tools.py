@@ -1586,7 +1586,10 @@ def _matches_media_type(file_name: str, media_type: str) -> bool:
     Movie and TV TMDB IDs are independent — the same number can exist in both.
     TV files always carry a {tvdb-} tag or a season marker; movie files don't.
     Collections have no reliable marker so we accept them unconditionally.
+    People are their own id namespace and drive files are never attributed to one.
     """
+    if media_type == "person":
+        return False
     if not media_type or media_type == "collection":
         return True
     is_tv = _is_tv_filename(file_name)
@@ -1598,7 +1601,7 @@ class PosterCheckItem(BaseModel):
     tvdb_id: int = 0      # a show TMDB doesn't carry is keyed and matched by this instead
     title: str
     year: str = ""
-    media_type: str = ""  # "movie" | "tv" | "collection"
+    media_type: str = ""  # "movie" | "tv" | "collection" ("person" never matches)
 
     # Cards send whatever the item carries, so a missing id arrives as null.
     @field_validator("tmdb_id", "tvdb_id", mode="before")
@@ -1841,12 +1844,13 @@ def _collection_member_logos(collection_id: int, api_key: str, img_lang: str | N
 
 @router.get("/tmdb/images", response_model=TmdbImagesResponse)
 def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session = Depends(get_db)) -> TmdbImagesResponse:
-    """Fetch available posters, backdrops, and logos for a TMDB item."""
+    """Fetch available posters, backdrops, and logos for a TMDB item. A person has only
+    profile photos; they come back as posters."""
     import re
 
     mt = str(media_type or "").strip().lower()
-    if mt not in ("movie", "tv", "collection"):
-        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+    if mt not in ("movie", "tv", "collection", "person"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, collection, or person")
 
     # Validate language: ISO 639-1/2 code (2-3 lowercase alpha) or "all"
     lang = str(language or "en+textless").strip().lower()
@@ -1865,6 +1869,11 @@ def tmdb_images(tmdb_id: int, media_type: str, language: str = "en", db: Session
 
     # Galleries get reopened; artwork lists barely move minute to minute.
     data = _tmdb_get_json(url, params, "images", cache_ttl=_TMDB_DETAIL_TTL)
+
+    if mt == "person":
+        posters = _build_tmdb_images(data.get("profiles", []))
+        posters.sort(key=lambda x: (0 if x.language is None else 1, -x.vote_average))
+        return TmdbImagesResponse(posters=posters, backdrops=[], logos=[], season_posters=None)
 
     posters = _build_tmdb_images(data.get("posters", []))
     backdrops = _build_tmdb_images(data.get("backdrops", []), size_thumb="w780")
@@ -1984,8 +1993,8 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
     fetch a description for thousands of items.
     """
     mt = str(media_type or "").strip().lower()
-    if mt not in ("movie", "tv", "collection"):
-        raise HTTPException(status_code=400, detail="media_type must be movie, tv, or collection")
+    if mt not in ("movie", "tv", "collection", "person"):
+        raise HTTPException(status_code=400, detail="media_type must be movie, tv, collection, or person")
 
     api_key = _get_monitor_tmdb_key(db)
     if not api_key:
@@ -1995,9 +2004,10 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
                           {"api_key": api_key, "language": "en-US"}, "overview",
                           cache_ttl=_TMDB_OVERVIEW_TTL)
     response.headers["Cache-Control"] = "public, max-age=86400"
-    poster_path = str(data.get("poster_path") or "").strip()
+    # A person record has a biography and a profile photo instead of an overview and poster.
+    poster_path = str(data.get("poster_path") or data.get("profile_path") or "").strip()
     return TmdbOverview(
-        overview=str(data.get("overview") or ""),
+        overview=str(data.get("overview") or data.get("biography") or ""),
         poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path.startswith("/") else None,
         original_language=str(data.get("original_language") or "").strip().lower() or None,
     )
@@ -3380,15 +3390,28 @@ def _export_season(stem: str) -> int | None:
     return 0 if m.group(2) else int(m.group(1))
 
 
+def _export_looks_like_person(stem: str) -> bool:
+    """A person export is "Name {tmdb-N}": no year, no tvdb/imdb tag, no season suffix. Movie and
+    TV exports always carry a year (and usually an imdb/tvdb tag)."""
+    lower = stem.lower()
+    return (year_regex.search(stem) is None and "{tvdb-" not in lower and "{imdb-" not in lower
+            and _export_season(stem) is None)
+
+
 def _export_match(stem: str, *, tmdb_id: int | None, tvdb_id: int | None, title: str,
-                  year: int | None, seasons: set[int]) -> str | None:
+                  year: int | None, seasons: set[int], media_type: str = "") -> str | None:
     """'exact' when the file is the requested item in a requested slot (one of `seasons`, or the
     plain poster when none), 'item' when it is the same title in another slot, None otherwise.
-    Id tags decide; untagged files fall back to title + year."""
+    Id tags decide; untagged files fall back to title + year. TMDB ids are per namespace, so a
+    person request only id-matches a person-looking file and a movie/show request never does."""
     file_tmdb, file_tvdb, _ = extract_ids(stem)
     if file_tmdb or file_tvdb:
         same = ((tmdb_id is not None and file_tmdb == tmdb_id)
                 or (tvdb_id is not None and file_tvdb == tvdb_id))
+        if same and media_type == "person":
+            same = _export_looks_like_person(stem)
+        elif same and media_type in ("movie", "show", "season"):
+            same = not _export_looks_like_person(stem)
     else:
         want = normalize_titles(title or "")
         same = bool(want) and normalize_titles(_EXPORT_TAIL_RE.sub("", stem)) == want
@@ -3424,13 +3447,15 @@ def _list_export_files(root: Path, source: str) -> list[dict]:
 
 @router.get("/poster-exports")
 def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, title: str = "",
-                        year: int | None = None, seasons: str = "",
+                        year: int | None = None, seasons: str = "", media_type: str = "",
                         db: Session = Depends(get_db)) -> JSONResponse:
     """Finished exports on the server for the request upload picker: every configured export
     folder, newest first, each file tagged with how it relates to the request. `seasons` is a
     comma list of requested season numbers (0 = Specials); empty means the plain poster.
-    Blocking FS work, so sync on purpose."""
+    `media_type` is the request's (movie/show/season/collection/person) and keeps an id match
+    inside its TMDB namespace. Blocking FS work, so sync on purpose."""
     wanted = {int(part) for part in seasons.split(",") if part.strip().isdigit()}
+    mt = str(media_type or "").strip().lower()
     folders: list[dict] = []
     files: list[dict] = []
     for source, folder in _export_picker_roots(db):
@@ -3444,7 +3469,8 @@ def list_poster_exports(tmdb_id: int | None = None, tvdb_id: int | None = None, 
     for f in files:
         stem = Path(f["name"]).stem
         f["season"] = _export_season(stem)
-        f["match"] = _export_match(stem, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title, year=year, seasons=wanted)
+        f["match"] = _export_match(stem, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title, year=year,
+                                   seasons=wanted, media_type=mt)
     return JSONResponse({"folders": folders, "files": files, "truncated": truncated})
 
 

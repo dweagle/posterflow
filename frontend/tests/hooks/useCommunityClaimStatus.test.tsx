@@ -85,6 +85,17 @@ describe('useCommunityClaimStatus per-style statuses', () => {
     expect(result.current.getStatus(crucifix)).toBeNull()
   })
 
+  it('keeps a person request out of the show and movie keys that share its TMDB id', async () => {
+    const { result } = await renderWithData({
+      requests: [request({ tmdb_id: 500, media_type: 'person', title: 'Tom Cruise', year: null, status: 'in_progress' })],
+    })
+    const show = { tmdb_id: 500, media_type: 'show', title: 'Some Show', year: 2020 }
+    expect(result.current.getStatus(show)).toBeNull()
+    expect(result.current.getStatus({ tmdb_id: 500, media_type: 'movie', title: 'Reservoir Dogs', year: 1992 })).toBeNull()
+    expect(result.current.getOverlap(show)).toEqual({ onList: false, requested: false })
+    expect(result.current.getStatus({ tmdb_id: 500, media_type: 'person', title: 'Tom Cruise' })).toEqual({ CL2K: 'in_progress' })
+  })
+
   it('keeps getOverlap style-blind for the community board chips', async () => {
     const { result } = await renderWithData({ requests: [request({ status: 'pending' })] })
     expect(result.current.getOverlap(crucifix)).toEqual({ onList: false, requested: true })

@@ -12,7 +12,7 @@ vi.mock('../../src/api/client', async (importOriginal) => ({
 vi.mock('../../src/components/maker-tools/TmdbItemCard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/components/maker-tools/TmdbItemCard')>()),
   default: (props: TmdbItemCardProps) => (
-    <div data-testid="maker-panel" data-gallery-language={props.defaultGalleryLanguage ?? ''} data-highlight-language={props.highlightLanguage ?? ''} />
+    <div data-testid="maker-panel" data-media-type={props.item.media_type} data-gallery-language={props.defaultGalleryLanguage ?? ''} data-highlight-language={props.highlightLanguage ?? ''} />
   ),
 }))
 
@@ -72,6 +72,14 @@ describe('RequestItemCard original language', () => {
 
     expect(screen.queryByText(/Original language/)).toBeNull()
     expect(mockedOverview).not.toHaveBeenCalled()
+  })
+
+  it('hands the maker panel a person in its own TMDB namespace, not the show with that id', () => {
+    mount({ mediaType: 'person', title: 'Tom Cruise', year: null, tmdbId: 500, originalLanguage: false, notes: null })
+
+    expect(screen.getByTestId('maker-panel').getAttribute('data-media-type')).toBe('person')
+    expect(mockedOverview).not.toHaveBeenCalled()
+    expect((screen.getByRole('link', { name: /tmdb/i }) as HTMLAnchorElement).href).toBe('https://www.themoviedb.org/person/500')
   })
 
   it('shows nothing when TMDB has no language for the title', async () => {

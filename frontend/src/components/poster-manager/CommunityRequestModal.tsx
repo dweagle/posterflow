@@ -103,7 +103,10 @@ export default function CommunityRequestModal({
 
   // Non-blocking notice when this item was already fulfilled in the chosen style.
   // Mirrors the submit payload: 'season' only carries a number when single-season.
-  const isSeasonRequest = seasonNumbers != null && seasonNumbers.length > 0
+  // A person picked from the fallback results is its own request: never a season of the show
+  // that shares its TMDB id, and never carrying the unmatched item's year.
+  const isPersonRequest = selected?.media_type === 'person'
+  const isSeasonRequest = !isPersonRequest && seasonNumbers != null && seasonNumbers.length > 0
   const isCollectionRequest = !isSeasonRequest && (selected?.media_type ?? tmdbType) === 'collection'
   const canWantOriginalLanguage = (selected?.media_type ?? tmdbType) !== 'person'
   const alreadyMade = useAlreadyMadeWarning(
@@ -137,8 +140,8 @@ export default function CommunityRequestModal({
     if (!trimmedName || !token) return
     setSubmitting(true)
     try {
-      const isSeason = seasonNumbers != null && seasonNumbers.length > 0
-      const isMultiSeason = seasonNumbers != null && seasonNumbers.length > 1
+      const isSeason = isSeasonRequest
+      const isMultiSeason = isSeason && seasonNumbers!.length > 1
       let notesValue = notes.trim() || null
       let seasonNumber: number | null = null
       if (isSeason) {
@@ -161,7 +164,7 @@ export default function CommunityRequestModal({
         tmdb_id: selected?.tmdb_id ?? null,
         media_type: isSeason ? 'season' : (selected?.media_type ?? tmdbType),
         title: selected?.title ?? cleanTitle,
-        year: selected?.year ?? year,
+        year: isPersonRequest ? null : (selected?.year ?? year),
         season_number: seasonNumber,
         poster_path: selected?.poster_url ?? null,
         imdb_id: selected?.imdb_id ?? null,
@@ -189,7 +192,7 @@ export default function CommunityRequestModal({
     } finally {
       setSubmitting(false)
     }
-  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired, isCollectionRequest, includeCollectionMovies, canWantOriginalLanguage, wantOriginalLanguage])
+  }, [selected, submitting, effectiveName, notes, posterStyle, extraTags, pingDiscordId, token, showToast, tmdbSelectionRequired, isPersonRequest, isSeasonRequest, isCollectionRequest, includeCollectionMovies, canWantOriginalLanguage, wantOriginalLanguage])
 
   // Auto-close shortly after a successful submit. Cleared on unmount so a pending
   // close can't fire after the modal is gone (which leaked stray onClose calls into tests).

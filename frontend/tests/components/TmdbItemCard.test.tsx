@@ -121,6 +121,38 @@ describe('TmdbItemCard gallery sources', () => {
     expect(container.querySelector('.tmdb-gallery-sources')).toBeNull()   // one source → no tab row
   })
 
+  it('browses only TMDB for a person, as photos, with no TV lookups for the show sharing its id', async () => {
+    mockedTmdbImages.mockResolvedValue({
+      posters: [{ file_path: '/face.jpg', width: 1000, height: 1500, language: null, vote_average: 5, url_thumb: 'https://x/t.jpg', url_full: 'https://x/f.jpg' }],
+      backdrops: [],
+      logos: [],
+    })
+    const { container } = render(
+      <TmdbItemCard
+        item={item({ tmdb_id: 500, media_type: 'person', title: 'Tom Cruise', year: '' })}
+        psdConfig={{ ...withSources, fanartEnabled: true, appleEnabled: true }}
+        posterAvailability={[{ style: 'CL2K', seasons: [] }]}
+        posterAvailabilityChecked
+        hideTitle
+        hideOverview
+      />,
+    )
+
+    expect(screen.getByText('Person')).toBeTruthy()
+    // Drive files are never attributed to a person: neither the check nor the X.
+    expect(container.querySelector('.tmdb-poster-available')).toBeNull()
+    expect(container.querySelector('.tmdb-poster-unavailable')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Browse images/ }))
+
+    await waitFor(() => expect(container.querySelector('.tmdb-gallery-panel')).not.toBeNull())
+    expect(mockedTmdbImages).toHaveBeenCalledWith(500, 'person', expect.any(String))
+    expect(mockedTvDetails).not.toHaveBeenCalled()
+    expect(mockedTvdbImages).not.toHaveBeenCalled()
+    expect(mockedAppleImages).not.toHaveBeenCalled()
+    expect(container.querySelector('.tmdb-gallery-sources')).toBeNull()   // one source → no tab row
+    expect(screen.getByText(/Photos/)).toBeTruthy()
+  })
+
   it('shows the standalone export group when no source can be asked', () => {
     const { container } = render(
       <TmdbItemCard item={item({ tmdb_id: 0, tvdb_id: 78435 })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview />,

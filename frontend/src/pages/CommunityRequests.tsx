@@ -158,10 +158,11 @@ export default function CommunityRequests() {
     } catch { /* storage unavailable; skip persistence */ }
   }, [noMm2k])
 
-  // Fetch poster availability whenever the visible request list changes
+  // Fetch poster availability whenever the visible request list changes. Drive files are never
+  // attributed to a person, so people skip the check (their card shows neither check nor X).
   useEffect(() => {
     const items = requests
-      .filter((r) => posterCheckKey(r) != null)
+      .filter((r) => r.media_type !== 'person' && posterCheckKey(r) != null)
       .map((r) => ({
         tmdb_id: r.tmdb_id,
         tvdb_id: r.tvdb_id,

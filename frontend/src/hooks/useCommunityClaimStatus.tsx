@@ -23,8 +23,9 @@ type LookupItem = {
   year?: number | null
 }
 
+// TMDB ids are per namespace: a person never shares a key with the show or movie of the same id.
 const groupOf = (mt?: string | null): string =>
-  mt === 'movie' ? 'movie' : mt === 'collection' ? 'collection' : 'series' // show/season → series
+  mt === 'movie' ? 'movie' : mt === 'collection' ? 'collection' : mt === 'person' ? 'person' : 'series' // show/season → series
 
 const normTitle = (t?: string | null): string =>
   (t || '').toLowerCase().replace(/\s*\(\d{4}\)\s*$/, '').trim()

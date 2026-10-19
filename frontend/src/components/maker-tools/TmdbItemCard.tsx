@@ -19,10 +19,11 @@ import {
   Tag,
   Trash2,
   Tv,
+  User,
   X,
 } from 'lucide-react'
 import {
-  type TmdbSearchResult,
+  type MakerCardItem,
   type TmdbImage,
   type TmdbImagesResponse,
   type TmdbTvDetails,
@@ -179,7 +180,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
 }
 
 export type TmdbItemCardProps = {
-  item: TmdbSearchResult
+  item: MakerCardItem
   posterAvailability?: PosterAvailability
   /** True once the drive availability check has run, so "none found" can show a red X. */
   posterAvailabilityChecked?: boolean
@@ -283,7 +284,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // drops the TMDB tab rather than failing on it first.
   const tmdbUsable = hasTmdb && tvDetails?.tmdb_found !== false
   const gallerySources = useMemo<ImageSource[]>(() => {
-    if (item.media_type === 'collection') return hasTmdb ? ['tmdb'] : []   // the other three have no collection entity
+    if (item.media_type === 'collection' || item.media_type === 'person') return hasTmdb ? ['tmdb'] : []   // the other three have no collection or person entity
     const out: ImageSource[] = []
     if (tmdbUsable) out.push('tmdb')
     if (psdConfig.tvdbEnabled && (hasTvdb || (item.media_type === 'movie' && !!item.imdb_id))) out.push('tvdb')
@@ -776,7 +777,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const galleryTabs: Array<{ id: 'posters' | 'backdrops' | 'logos' | 'season-posters'; label: string; count: number | null }> =
     galleryImages
       ? [
-          { id: 'posters', label: 'Posters', count: galleryImages.posters.length },
+          { id: 'posters', label: item.media_type === 'person' ? 'Photos' : 'Posters', count: galleryImages.posters.length },
           { id: 'backdrops', label: 'Backdrops', count: galleryImages.backdrops.length },
           { id: 'logos', label: 'Logos', count: galleryImages.logos.length },
           ...(item.media_type === 'tv' ? [{ id: 'season-posters' as const, label: 'Seasons', count: null }] : []),
@@ -786,7 +787,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // Drive availability indicator shown next to "Search Drives": green check with a
   // per-style/season tooltip when posters exist, red X once a check found none.
   const hasDrivePosters = !!posterAvailability && posterAvailability.length > 0
-  const availabilityIndicator = hasDrivePosters ? (
+  // Drive files are never attributed to a person, so a person card gets neither the check nor the X.
+  const availabilityIndicator = item.media_type === 'person' ? null : hasDrivePosters ? (
     <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
       <Check size={11} />
       <span className="tmdb-poster-available-tooltip">
@@ -913,7 +915,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               ? <img src={posterUrl} alt={item.title} loading="lazy" />
               : (
                 <div className="tmdb-poster-placeholder">
-                  {item.media_type === 'movie' ? <MovieIcon size={32} /> : item.media_type === 'tv' ? <Tv size={32} /> : <FolderOpen size={32} />}
+                  {item.media_type === 'movie' ? <MovieIcon size={32} /> : item.media_type === 'tv' ? <Tv size={32} /> : item.media_type === 'person' ? <User size={32} /> : <FolderOpen size={32} />}
                 </div>
               )
             }
@@ -941,9 +943,9 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
           {/* Right side: everything actionable, at a fixed width so it's identical on every tab. */}
           <div className="tmdb-result-box">
           <div className="tmdb-result-meta">
-            <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? (isMiniseries ? 'badge-purple' : 'badge-green') : 'badge-orange'}`}>
-              {item.media_type === 'movie' ? <MovieIcon size={12} /> : item.media_type === 'tv' ? <Tv size={12} /> : <FolderOpen size={12} />}
-              {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? (isMiniseries ? 'Miniseries' : 'Series') : 'Collection'}
+            <span className={`badge ${item.media_type === 'movie' ? 'badge-blue' : item.media_type === 'tv' ? (isMiniseries ? 'badge-purple' : 'badge-green') : item.media_type === 'person' ? 'badge-purple' : 'badge-orange'}`}>
+              {item.media_type === 'movie' ? <MovieIcon size={12} /> : item.media_type === 'tv' ? <Tv size={12} /> : item.media_type === 'person' ? <User size={12} /> : <FolderOpen size={12} />}
+              {item.media_type === 'movie' ? 'Movie' : item.media_type === 'tv' ? (isMiniseries ? 'Miniseries' : 'Series') : item.media_type === 'person' ? 'Person' : 'Collection'}
             </span>
             {item.media_type === 'tv' && tvDetails && (
               <>
@@ -963,7 +965,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               </>
             )}
             {driveSearchControl}
-            <ReminderToggle kind="poster" item={item} />
+            {item.media_type !== 'person' && <ReminderToggle kind="poster" item={item} />}
           </div>
 
           <ServiceLinks item={item} appleTv={appleTv} />

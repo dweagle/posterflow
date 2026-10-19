@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import { ExternalLink, ImageOff, Languages, Upload } from 'lucide-react'
 import TmdbItemCard, { type PsdConfig } from '../maker-tools/TmdbItemCard'
-import { type PosterAvailability, type TmdbSearchResult } from '../../api/makerTools'
+import { type MakerCardItem, type PosterAvailability } from '../../api/makerTools'
 import { useOriginalLanguage } from '../../hooks/useCardOverview'
 import { formatMediumDateTime } from '../../utils/datetime'
 import { languageName } from '../../utils/language'
@@ -118,11 +118,12 @@ export default function RequestItemCard({
 }: RequestItemCardProps) {
   const tmdbLink = tmdbLinkFor(mediaType, tmdbId)
   const tvdbLink = tvdbLinkFor(tvdbId)
-  const tmdbMediaType = mediaType === 'movie' ? 'movie' : mediaType === 'collection' ? 'collection' : 'tv'
+  // A person keeps its own TMDB namespace; folding it into 'tv' hands the maker panel the show with the same id.
+  const tmdbMediaType = mediaType === 'movie' ? 'movie' : mediaType === 'collection' ? 'collection' : mediaType === 'person' ? 'person' : 'tv'
   // Only an original-language ask needs the title's language; it rides the cached details read.
   const originalLanguageCode = useOriginalLanguage(tmdbId, tmdbMediaType, !!originalLanguage)
   const originalLanguageName = languageName(originalLanguageCode)
-  const cardItem: TmdbSearchResult = {
+  const cardItem: MakerCardItem = {
     tmdb_id: tmdbId ?? 0,
     media_type: tmdbMediaType,
     title,

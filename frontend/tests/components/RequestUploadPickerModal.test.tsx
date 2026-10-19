@@ -47,7 +47,7 @@ describe('RequestUploadPickerModal', () => {
     render(<RequestUploadPickerModal request={request} onClose={vi.fn()} onPost={vi.fn()} onPickFromComputer={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Matching/ })).toBeTruthy())
-    expect(listPosterExports).toHaveBeenCalledWith({ tmdb_id: 157239, tvdb_id: null, title: 'Alien: Earth', year: 2025, seasons: [1] })
+    expect(listPosterExports).toHaveBeenCalledWith({ tmdb_id: 157239, tvdb_id: null, title: 'Alien: Earth', year: 2025, seasons: [1], media_type: 'season' })
 
     const thumbs = screen.getAllByRole('button', { name: /\.jpg$/ })
     expect(thumbs.map((b) => b.getAttribute('aria-label'))).toEqual(['Alien Earth (2025) {tmdb-157239} - Season 1.jpg', 'Alien Earth (2025) {tmdb-157239}.jpg'])

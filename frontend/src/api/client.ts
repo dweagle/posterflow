@@ -251,6 +251,7 @@ export {
   type TmdbImagesResponse,
   type TmdbSearchFilter,
   type TmdbSearchResult,
+  type MakerCardItem,
   type TmdbSearchIds,
   type TmdbSeasonInfo,
   type TmdbTvDetails,

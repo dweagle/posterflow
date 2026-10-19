@@ -6592,6 +6592,11 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   gap: 0.3rem;
 }
 
+/* A pill, not a full-width bar: the column stretches its children by default */
+.creq-candidate-info .tmdb-type-badge {
+  align-self: flex-start;
+}
+
 .creq-candidate-title {
   font-size: 0.88rem;
   font-weight: 500;

@@ -612,6 +612,32 @@ def test_tmdb_images_invalid_media_type_returns_400(client, test_db):
     assert response.status_code == 400
 
 
+def test_tmdb_images_serves_a_person_profile_photos_as_posters(client, test_db):
+    """A person request's card browses the person's photos, not the show or movie sharing its id."""
+    _seed_tmdb_key(test_db)
+    seen: list[str] = []
+
+    def fake_get(url, params=None, timeout=None):
+        seen.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"profiles": [
+            {"file_path": "/face.jpg", "width": 1000, "height": 1500, "iso_639_1": None, "vote_average": 5.0},
+        ]}
+        return resp
+
+    with patch("api.maker_tools.requests.get", side_effect=fake_get):
+        response = client.get("/api/maker-tools/tmdb/images?tmdb_id=424242&media_type=person")
+
+    assert response.status_code == 200
+    assert seen == ["https://api.themoviedb.org/3/person/424242/images"]
+    body = response.json()
+    assert [p["file_path"] for p in body["posters"]] == ["/face.jpg"]
+    assert body["backdrops"] == []
+    assert body["logos"] == []
+    assert body["season_posters"] is None
+
+
 def test_tmdb_images_no_api_key_returns_400(client):
     # No TMDB key seeded
     response = client.get("/api/maker-tools/tmdb/images?tmdb_id=1&media_type=movie&language=en")
@@ -831,6 +857,23 @@ def test_overview_without_an_original_language_returns_none(client, test_db):
         data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=2&media_type=collection").json()
 
     assert data["original_language"] is None
+
+
+def test_overview_reads_a_person_biography_and_profile_photo(client, test_db):
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"biography": "Born in Syracuse.", "profile_path": "/tc.jpg"}
+
+    with patch("api.maker_tools.requests.get", return_value=resp) as get:
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=424243&media_type=person").json()
+
+    assert get.call_args[0][0] == "https://api.themoviedb.org/3/person/424243"
+    assert data == {
+        "overview": "Born in Syracuse.",
+        "poster_url": "https://image.tmdb.org/t/p/w185/tc.jpg",
+        "original_language": None,
+    }
 
 
 # --- TMDB response cache -----------------------------------------------------------------
@@ -3566,6 +3609,21 @@ def test_poster_check_accepts_null_ids_in_the_batch(client, test_db):
     assert resp.json() == {"tmdb-111625": [{"style": "CL2K", "seasons": [1]}]}
 
 
+def test_poster_check_never_attributes_drive_files_to_a_person(client, test_db):
+    # TMDB person ids are their own namespace: person 111625 is not the show tagged {tmdb-111625},
+    # and the title fallback must not hand a person the movie file with a matching name either.
+    _seed_drive_posters(test_db, "Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 1.jpg",
+                        "Reservoir Dogs (1992) {tmdb-500}.jpg")
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tmdb_id": 111625, "title": "Dash", "year": "", "media_type": "person"},
+        {"tmdb_id": 500, "title": "Reservoir Dogs", "year": "", "media_type": "person"},
+    ]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {}
+
+
 # ---------------------------------------------------------------------------
 # Export picker (Community Requests upload)
 # ---------------------------------------------------------------------------
@@ -3643,6 +3701,38 @@ def test_poster_exports_list_tags_files_by_request(client, test_db):
         response = client.get("/api/maker-tools/poster-exports", params={"title": "Dune", "year": 1984})
         by_name = {f["name"]: f for f in response.json()["files"]}
         assert by_name[names[4]]["match"] is None
+
+
+def test_poster_exports_keep_an_id_match_inside_its_tmdb_namespace(client, test_db):
+    """Person 500 is not the movie tagged {tmdb-500}, and the other way round."""
+    names = [
+        "Reservoir Dogs (1992) {tmdb-500} {imdb-tt0105236}.jpg",
+        "Tom Cruise {tmdb-500}.jpg",
+        "Some Show (2020) {tmdb-500} {tvdb-77} - Season 1.jpg",
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _seed_export_folder(test_db, tmpdir)
+        for name in names:
+            (Path(tmpdir) / name).write_bytes(b"x")
+
+        person = client.get("/api/maker-tools/poster-exports",
+                            params={"tmdb_id": 500, "title": "Tom Cruise", "media_type": "person"})
+        by_name = {f["name"]: f for f in person.json()["files"]}
+        assert by_name[names[1]]["match"] == "exact"
+        assert by_name[names[0]]["match"] is None
+        assert by_name[names[2]]["match"] is None
+
+        movie = client.get("/api/maker-tools/poster-exports",
+                           params={"tmdb_id": 500, "title": "Reservoir Dogs", "year": 1992, "media_type": "movie"})
+        by_name = {f["name"]: f for f in movie.json()["files"]}
+        assert by_name[names[0]]["match"] == "exact"
+        assert by_name[names[1]]["match"] is None
+
+        # No type (an older client): every tagged file still matches, as before.
+        legacy = client.get("/api/maker-tools/poster-exports", params={"tmdb_id": 500})
+        by_name = {f["name"]: f for f in legacy.json()["files"]}
+        assert by_name[names[0]]["match"] == "exact"
+        assert by_name[names[1]]["match"] == "exact"
 
 
 def test_poster_exports_list_merges_folders_and_drops_duplicates(client, test_db):

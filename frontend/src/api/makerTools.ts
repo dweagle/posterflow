@@ -125,6 +125,11 @@ export interface TmdbSearchResult {
   auto_matched?: boolean
 }
 
+// A people-collection request on a maker card: the same shape in its own TMDB id namespace. Only
+// the community request cards build one; searches, artwork tools and reminders never see it.
+export type PersonCardItem = Omit<TmdbSearchResult, 'media_type'> & { media_type: 'person' }
+export type MakerCardItem = TmdbSearchResult | PersonCardItem
+
 export type TmdbSearchFilter = 'all' | 'movie' | 'tv' | 'collection'
 
 export interface TmdbSearchIds {
@@ -1056,6 +1061,7 @@ export interface PosterExportQuery {
   title?: string
   year?: number | null
   seasons?: number[]            // requested season numbers (0 = Specials); empty = the plain poster
+  media_type?: string           // the request's type; keeps an id match inside its TMDB namespace
 }
 
 /** Finished exports on the server, newest first, each tagged with how it relates to the item. */
@@ -1066,6 +1072,7 @@ export const listPosterExports = (q: PosterExportQuery): Promise<PosterExportLis
   if (q.title) params.title = q.title
   if (q.year) params.year = q.year
   if (q.seasons?.length) params.seasons = q.seasons.join(',')
+  if (q.media_type) params.media_type = q.media_type
   return getData('/api/maker-tools/poster-exports', { params })
 }
 

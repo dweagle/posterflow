@@ -97,7 +97,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
     setLoading(true)
     setError(null)
     const seasons = slots === 'all' ? [] : [...slots].filter((n): n is number => n != null)
-    listPosterExports({ tmdb_id, tvdb_id, title, year, seasons })
+    listPosterExports({ tmdb_id, tvdb_id, title, year, seasons, media_type })
       .then((res) => {
         if (cancelled) return
         const picked = autoSelect(res.files, slots)
@@ -109,7 +109,7 @@ export default function RequestUploadPickerModal({ request, action = 'discord', 
       .catch((e) => { if (!cancelled) setError(getApiErrorMessage(e, 'Failed to list exports')) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [tmdb_id, tvdb_id, title, year, slots])
+  }, [tmdb_id, tvdb_id, title, year, slots, media_type])
 
   const all = useMemo(() => sortForRequest(data?.files ?? []), [data])
   const matching = useMemo(() => all.filter((f) => f.match), [all])
