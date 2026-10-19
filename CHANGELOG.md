@@ -6,6 +6,22 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-19
+### Added
+- Maker Tools: maker cards now offer Remove Text and Make Logo buttons on image previews powered by Gemini. Render a text-free redraw of artwork or a transparent logo PNG, and Keep a result to turn it into a gallery tile ready for PSD export. Requires a Gemini API key in Settings.
+- Community Requests: moderator tools: match id-less requests, upgrade a season request to a show request, and remove any request.
+- Community Requests: original-language requests now show the language on the request card, and the original-language badge lights up.
+
+### Changed
+- Scanning: poster and artwork folders are listed without a per-file stat, fixing long "Sync All" stalls on network shares.
+- Drives: removed the Reitenth MM2K drive from the community list.
+
+### Fixed
+- Maker Tools: the gallery stays still when switching seasons or tabs, and at the bottom of the page.
+- Community Requests: person requests no longer match the show or movie that shares their TMDB id.
+- Match Report: collection rows no longer blame same-named movie folders.
+- Unmatched Assets: the Ignore Unmonitored help text stays inside the Detection Settings card.
+
 ## [0.17.4] - 2026-10-16
 ### Added
 - License: the project now ships an MIT License file, noted in the README.
