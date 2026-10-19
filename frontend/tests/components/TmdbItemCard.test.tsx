@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import TmdbItemCard, { EMPTY_PSD_CONFIG } from '../../src/components/maker-tools/TmdbItemCard'
 import { getAppleImages, getSeasonImages, getTmdbImages, getTmdbOverview, getTvDetails, getTvdbImages } from '../../src/api/client'
+import type { TmdbImagesResponse } from '../../src/api/makerTools'
 
 vi.mock('../../src/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/api/client')>()),
@@ -327,7 +328,8 @@ describe('TmdbItemCard seasons tab', () => {
     fireEvent.click(tab)
     // The auto-load skips straight to the first season that has posters.
     await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333002, 2, 'en+textless'))
-    const s1 = screen.getByRole('button', { name: 'S01' }) as HTMLButtonElement
+    // The chips arrive together with the first season's posters, in one render.
+    const s1 = await screen.findByRole('button', { name: 'S01' }) as HTMLButtonElement
     expect(s1.disabled).toBe(true)
     expect(s1.getAttribute('title')).toBe('No TMDB posters for this season')
     await waitFor(() => expect((screen.getByRole('button', { name: 'S02' }) as HTMLButtonElement).disabled).toBe(false))
@@ -339,7 +341,89 @@ describe('TmdbItemCard seasons tab', () => {
     expect(tab.disabled).toBe(false)
     fireEvent.click(tab)
     await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333003, 1, 'en+textless'))
-    expect((screen.getByRole('button', { name: 'S02' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((await screen.findByRole('button', { name: 'S02' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // A season fetch the test resolves when it wants to.
+  const deferred = () => {
+    let resolve!: (v: TmdbImagesResponse) => void
+    const promise = new Promise<TmdbImagesResponse>((r) => { resolve = r })
+    return { promise, resolve }
+  }
+  const seasonPosters = (n: number): TmdbImagesResponse => ({ posters: [{ ...tvdbPoster.posters[0], file_path: `/tmdb/s${n}.jpg` }], backdrops: [], logos: [] })
+
+  it('keeps the posters grid in view until the first season has loaded', async () => {
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    const d = deferred()
+    mockedSeasonImages.mockReturnValue(d.promise)
+    const tab = await open(333006)
+    fireEvent.click(tab)
+    await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333006, 1, 'en+textless'))
+    // Still the posters tab and grid, the Seasons tab pulsing: no chips, no loading line.
+    await waitFor(() => expect(tab.className).toContain('tmdb-gallery-tab--pending'))
+    expect(tab.className).not.toContain('active')
+    expect(screen.queryByRole('button', { name: 'S01' })).toBeNull()
+    expect(screen.queryByText('Loading posters…')).toBeNull()
+    expect(document.querySelector('.tmdb-gallery-grid--posters')).not.toBeNull()
+    d.resolve(seasonPosters(1))
+    const s1 = await screen.findByRole('button', { name: 'S01' })
+    expect(s1.className).toContain('active')
+    expect(tab.className).toContain('active')
+    expect(tab.className).not.toContain('tmdb-gallery-tab--pending')
+  })
+
+  it('keeps the current season in view until the next one has loaded', async () => {
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    mockedSeasonImages.mockResolvedValueOnce(seasonPosters(1))
+    const tab = await open(333007)
+    fireEvent.click(tab)
+    const s1 = await screen.findByRole('button', { name: 'S01' })
+    await waitFor(() => expect(s1.className).toContain('active'))
+    const d = deferred()
+    mockedSeasonImages.mockReturnValueOnce(d.promise)
+    const s2 = screen.getByRole('button', { name: 'S02' }) as HTMLButtonElement
+    fireEvent.click(s2)
+    await waitFor(() => expect(mockedSeasonImages).toHaveBeenCalledWith(333007, 2, 'en+textless'))
+    // S01 stays selected with its grid up; S02 pulses until its posters land.
+    await waitFor(() => expect(s2.className).toContain('tmdb-season-chip--pending'))
+    expect(s2.disabled).toBe(true)
+    expect(s1.className).toContain('active')
+    expect(screen.queryByText('Loading posters…')).toBeNull()
+    expect(document.querySelector('.tmdb-season-picker .tmdb-gallery-grid')).not.toBeNull()
+    d.resolve(seasonPosters(2))
+    await waitFor(() => expect(s2.className).toContain('active'))
+    expect(s1.className).not.toContain('active')
+    expect(s2.disabled).toBe(false)
+  })
+
+  it('pads the panel so a shorter season cannot drag the chips up the page', async () => {
+    mockedTmdbImages.mockResolvedValue(tvdbPoster)
+    mockedSeasonImages.mockResolvedValueOnce(seasonPosters(1))
+    const tab = await open(333008)
+    fireEvent.click(tab)
+    const s1 = await screen.findByRole('button', { name: 'S01' })
+    await waitFor(() => expect(s1.className).toContain('active'))
+    const panel = document.querySelector('.tmdb-gallery-panel') as HTMLElement
+    // jsdom lays nothing out, so stand in for the page scroller: an 800px viewport scrolled to
+    // 579px over content measuring 1777px with S01 up and 1119px once S02 replaces it, the
+    // panel's padding counted in, and the scroll position clamped the way a browser would.
+    const scroller = (document.scrollingElement ?? document.documentElement) as HTMLElement
+    const content = () => (document.querySelector('.tmdb-season-chip.active')?.textContent === 'S02' ? 1119 : 1777) + (parseFloat(panel.style.minHeight) || 0)
+    let scrollTop = 579
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 800 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: content })
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => Math.min(scrollTop, content() - 800), set: (v: number) => { scrollTop = v } })
+    try {
+      const d = deferred()
+      mockedSeasonImages.mockReturnValueOnce(d.promise)
+      fireEvent.click(screen.getByRole('button', { name: 'S02' }))
+      d.resolve(seasonPosters(2))
+      await waitFor(() => expect(screen.getByRole('button', { name: 'S02' }).className).toContain('active'))
+      expect(panel.style.minHeight).toBe('260px')   // 579 + 800 - 1119
+      expect(scroller.scrollTop).toBe(579)
+    } finally {
+      for (const k of ['clientHeight', 'scrollHeight', 'scrollTop']) delete (scroller as unknown as Record<string, unknown>)[k]
+    }
   })
 
   it('dims the tab once the details say the show has no seasons', async () => {

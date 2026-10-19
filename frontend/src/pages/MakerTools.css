@@ -1604,6 +1604,14 @@
   50% { opacity: 0.3; }
 }
 
+/* A season chip, or the Seasons tab, pulses while its posters load behind the grid in view. */
+.tmdb-gallery-tab--pending,
+.tmdb-season-chip--pending:disabled {
+  opacity: 1;
+  cursor: progress;
+  animation: tmdb-gallery-source-pulse 0.9s ease-in-out infinite;
+}
+
 /* Same 6px corners as the content tabs, but joined into one segmented control. */
 .tmdb-gallery-source:first-child {
   border-radius: 6px 0 0 6px;

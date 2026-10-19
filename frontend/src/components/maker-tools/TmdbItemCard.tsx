@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -107,6 +107,20 @@ export const TMDB_IMAGE_LANGUAGES = [
 
 // Season image caches are per source — the same season number has different artwork on each.
 const seasonKey = (source: ImageSource, seasonNumber: number) => `${source}:s${seasonNumber}`
+// First season the source has posters for, real seasons before Specials; null when none.
+const firstSeasonWithPosters = (list: TmdbTvDetails['seasons'], posters: number[] | null | undefined): number | null => {
+  const has = (n: number) => posters == null || posters.includes(n)
+  return list.find((sn) => sn.season_number >= 1 && has(sn.season_number))?.season_number
+    ?? list.find((sn) => has(sn.season_number))?.season_number ?? null
+}
+// Nearest ancestor that scrolls vertically (the page's content pane, or a modal body), else the page.
+const scrollParent = (el: HTMLElement): HTMLElement => {
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    const oy = getComputedStyle(a).overflowY
+    if (oy === 'auto' || oy === 'scroll') return a
+  }
+  return (document.scrollingElement ?? document.documentElement) as HTMLElement
+}
 // Tiles keep one box per grid (2:3 posters, 16:9 backdrops) so rows line up; an image far from that
 // shape — Apple TV's squares and 4:3 / portrait heroes — is shown whole inside it instead of cropped.
 const TILE_BOX = { poster: 2 / 3, backdrop: 16 / 9 } as const
@@ -434,26 +448,91 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     }
   }, [item.tmdb_id, item.tvdb_id, hasTmdb, hasTvdb, tvDetails, tvDetailsLoading])
 
-  const fetchSeasonImages = useCallback(async (seasonNumber: number) => {
-    setSelectedSeason(seasonNumber)
-    const sk = seasonKey(imageSource, seasonNumber)
-    if (seasonImages[sk]) return
+  // The season picker follows whichever source's images are being browsed: each provider can
+  // list a season the other doesn't (TMDB often carries one more for an airing show), and
+  // pinning the chips to one source would make the other's season posters unreachable. fanart.tv
+  // is keyed by TheTVDB id, so it follows TVDB's seasons. Falls back to the preferred list when
+  // the source has no seasons of its own.
+  const seasonListFor = useCallback((source: ImageSource) => {
+    if (!tvDetails) return []
+    const own = source === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons
+    return own.length > 0 ? own : tvDetails.seasons
+  }, [tvDetails])
+
+  // Fetch one season's images from a source and cache them; a cached season comes straight back
+  // unless a language is given (a language change invalidates every cache). Null when it failed.
+  const loadSeason = useCallback(async (source: ImageSource, seasonNumber: number, opts?: { language?: string }): Promise<TmdbImagesResponse | null> => {
+    const sk = seasonKey(source, seasonNumber)
+    const cached = seasonImages[sk]
+    if (cached && !opts?.language) return cached
+    const language = opts?.language ?? galleryLanguage
     setSeasonImagesLoading((prev) => ({ ...prev, [sk]: true }))
     try {
-      const data = imageSource === 'tmdb'
-        ? await getSeasonImages(item.tmdb_id, seasonNumber, galleryLanguage)
-        : imageSource === 'tvdb'
-          ? await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
-          : imageSource === 'fanart'
-            ? await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, galleryLanguage)
-            : await getAppleSeasonImages(sourceItem, seasonNumber, galleryLanguage)
+      const data = source === 'tmdb'
+        ? await getSeasonImages(item.tmdb_id, seasonNumber, language)
+        : source === 'tvdb'
+          ? await getTvdbSeasonImages(item.tvdb_id ?? 0, seasonNumber, language)
+          : source === 'fanart'
+            ? await getFanartSeasonImages(item.tvdb_id ?? 0, seasonNumber, language)
+            : await getAppleSeasonImages(sourceItem, seasonNumber, language)
       setSeasonImages((prev) => ({ ...prev, [sk]: data }))
+      return data
     } catch (error) {
       showToast(getApiErrorMessage(error, 'Failed to load season images'), 'error')
+      return null
     } finally {
       setSeasonImagesLoading((prev) => ({ ...prev, [sk]: false }))
     }
-  }, [item.tmdb_id, item.tvdb_id, sourceItem, imageSource, galleryLanguage, seasonImages, showToast])
+  }, [item.tmdb_id, item.tvdb_id, sourceItem, galleryLanguage, seasonImages, showToast])
+
+  // Cache key of the season last asked for; a slower earlier fetch landing after it must not swap the grid.
+  const wantedSeason = useRef<string | null>(null)
+
+  const galleryPanelRef = useRef<HTMLDivElement>(null)
+  const galleryAnchor = useRef<number | null>(null)
+  // Call right before a state change that swaps the gallery's content (see the layout effect).
+  const anchorGallery = useCallback(() => {
+    const panel = galleryPanelRef.current
+    galleryAnchor.current = panel ? scrollParent(panel).scrollTop : null
+  }, [])
+  // After a swap, pad the panel so the page is never shorter than the scroll position needs:
+  // with the card at the page's end, a shorter grid would otherwise clamp the scroll up the
+  // page, taking the tabs or chips just clicked with it (Safari never anchors it back).
+  useLayoutEffect(() => {
+    const before = galleryAnchor.current
+    if (before == null) return
+    galleryAnchor.current = null
+    const panel = galleryPanelRef.current
+    if (!panel) return
+    const scroller = scrollParent(panel)
+    panel.style.minHeight = ''
+    const deficit = before + scroller.clientHeight - scroller.scrollHeight
+    if (deficit <= 0) return
+    panel.style.minHeight = `${panel.offsetHeight + deficit}px`
+    scroller.scrollTop = before
+  })
+  // Show a season's posters. The grid in view stays put until the season has loaded, then the
+  // season (and the Seasons tab, when coming from another) swap in one render, like a source
+  // change: no collapse to a loading line that lets the page jump under the click.
+  const showSeason = useCallback(async (seasonNumber: number) => {
+    const sk = seasonKey(imageSource, seasonNumber)
+    wantedSeason.current = sk
+    const data = await loadSeason(imageSource, seasonNumber)
+    if (!data || wantedSeason.current !== sk) return
+    anchorGallery()
+    setSelectedSeason(seasonNumber)
+    setActiveGalleryTab('season-posters')
+  }, [imageSource, loadSeason, anchorGallery])
+
+  // Season to land on after a source or language switch: the one in view when the new listing
+  // has posters for it, else the first that does.
+  const seasonToKeep = useCallback((source: ImageSource, data: TmdbImagesResponse): number | null => {
+    const list = seasonListFor(source)
+    const keep = selectedSeason != null
+      && list.some((sn) => sn.season_number === selectedSeason)
+      && (data.season_posters == null || data.season_posters.includes(selectedSeason))
+    return keep ? selectedSeason : firstSeasonWithPosters(list, data.season_posters)
+  }, [selectedSeason, seasonListFor])
 
   // Which tab to show for a freshly loaded source: keep the current one when it has content, else
   // the first that does — so a switch never lands on a needlessly empty grid.
@@ -523,36 +602,61 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   }, [galleryOpen, imageSource, gallerySources, item.media_type, ensureTvDetails, loadSource, settleTab, showToast])
 
   // The grid in view stays put until the new source has loaded, then source and tab swap in one
-  // render — no collapse to a loading line and back, so the cards below don't jump.
+  // render — no collapse to a loading line and back, so the cards below don't jump. On the
+  // Seasons tab the new source's season loads too, so that grid swaps straight across as well.
   const handleSourceChange = useCallback(async (source: ImageSource) => {
     if (source === imageSource) return
     const data = await loadSource(source)
     if (!data) return   // a failed switch stays on the source that still has images
+    let season: number | null = null
+    if (activeGalleryTab === 'season-posters') {
+      const next = seasonToKeep(source, data)
+      if (next != null) {
+        wantedSeason.current = seasonKey(source, next)
+        if (await loadSeason(source, next)) season = next
+      }
+    }
+    anchorGallery()
     setImageSource(source)
-    setSelectedSeason(null)
+    setSelectedSeason(season)
     settleTab(data)
-  }, [imageSource, loadSource, settleTab])
+  }, [imageSource, activeGalleryTab, loadSource, loadSeason, seasonToKeep, settleTab, anchorGallery])
 
   const handleGalleryLanguageChange = useCallback(async (newLang: string) => {
     setGalleryLanguage(newLang)
-    setSeasonImages({})
-    setSeasonImagesLoading({})
-    setSelectedSeason(null)
     // Every cache is language-scoped. With the panel open, the grid in view stays put until its
-    // refetch lands; the other sources reload the next time their tab is clicked.
+    // refetch lands (on the Seasons tab, the season's too); the other sources and seasons reload
+    // the next time they're clicked.
     if (!galleryOpen) {
       setImagesBySource({})
+      setSeasonImages({})
+      setSelectedSeason(null)
       return
     }
     const data = await loadSource(imageSource, { language: newLang, force: true })
     if (!data) {
       setImagesBySource({})
+      setSeasonImages({})
+      setSelectedSeason(null)
       setGalleryOpen(false)
       return
     }
+    let season: number | null = null
+    let seasonData: TmdbImagesResponse | null = null
+    if (activeGalleryTab === 'season-posters') {
+      const next = seasonToKeep(imageSource, data)
+      if (next != null) {
+        wantedSeason.current = seasonKey(imageSource, next)
+        seasonData = await loadSeason(imageSource, next, { language: newLang })
+        if (seasonData) season = next
+      }
+    }
+    anchorGallery()
     setImagesBySource({ [imageSource]: data })
+    setSeasonImages(season != null && seasonData ? { [seasonKey(imageSource, season)]: seasonData } : {})
+    setSelectedSeason(season)
     settleTab(data)
-  }, [galleryOpen, imageSource, loadSource, settleTab])
+  }, [galleryOpen, imageSource, activeGalleryTab, loadSource, loadSeason, seasonToKeep, settleTab, anchorGallery])
 
   const togglePsdSelection = useCallback((role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
     setPsdSelection((prev) => {
@@ -712,16 +816,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     { label: 'TVDB', display: item.tvdb_id ? `#${item.tvdb_id}` : null, copy: String(item.tvdb_id ?? '') },
   ]
 
-  // The season picker follows whichever source's images are being browsed: each provider can
-  // list a season the other doesn't (TMDB often carries one more for an airing show), and
-  // pinning the chips to one source would make the other's season posters unreachable. fanart.tv
-  // is keyed by TheTVDB id, so it follows TVDB's seasons. Falls back to the preferred list when
-  // the active source has no seasons of its own.
-  const seasonList = !tvDetails
-    ? []
-    : (imageSource === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons).length > 0
-      ? (imageSource === 'tmdb' ? tvDetails.tmdb_seasons : tvDetails.tvdb_seasons)
-      : tvDetails.seasons
+  const seasonList = seasonListFor(imageSource)
 
   // Seasons the active source holds posters for, per its images response; null until it says
   // (or from an older server, which can't). A season outside the list gets a dimmed chip.
@@ -737,18 +832,20 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     && (!tvDetails || seasonList.length > 0)
   useEffect(() => {
     if (activeGalleryTab !== 'season-posters' || seasonsAvailable || !galleryImages) return
+    anchorGallery()
     setActiveGalleryTab(galleryImages.posters.length > 0 ? 'posters' : galleryImages.backdrops.length > 0 ? 'backdrops' : 'logos')
-  }, [activeGalleryTab, seasonsAvailable, galleryImages])
+  }, [activeGalleryTab, seasonsAvailable, galleryImages, anchorGallery])
 
   // Landing on the Seasons tab loads the first real season with posters straight away (Specials
   // only when that's all there is) instead of showing bare chips. The pick is cleared by a source
   // or language change, so this also refills it for the new source / language.
-  const firstSeasonNumber = seasonList.find((sn) => sn.season_number >= 1 && hasSeasonPosters(sn.season_number))?.season_number
-    ?? seasonList.find((sn) => hasSeasonPosters(sn.season_number))?.season_number ?? null
+  const firstSeasonNumber = firstSeasonWithPosters(seasonList, seasonPosters)
   useEffect(() => {
     if (!galleryOpen || activeGalleryTab !== 'season-posters' || selectedSeason != null || firstSeasonNumber == null) return
-    void fetchSeasonImages(firstSeasonNumber)
-  }, [galleryOpen, activeGalleryTab, selectedSeason, firstSeasonNumber, fetchSeasonImages])
+    void showSeason(firstSeasonNumber)
+  }, [galleryOpen, activeGalleryTab, selectedSeason, firstSeasonNumber, showSeason])
+  // A season fetched from another tab pulses the Seasons tab until it swaps in.
+  const seasonTabPending = activeGalleryTab !== 'season-posters' && Object.values(seasonImagesLoading).some(Boolean)
 
   // Air-date state for the seasons badge edge: red = a numbered season is listed with no air
   // dates yet (announced/TBA), green = every one is dated. Unknowns stay uncolored so a failed
@@ -1046,7 +1143,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
       {/* Gallery panel */}
       {galleryOpen && (galleryImages || galleryLoading) && (() => { const _panel = (
-        <div className="tmdb-gallery-panel">
+        <div className="tmdb-gallery-panel" ref={galleryPanelRef}>
           <div className="tmdb-gallery-tabs">
             {gallerySources.length > 1 && (
               <div className="tmdb-gallery-sources" role="group" aria-label="Image source">
@@ -1074,11 +1171,15 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 <button
                   key={t.id}
                   type="button"
-                  className={`tmdb-gallery-tab${activeGalleryTab === t.id ? ' active' : ''}`}
+                  className={`tmdb-gallery-tab${activeGalleryTab === t.id ? ' active' : ''}${t.id === 'season-posters' && seasonTabPending ? ' tmdb-gallery-tab--pending' : ''}`}
                   onClick={() => {
                     if (t.id === 'season-posters') {
-                      setActiveGalleryTab('season-posters')
+                      if (seasonTabPending) return
+                      if (selectedSeason == null && firstSeasonNumber != null) void showSeason(firstSeasonNumber)
+                      else { anchorGallery(); setActiveGalleryTab('season-posters') }
                     } else if (t.count != null && t.count > 0) {
+                      wantedSeason.current = null   // a season still loading must not pull the user back here
+                      anchorGallery()
                       setActiveGalleryTab(t.id)
                     }
                   }}
@@ -1197,8 +1298,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                             <button
                               key={s.season_number}
                               type="button"
-                              className={`tmdb-season-chip${selectedSeason === s.season_number ? ' active' : ''}`}
-                              onClick={() => void fetchSeasonImages(s.season_number)}
+                              className={`tmdb-season-chip${selectedSeason === s.season_number ? ' active' : ''}${seasonImagesLoading[seasonKey(imageSource, s.season_number)] ? ' tmdb-season-chip--pending' : ''}`}
+                              onClick={() => void showSeason(s.season_number)}
                               disabled={seasonImagesLoading[seasonKey(imageSource, s.season_number)] || !hasSeasonPosters(s.season_number)}
                               title={hasSeasonPosters(s.season_number) ? undefined : `No ${SOURCE_LABEL[imageSource]} posters for this season`}
                             >
@@ -1209,8 +1310,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                         {selectedSeason != null && (() => {
                           const sk = seasonKey(imageSource, selectedSeason)
                           const sImgs = seasonImages[sk]
-                          if (seasonImagesLoading[sk]) return <p className="tmdb-gallery-empty">Loading posters…</p>
-                          if (!sImgs || sImgs.posters.length === 0) return <p className="tmdb-gallery-empty">No posters available for this season.</p>
+                          if (!sImgs) return <p className="tmdb-gallery-empty">{seasonImagesLoading[sk] ? 'Loading posters…' : 'No posters available for this season.'}</p>
+                          if (sImgs.posters.length === 0) return <p className="tmdb-gallery-empty">No posters available for this season.</p>
                           return (
                             <div className="tmdb-gallery-grid tmdb-gallery-grid--posters">
                               {sImgs.posters.map((img) => {
