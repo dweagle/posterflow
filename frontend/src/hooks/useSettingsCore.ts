@@ -15,10 +15,11 @@ export const API_KEY_SETTINGS = {
   tmdb: { setting: 'tmdb_api_key', label: 'TMDB' },
   tvdb: { setting: 'tvdb_api_key', label: 'TheTVDB' },
   fanart: { setting: 'fanart_api_key', label: 'fanart.tv' },
+  gemini: { setting: 'gemini_api_key', label: 'Gemini' },
 } as const
 export type ApiKeyName = keyof typeof API_KEY_SETTINGS
 
-const noSavedApiKeys: Record<ApiKeyName, boolean> = { tmdb: false, tvdb: false, fanart: false }
+const noSavedApiKeys: Record<ApiKeyName, boolean> = { tmdb: false, tvdb: false, fanart: false, gemini: false }
 
 interface RcloneSettings {
   google_client_id: string
@@ -82,6 +83,7 @@ export const useSettingsCore = ({
   const [tvdbApiKey, setTvdbApiKey] = useState('')
   const [tvdbPin, setTvdbPin] = useState('')
   const [fanartApiKey, setFanartApiKey] = useState('')
+  const [geminiApiKey, setGeminiApiKey] = useState('')
   const [savedApiKeys, setSavedApiKeys] = useState<Record<ApiKeyName, boolean>>(noSavedApiKeys)
   const [appleArtworkEnabled, setAppleArtworkEnabled] = useState(true)
   const [psdExportFolder, setPsdExportFolder] = useState('')
@@ -105,11 +107,13 @@ export const useSettingsCore = ({
       const tmdbKey = (settings.tmdb_api_key || '').trim()
       const tvdbKey = (settings.tvdb_api_key || '').trim()
       const fanartKey = (settings.fanart_api_key || '').trim()
+      const geminiKey = (settings.gemini_api_key || '').trim()
       setTmdbApiKey(tmdbKey)
       setTvdbApiKey(tvdbKey)
       setTvdbPin((settings.tvdb_pin || '').trim())
       setFanartApiKey(fanartKey)
-      setSavedApiKeys({ tmdb: !!tmdbKey, tvdb: !!tvdbKey, fanart: !!fanartKey })
+      setGeminiApiKey(geminiKey)
+      setSavedApiKeys({ tmdb: !!tmdbKey, tvdb: !!tvdbKey, fanart: !!fanartKey, gemini: !!geminiKey })
       setAppleArtworkEnabled((settings.apple_artwork_enabled || '').trim().toLowerCase() !== 'false')
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
@@ -264,6 +268,24 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleSaveGeminiApiKey = async (): Promise<boolean> => {
+    const valueToSave = geminiApiKey.trim()
+    if (!valueToSave || valueToSave === '***masked***') return rejectBlankApiKey('gemini')
+    try {
+      setSaving(true)
+      await saveBulkSettings({ gemini_api_key: valueToSave })
+      markApiKeySaved('gemini', true)
+      showToast('Gemini API key saved!')
+      return true
+    } catch (error) {
+      console.error('Error saving Gemini API key:', error)
+      showToast('Failed to save Gemini API key', 'error')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleSaveFanartApiKey = async (): Promise<boolean> => {
     const valueToSave = fanartApiKey.trim()
     if (!valueToSave || valueToSave === '***masked***') return rejectBlankApiKey('fanart')
@@ -286,6 +308,7 @@ export const useSettingsCore = ({
     tmdb: setTmdbApiKey,
     tvdb: setTvdbApiKey,
     fanart: setFanartApiKey,
+    gemini: setGeminiApiKey,
   }
 
   const handleRemoveApiKey = async (name: ApiKeyName): Promise<boolean> => {
@@ -430,6 +453,9 @@ export const useSettingsCore = ({
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    geminiApiKey,
+    setGeminiApiKey,
+    handleSaveGeminiApiKey,
     savedApiKeys,
     handleRemoveApiKey,
     appleArtworkEnabled,

@@ -44,9 +44,9 @@ def test_warns_once_per_source_and_key(monkeypatch):
 
 def test_warns_again_after_the_interval(monkeypatch):
     lines = _capture(monkeypatch)
-    rk.warn_rejected_key("tmdb", "k")
-    rk._logged_at[("tmdb", "k")] -= rk.INTERVAL + 1
-    rk.warn_rejected_key("tmdb", "k")
+    rk.warn_rejected_key("gemini", "k")
+    rk._logged_at[("gemini", "k")] -= rk.INTERVAL + 1
+    rk.warn_rejected_key("gemini", "k")
     assert len(lines) == 2
 
 

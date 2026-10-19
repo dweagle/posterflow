@@ -14,6 +14,7 @@ vi.mock('../../src/api/client', async (importOriginal) => ({
   getTvdbImages: vi.fn(),
   getFanartImages: vi.fn(),
   getAppleImages: vi.fn(),
+  getKeptGeminiImages: vi.fn(async () => []),
 }))
 vi.mock('../../src/components/Toast', () => ({ useToast: () => ({ showToast: vi.fn() }) }))
 vi.mock('../../src/components/PosterDriveSearchModal', () => ({ default: () => null }))

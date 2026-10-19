@@ -174,6 +174,8 @@ export interface TmdbImage {
   url_thumb: string
   url_full: string
   origin?: string | null   // collection logos: the member movie this came from
+  gemini?: boolean         // a kept Gemini result: gets a remove button, downloads by its canonical name
+  download_name?: string
 }
 
 export interface TmdbImagesResponse {
@@ -642,6 +644,116 @@ export const saveGalleryArtworkToFolder = async (
   })
 }
 
+// ── Gemini image edits (experimental) ───────────────────────────────────────
+
+export type GeminiImageSize = '1K' | '2K' | '4K'
+export type GeminiOperation = 'remove_text' | 'extract_logo'
+
+/** Gemini's image models as offered in the Gemini modal (first = default). */
+export const GEMINI_IMAGE_MODELS: { id: string; label: string }[] = [
+  { id: 'gemini-nano-banana-2.1', label: 'Nano Banana 2.1' },
+  { id: 'gemini-3.1-flash-image', label: 'Nano Banana 2' },
+  { id: 'gemini-3-pro-image', label: 'Nano Banana Pro' },
+]
+
+export interface GeminiImageResponse {
+  operation: GeminiOperation
+  ref: string              // the parked server copy ('gemini:<item>/<file>'); Keep turns it into a gallery tile
+  file_url: string
+  image_base64: string
+  mime_type: string        // image/jpeg for a textless redraw, image/png for a logo
+  width: number            // the result's size: the source's for a redraw, the trimmed mark for a logo
+  height: number
+  output_width: number     // what Gemini actually rendered
+  output_height: number
+  model: string
+  image_size: GeminiImageSize
+  elapsed_seconds: number
+  filename: string         // the gallery download name (+ " - textless" for a redraw)
+}
+
+/** The built-in prompts per operation: `detailed` is the server default, `simple` the plain
+ *  alternative for when the detailed one makes Gemini balk. */
+export interface GeminiPromptSet { detailed: string; simple: string }
+
+export const getGeminiPrompts = (): Promise<Record<GeminiOperation, GeminiPromptSet>> =>
+  getData<Record<GeminiOperation, GeminiPromptSet>>('/api/maker-tools/gemini-image/prompts')
+
+/** Ask Gemini to redraw a gallery image without its text, or to lift its title logo out.
+ *  Slow (10 to 60 s) and billed to the user's key. */
+export const runGeminiImageEdit = async (
+  item: { title: string; media_type: string; year?: string | number | null; tmdb_id?: number | null; tvdb_id?: number | null; imdb_id?: string | null },
+  filePath: string,
+  role: 'poster' | 'background',
+  opts: { operation: GeminiOperation; imageSize: GeminiImageSize; model: string; prompt?: string; season?: number | null; source: ImageSource },
+): Promise<GeminiImageResponse> => {
+  return postData<GeminiImageResponse>('/api/maker-tools/gemini-image', {
+    path: filePath,
+    operation: opts.operation,
+    role,
+    source: opts.source,
+    image_size: opts.imageSize,
+    model: opts.model,
+    prompt: opts.prompt || undefined,
+    title: item.title,
+    media_type: item.media_type,
+    year: item.year ? Number(item.year) : undefined,
+    tmdb_id: item.tmdb_id ?? undefined,
+    tvdb_id: item.tvdb_id ?? undefined,
+    imdb_id: item.imdb_id ?? undefined,
+    season: opts.season ?? undefined,
+  }, { timeout: 300_000 })
+}
+
+/** A Gemini result the user kept. It lives in the server's gemini folder until a PSD export uses it. */
+export interface KeptGeminiImage {
+  ref: string
+  role: 'poster' | 'background' | 'logo'
+  source: ImageSource
+  season: number | null
+  operation: GeminiOperation
+  width: number
+  height: number
+  download_name: string
+  url_full: string
+  url_thumb: string
+}
+
+export const keepGeminiImage = (ref: string): Promise<KeptGeminiImage> =>
+  postData<KeptGeminiImage>('/api/maker-tools/gemini-image/keep', { ref })
+
+export const getKeptGeminiImages = (item: { title: string; tmdb_id?: number | null; tvdb_id?: number | null }): Promise<KeptGeminiImage[]> => {
+  const params = new URLSearchParams({ title: item.title })
+  if (item.tmdb_id) params.set('tmdb_id', String(item.tmdb_id))
+  if (item.tvdb_id) params.set('tvdb_id', String(item.tvdb_id))
+  return getData<KeptGeminiImage[]>(`/api/maker-tools/gemini-image/kept?${params.toString()}`)
+}
+
+export const deleteKeptGeminiImage = (ref: string): Promise<{ deleted: boolean }> =>
+  deleteData<{ deleted: boolean }>(`/api/maker-tools/gemini-image/kept?ref=${encodeURIComponent(ref)}`)
+
+export const isGeminiRef = (path: string): boolean => path.startsWith('gemini:')
+
+export const geminiFileUrl = (ref: string, download = false): string =>
+  `/api/maker-tools/gemini-image/file?ref=${encodeURIComponent(ref)}${download ? '&download=1' : ''}`
+
+/** A kept result as a gallery image. A null language reads as TL (textless) in the grid. */
+export const keptToTmdbImage = (k: KeptGeminiImage): TmdbImage => ({
+  file_path: k.ref, width: k.width, height: k.height, language: null, vote_average: 0,
+  url_thumb: k.url_thumb, url_full: k.url_full, gemini: true, download_name: k.download_name,
+})
+
+/** Pin the kept results that belong on this source tab (and season) to the front of their lists. */
+export function withKeptImages(data: TmdbImagesResponse, kept: KeptGeminiImage[], source: ImageSource, season: number | null): TmdbImagesResponse {
+  const mine = kept.filter((k) => k.source === source && (k.season ?? null) === season)
+  if (mine.length === 0) return data
+  const pin = (list: TmdbImage[], role: KeptGeminiImage['role']) => {
+    const extra = mine.filter((k) => k.role === role && !list.some((img) => img.file_path === k.ref)).map(keptToTmdbImage)
+    return extra.length ? [...extra, ...list] : list
+  }
+  return { ...data, posters: pin(data.posters, 'poster'), backdrops: pin(data.backdrops, 'background'), logos: pin(data.logos, 'logo') }
+}
+
 export interface PsdExportRequest {
   title: string
   year: string
@@ -666,6 +778,7 @@ export interface PsdExportSaved {
   psdUrl: string   // absolute HTTPS URL, ready to pass to Photopea (carries ?style=)
   openPhotopea: boolean
   style: string    // resolved "CL2K" | "MM2K" — used to build the save / JPG-export URLs
+  clearedRefs: string[]   // kept Gemini results this export used; the server deleted them
 }
 
 /** Returned when no export folder is configured — trigger a browser download. */
@@ -673,6 +786,7 @@ export interface PsdExportDownload {
   mode: 'download'
   blob: Blob
   filename: string
+  clearedRefs: string[]
 }
 
 /** Returned when use_existing=true but no PSD with the expected name exists in the export folder. */
@@ -728,9 +842,9 @@ export const exportToPsd = async (
     if (contentType.includes('application/json')) {
       // Server saved to export folder — parse the JSON blob
       const text = await (resp.data as Blob).text()
-      const json = JSON.parse(text) as { filename: string; psd_url: string; open_photopea: boolean; style?: string }
+      const json = JSON.parse(text) as { filename: string; psd_url: string; open_photopea: boolean; style?: string; cleared_refs?: string[] }
       const absoluteUrl = `${window.location.origin}${json.psd_url}`
-      return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false, style: json.style || 'CL2K' }
+      return { mode: 'photopea', filename: json.filename, psdUrl: absoluteUrl, openPhotopea: json.open_photopea ?? false, style: json.style || 'CL2K', clearedRefs: json.cleared_refs ?? [] }
     }
 
     // Blob download path. Prefer the server's Content-Disposition filename so the download is
@@ -747,7 +861,10 @@ export const exportToPsd = async (
         filename = dispositionMatch[1].trim()
       }
     }
-    return { mode: 'download', blob: resp.data as Blob, filename }
+    // The body is the PSD, so the cleared kept-Gemini refs ride in a header.
+    const clearedHeader = (resp.headers['x-gemini-cleared'] as string | undefined) ?? ''
+    const clearedRefs = clearedHeader.split(',').filter(Boolean).map((r) => decodeURIComponent(r))
+    return { mode: 'download', blob: resp.data as Blob, filename, clearedRefs }
   } catch (err: unknown) {
     const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string }
     const rawData = axiosErr?.response?.data

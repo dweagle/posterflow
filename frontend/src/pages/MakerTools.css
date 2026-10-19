@@ -1954,6 +1954,38 @@
   bottom: 4px;
 }
 
+/* Kept Gemini tiles: a badge that reads at a glance, and a red remove button in the bottom-right corner. */
+.tmdb-gemini-badge {
+  background: linear-gradient(135deg, #7c4dff, #448aff);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.tmdb-gemini-remove {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(211, 47, 47, 0.85);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.15s;
+}
+
+.tmdb-gemini-remove:hover {
+  background: #e53935;
+}
+
 /* Overlay action buttons (P/B/L select, T tag, trash) live in a flex row in the top-left corner. */
 .tmdb-thumb-actions {
   position: absolute;
@@ -2404,6 +2436,56 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* Gemini buttons sit in their own centered row above the image; the image gives up that row's height. */
+.tmdb-gallery-lightbox-actions--top {
+  justify-content: center;
+}
+
+.tmdb-gallery-lightbox--toolbar .tmdb-gallery-lightbox-img {
+  max-height: calc(92vh - 6.5rem);
+}
+
+/* Gemini modal pickers: compact. Scoped under .modal-body to outrank DriveEditModal.css's
+   `.modal-body select`, whose 0.75rem padding makes them tall. */
+.modal-body select.gemini-field-select {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+/* Gemini modal: the Working button's icon turns while a run is in flight. */
+.gemini-spin {
+  animation: gemini-spin 1s linear infinite;
+}
+
+@keyframes gemini-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Gemini modal prompt box: the same dark field styling the modal's selects get. */
+.gemini-prompt-box {
+  padding: 0.6rem 0.7rem;
+  background-color: #2a2a2a;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.gemini-prompt-box:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.gemini-prompt-box:disabled {
+  opacity: 0.6;
 }
 
 /* ── Seasons info panel ──────────────────────────────────────────────────── */

@@ -42,6 +42,7 @@ SENSITIVE_PLAIN_KEYS: set[str] = {
     "tvdb_api_key",
     "tvdb_pin",
     "fanart_api_key",
+    "gemini_api_key",
     # App password – hash and salt must never leave the backend
     "app_password_hash",
     "app_password_salt",
@@ -99,6 +100,7 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "tvdb_api_key",
     "tvdb_pin",
     "fanart_api_key",
+    "gemini_api_key",
     "apple_artwork_enabled",
     # Border Replacer
     "border_replacer_colors",

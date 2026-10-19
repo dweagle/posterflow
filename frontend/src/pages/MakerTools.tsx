@@ -170,6 +170,7 @@ function MakerTools() {
   const [tvdbEnabled, setTvdbEnabled] = useState(false)   // gallery's TheTVDB source tab
   const [fanartEnabled, setFanartEnabled] = useState(false)   // gallery's fanart.tv source tab
   const [appleEnabled, setAppleEnabled] = useState(false)   // gallery's Apple TV source tab
+  const [geminiEnabled, setGeminiEnabled] = useState(false)   // Remove Text button on gallery previews
   const [psdPosterFitBorder, setPsdPosterFitBorder] = useState(false)
   const [showPsdConfigModal, setShowPsdConfigModal] = useState(false)
   const { showToast } = useToast()
@@ -256,6 +257,7 @@ function MakerTools() {
       setTvdbEnabled(cfg.tvdbEnabled)
       setFanartEnabled(cfg.fanartEnabled)
       setAppleEnabled(cfg.appleEnabled)
+      setGeminiEnabled(cfg.geminiEnabled)
       setPsdPosterFitBorder((settings.psd_poster_fit_border || '').trim().toLowerCase() === 'true')
       setLogoExportFolder((settings.logo_export_folder || '').trim())
       setArtworkLogoExportFolder((settings.artwork_logo_export_folder || '').trim())
@@ -445,7 +447,8 @@ function MakerTools() {
     tvdbEnabled,
     fanartEnabled,
     appleEnabled,
-  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, artworkLogoExportFolder, backgroundExportFolder, squareartExportFolder, tvdbEnabled, fanartEnabled, appleEnabled])
+    geminiEnabled,
+  }), [psdExportFolder, psdTemplatePath, psdImageExportFolder, psdExportFolderMm2k, psdTemplatePathMm2k, psdImageExportFolderMm2k, psdOpenPhotopea, psdSameTab, psdDefaultEditor, artworkLogoExportFolder, backgroundExportFolder, squareartExportFolder, tvdbEnabled, fanartEnabled, appleEnabled, geminiEnabled])
 
   const selectedDriveIdSet = useMemo(() => {
     return new Set(modalConfig.drive_ids.filter((driveId) => driveId > 0))

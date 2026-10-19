@@ -40,9 +40,10 @@ describe('useSettingsCore API keys', () => {
       tvdb_api_key: '***masked***',
       tvdb_pin: '',
       fanart_api_key: '',
+      gemini_api_key: '',
     })
 
-    expect(result.current.savedApiKeys).toEqual({ tmdb: true, tvdb: true, fanart: false })
+    expect(result.current.savedApiKeys).toEqual({ tmdb: true, tvdb: true, fanart: false, gemini: false })
     expect(result.current.tmdbApiKey).toBe('***masked***')
   })
 
@@ -81,17 +82,17 @@ describe('useSettingsCore API keys', () => {
   it('keeps the saved key when the removal request fails', async () => {
     saveBulkSettingsMock.mockRejectedValue(new Error('offline'))
     const { result, showToast } = renderCore()
-    await loadSettings(result, { tmdb_api_key: '***masked***' })
+    await loadSettings(result, { gemini_api_key: '***masked***' })
 
     let removed = true
     await act(async () => {
-      removed = await result.current.handleRemoveApiKey('tmdb')
+      removed = await result.current.handleRemoveApiKey('gemini')
     })
 
     expect(removed).toBe(false)
-    expect(result.current.tmdbApiKey).toBe('***masked***')
-    expect(result.current.savedApiKeys.tmdb).toBe(true)
-    expect(showToast).toHaveBeenCalledWith('Failed to remove TMDB API key', 'error')
+    expect(result.current.geminiApiKey).toBe('***masked***')
+    expect(result.current.savedApiKeys.gemini).toBe(true)
+    expect(showToast).toHaveBeenCalledWith('Failed to remove Gemini API key', 'error')
   })
 
   it('refuses to save a blank key and points at Remove when one is saved', async () => {

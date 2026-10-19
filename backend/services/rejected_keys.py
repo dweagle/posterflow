@@ -12,7 +12,7 @@ from core.logging import LogTags, log_warning
 # A page of maker cards or a monitor run fails the same key dozens of times; say it once an hour.
 INTERVAL = 60 * 60
 
-_LABELS = {"tmdb": "TMDB", "tvdb": "TheTVDB", "fanart": "fanart.tv"}
+_LABELS = {"tmdb": "TMDB", "tvdb": "TheTVDB", "fanart": "fanart.tv", "gemini": "Gemini"}
 _HINTS = {
     "tmdb": "Check the key in Settings > General > API Keys. It is the v3 'API Key' on TMDB's API "
             "settings page, not the v4 'API Read Access Token'.",
@@ -20,6 +20,7 @@ _HINTS = {
             "enter it in Settings > General > API Keys. A user-supported key also needs its PIN.",
     "fanart": "Check the personal API key in Settings > General > API Keys. It is the key on your "
               "fanart.tv profile page.",
+    "gemini": "Check the key in Settings > General > API Keys. Create one in Google AI Studio.",
 }
 
 _lock = threading.Lock()

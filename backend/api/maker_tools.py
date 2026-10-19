@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -45,6 +46,7 @@ from services import apple_tv
 from services import fanart
 from services.rejected_keys import note_tmdb_response
 from services import tvdb
+from services import gemini_kept
 from util.constants import year_regex
 from util.data.extract import extract_ids
 from util.data.normalization import normalize_titles
@@ -2532,10 +2534,12 @@ class PsdExportRequest(BaseModel):
 
 
 def _is_export_ref_valid(ref: str) -> bool:
-    """Export refs are source-qualified: a TMDB file_path ('/abc.jpg') or an absolute TVDB /
-    fanart.tv / Apple TV artwork URL."""
+    """Export refs are source-qualified: a TMDB file_path ('/abc.jpg'), an absolute TVDB /
+    fanart.tv / Apple TV artwork URL, or a kept Gemini result ('gemini:<item>/<file>')."""
     if ref.startswith("/"):
         return ".." not in ref
+    if gemini_kept.is_ref(ref):
+        return gemini_kept.is_valid_ref(ref)
     return tvdb.is_tvdb_image_url(ref) or fanart.is_fanart_image_url(ref) or apple_tv.is_apple_image_url(ref)
 
 
@@ -2548,6 +2552,8 @@ def _fetch_tmdb_image_bytes(path: str, api_key: str) -> bytes:
     If the original is an SVG (common for TMDB logos), converts it to a
     high-quality PNG in-process using cairosvg at 2000px wide.
     """
+    if gemini_kept.is_ref(path):
+        return gemini_kept.read_ref(path)
     url = f"https://image.tmdb.org/t/p/original{path}" if path.startswith("/") else path
     # api_key is not needed for image CDN but included for consistency / future auth
     resp = requests.get(url, timeout=30)
@@ -3145,6 +3151,7 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             except OSError as exc:
                 log_warning(LogTags.API, f"Could not remove superseded PSD {overwrite_target.name}: {exc}")
         log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
+        cleared_refs = gemini_kept.clear_used(all_paths)
         # When a password is set, Photopea fetches the PSD via files:[url] and can't send the
         # Bearer header — append a signed, file-scoped, expiring token it can use instead.
         # style rides along so the serve/save/JPG round-trip resolves the same style's folder.
@@ -3161,13 +3168,17 @@ def _tmdb_psd_export_impl(payload: PsdExportRequest, db: Session) -> Response:
             "psd_url": psd_url,
             "open_photopea": open_photopea,
             "style": style,
+            "cleared_refs": cleared_refs,
         })
 
     log_user_action("Exported PSD from TMDB images", title=payload.title, year=payload.year)
+    cleared_refs = gemini_kept.clear_used(all_paths)
     return Response(
         content=psd_bytes,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": _content_disposition("attachment", output_filename)},
+        headers={"Content-Disposition": _content_disposition("attachment", output_filename),
+                 # the download body is the PSD itself, so the cleared refs ride in a header
+                 "X-Gemini-Cleared": ",".join(quote(r, safe="") for r in cleared_refs)},
     )
 
 
@@ -3594,6 +3605,169 @@ def save_gallery_artwork(request: SaveGalleryArtworkRequest, db: Session = Depen
     log_user_action("Saved gallery artwork to export folder", subtype=request.subtype,
                     filename=filename, folder=folder)
     return JSONResponse({"status": "added", "written": filename})
+
+
+class GeminiImageRequest(BaseModel):
+    path: str                        # TMDB file_path ('/abc.jpg') or absolute TVDB / fanart.tv / Apple TV URL
+    operation: str = "remove_text"   # remove_text | extract_logo
+    role: str = "poster"             # poster | backdrop — names a textless download like a gallery download
+    image_size: str = "2K"           # 1K | 2K | 4K, Gemini's native output grid
+    model: str | None = None         # one of gemini_image.MODELS; blank = default
+    prompt: str | None = None        # blank = the operation's built-in prompt
+    source: str = "tmdb"             # gallery tab the image came from; a kept result goes back onto it
+    title: str = ""
+    media_type: str = "movie"
+    year: int | None = None
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
+    season: int | None = None
+
+
+@router.get("/gemini-image/prompts")
+def gemini_image_prompts() -> dict[str, dict[str, str]]:
+    """The built-in prompts per operation (detailed = the server default, simple = the plain
+    alternative), so the modal can show them and let the user edit or swap."""
+    from services import gemini_image
+    return {op: {"detailed": gemini_image.PROMPTS[op], "simple": gemini_image.SIMPLE_PROMPTS[op]}
+            for op in gemini_image.OPERATIONS}
+
+
+@router.post("/gemini-image")
+def gemini_image_edit(request: GeminiImageRequest, db: Session = Depends(get_db)) -> JSONResponse:
+    """Experimental: Gemini redraws a gallery image without its text, or lifts its title logo out
+    as a white-on-transparent PNG. The result comes back inline (base64) for the modal to show
+    and download."""
+    from services import artwork_finder as af
+    from services import gemini_image
+
+    if not _is_export_ref_valid(request.path):
+        raise HTTPException(status_code=400, detail="Invalid image path")
+    operation = request.operation.strip().lower()
+    if operation not in gemini_image.OPERATIONS:
+        raise HTTPException(status_code=400, detail="operation must be remove_text or extract_logo")
+    api_key = gemini_image.get_gemini_key(db)
+    if not api_key:
+        raise HTTPException(status_code=400,
+                            detail="Gemini API key not configured. Set it in Settings → General → API Keys.")
+    image_size = request.image_size.strip().upper()
+    if image_size not in gemini_image.IMAGE_SIZES:
+        raise HTTPException(status_code=400, detail="image_size must be 1K, 2K, or 4K")
+    model = (request.model or "").strip() or gemini_image.DEFAULT_MODEL
+    if model not in gemini_image.MODELS:
+        raise HTTPException(status_code=400, detail="Unknown Gemini image model")
+    prompt = (request.prompt or "").strip()
+    if len(prompt) > gemini_image.MAX_PROMPT_CHARS:
+        raise HTTPException(status_code=400, detail=f"prompt must be at most {gemini_image.MAX_PROMPT_CHARS} characters")
+    role = "background" if request.role in ("background", "backdrop") else "poster"
+
+    try:
+        content = _fetch_tmdb_image_bytes(request.path, "")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _tmdb_raise_http("image download", exc=exc)
+    if not content:
+        raise HTTPException(status_code=502, detail="Failed to fetch the image.")
+    kwargs = dict(api_key=api_key, model=model, image_size=image_size, prompt=prompt or None)
+    try:
+        if operation == "extract_logo":
+            result = gemini_image.extract_logo(content, **kwargs)
+        else:
+            result = gemini_image.remove_text(
+                content, min_size=gemini_image.POSTER_MIN_SIZE if role == "poster" else None, **kwargs)
+    except gemini_image.GeminiError as exc:
+        log_warning(LogTags.API, f"Gemini {operation} failed for {request.path}: {exc}")
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    except Exception as exc:
+        log_error(LogTags.API, f"Gemini {operation} crashed for {request.path}: {exc}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=502, detail=f"Gemini call failed: {exc}")
+
+    # A logo takes the canonical " - logo.png" name; a redraw keeps the gallery name + " - textless".
+    if operation == "extract_logo":
+        name_role, season, ext, suffix, fallback = "logo", None, ".png", "", "logo.png"
+    else:
+        name_role, season, ext, suffix, fallback = role, request.season, ".jpg", " - textless", "textless.jpg"
+    filename = fallback
+    title = request.title.strip()
+    if title:
+        media_type = (request.media_type or "").strip().lower()
+        item = af.FinderItem(title=title, year=request.year, tmdb_id=request.tmdb_id, tvdb_id=request.tvdb_id,
+                             imdb_id=(request.imdb_id or None),
+                             media_type=media_type if media_type in ("movie", "tv", "collection") else "movie")
+        stem, _ = os.path.splitext(af.build_download_filename(item, name_role, season, ext))
+        filename = f"{stem}{suffix}{ext}"
+
+    # Park the result server-side so Keep can turn it into a gallery tile without re-uploading it.
+    source = request.source.strip().lower()
+    gemini_kept.sweep()
+    try:
+        ref = gemini_kept.save_pending(
+            result["image"], ext="png" if operation == "extract_logo" else "jpg",
+            key=gemini_kept.item_key(request.tmdb_id, request.tvdb_id, title),
+            meta={"role": "logo" if operation == "extract_logo" else role,
+                  "source": source if source in ("tmdb", "tvdb", "fanart", "apple") else "tmdb",
+                  "season": None if operation == "extract_logo" else request.season,
+                  "operation": operation, "width": result["width"], "height": result["height"],
+                  "download_name": filename})
+    except (OSError, ValueError) as exc:
+        log_warning(LogTags.API, f"Could not park the Gemini result for keeping: {exc}")
+        ref = ""
+    log_user_action("Edited image with Gemini", operation=operation, path=request.path, model=model,
+                    image_size=image_size, elapsed_seconds=result["elapsed_seconds"], filename=filename)
+    return JSONResponse({
+        "operation": operation,
+        "ref": ref,
+        "file_url": gemini_kept.file_url(ref) if ref else "",
+        "image_base64": base64.b64encode(result["image"]).decode("ascii"),
+        "mime_type": result["mime_type"],
+        "width": result["width"], "height": result["height"],
+        "output_width": result["output_width"], "output_height": result["output_height"],
+        "model": model, "image_size": image_size,
+        "elapsed_seconds": result["elapsed_seconds"],
+        "filename": filename,
+    })
+
+
+class GeminiKeepRequest(BaseModel):
+    ref: str
+
+
+@router.post("/gemini-image/keep")
+def gemini_image_keep(request: GeminiKeepRequest) -> JSONResponse:
+    """Mark a parked result as kept so the maker card lists it as a gallery tile."""
+    kept = gemini_kept.keep(request.ref) if gemini_kept.is_ref(request.ref) else None
+    if kept is None:
+        raise HTTPException(status_code=404, detail="That Gemini image is no longer available. Run it again.")
+    log_user_action("Kept Gemini image", ref=request.ref)
+    return JSONResponse(kept)
+
+
+@router.get("/gemini-image/kept")
+def gemini_image_kept(title: str = "", tmdb_id: int | None = None, tvdb_id: int | None = None) -> JSONResponse:
+    """Kept results for one title, so the gallery shows them again after a reload."""
+    return JSONResponse(gemini_kept.list_kept(gemini_kept.item_key(tmdb_id, tvdb_id, title)))
+
+
+@router.delete("/gemini-image/kept")
+def gemini_image_delete(ref: str) -> JSONResponse:
+    deleted = gemini_kept.is_ref(ref) and gemini_kept.delete(ref)
+    if deleted:
+        log_user_action("Removed Gemini image", ref=ref)
+    return JSONResponse({"deleted": bool(deleted)})
+
+
+@router.get("/gemini-image/file")
+def gemini_image_file(ref: str, download: int = 0) -> Response:
+    """Serve a parked or kept result for the gallery, or as a download under its canonical name."""
+    path = gemini_kept.ref_path(ref) if gemini_kept.is_ref(ref) else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="Gemini image not found")
+    headers = {}
+    if download:
+        name = (gemini_kept.read_meta(path) or {}).get("download_name") or path.name
+        headers["Content-Disposition"] = _content_disposition("attachment", name)
+    return FileResponse(path, media_type=gemini_kept.MIME[path.suffix.lstrip(".")], headers=headers)
 
 
 # ---------------------------------------------------------------------------

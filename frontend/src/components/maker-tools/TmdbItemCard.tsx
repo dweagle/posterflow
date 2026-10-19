@@ -19,7 +19,9 @@ import {
   Tag,
   Trash2,
   Tv,
+  Type as TypeIcon,
   User,
+  WandSparkles,
   X,
 } from 'lucide-react'
 import {
@@ -48,11 +50,18 @@ import {
   getTvDetails,
   getApiErrorMessage,
   getSettings,
+  type KeptGeminiImage,
+  getKeptGeminiImages,
+  deleteKeptGeminiImage,
+  isGeminiRef,
+  geminiFileUrl,
+  withKeptImages,
 } from '../../api/client'
 import { useToast } from '../Toast'
 import { useAppleTvStorefront } from '../../hooks/useAppleTvStorefront'
 import PosterDriveSearchModal from '../PosterDriveSearchModal'
 import SquareCropModal from './SquareCropModal'
+import GeminiImageModal, { type GeminiMode } from './GeminiImageModal'
 import ServiceLinks from './ServiceLinks'
 import ReminderToggle from './ReminderToggle'
 import IdarrDropZone from './IdarrDropZone'
@@ -161,6 +170,7 @@ export type PsdConfig = {
   tvdbEnabled: boolean
   fanartEnabled: boolean
   appleEnabled: boolean
+  geminiEnabled: boolean   // Gemini key set: Remove Text button on poster/backdrop previews
 }
 
 /** Empty config used before settings load (shared by every consumer). */
@@ -168,7 +178,7 @@ export const EMPTY_PSD_CONFIG: PsdConfig = {
   exportFolder: '', templatePath: '', imageExportFolder: '',
   exportFolderMm2k: '', templatePathMm2k: '', imageExportFolderMm2k: '',
   openPhotopea: false, sameTab: false, defaultEditor: 'photopea',
-  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false, fanartEnabled: false, appleEnabled: false,
+  logoFolderSet: false, backgroundFolderSet: false, squareartFolderSet: false, tvdbEnabled: false, fanartEnabled: false, appleEnabled: false, geminiEnabled: false,
 }
 
 /** Derive the read-only PSD config from a settings map (shared by every consumer). */
@@ -190,6 +200,7 @@ export function derivePsdConfig(s: Record<string, string>): PsdConfig {
     tvdbEnabled: !!(s.tvdb_api_key || '').trim(),
     fanartEnabled: !!(s.fanart_api_key || '').trim(),
     appleEnabled: (s.apple_artwork_enabled || '').trim().toLowerCase() !== 'false',
+    geminiEnabled: !!(s.gemini_api_key || '').trim(),
   }
 }
 
@@ -239,7 +250,18 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [loadingSource, setLoadingSource] = useState<ImageSource | null>(null)
   // Set when every source failed to load: the panel opens empty so the export buttons stay reachable.
   const [galleryEmptyFallback, setGalleryEmptyFallback] = useState(false)
-  const galleryImages = imagesBySource[imageSource] ?? (galleryEmptyFallback ? EMPTY_IMAGES : null)
+  const rawGalleryImages = imagesBySource[imageSource] ?? (galleryEmptyFallback ? EMPTY_IMAGES : null)
+  const [keptGemini, setKeptGemini] = useState<KeptGeminiImage[]>([])   // kept Gemini results for this title
+  const galleryImages = useMemo(
+    () => (rawGalleryImages ? withKeptImages(rawGalleryImages, keptGemini, imageSource, null) : rawGalleryImages),
+    [rawGalleryImages, keptGemini, imageSource],
+  )
+  useEffect(() => {
+    if (!galleryOpen) return
+    let alive = true
+    getKeptGeminiImages(item).then((kept) => { if (alive) setKeptGemini(kept) }).catch(() => {})
+    return () => { alive = false }
+  }, [galleryOpen, item.title, item.tmdb_id, item.tvdb_id])   // eslint-disable-line react-hooks/exhaustive-deps
   const galleryLoading = loadingSource === imageSource
   const [activeGalleryTab, setActiveGalleryTab] = useState<'posters' | 'backdrops' | 'logos' | 'season-posters'>('posters')
   const [galleryLanguage, setGalleryLanguage] = useState(defaultGalleryLanguage ?? 'en+textless')
@@ -325,6 +347,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [artworkSaved, setArtworkSaved] = useState<Record<string, string>>({})   // key → written filename
   const [artworkOverwriteConfirm, setArtworkOverwriteConfirm] = useState<{ subtype: ArtworkSubtype; path: string; filename: string; crop?: { x: number; y: number; size: number } } | null>(null)
   const [squareCropTarget, setSquareCropTarget] = useState<TmdbImage | null>(null)   // poster open in the crop modal
+  const [geminiTarget, setGeminiTarget] = useState<{ mode: GeminiMode; image: TmdbImage; role: 'poster' | 'background'; season: number | null; source: ImageSource } | null>(null)   // preview sent to Gemini
 
   // Poster lightbox
   const [previewPoster, setPreviewPoster] = useState<string | null>(null)
@@ -386,7 +409,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   // (Title (Year) {ids}[ - Season N][ - logo|background].ext), matching the rest of the app.
   const handleGalleryDownload = useCallback(async (filePath: string, role: 'poster' | 'backdrop' | 'logo' = 'poster', season?: number | null) => {
     try {
-      const resp = await fetch(getArtworkTaggedDownloadUrl(filePath, role, item, season))
+      const resp = await fetch(isGeminiRef(filePath) ? geminiFileUrl(filePath, true) : getArtworkTaggedDownloadUrl(filePath, role, item, season))
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const cd = resp.headers.get('Content-Disposition') || ''
       const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd)
@@ -658,6 +681,46 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     settleTab(data)
   }, [galleryOpen, imageSource, activeGalleryTab, loadSource, loadSeason, seasonToKeep, settleTab, anchorGallery])
 
+  const handleGeminiKeep = useCallback((kept: KeptGeminiImage) => {
+    anchorGallery()
+    setKeptGemini((prev) => [kept, ...prev.filter((k) => k.ref !== kept.ref)])
+    // Show the tile where it landed: its source tab, and the list for its role (a logo made from a
+    // poster lands on the Logos tab).
+    setImageSource(kept.source)
+    if (kept.role === 'logo') {
+      setActiveGalleryTab('logos')
+    } else if (kept.role === 'background') {
+      setActiveGalleryTab('backdrops')
+    } else if (kept.season != null) {
+      setSelectedSeason(kept.season)
+      setActiveGalleryTab('season-posters')
+    } else {
+      setActiveGalleryTab('posters')
+    }
+    showToast('Added to the gallery. Tag or select it like any other image.', 'success')
+  }, [anchorGallery, showToast])
+
+  const dropGeminiRefs = useCallback((refs: string[]) => {
+    if (refs.length === 0) return
+    setKeptGemini((prev) => prev.filter((k) => !refs.includes(k.ref)))
+    setPsdSelection((prev) => ({
+      posters: prev.posters.filter((p) => !refs.includes(p)),
+      backdrops: prev.backdrops.filter((p) => !refs.includes(p)),
+      logos: prev.logos.filter((p) => !refs.includes(p)),
+    }))
+    setPosterTags((prev) => { const next = { ...prev }; refs.forEach((r) => { delete next[r] }); return next })
+  }, [])
+
+  const handleGeminiRemove = useCallback(async (ref: string) => {
+    try {
+      await deleteKeptGeminiImage(ref)
+    } catch (err) {
+      showToast(getApiErrorMessage(err, 'Failed to remove the Gemini image'), 'error')
+      return
+    }
+    dropGeminiRefs([ref])
+  }, [dropGeminiRefs, showToast])
+
   const togglePsdSelection = useCallback((role: 'poster' | 'backdrop' | 'logo', filePath: string) => {
     setPsdSelection((prev) => {
       if (role === 'logo') {
@@ -708,6 +771,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
         setPsdNotFound({ expectedFilename: result.expectedFilename })
         return
       }
+      dropGeminiRefs(result.clearedRefs)
       if (result.mode === 'photopea') {
         if (!result.openPhotopea) {
           showToast(`PSD saved: ${result.filename}`, 'success')
@@ -747,7 +811,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
     } finally {
       setPsdExporting(false)
     }
-  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, posterTags, psdConfig.sameTab, psdEditor, showToast])
+  }, [item.title, item.year, item.tmdb_id, item.tvdb_id, item.imdb_id, item.media_type, exportStyle, psdSelection, posterTags, psdConfig.sameTab, psdEditor, showToast, dropGeminiRefs])
 
   // Tag a specific poster with a plugin-convention name (s1/s0/main/show/c/cls/s<year>). Tagging just STORES the
   // name (and selects the poster); it's applied when the user later hits New/Use-Existing Export,
@@ -1309,7 +1373,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                         </div>
                         {selectedSeason != null && (() => {
                           const sk = seasonKey(imageSource, selectedSeason)
-                          const sImgs = seasonImages[sk]
+                          const sImgs = seasonImages[sk] ? withKeptImages(seasonImages[sk], keptGemini, imageSource, selectedSeason) : seasonImages[sk]
                           if (!sImgs) return <p className="tmdb-gallery-empty">{seasonImagesLoading[sk] ? 'Loading posters…' : 'No posters available for this season.'}</p>
                           if (sImgs.posters.length === 0) return <p className="tmdb-gallery-empty">No posters available for this season.</p>
                           return (
@@ -1328,6 +1392,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                                       >
                                         <img src={img.url_thumb} alt="" loading="lazy" className="tmdb-gallery-thumb" style={tileStyle(img, 'poster')} />
                                       </button>
+                                      {img.gemini && (
+                                        <>
+                                          <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom tmdb-gemini-badge" title="Made with Gemini">Gemini</span>
+                                          <button type="button" className="tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
+                                            <X size={13} />
+                                          </button>
+                                        </>
+                                      )}
                                       <div className="tmdb-thumb-actions">
                                         <button
                                           type="button"
@@ -1408,6 +1480,14 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                           {/* Collection logos are borrowed from a member movie — say which one. */}
                           {img.origin && (
                             <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom" title={`From ${img.origin}`}>{img.origin}</span>
+                          )}
+                          {img.gemini && (
+                            <>
+                              <span className="tmdb-gallery-origin-badge tmdb-gallery-origin-badge--bottom tmdb-gemini-badge" title="Made with Gemini">Gemini</span>
+                              <button type="button" className="tmdb-gemini-remove" onClick={() => void handleGeminiRemove(img.file_path)} title="Remove this Gemini image (deletes the kept file)">
+                                <X size={13} />
+                              </button>
+                            </>
                           )}
                           <div className="tmdb-thumb-actions">
                             <button
@@ -1507,7 +1587,26 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       {/* Gallery image lightbox */}
       {galleryPreview && (
         <div className="tmdb-lightbox-overlay" onClick={() => setGalleryPreview(null)}>
-          <div className="tmdb-gallery-lightbox" onClick={(e) => e.stopPropagation()}>
+          {(() => {
+            // Gemini gets its own row above the image so the bottom row keeps its width.
+            const geminiRow = psdConfig.geminiEnabled && galleryPreviewRole !== 'logo' && !galleryPreview.gemini
+            const openGemini = (mode: GeminiMode) => {
+              setGeminiTarget({ mode, image: galleryPreview, role: galleryPreviewRole === 'backdrop' ? 'background' : 'poster', season: galleryPreviewSeason, source: imageSource })
+              setGalleryPreview(null)
+            }
+            const geminiStyle = { fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }
+            return (
+          <div className={`tmdb-gallery-lightbox${geminiRow ? ' tmdb-gallery-lightbox--toolbar' : ''}`} onClick={(e) => e.stopPropagation()}>
+            {geminiRow && (
+              <div className="tmdb-gallery-lightbox-actions tmdb-gallery-lightbox-actions--top">
+                <button type="button" className="btn-toolbar" style={geminiStyle} title="Ask Gemini to redraw this image without its text (experimental, billed to your key)" onClick={() => openGemini('remove_text')}>
+                  <WandSparkles size={13} /> Remove Text
+                </button>
+                <button type="button" className="btn-toolbar" style={geminiStyle} title="Ask Gemini to lift the title logo out as a white PNG (experimental, billed to your key)" onClick={() => openGemini('extract_logo')}>
+                  <TypeIcon size={13} /> Make Logo
+                </button>
+              </div>
+            )}
             <img
               className={`tmdb-gallery-lightbox-img${galleryPreviewIsLogo ? ' tmdb-gallery-lightbox-img--logo' : ''}`}
               src={galleryPreview.url_full}
@@ -1531,7 +1630,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                   <button
                     type="button"
                     className="btn-toolbar"
-                    style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#4caf50' }}
+                    style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }}
                     title={`Save to the ${subtype} export folder, named for artwork drives`}
                     onClick={() => void handleSaveArtwork(subtype, galleryPreview.file_path)}
                     disabled={!!artworkSaving[key] || !!artworkSaved[key]}
@@ -1544,7 +1643,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
                 <button
                   type="button"
                   className="btn-toolbar"
-                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#4caf50' }}
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fff' }}
                   title="Crop into square art → saves to the square art export folder, named for artwork drives"
                   onClick={() => { setSquareCropTarget(galleryPreview); setGalleryPreview(null) }}
                 >
@@ -1553,8 +1652,24 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
               )}
             </div>
           </div>
+            )
+          })()}
           <button type="button" className="tmdb-lightbox-close" onClick={() => setGalleryPreview(null)}>×</button>
         </div>
+      )}
+
+      {/* Experimental: Gemini redraws the previewed poster/backdrop without its text, or lifts its logo out */}
+      {geminiTarget && (
+        <GeminiImageModal
+          mode={geminiTarget.mode}
+          image={geminiTarget.image}
+          role={geminiTarget.role}
+          season={geminiTarget.season}
+          source={geminiTarget.source}
+          item={item}
+          onKeep={handleGeminiKeep}
+          onClose={() => setGeminiTarget(null)}
+        />
       )}
 
       {/* Crop a poster into square art → saves to the square art export folder */}

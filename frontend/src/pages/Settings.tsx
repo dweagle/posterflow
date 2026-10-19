@@ -353,6 +353,7 @@ function Settings() {
   const [showTmdbKey, setShowTmdbKey] = useState(false)
   const [showTvdbKey, setShowTvdbKey] = useState(false)
   const [showFanartKey, setShowFanartKey] = useState(false)
+  const [showGeminiKey, setShowGeminiKey] = useState(false)
   const [removeApiKey, setRemoveApiKey] = useState<ApiKeyName | null>(null)
 
   const handleToggleTvdbKeyVisibility = async () => {
@@ -391,6 +392,25 @@ function Settings() {
       }
     }
     setShowFanartKey((prev) => !prev)
+  }
+
+  const handleToggleGeminiKeyVisibility = async () => {
+    const willShow = !showGeminiKey
+    if (willShow && geminiApiKey === MASKED_VALUE) {
+      try {
+        const response = await revealSensitiveSetting({ setting_key: 'gemini_api_key' })
+        const revealedValue = String(response.value || '')
+        if (!revealedValue) {
+          showToast('No saved Gemini API key available to reveal', 'error')
+          return
+        }
+        setGeminiApiKey(revealedValue)
+      } catch (error) {
+        showToast(getApiErrorMessage(error, 'Failed to reveal Gemini API key'), 'error')
+        return
+      }
+    }
+    setShowGeminiKey((prev) => !prev)
   }
 
   const handleToggleTmdbKeyVisibility = async () => {
@@ -610,6 +630,9 @@ function Settings() {
     fanartApiKey,
     setFanartApiKey,
     handleSaveFanartApiKey,
+    geminiApiKey,
+    setGeminiApiKey,
+    handleSaveGeminiApiKey,
     savedApiKeys,
     handleRemoveApiKey,
     appleArtworkEnabled,
@@ -1277,6 +1300,54 @@ function Settings() {
                   />
                   <span className="toggle-slider"></span>
                 </label>
+              </div>
+            </div>
+            <div className="setting-item api-key-setting">
+              <div className="setting-info">
+                <label>Gemini API Key</label>
+                <p className="setting-description">
+                  Optional and experimental. Adds a Remove Text button to the maker card's image preview.
+                  Gemini redraws a poster or backdrop without its title and credits, and you download the result.
+                  Google bills each image to this key. Create one in{' '}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: '#64b5f6' }}>
+                    Google AI Studio
+                  </a>.
+                </p>
+              </div>
+              <div className="settings-input-row api-key-control">
+                <div className="input-with-toggle">
+                  <input
+                    type={showGeminiKey ? 'text' : 'password'}
+                    value={geminiApiKey === MASKED_VALUE ? '' : geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder={geminiApiKey === MASKED_VALUE ? '••••••••••••••••' : 'Enter your Gemini API key'}
+                  />
+                  <button
+                    className="toggle-visibility"
+                    type="button"
+                    onClick={handleToggleGeminiKeyVisibility}
+                    title={showGeminiKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showGeminiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <button
+                  className="btn-primary btn-inline-save"
+                  onClick={handleSaveGeminiApiKey}
+                  disabled={saving}
+                >
+                  Save
+                </button>
+                {savedApiKeys.gemini && (
+                  <button
+                    className="btn-secondary btn-inline-save"
+                    type="button"
+                    onClick={() => setRemoveApiKey('gemini')}
+                    disabled={saving}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
           </div>
