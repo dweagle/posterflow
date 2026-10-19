@@ -6403,13 +6403,15 @@ body.ui-ready .flow-job-card .toggle-slider:before {
 }
 
 /* Ignore Unmonitored as a plain compact row: no boxed card, text inline with the
-   checkbox, and only as wide as its content so the empty row isn't clickable. */
+   checkbox, and only as wide as its content so the empty row isn't clickable.
+   Capped at the card width so the help text wraps instead of spilling out. */
 .poster-manager .checkbox-label.checkbox-label--inline {
   padding: 0;
   background: none;
   border: none;
-  align-items: center;
+  align-items: flex-start;
   align-self: flex-start;
+  max-width: 100%;
   gap: 0.4rem;
 }
 
@@ -6431,14 +6433,14 @@ body.ui-ready .flow-job-card .toggle-slider:before {
   min-width: 0;
 }
 
-.poster-manager .checkbox-label.checkbox-label--inline strong,
-.poster-manager .checkbox-label.checkbox-label--inline small {
+.poster-manager .checkbox-label.checkbox-label--inline strong {
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .poster-manager .checkbox-label.checkbox-label--inline small {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Cross-asset-type warning under the Ignored Items heading */
