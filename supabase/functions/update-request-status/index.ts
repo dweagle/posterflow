@@ -18,6 +18,8 @@
  *   - "match" (server owner or a DISCORD_MOD_ROLE_IDS holder) fills in the ids
  *     of a custom request; conditional on tmdb_id still being NULL so it can't
  *     run twice
+ *   - "upgrade" (same moderators) turns an active season request into a
+ *     show-level one; conditional on it still being an active season request
  *
  * Required Supabase secrets:
  *   DISCORD_BOT_TOKEN
@@ -31,21 +33,21 @@
  * Request body (JSON):
  *   token      - Signed maker token from discord-oauth
  *   request_id - UUID of the poster_request row
- *   action     - "claim" | "complete" | "reject" | "close" | "remove" | "release" | "match"
+ *   action     - "claim" | "complete" | "reject" | "close" | "remove" | "release" | "match" | "upgrade"
  *   match      - for "match": { tmdb_id, tvdb_id, imdb_id, title, year, poster_path, media_type }
  */
 
 const BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')!
 const GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')!
 const MAKER_ROLE_ID = Deno.env.get('DISCORD_MAKER_ROLE_ID')!
-// Role ids whose holders may run owner-level request actions (Match, Remove). Checked
+// Role ids whose holders may run owner-level request actions (Match, Upgrade, Remove). Checked
 // live per call, like the Maker role, so removing the role takes effect at once.
 const MOD_ROLE_IDS = (Deno.env.get('DISCORD_MOD_ROLE_IDS') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 const JWT_SECRET = Deno.env.get('DISCORD_JWT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close', 'remove', 'release', 'match'])
+const VALID_ACTIONS = new Set(['claim', 'complete', 'reject', 'close', 'remove', 'release', 'match', 'upgrade'])
 
 // ── Token verification (same as post-poster) ───────────────────────────────
 
@@ -412,8 +414,8 @@ interface MatchFields {
   media_type: string
 }
 
-// The row as PostgREST returns it after the match PATCH.
-type MatchedRow = MatchFields & {
+// The row as PostgREST returns it after a match/upgrade PATCH.
+type UpdatedRow = MatchFields & {
   id: string
   season_number: number | null
   notes: string | null
@@ -467,14 +469,17 @@ function parseMatch(raw: unknown, row: RequestRow): MatchFields | string {
 // An active same-style request for the matched item would make the PATCH hit
 // the idx_poster_requests_tmdb_style unique index. Checked up front for a
 // readable message; the PATCH's own 409 is the backstop for races.
-async function findActiveDuplicate(m: MatchFields, row: RequestRow): Promise<{ id: string; title: string } | null> {
-  if (m.tmdb_id == null) return null
+async function findActiveDuplicate(
+  key: { tmdb_id: number | null; media_type: string; season_number: number | null },
+  row: RequestRow,
+): Promise<{ id: string; title: string } | null> {
+  if (key.tmdb_id == null) return null
   const params = new URLSearchParams()
   params.set('select', 'id,title,style_tags')
   params.set('id', `neq.${row.id}`)
-  params.set('tmdb_id', `eq.${m.tmdb_id}`)
-  params.set('media_type', `eq.${m.media_type}`)
-  params.set('season_number', row.season_number == null ? 'is.null' : `eq.${row.season_number}`)
+  params.set('tmdb_id', `eq.${key.tmdb_id}`)
+  params.set('media_type', `eq.${key.media_type}`)
+  params.set('season_number', key.season_number == null ? 'is.null' : `eq.${key.season_number}`)
   params.set('status', 'in.(pending,in_progress)')
   const resp = await fetch(`${SUPABASE_URL}/rest/v1/poster_requests?${params}`, { headers: SB_HEADERS })
   if (!resp.ok) return null
@@ -484,12 +489,12 @@ async function findActiveDuplicate(m: MatchFields, row: RequestRow): Promise<{ i
 }
 
 // A formal request supersedes the community-list entry for the same poster in
-// the same style. At submission a custom request could only look for that entry
-// by title; now that it has ids, clear the open list row the way submit-request
-// would have. Claimed (in_progress) rows are left so a match can't yank work in
-// progress. Deleting the wanters lets the orphan-cleanup trigger remove the
-// empty row. Best-effort.
-async function clearListEntriesForMatch(after: MatchedRow, row: RequestRow): Promise<void> {
+// the same style. After a match (ids the submission didn't have) or an upgrade
+// (a show covers its seasons), clear the open list rows the edited row now
+// covers, the way submit-request would have. Claimed (in_progress) rows are
+// left so an edit can't yank work in progress. Deleting the wanters lets the
+// orphan-cleanup trigger remove the empty row. Best-effort.
+async function clearSupersededListEntries(after: UpdatedRow, row: RequestRow): Promise<void> {
   try {
     const params = new URLSearchParams()
     params.set('select', 'id,style_tag')
@@ -543,7 +548,7 @@ const COLLECTION_ALL_MOVIES_NOTE = 'Includes: all movies in the collection'
 const ORIGINAL_LANGUAGE_NOTE = 'Includes: original-language poster/logo'
 
 // Thread name in the same shape notify-discord gives a new request.
-function displayTitleFor(r: MatchedRow): string {
+function displayTitleFor(r: UpdatedRow): string {
   const notes = typeof r.notes === 'string' ? r.notes : ''
   let seasonsLabel: string | null = null
   if (r.season_number != null) {
@@ -565,6 +570,17 @@ function displayTitleFor(r: MatchedRow): string {
   return title
 }
 
+function tvdbLinkFor(tvdbId: number | null): string {
+  return tvdbId ? `https://thetvdb.com/dereferrer/series/${tvdbId}` : ''
+}
+
+// Drop the "Seasons: …" first line a multi-season request carries in its notes.
+function stripSeasonsLine(notes: string | null): string | null {
+  if (!notes || !notes.startsWith(SEASONS_PREFIX)) return notes
+  const rest = notes.split('\n').slice(1).join('\n').trim()
+  return rest || null
+}
+
 function tmdbLinkFor(tmdbId: number | null, mediaType: string): string {
   if (!tmdbId) return ''
   const seg = mediaType === 'movie' ? 'movie'
@@ -574,19 +590,20 @@ function tmdbLinkFor(tmdbId: number | null, mediaType: string): string {
   return `https://www.themoviedb.org/${seg}/${tmdbId}`
 }
 
-// A matched request's thread still looks like a custom one: no links, no
-// thumbnail, maybe the wrong type tag. Bring it in line with what notify-discord
-// would have created and leave a note saying who matched it. Best-effort.
-async function refreshMatchedThread(
+// After a moderator edit (match, upgrade) the thread still describes the old
+// row: name, forum type tag, id links, thumbnail, Type/Notes fields. Bring it
+// in line with what notify-discord would create for the row as it is now, and
+// leave a note saying who changed it. Buttons are left alone. Best-effort.
+async function refreshThreadAfterEdit(
   threadId: string,
   before: RequestRow,
-  after: MatchedRow,
-  ownerName: string,
+  after: UpdatedRow,
+  note: string,
 ): Promise<void> {
   const auth = { Authorization: `Bot ${BOT_TOKEN}` }
   const jsonAuth = { ...auth, 'Content-Type': 'application/json' }
   const tmdbLink = tmdbLinkFor(after.tmdb_id, after.media_type)
-  const tvdbLink = after.tvdb_id ? `https://thetvdb.com/dereferrer/series/${after.tvdb_id}` : ''
+  const tvdbLink = tvdbLinkFor(after.tvdb_id)
 
   // Thread name, plus the forum tag when the media type changed.
   const chResp = await fetch(`https://discord.com/api/v10/channels/${threadId}`, { headers: auth })
@@ -605,11 +622,11 @@ async function refreshMatchedThread(
       body: JSON.stringify({ name: displayTitleFor(after).slice(0, 100), applied_tags: tags }),
     })
     if (!patchResp.ok) {
-      console.error('[update-request-status] match thread rename failed:', await patchResp.text())
+      console.error('[update-request-status] thread rename failed:', await patchResp.text())
     }
   }
 
-  // Starter embed: id links, thumbnail, Type field. Buttons are left as they are.
+  // Starter embed: id links, thumbnail, Type and Notes fields.
   const msgResp = await fetch(
     `https://discord.com/api/v10/channels/${threadId}/messages/${threadId}`,
     { headers: auth },
@@ -622,8 +639,15 @@ async function refreshMatchedThread(
         .filter(Boolean)
         .join(' · ')
       const typeLabel = after.media_type.charAt(0).toUpperCase() + after.media_type.slice(1)
-      const fields = ((embed.fields ?? []) as { name: string; value: string; inline?: boolean }[])
+      let fields = ((embed.fields ?? []) as { name: string; value: string; inline?: boolean }[])
         .map((f) => (f.name === 'Type' ? { ...f, value: typeLabel } : f))
+      if (after.notes) {
+        fields = fields.some((f) => f.name === 'Notes')
+          ? fields.map((f) => (f.name === 'Notes' ? { ...f, value: after.notes as string } : f))
+          : [...fields, { name: 'Notes', value: after.notes, inline: false }]
+      } else {
+        fields = fields.filter((f) => f.name !== 'Notes')
+      }
       const updated: Record<string, unknown> = { ...embed, fields }
       if (links) updated.description = links
       if (after.poster_path) updated.thumbnail = { url: after.poster_path }
@@ -632,18 +656,12 @@ async function refreshMatchedThread(
         { method: 'PATCH', headers: jsonAuth, body: JSON.stringify({ embeds: [updated] }) },
       )
       if (!embedResp.ok) {
-        console.error('[update-request-status] match embed refresh failed:', await embedResp.text())
+        console.error('[update-request-status] embed refresh failed:', await embedResp.text())
       }
     }
   }
 
-  const label = after.year ? `${after.title} (${after.year})` : after.title
-  // <url> stops Discord unfurling a link-preview card under the note.
-  const target = tmdbLink || tvdbLink ? `[${label}](<${tmdbLink || tvdbLink}>)` : label
-  await postThreadMessage(
-    threadId,
-    `🔗 **Matched by ${ownerName}** via PosterFlow — this request is now linked to ${target}.`,
-  )
+  await postThreadMessage(threadId, note)
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -665,7 +683,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Missing required fields: token, request_id, action' }, 400)
   }
   if (!VALID_ACTIONS.has(action)) {
-    return json({ error: 'Invalid action — must be claim, complete, reject, close, remove, release, or match' }, 400)
+    return json({ error: 'Invalid action — must be claim, complete, reject, close, remove, release, match, or upgrade' }, 400)
   }
   // request_id is interpolated into PostgREST query strings, so require a strict
   // UUID — this blocks query-parameter injection via crafted ids.
@@ -843,7 +861,7 @@ Deno.serve(async (req) => {
     const fields = parseMatch(body.match, row)
     if (typeof fields === 'string') return json({ error: `Invalid ${fields}` }, 400)
 
-    const dup = await findActiveDuplicate(fields, row)
+    const dup = await findActiveDuplicate({ tmdb_id: fields.tmdb_id, media_type: fields.media_type, season_number: row.season_number }, row)
     if (dup) {
       const style = styleOf(row.style_tags)
       return json(
@@ -865,15 +883,89 @@ Deno.serve(async (req) => {
       if (resp.status === 409) return json({ error: 'An active request for this item already exists' }, 409)
       return json({ error: 'Failed to update the request' }, 500)
     }
-    const rows = (await resp.json()) as MatchedRow[]
+    const rows = (await resp.json()) as UpdatedRow[]
     if (rows.length === 0) return json({ error: 'This request was just updated — please refresh' }, 409)
     const updated = rows[0]
 
     // Cross-sync: the request now supersedes any open list entry for this poster.
-    await clearListEntriesForMatch(updated, row)
+    await clearSupersededListEntries(updated, row)
 
     if (row.discord_message_id) {
-      const bgTask = refreshMatchedThread(row.discord_message_id, row, updated, maker.discord_username).catch(console.error)
+      const label = updated.year ? `${updated.title} (${updated.year})` : updated.title
+      const link = tmdbLinkFor(updated.tmdb_id, updated.media_type) || tvdbLinkFor(updated.tvdb_id)
+      // <url> stops Discord unfurling a link-preview card under the note.
+      const target = link ? `[${label}](<${link}>)` : label
+      const bgTask = refreshThreadAfterEdit(
+        row.discord_message_id, row, updated,
+        `🔗 **Matched by ${maker.discord_username}** via PosterFlow — this request is now linked to ${target}.`,
+      ).catch(console.error)
+      try {
+        // @ts-ignore - EdgeRuntime is a Supabase-specific global
+        EdgeRuntime.waitUntil(bgTask)
+      } catch {
+        await bgTask
+      }
+    }
+
+    return json({ ok: true, request: updated })
+  }
+
+  // ── Upgrade action: a moderator turns a season request into a show request ─
+  // Same end state as the submit RPC's season→show merge: media type show,
+  // season cleared, "Seasons: …" notes line dropped, requester and claim kept.
+  if (action === 'upgrade') {
+    if (!(await isModerator(maker.discord_user_id))) {
+      return json({ error: 'Only the server owner or a moderator can upgrade a request' }, 403)
+    }
+    const row = await fetchRequest(request_id)
+    if (!row) return json({ error: 'Request not found' }, 404)
+    if (row.media_type !== 'season') {
+      return json({ error: 'Only a season request can be upgraded to a show request' }, 409)
+    }
+    if (row.status !== 'pending' && row.status !== 'in_progress') {
+      return json({ error: 'Only an open or claimed request can be upgraded' }, 409)
+    }
+
+    const dup = await findActiveDuplicate({ tmdb_id: row.tmdb_id, media_type: 'show', season_number: null }, row)
+    if (dup) {
+      const style = styleOf(row.style_tags)
+      return json(
+        { error: `An active ${style ? `${style} ` : ''}show request for "${dup.title}" already exists — remove this season request instead.` },
+        409,
+      )
+    }
+
+    // Conditional on it still being an active season request.
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/poster_requests?id=eq.${request_id}&media_type=eq.season&status=in.(pending,in_progress)`,
+      {
+        method: 'PATCH',
+        headers: SB_HEADERS,
+        body: JSON.stringify({
+          media_type: 'show',
+          season_number: null,
+          notes: stripSeasonsLine(row.notes),
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    )
+    if (!resp.ok) {
+      console.error('[update-request-status] upgrade PATCH failed:', await resp.text())
+      if (resp.status === 409) return json({ error: 'An active show request for this series already exists' }, 409)
+      return json({ error: 'Failed to update the request' }, 500)
+    }
+    const rows = (await resp.json()) as UpdatedRow[]
+    if (rows.length === 0) return json({ error: 'This request was just updated — please refresh' }, 409)
+    const updated = rows[0]
+
+    // A show request covers its seasons: clear the open list rows it now supersedes.
+    await clearSupersededListEntries(updated, row)
+
+    if (row.discord_message_id) {
+      const bgTask = refreshThreadAfterEdit(
+        row.discord_message_id, row, updated,
+        `⬆️ **Upgraded by ${maker.discord_username}** via PosterFlow — now a show-level request (series + all season posters).`,
+      ).catch(console.error)
       try {
         // @ts-ignore - EdgeRuntime is a Supabase-specific global
         EdgeRuntime.waitUntil(bgTask)

@@ -1227,13 +1227,15 @@
   color: #ffcc80;
 }
 
-/* Match — violet; the server owner links an id-less request to TMDB/TVDB. */
-.action-match {
+/* Match / Upgrade — violet; moderator edits to a request (link ids, season → show). */
+.action-match,
+.action-upgrade {
   border: 1px solid rgba(186, 104, 200, 0.45);
   background: transparent;
   color: #ba68c8;
 }
-.action-match:hover:not(:disabled) {
+.action-match:hover:not(:disabled),
+.action-upgrade:hover:not(:disabled) {
   border-color: #ba68c8;
   background: rgba(186, 104, 200, 0.12);
   color: #ce93d8;

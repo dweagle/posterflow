@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2 } from 'lucide-react'
+import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest, type RequestMatch } from '../api/community'
 import { getSettings } from '../api/client'
 import { checkTmdbPosterAvailability, posterCheckKey, type PosterAvailability } from '../api/makerTools'
@@ -76,7 +76,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 
 export default function CommunityRequests() {
   const { showToast } = useToast()
-  const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus, matchRequest } = useDiscordAuth()
+  const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus, matchRequest, upgradeRequest } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
   const { refreshCommunityRequestCount } = useAppEvents()
   // Latest fetchRequests, so a failed claim can refresh the (possibly stale) list.
@@ -112,6 +112,8 @@ export default function CommunityRequests() {
   // Owner-only Match: the id-less request being linked to a TMDB/TVDB entry.
   const [matchRequestId, setMatchRequestId] = useState<string | null>(null)
   const [matchSubmitting, setMatchSubmitting] = useState(false)
+  // Per-card season→show upgrade state: requestId → 'loading' | error string
+  const [upgradeStates, setUpgradeStates] = useState<Map<string, 'loading' | string>>(new Map())
 
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(EMPTY_PSD_CONFIG)
   const [posterAvailability, setPosterAvailability] = useState<Record<string, PosterAvailability>>({})
@@ -344,6 +346,19 @@ export default function CommunityRequests() {
       setMatchSubmitting(false)
     }
   }, [matchRequest, showToast])
+
+  const handleUpgrade = useCallback(async (requestId: string) => {
+    setUpgradeStates((prev) => new Map(prev).set(requestId, 'loading'))
+    try {
+      const updated = await upgradeRequest(requestId)
+      setRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, ...updated } : r)))
+      setUpgradeStates((prev) => { const next = new Map(prev); next.delete(requestId); return next })
+      showToast(`Upgraded to a show request: ${updated.title}`, 'success')
+      fetchRequestsRef.current?.()   // the Seasons tab no longer lists it
+    } catch (err) {
+      setUpgradeStates((prev) => new Map(prev).set(requestId, err instanceof Error ? err.message : 'Upgrade failed'))
+    }
+  }, [upgradeRequest, showToast])
 
   const handleDrop = useCallback((e: React.DragEvent, requestId: string) => {
     e.preventDefault()
@@ -825,6 +840,29 @@ export default function CommunityRequests() {
                         </button>
                         {archiveError && (
                           <span className="request-action-error" data-tooltip={archiveError}>{archiveError}</span>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  {/* Upgrade button — owner or moderator turns an open season request into a show request */}
+                  {isConnected && (isOwner || isMod) && req.media_type === 'season' && (req.status === 'pending' || req.status === 'in_progress') && (() => {
+                    const st = upgradeStates.get(req.id)
+                    const upgrading = st === 'loading'
+                    const upgradeError = typeof st === 'string' && st !== 'loading' ? st : null
+                    return (
+                      <div className="request-status-actions">
+                        <button
+                          type="button"
+                          className="request-action-btn action-upgrade"
+                          disabled={upgrading}
+                          data-tooltip="Upgrade to a show request: series + all season posters (moderator)"
+                          onClick={() => handleUpgrade(req.id)}
+                        >
+                          {upgrading ? <Loader2 size={11} className="spin-icon" /> : <ChevronsUp size={11} />}
+                          <span>Upgrade</span>
+                        </button>
+                        {upgradeError && (
+                          <span className="request-action-error" data-tooltip={upgradeError}>{upgradeError}</span>
                         )}
                       </div>
                     )

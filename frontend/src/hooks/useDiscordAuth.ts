@@ -205,25 +205,37 @@ export function useDiscordAuth() {
     [auth],
   )
 
-  // Server owner only: link an id-less (custom) request to a TMDB/TVDB entry.
-  // Same endpoint as the status actions; returns the updated row.
-  const matchRequest = useCallback(
-    async (requestId: string, match: RequestMatch): Promise<CommunityRequest> => {
+  // Owner/moderator edits that return the whole updated row. Same endpoint as
+  // the status actions.
+  const moderateRequest = useCallback(
+    async (requestId: string, action: 'match' | 'upgrade', extra: Record<string, unknown> = {}): Promise<CommunityRequest> => {
       if (!auth?.token) throw new Error('Not connected to Discord')
 
       const resp = await fetch(UPDATE_STATUS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: auth.token, request_id: requestId, action: 'match', match }),
+        body: JSON.stringify({ token: auth.token, request_id: requestId, action, ...extra }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok) {
-        throw new Error((data as { error?: string }).error ?? 'Match failed')
+        throw new Error((data as { error?: string }).error ?? `Action "${action}" failed`)
       }
       void clearCommunityCache().catch(() => {})
       return (data as { request: CommunityRequest }).request
     },
     [auth],
+  )
+
+  // Link an id-less (custom) request to a TMDB/TVDB entry.
+  const matchRequest = useCallback(
+    (requestId: string, match: RequestMatch) => moderateRequest(requestId, 'match', { match }),
+    [moderateRequest],
+  )
+
+  // Turn an active season request into a show-level one (series + all seasons).
+  const upgradeRequest = useCallback(
+    (requestId: string) => moderateRequest(requestId, 'upgrade'),
+    [moderateRequest],
   )
 
   // Community list-item actions — mirrors updateRequestStatus, different endpoint.
@@ -266,6 +278,7 @@ export function useDiscordAuth() {
     uploadPoster,
     updateRequestStatus,
     matchRequest,
+    upgradeRequest,
     updateListItem,
   }
 }
