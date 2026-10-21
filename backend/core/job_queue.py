@@ -5,11 +5,34 @@ Uses a thread pool executor to manage concurrent jobs.
 import gc
 import ctypes
 import threading
+from datetime import datetime, timezone
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Dict, Optional
-from core.logging import log_debug
+from core.logging import log_debug, log_warning, log_error
 from core.config import settings
-from core.job_cancel import is_cancel_requested, clear_cancel
+from core.job_cancel import JobCancelled, is_cancel_requested, clear_cancel
+from database import SessionLocal
+from models.job import Job, JOB_STATUS_FAILED, JOB_STATUSES_ACTIVE, finalize_job_cancelled, update_job_state
+
+
+def _finalize_abandoned_job(job_id: int, exc: BaseException) -> None:
+    """A runner that raised without closing out its row leaves a job 'running' that nobody
+    will ever finish (Stop can only write 'Stopping…'). Close it from the exception type."""
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job is None or job.status not in JOB_STATUSES_ACTIVE:
+            return
+        was = job.status
+        if isinstance(exc, JobCancelled):
+            finalize_job_cancelled(db, job_id)
+        else:
+            update_job_state(db, job, status=JOB_STATUS_FAILED, progress=100, error=str(exc), completed_at=datetime.now(timezone.utc))
+        log_warning("QUEUE", f"Job {job_id} raised {type(exc).__name__} while still '{was}'; marked {job.status}", job_id=job_id)
+    except Exception as e:
+        log_error("QUEUE", f"Could not finalize abandoned job {job_id}: {e}", job_id=job_id)
+    finally:
+        db.close()
 
 
 def _trim_process_memory() -> None:
@@ -66,6 +89,9 @@ class JobQueueManager:
 
             try:
                 return job_func(*args, **kwargs)
+            except BaseException as exc:
+                _finalize_abandoned_job(job_id, exc)
+                raise
             finally:
                 with self.lock:
                     self.active_jobs -= 1
