@@ -20,13 +20,13 @@ function run(caseName, opts) {
     const model = { singles: [{ lab: 'SP', n: 'Specials', p: [1, 3], v: false }, { lab: 'C', n: 'Collection', p: [1, 4], v: false }],
       seasons: [{ n: 'SEASONS', p: [2], g: true, v: false, r: 'main' }, { n: '1990-1999', p: [2, 0], g: true, v: false, r: 'decade' },
                 { n: 'Season 1', p: [2, 0, 0], g: false, v: false, r: 'season' }, { n: 'Season 2', p: [2, 0, 1], g: false, v: false, r: 'season' }], sequels: [], seqGroup: null };
-    const scan = { variants: [{ nm: 'show', p: [3, 0], v: true }, { nm: 's1', p: [3, 1], v: false }, { nm: 's2', p: [3, 2], v: false }],
+    const scan = { variants: [{ nm: 'show', p: [3, 0], v: true }, { nm: 's1', p: [3, 1], v: false }, { nm: 's2', p: [3, 2], v: false }].concat(opts.cVariant ? [{ nm: 'c', p: [3, 3], v: false }] : []),
       seasonText: [{ n: 1, p: [1, 0] }, { n: 2, p: [1, 1] }, { n: 3, p: [1, 2] }], specialsText: [{ p: [1, 3] }], clsText: [], collectionText: [{ p: [1, 4] }],
       poster: opts.untagged ? { count: 4, untagged: ['Layer 2'] } : { count: 3, untagged: [] }, source: SRC, name: NAME };
     const ctxEchoes = () => { if (SZ) post('SZNAME:' + NAME); else { post('PFLURL:' + SRC); post('PFLNAME:' + NAME); } };
     const onScript = (s) => {
       scripts.push(s);
-      if (s.includes('"' + P + 'FIN:"')) { ctxEchoes(); post(P + 'FIN:' + JSON.stringify({ poster: true, logo: true })); }
+      if (s.includes('"' + P + 'FIN:"')) { ctxEchoes(); post(P + 'FIN:' + JSON.stringify({ poster: true, logo: !opts.noLogo })); }
       else if (s.includes('"' + P + 'RENV:"')) { const m = s.match(/t=("(?:[^"\\]|\\.)*")/); post(P + 'RENV:' + JSON.stringify({ from: 'old', to: JSON.parse(m[1]), same: false })); }
       else if (s.includes("'" + P + "TRIM:ok'")) post(P + 'TRIM:ok');
       else if (s.includes('"' + P + 'SAVED:')) post(P + 'SAVED:ok');
@@ -34,7 +34,7 @@ function run(caseName, opts) {
       else if (s.includes('"' + P + 'GRAD:"')) post(P + 'GRAD:0');
       else if (s.includes("'" + P + "VIS:ok'")) post(P + 'VIS:ok');
       else if (s.includes('"' + P + 'ACT:"')) post(P + 'ACT:sig');
-      else if (s.includes("'" + P + ":'+JSON.stringify")) { if (!SZ) { post('PFLNAME:' + NAME); post('PFLCTX:'); } else post('SZNAME:' + NAME); post(P + 'DET:CL2K'); post(P + 'SIG:sig'); post(P + ':' + JSON.stringify(model)); }
+      else if (s.includes("'" + P + ":'+JSON.stringify")) { if (!SZ) { post('PFLNAME:' + NAME); post('PFLCTX:'); } else post('SZNAME:' + NAME); post(P + 'DET:' + (opts.style || 'CL2K')); post(P + 'SIG:sig'); post(P + ':' + JSON.stringify(model)); }
       else if (s.includes('d.saveToOE("psd")')) { ctxEchoes(); post(bytes('8BPS')); }
       else if (s.includes('dd.saveToOE("jpg:0.90")')) post(bytes('JPGB'));
       else if (s.includes('saveToOE("jpg:0.90")')) { ctxEchoes(); post(bytes('JPGB')); }
@@ -70,13 +70,17 @@ function run(caseName, opts) {
 }
 
 (async () => {
-  const saveOn = SZ ? { show: { save: true, saveAgain: true }, movie: { save: true } } : {};
+  const saveOn = SZ ? { show: { save: true, saveAgain: true }, movie: { save: true }, collection: { save: true, saveAgain: true } } : {};
   const cases = [
     { caseName: 'MOVIE right-click', chip: 'MOVIE', steps: Object.assign({}, saveOn, { movie: Object.assign({ logoPng: false, trim: true }, saveOn.movie || {}) }), expect: ['MOVIE: ', '✓ cleared', '✓ main', '✓ logo name', '✓ trim', '✓ saved', '✓ JPG', 'opening Square Art'], expectLog: 'square-art-started' },
     { caseName: 'SHOW orange, clean tags', chip: 'SHOW', steps: Object.assign({}, saveOn, { show: Object.assign({ logoPng: false }, saveOn.show || {}) }), expect: ['SHOW (orange', '✓ cleared', '✓ logo name', '✓ saved', '✓ tag batch (3 JPGs)', '✓ show only', '✓ saved again', 'opening Square Art'] },
     { caseName: 'SHOW orange, untagged layer', chip: 'SHOW', untagged: true, steps: saveOn, expect: ['STOPPED. Fix these tags', '"Layer 2" is not tagged'] },
     { caseName: 'SHOW blue, Run 2 seasons', chip: 'SHOW', shift: true, runSeasons: '2', steps: Object.assign({}, saveOn, { show: Object.assign({ logoPng: false }, saveOn.show || {}) }), expect: ['SHOW (blue', '✓ season batch (2 JPGs)', '✓ show only', 'opening Square Art'] },
     { caseName: 'movie with save off', chip: 'MOVIE', steps: { movie: { save: false, logoPng: false, squareArt: false } }, expect: ['MOVIE: ', '✓ cleared', '✓ JPG', 'done'] },
+    { caseName: 'COLLECTION right-click', chip: 'COLLECTION', cVariant: true, steps: Object.assign({}, saveOn, { collection: Object.assign({ logoPng: false }, saveOn.collection || {}) }), expect: ['COLLECTION: ', '✓ c', '✓ logo name', '✓ trim', '✓ saved', '✓ JPG', '✓ saved again', 'opening Square Art'], expectLog: 'square-art-started' },
+    { caseName: 'COLLECTION, no c layer', chip: 'COLLECTION', steps: Object.assign({}, saveOn, { collection: Object.assign({ logoPng: false }, saveOn.collection || {}) }), expect: ['COLLECTION: ', '✓ saved', '✗ JPG: no POSTER layer tagged "c"', 'save again and Square Art skipped'] },
+    { caseName: 'MOVIE, CL2K without LOGO', chip: 'MOVIE', noLogo: true, steps: Object.assign({}, saveOn, { movie: Object.assign({ logoPng: false }, saveOn.movie || {}) }), expect: ['MOVIE: ', '✗ logo name: no LOGO group', 'PSD saved; JPG and Square Art skipped'] },
+    { caseName: 'MOVIE, MM2K without LOGO', chip: 'MOVIE', noLogo: true, style: 'MM2K', steps: Object.assign({}, saveOn, { movie: Object.assign({ logoPng: false }, saveOn.movie || {}) }), expect: ['MOVIE: ', '– logo name skipped (no LOGO group on MM2K)', '✓ JPG', 'opening Square Art'], expectLog: 'square-art-started' },
   ];
   let fails = 0;
   for (const c of cases) {

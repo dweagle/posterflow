@@ -64,6 +64,9 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .singles.hidden, .sequels.hidden { display: none; }
 /* Tag chips (SP / C / CLS / MOVIE / SHOW) match the season number chips' height and 28px minimum. */
 .singles .chip { padding: 3px 7px; min-width: 28px; }
+/* Two rows: MOVIE · SHOW · COLLECTION, then SPECIALS · LIMITED SERIES. Rows wrap, so a 200px panel drops a chip down instead of clipping it. */
+.singles { flex-direction: column; }
+.tagrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; align-self: stretch; }
 .rowlabel { color: var(--uxp-host-text-color-secondary); font-size: 10px; margin-right: 4px; }
 
 /* overflow-y: scroll (not auto) — the gutter is ALWAYS reserved, so the chips' width never changes
@@ -80,6 +83,8 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .chip.num { width: 28px; padding-left: 0; padding-right: 0; padding-top: 3px; padding-bottom: 3px; }
 /* MOVIE / SHOW toggle nothing: plain click clears the season text, Alt-click tags a layer. After .chip.off so the tint wins. */
 .chip.tagonly { background: rgba(90, 130, 200, 0.22); }
+/* COLLECTION is blue like MOVIE / SHOW but still a real toggle: keep the green "on" state visible. */
+.chip.tagonly.on { background: #2e7d46; border-color: #3fae62; color: #ffffff; }
 
 .trimbar { flex-shrink: 0; display: flex; justify-content: center; padding: 3px; border-top: 1px solid var(--uxp-host-border-color); background: rgba(0, 0, 0, 0.15); }
 .trimbar sp-action-button { margin: 0 2px; }
@@ -96,6 +101,8 @@ sp-action-button.bolt-seasons { background-color: #2b5c9e; }
 .sqpresets sp-action-button[data-sq="1000"] { width: 38px; }
 .sqpresets.hidden { display: flex; visibility: hidden; }
 .sqcancel.hidden { display: none; }
+sp-action-button.sqcancel { background-color: #9b2c2c; }   /* red, so the crop cancel stands apart from Crop */
+sp-action-button.crop { background-color: #2e7d46; }   /* green while armed: the press that exports */
 
 /* Hover tip for the div chips (UXP shows `title` tooltips only on Spectrum widgets). */
 .tip { position: absolute; z-index: 100; left: 0; top: 0; max-width: 200px; padding: 3px 6px; font-size: 10px; line-height: 1.3; color: #f0f0f0; background-color: #262626; border: 1px solid #6a6a6a; border-radius: 4px; }

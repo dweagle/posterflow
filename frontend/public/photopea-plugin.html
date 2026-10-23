@@ -41,6 +41,10 @@
   .btn.bolt-tags:hover { background: #a06a24; }
   .btn.bolt-seasons { background: #2b5c9e; }
   .btn.bolt-seasons:hover { background: #356ec0; }
+  .btn.sqcancel { background: #9b2c2c; }   /* red, so the crop cancel stands apart from Crop */
+  .btn.sqcancel:hover { background: #b83a3a; }
+  .btn.crop { background: #2e7d46; }   /* green while armed: the press that exports */
+  .btn.crop:hover { background: #3a9a58; }
   .singles, .sequels { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; padding: 8px 4px; border-bottom: 1px solid #3a3a42; }
   .singles.hidden, .sequels.hidden { display: none; }
   .rowlabel { color: #9aa; margin-right: 2px; }
@@ -78,12 +82,15 @@
   .chip.num { width: 28px; padding-left: 2px; padding-right: 2px; }
   /* Tag chips (SP / C / CLS / MOVIE / SHOW) match the season number chips' height and 28px minimum. */
   .singles .chip { padding: 3px 5px; min-width: 28px; }
-  .singles .break { flex-basis: 100%; height: 0; }
-  /* At the full panel width (228px) all five tag chips fit on one line and the season rows get roomier chips;
-     narrower hosts (a gallery entry published at the old 196px) keep the two-line layout. */
-  @media (min-width: 216px) { .singles .break { display: none; } .chip.num { width: 32px; } }
+  /* Two rows: MOVIE · SHOW · COLLECTION, then SPECIALS · LIMITED SERIES. Rows wrap, so a narrow host drops a chip down instead of clipping it. */
+  .singles { flex-direction: column; }
+  .tagrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; align-self: stretch; gap: 4px; }
+  /* At the full panel width (228px) the season rows get roomier chips. */
+  @media (min-width: 216px) { .chip.num { width: 32px; } }
   /* MOVIE / SHOW toggle nothing: plain click clears the season text, Alt-click tags a layer. After .chip.off so the tint wins. */
   .chip.tagonly { background: rgba(90, 130, 200, 0.22); }
+  /* COLLECTION is blue like MOVIE / SHOW but still a real toggle: keep the green "on" state visible. */
+  .chip.tagonly.on { background: #2e7d46; border-color: #3fae62; color: #fff; }
   .msg { padding: 8px; color: #9aa; }
   .trimbar { display: flex; justify-content: center; gap: 6px; padding: 6px; border-top: 1px solid #3a3a42; background: #23232a; }
   .trimbar .btn { padding: 4px 18px; }
@@ -111,7 +118,7 @@
     <button class="btn bolt-tags" data-act="batch" title="Name-tag batch — one JPG per tagged layer (s0/s1…/main/show/c)">⚡</button>
     <button class="btn bolt-seasons" data-act="batch-seasons" title="Seasons from one poster — pick a range and export Season 1…N (+ Specials) from a single poster">⚡</button>
     <button class="btn" data-act="refresh" title="Reload layers from the active document">⟳</button>
-    <button class="btn" data-act="options" title="Finish steps: choose what a right-click MOVIE / SHOW finish does">⚙</button>
+    <button class="btn" data-act="options" title="Finish steps: choose what a right-click MOVIE / SHOW / COLLECTION finish does">⚙</button>
   </div>
   <div class="optbar hidden">
     <div class="optmsg">Right-click finish steps, in run order. Tap a step to skip it (grey) or restore it (green).</div>
@@ -119,6 +126,8 @@
     <div class="optrow" data-steps="movie"></div>
     <div class="opthead">SHOW · right-click = orange ⚡ · Shift+right-click = blue ⚡</div>
     <div class="optrow" data-steps="show"></div>
+    <div class="opthead">COLLECTION · right-click</div>
+    <div class="optrow" data-steps="collection"></div>
     <div class="optrow optclose"><button class="btn" data-act="options-close" title="Close">✕</button></div>
   </div>
   <div class="batchbar hidden">
@@ -164,7 +173,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '1.3.1';   // keep in step with photoshop-posterflow/manifest.json (its smoke test checks)
+  const PANEL_VERSION = '1.3.3';   // keep in step with photoshop-posterflow/manifest.json (its smoke test checks)
   const PP      = window.parent;                 // top-level Photopea hosts this panel
   const singles = document.querySelector('.singles');
   const sequels = document.querySelector('.sequels');
@@ -188,6 +197,7 @@
   let sqArt = null, sqCtx = null, sqWant = 0;   // trimmed art PNG (ArrayBuffer, fallback path only) + export ctx + last preset size
   let sqArtCv = null;                           // the trimmed art as a canvas: what Crop cuts the square from
   let sqSide = 0;                               // the square last placed or restored (a drag-clipped selection is restored to it)
+  let sqKeep = null, sqNone = 0;                // the last valid square {x,y,side} put back after a click-deselect + ticks seen with no selection
   let sqHomeName = '', sqTempName = '';         // the poster PSD tab to return to + the crop tab's name
   const styleName = document.querySelector('[data-el="style"]');
   let model = { singles: [], seasons: [], sequels: [] };
@@ -444,6 +454,8 @@
   // season / single layer, Alt-click renames.
   const cleanTitle = (s_) => String(s_ || '').replace(/\s*\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
   const SINGLE_TAG = { SP: 's0', C: 'c', CLS: 'cls' };
+  // Chip text only: the model, toggles and batch keep keying off SP / C / CLS.
+  const SINGLE_TEXT = { SP: 'SPECIALS', C: 'COLLECTION', CLS: 'LIMITED SERIES' };
   const MAIN_TAGS = [{ lab: 'MOVIE', tag: 'main' }, { lab: 'SHOW', tag: 'show' }];
   const chipTag = (N) => {
     if (N.r !== 'season' && N.r !== 'year') return null;
@@ -483,26 +495,42 @@
 
   const render = () => {
     singles.innerHTML = '';
-    model.singles.forEach((SI) => {
-      const c = chip(SI.lab, SI.v, false);
-      const tag = SINGLE_TAG[SI.lab] || null;
-      c.title = tag ? tagTitle(SI.n, tag) : SI.n;
-      c.addEventListener('click', (ev) => { if (tag && ev.altKey) renameSelectedTo(tag); else clickSingle(SI); });
-      singles.appendChild(c);
-    });
-    // MOVIE / SHOW are always available, on their own line (the panel is too narrow for five chips).
-    if (model.singles.length) { const br = document.createElement('span'); br.className = 'break'; singles.appendChild(br); }
+    // Row 1: MOVIE · SHOW · COLLECTION, blue, each with a right-click finish. Row 2: the SPECIALS / LIMITED SERIES toggles.
+    const finRow = document.createElement('div'); finRow.className = 'tagrow';
+    const togRow = document.createElement('div'); togRow.className = 'tagrow';
     MAIN_TAGS.forEach((MT) => {
       const c = chip(MT.lab, false, false);
       c.classList.add('tagonly');
-      c.title = 'Clear all season / Specials / Collection / CLS layers.  \u00b7  Alt-click: rename the selected layer to "' + MT.tag + '"  \u00b7  ' + finishTip(MT.tag);
+      c.title = 'Clear all season / Specials / Collection / Limited Series layers.  \u00b7  Alt-click: rename the selected layer to "' + MT.tag + '"  \u00b7  ' + finishTip(MT.tag);
       c.addEventListener('click', (ev) => { if (ev.altKey) renameSelectedTo(MT.tag); else clearAll(); });
       c.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         if (MT.tag === 'main') onFinishMovie(); else onFinishShow(ev.shiftKey ? 'seasons' : 'tags');
       });
-      singles.appendChild(c);
+      finRow.appendChild(c);
     });
+    // COLLECTION keeps its toggle (a plain click shows / hides the COLLECTION text) and adds the finish.
+    const CS = model.singles.find((SI) => SI.lab === 'C') || null;
+    const cc = chip(SINGLE_TEXT.C, !!(CS && CS.v), false);
+    cc.classList.add('tagonly');
+    cc.title = (CS ? tagTitle(CS.n, 'c') : 'No COLLECTION text layer in this document  \u00b7  Alt-click: rename the selected layer to "c"') + '  \u00b7  ' + finishTip('c');
+    cc.addEventListener('click', (ev) => {
+      if (ev.altKey) renameSelectedTo('c');
+      else if (CS) clickSingle(CS);
+      else note('No COLLECTION text layer in this document.');
+    });
+    cc.addEventListener('contextmenu', (ev) => { ev.preventDefault(); onFinishCollection(); });
+    finRow.appendChild(cc);
+    model.singles.forEach((SI) => {
+      if (SI.lab === 'C') return;   // rendered above, in the finish row
+      const c = chip(SINGLE_TEXT[SI.lab] || SI.lab, SI.v, false);
+      const tag = SINGLE_TAG[SI.lab] || null;
+      c.title = tag ? tagTitle(SI.n, tag) : SI.n;
+      c.addEventListener('click', (ev) => { if (tag && ev.altKey) renameSelectedTo(tag); else clickSingle(SI); });
+      togRow.appendChild(c);
+    });
+    singles.appendChild(finRow);
+    if (togRow.childNodes.length) singles.appendChild(togRow);
     singles.classList.toggle('hidden', !!model.nodoc);
 
     // Sequels (MM2K): a labeled row of numbered toggle chips, above the season list.
@@ -1119,7 +1147,8 @@
     return { side, x: clamp((l + r) / 2 - side / 2, cw - side), y: clamp((t + b) / 2 - side / 2, ch - side), why: nonSquare ? 'shape' : '' };
   };
   // Re-select the planned square on the crop tab; the PFLSQSNAP echo notes it and remembers the size.
-  const sqReselect = (x, y, side, why) => send(px("var d=app.activeDocument;d.selection.select([[" + x + "," + y + "],[" + (x + side) + "," + y + "],[" + (x + side) + "," + (y + side) + "],[" + x + "," + (y + side) + "]]);app.echoToOE('PFLSQSNAP:" + side + ',' + why + "');"));
+  const sqRemember = (x, y, side) => { sqKeep = { x, y, side }; sqSide = side; };
+  const sqReselect = (x, y, side, why) => { sqRemember(x, y, side); send(px("var d=app.activeDocument;d.selection.select([[" + x + "," + y + "],[" + (x + side) + "," + y + "],[" + (x + side) + "," + (y + side) + "],[" + x + "," + (y + side) + "]]);app.echoToOE('PFLSQSNAP:" + side + ',' + why + "');")); };
   // Edge keeper: while the crop tab is armed, read its selection every SQ_WATCH_MS and slide a square that
   // was dragged past (or clipped at) an edge back onto the canvas, as the Photoshop plugin does on
   // release. This is the one background poll the panel runs: the crop tab is a flat raster copy with no
@@ -1127,21 +1156,33 @@
   // bite here, and the script does nothing unless the crop tab is the active document. A wrong reading
   // must repeat on two ticks before it's acted on, so a drag still in progress isn't fought.
   const SQ_WATCH_MS = 250;   // two ticks confirm a reading, so a dragged-off square comes back within about half a second
+  const SQ_NONE_TICKS = 4;   // a click-deselect is restored after a second with no selection: scripts may run while a new marquee is still being dragged, so it must not be fought
   let sqWatch = null, sqLast = '';
   const sqWatchTick = () => {
     if (!sqArmed || squareArtBusy || !sqTempName) return;
     send(px("var d=app.activeDocument;if(d.name==" + JSON.stringify(sqTempName) + "){try{var b=d.selection.bounds;" +
-      "app.echoToOE('PFLSQW:'+nv(b[0])+','+nv(b[1])+','+nv(b[2])+','+nv(b[3])+','+Math.round(nv(d.width))+','+Math.round(nv(d.height)));}catch(_e){}}"));
+      "app.echoToOE('PFLSQW:'+nv(b[0])+','+nv(b[1])+','+nv(b[2])+','+nv(b[3])+','+Math.round(nv(d.width))+','+Math.round(nv(d.height)));}catch(_e){app.echoToOE('PFLSQW:none');}}"));
   };
-  const sqWatchStart = () => { if (sqWatch) return; sqLast = ''; sqWatch = setInterval(sqWatchTick, SQ_WATCH_MS); };
-  const sqWatchStop = () => { if (sqWatch) clearInterval(sqWatch); sqWatch = null; sqLast = ''; };
+  const sqWatchStart = () => { if (sqWatch) return; sqLast = ''; sqNone = 0; sqWatch = setInterval(sqWatchTick, SQ_WATCH_MS); };
+  const sqWatchStop = () => { if (sqWatch) clearInterval(sqWatch); sqWatch = null; sqLast = ''; sqKeep = null; sqNone = 0; };
   const onSquareWatch = (raw) => {
     if (!sqArmed || squareArtBusy) return;
+    if (raw === 'none') {   // no selection: with the marquee tool a click without a drag is Deselect, so put the last square back
+      if (++sqNone < SQ_NONE_TICKS || !sqKeep) return;
+      sqNone = 0; sqLast = '';
+      sqReselect(sqKeep.x, sqKeep.y, sqKeep.side, 'restored');
+      return;
+    }
+    sqNone = 0;
     const n = raw.split(',').map(parseFloat);
     if (n.length !== 6 || n.some((v) => !isFinite(v))) return;
     const [l, t, r, b, cw, ch] = n;
     const plan = sqPlan(l, t, r, b, cw, ch, sqSide);
-    if (plan.why !== 'edge' && plan.why !== 'clipped') { sqLast = ''; return; }   // on the canvas, or a hand-drawn shape: leave it
+    if (plan.why !== 'edge' && plan.why !== 'clipped') {   // on the canvas, or a hand-drawn shape: leave it
+      sqLast = '';
+      if (!plan.why) sqRemember(plan.x, plan.y, plan.side);   // a square sitting on the canvas, including one just drawn, is the one to restore
+      return;
+    }
     const key = plan.why + ':' + n.map(Math.round).join(',');
     if (sqLast !== key) { sqLast = key; return; }   // first sighting: wait a tick in case the drag is still going
     sqLast = '';
@@ -1162,14 +1203,14 @@
     fetchLayers();   // runs after the switch above (messages are ordered); the click-gated watcher can't see it
   };
   const disarmSquare = () => {
-    sqArmed = false; squareArtBusy = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden'); squareArtBtn.textContent = 'Square Art';
+    sqArmed = false; squareArtBusy = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden'); squareArtBtn.textContent = 'Square Art'; squareArtBtn.classList.remove('crop');
     posterExpBtn.classList.remove('hidden');
     closeTempReturnHome();
     sqArt = null; sqArtCv = null; sqCtx = null; sqWant = 0; sqSide = 0; sqWatchStop();
     send('try{' + SQ_TOOL_JS + 'swT("moveTool");}catch(e){}');   // hand the Move tool back
   };
   const flashSquare = (m) => {
-    squareArtBusy = false; sqArmed = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden');
+    squareArtBusy = false; sqArmed = false; sqPresets.classList.add('hidden'); sqCancelBtn.classList.add('hidden'); squareArtBtn.classList.remove('crop');
     posterExpBtn.classList.remove('hidden');
     squareArtBtn.textContent = m; setTimeout(() => { if (!sqArmed) squareArtBtn.textContent = 'Square Art'; }, 1400);
     closeTempReturnHome();
@@ -1181,7 +1222,7 @@
     sqWant = size;   // remembered so a preset larger than the art can upscale the output to match
     send(px(SQ_TOOL_JS + "var d=app.activeDocument;var w=Math.round(nv(d.width)),h=Math.round(nv(d.height));" +
       "var s=Math.min(" + size + ",w,h);var x=Math.round((w-s)/2),y=Math.max(0,Math.min(100,h-s));" +   // horizontally centered, 100px from the top (poster subjects sit high)
-      "d.selection.select([[x,y],[x+s,y],[x+s,y+s],[x,y+s]]);swT('marqueeRectTool');app.echoToOE('PFLSQSET:'+s);"));
+      "d.selection.select([[x,y],[x+s,y],[x+s,y+s],[x,y+s]]);swT('marqueeRectTool');app.echoToOE('PFLSQSET:'+s+','+x+','+y);"));
   };
   let sqArmTimer = null;
   const sqArmWatch = () => {
@@ -1752,6 +1793,7 @@
   // → [trim] → SAVE → JPG → logo PNG → Square Art. SHOW (orange ⚡): clear → logo name → [trim] → SAVE
   // → tag check → tag batch unattended → logo PNG → show poster only → SAVE again → Square Art. SHOW
   // (Shift = blue ⚡): the same up to SAVE, then the range box waits for Run and the tail resumes.
+  // COLLECTION: the MOVIE finish with "c" in place of "main"; the JPG runs through the tag batch filtered to "c", then SAVE again.
   // Every panel operation is fire-and-forget (a script goes out, its outcome arrives later in the
   // message handler), so the steps await that outcome through finWait/settle: each operation's
   // terminal point (flash*, batchFinish, the echo branches) settles the waiter, and a step that
@@ -1769,10 +1811,11 @@
   const STEP_DEFAULTS = {
     movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
     show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
+    collection: { c: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, saveAgain: true, squareArt: true },
   };
   const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     movie: [
-      ['clear', 'clear', 'Clear all season / SP / C / CLS layers first: a stray visible season layer would misname the JPG'],
+      ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first: a stray visible season layer would misname the JPG'],
       ['main', 'main', 'Rename the visible POSTER layer to "main"'],
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
@@ -1782,7 +1825,7 @@
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
     ],
     show: [
-      ['clear', 'clear', 'Clear all season / SP / C / CLS layers first'],
+      ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first'],
       ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
       ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
       ['save', 'save', 'Save the PSD back to Posterflow before the batch: a failed save stops the finish'],
@@ -1793,20 +1836,32 @@
       ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt'],
       ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
     ],
+    collection: [
+      ['c', 'c', 'Rename the visible POSTER layer to "c"'],
+      ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
+      ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
+      ['save', 'save', 'Save the PSD back to Posterflow: a failed save stops the finish'],
+      ['jpg', 'JPG', 'Export the Collection JPG through the tag batch: the logo moves to the collection ruler and the file is named like the batch names it'],
+      ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
+      ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt: the export toggles layers after the first save'],
+      ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
+    ],
   };
+  const FINISHES = ['movie', 'show', 'collection'];
   const loadSteps = () => {
-    const out = { movie: Object.assign({}, STEP_DEFAULTS.movie), show: Object.assign({}, STEP_DEFAULTS.show) };
+    const out = {};
+    FINISHES.forEach((f) => { out[f] = Object.assign({}, STEP_DEFAULTS[f]); });
     try {
       const saved = JSON.parse(localStorage.getItem('posterflow.finishSteps') || '{}');
       if (saved.v !== 2) return out;   // choices stored before every step defaulted on are dropped
-      ['movie', 'show'].forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
+      FINISHES.forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
     } catch (_) {}
     return out;
   };
   const steps = loadSteps();
   const optBar = document.querySelector('.optbar');
   const renderOptions = () => {   // one toggle chip per step, green = runs, grey = skipped
-    ['movie', 'show'].forEach((f) => {
+    FINISHES.forEach((f) => {
       const row = document.querySelector('.optrow[data-steps="' + f + '"]');
       row.innerHTML = '';
       STEP_LABELS[f].forEach(([k, text, why]) => {
@@ -1830,6 +1885,8 @@
   };
   const finishTip = (tag) => tag === 'main'
     ? 'Right-click: finish the movie poster: ' + stepList('movie')
+    : tag === 'c'
+    ? 'Right-click: finish the collection poster: ' + stepList('collection')
     : 'Right-click: finish the show with the orange ⚡ (unattended)  ·  Shift+right-click: with the blue ⚡ (you type the seasons).  Steps: ' + stepList('show');
   const skippedTail = (f, keys) => {   // "X and Y skipped" for whichever of the remaining steps are on, else "stopped"
     const names = STEP_LABELS[f].filter(([k]) => keys.indexOf(k) >= 0 && steps[f][k]).map(([, l]) => l);
@@ -1910,11 +1967,14 @@
   const stepClear = async () => { const p = finWait('vis', 15000); clearAll(); must(await p); };
   const stepRename = async (which, target, one) => { const p = finWait('rename', 15000); send(finRenameScript(which, target, one)); return must(await p); };
   const stepMain = () => stepRename('poster', 'main', true);
-  const stepLogoName = async (ctx) => { if (!ctx.logo) return { skipped: 'no LOGO group' }; await stepRename('logo', cleanTitle(ctx.base) + ' - Logo', false); };
+  // MM2K has text titles and no LOGO group, so its logo steps skip; any other template without one FAILS
+  // (the finish used to carry on and quietly produce a poster with no logo PNG).
+  const needLogo = (ctx) => { if (!ctx.logo && detectedStyle !== 'MM2K') throw new Error('no LOGO group'); return !!ctx.logo; };
+  const stepLogoName = async (ctx) => { if (!needLogo(ctx)) return { skipped: 'no LOGO group on MM2K' }; await stepRename('logo', cleanTitle(ctx.base) + ' - Logo', false); };
   const stepTrim = async () => must(await startOp('trim', trimDoc, () => trimBusy, 30000));
   const stepSave = async () => must(await startOp('save', saveDoc, () => saving, 120000));
   const stepJpg = async () => must(await startOp('jpg', exportJpg, () => jpgBusy, 120000));
-  const stepLogoPng = async (ctx) => { if (!ctx.logo) return { skipped: 'no LOGO group' }; must(await startOp('logo', exportLogo, () => logoExpBusy, 120000)); };
+  const stepLogoPng = async (ctx) => { if (!needLogo(ctx)) return { skipped: 'no LOGO group on MM2K' }; must(await startOp('logo', exportLogo, () => logoExpBusy, 120000)); };
   const stepTagBatch = async () => {
     const init = await startOp('batchInit', () => startBatch('tags'), () => !batchBar.classList.contains('hidden'), 15000);
     if (!init.ok) throw new Error(init.reason || 'nothing to export');
@@ -1957,6 +2017,35 @@
       if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['jpg', 'logoPng', 'squareArt'])); return; }
       if (S_.jpg && !(await F.step('JPG', stepJpg))) { F.report(skippedTail('movie', ['logoPng', 'squareArt'])); return; }
       if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('movie', ['squareArt'])); return; }
+      if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
+      else F.report('done');
+    } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
+    finally { finishBusy = false; }
+  };
+  // ---- Right-click COLLECTION: the MOVIE finish with "c" in place of "main" ----
+  const stepCollectionTag = () => stepRename('poster', 'c', true);
+  // The JPG goes through the tag batch filtered to "c": only the batch places the logo on the collection
+  // ruler and names the file " - Collection" (plain for a "… Collection" PSD). The JPG button does neither.
+  const stepCollectionJpg = async () => {
+    const init = await startOp('batchInit', () => startBatch('tags'), () => !batchBar.classList.contains('hidden'), 15000);
+    if (!init.ok || !batchConvention || !batchItems.some((it) => it.key === 'c')) { closeBatch(); throw new Error('no POSTER layer tagged "c"'); }
+    batchWarnings = batchWarnings.filter((w) => w.indexOf('"c"') >= 0);   // only warnings about the c export matter here
+    batchInput.value = 'c';
+    must(await startOp('batch', runBatch, () => batchBusy, 900000));
+  };
+  const onFinishCollection = async () => {
+    const label = 'COLLECTION', S_ = steps.collection;
+    const ctx = await finishGuard(label); if (!ctx) return;
+    const F = finishRun(label);
+    try {
+      if (S_.c) await F.step('c', stepCollectionTag);
+      if (S_.logoName) await F.step('logo name', () => stepLogoName(ctx));
+      if (S_.trim) await F.step('trim', stepTrim);
+      if (S_.save && !(await F.step('saved', stepSave))) { F.report('STOPPED, PSD not saved'); return; }
+      if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
+      if (S_.jpg && !(await F.step('JPG', stepCollectionJpg))) { F.report(skippedTail('collection', ['logoPng', 'saveAgain', 'squareArt'])); return; }
+      if (S_.logoPng && !(await F.step('logo PNG', () => stepLogoPng(ctx)))) { F.report(skippedTail('collection', ['saveAgain', 'squareArt'])); return; }
+      if (S_.saveAgain) await F.step('saved again', stepSave);   // the export toggled layers after the first save; this one spares a prompt on close
       if (S_.squareArt) { F.report('opening Square Art'); squareArtClick(); }
       else F.report('done');
     } catch (e) { note('Error: ' + (e && e.message ? e.message : e)); }
@@ -2048,8 +2137,8 @@
     else if (d.startsWith('PFLLOGOLAYER:')) { onLogoLayer(d.slice(13)); }
     else if (d.startsWith('PFLLOGOVIS:')) { try { logoRestore = JSON.parse(d.slice(11)); } catch (_) { logoRestore = null; } }
     else if (d.startsWith('PFLNOLOGO:')) { flashLogoExp('✗'); note('No LOGO group in this document (MM2K templates use text titles).'); }
-    else if (d.startsWith('PFLSQSET:')) { const s = d.slice(9); sqSide = parseInt(s, 10) || 0; note('Placed a ' + s + '×' + s + ' selection — drag inside it to position, then press Crop.'); }
-    else if (d.startsWith('PFLSQSNAP:')) { const [s, why] = d.slice(10).split(','); sqSide = parseInt(s, 10) || 0; squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note((why === 'edge' ? 'Moved the ' + s + '×' + s + ' selection back onto the canvas' : why === 'clipped' ? 'Restored the ' + s + '×' + s + ' square against the canvas edge' : 'Snapped the selection to ' + s + '×' + s) + ' — adjust it if needed, then press Crop.'); }
+    else if (d.startsWith('PFLSQSET:')) { const [s, x, y] = d.slice(9).split(',').map((v) => parseInt(v, 10) || 0); sqRemember(x, y, s); note('Placed a ' + s + '×' + s + ' selection — drag inside it to position, then press Crop.'); }
+    else if (d.startsWith('PFLSQSNAP:')) { const [s, why] = d.slice(10).split(','); sqSide = parseInt(s, 10) || 0; squareArtBusy = false; squareArtBtn.textContent = 'Crop'; note((why === 'edge' ? 'Moved the ' + s + '×' + s + ' selection back onto the canvas' : why === 'clipped' ? 'Restored the ' + s + '×' + s + ' square against the canvas edge' : why === 'restored' ? 'Restored the ' + s + '×' + s + ' selection (a click without dragging deselects)' : 'Snapped the selection to ' + s + '×' + s) + ' — adjust it if needed, then press Crop.'); }
     else if (d.startsWith('PFLSQB:'))   { onSquareBounds(d.slice(7)); }
     else if (d.startsWith('PFLSQW:'))   { onSquareWatch(d.slice(7)); }
     else if (d.startsWith('PFLNOSEL:')) {
@@ -2072,7 +2161,7 @@
       if (!nm) { flashSquare('✗'); note('Square Art: Photopea didn\'t open the crop tab.'); }
       else {
         sqTempName = nm;
-        squareArtBusy = false; sqArmed = true;
+        squareArtBusy = false; sqArmed = true; squareArtBtn.classList.add('crop');
         sqPresets.classList.remove('hidden'); sqCancelBtn.classList.remove('hidden');
         squareArtBtn.textContent = 'Crop';
         note('Opened the poster art in its own tab — pick a preset or drag a square, then press Crop.');

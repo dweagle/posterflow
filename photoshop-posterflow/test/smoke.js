@@ -327,6 +327,23 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('
   ok(b7 && b7.side === 700 && b7.x === 100 && b7.y === 736, '700 off the bottom: y=736, x untouched');
   ok(K(sel(50, 50, 650, 650)) === null, 'a freshly drawn 600 inside the canvas: left alone');
   ok(K(sel(-40, 100, 660, 500)) === null, 'a non-square marquee is left to Crop\'s snap even off-canvas');
+
+  // The square the keeper restores after a click-deselect: whatever square last sat fully on the canvas.
+  const Q = G.squareOnCanvas;
+  const drawn = Q(sel(50, 50, 650, 650));
+  ok(drawn && drawn.x === 50 && drawn.y === 50 && drawn.side === 600, 'a 600 square drawn on the canvas is remembered where it was drawn');
+  const full = Q(sel(0, 100, 958, 1058));
+  ok(full && full.x === 0 && full.y === 100 && full.side === 958, 'the default full-width square is remembered');
+  ok(Q(sel(118, 189, 1076, 1147)) === null, 'a square hanging off the canvas is not remembered (the keeper slides it first)');
+  ok(Q(sel(-40, 100, 660, 500)) === null, 'a non-square marquee is never remembered');
+  const near = Q(sel(10, 10, 611, 610));
+  ok(near && near.side === 600, 'a 601×600 marquee counts as a square and keeps the shorter side');
+  // Keeper sequence as main.js runs it: preset → drag down (on canvas) → edge correction; a deselect restores the latest.
+  let last = { x: 0, y: 100, side: 958 };
+  const moved = Q(sel(0, 300, 958, 1258)); if (moved) last = moved;
+  ok(last.y === 300, 'after a drag that stays on the canvas, the remembered square is the moved one');
+  const slid = K(sel(0, 600, 958, 1558)); if (slid) last = { x: slid.x, y: slid.y, side: slid.side };
+  ok(last.y === 1436 - 958, 'after an edge correction, the remembered square is the corrected one');
 }
 
 // ---- strip: export metadata scrub ----

@@ -145,6 +145,8 @@ const onYearsG = (YG) => applyChanges(T.clickYearsGroup(model, YG));
 // Chips that map to a tag rename on Alt-click. MOVIE / SHOW have no layer to toggle: a plain
 // click clears every season / single layer, Alt-click renames.
 const SINGLE_TAG = { SP: 's0', C: 'c', CLS: 'cls' };
+// Chip text only: the model, toggles and batch keep keying off SP / C / CLS.
+const SINGLE_TEXT = { SP: 'SPECIALS', C: 'COLLECTION', CLS: 'LIMITED SERIES' };
 const MAIN_TAGS = [{ lab: 'MOVIE', tag: 'main' }, { lab: 'SHOW', tag: 'show' }];
 
 // Season chips ("3") and season-year chips ("1985") both become s{digits}.
@@ -214,19 +216,13 @@ listEl.addEventListener('scroll', hideTip);
 function render() {
   hideTip();
   singlesEl.innerHTML = '';
-  model.singles.forEach((SI) => {
-    const c = chip(SI.lab, SI.v, false);
-    const tag = SINGLE_TAG[SI.lab] || null;
-    tip(c, tag ? tagTitle(SI.n, tag) : SI.n);
-    c.addEventListener('click', (ev) => {
-      if (tag && wantsRepick(ev)) renameSelectedTo(tag); else onSingle(SI);
-    });
-    singlesEl.appendChild(c);
-  });
+  // Row 1: MOVIE · SHOW · COLLECTION, blue, each with a right-click finish. Row 2: the SPECIALS / LIMITED SERIES toggles.
+  const finRow = document.createElement('div'); finRow.className = 'tagrow';
+  const togRow = document.createElement('div'); togRow.className = 'tagrow';
   MAIN_TAGS.forEach((T_) => {
     const c = chip(T_.lab, false, false);
     c.classList.add('tagonly');
-    tip(c, 'Clear all season / Specials / Collection / CLS layers.  \u00b7  '
+    tip(c, 'Clear all season / Specials / Collection / Limited Series layers.  \u00b7  '
            + 'Alt-click: rename the selected layer to "' + T_.tag + '"  \u00b7  ' + finishTip(T_.tag));
     c.addEventListener('click', (ev) => {
       if (wantsRepick(ev)) renameSelectedTo(T_.tag);
@@ -237,9 +233,38 @@ function render() {
       alt.release();         // a right-click fires no 'click', so drop whatever Alt its press recorded
       if (T_.tag === 'main') onFinishMovie(); else onFinishShow(ev.shiftKey ? 'seasons' : 'tags');
     });
-    singlesEl.appendChild(c);
+    finRow.appendChild(c);
   });
-  // MOVIE / SHOW are always available, so the row shows even with no SP/C/CLS layers.
+  // COLLECTION keeps its toggle (a plain click shows / hides the COLLECTION text) and adds the finish.
+  const CS = model.singles.find((SI) => SI.lab === 'C') || null;
+  const cc = chip(SINGLE_TEXT.C, !!(CS && CS.v), false);
+  cc.classList.add('tagonly');
+  tip(cc, (CS ? tagTitle(CS.n, 'c') : 'No COLLECTION text layer in this document  \u00b7  Alt-click: rename the selected layer to "c"')
+          + '  \u00b7  ' + finishTip('c'));
+  cc.addEventListener('click', (ev) => {
+    if (wantsRepick(ev)) renameSelectedTo('c');
+    else if (CS) onSingle(CS);
+    else note('No COLLECTION text layer in this document.');
+  });
+  cc.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    alt.release();
+    onFinishCollection();
+  });
+  finRow.appendChild(cc);
+  model.singles.forEach((SI) => {
+    if (SI.lab === 'C') return;   // rendered above, in the finish row
+    const c = chip(SINGLE_TEXT[SI.lab] || SI.lab, SI.v, false);
+    const tag = SINGLE_TAG[SI.lab] || null;
+    tip(c, tag ? tagTitle(SI.n, tag) : SI.n);
+    c.addEventListener('click', (ev) => {
+      if (tag && wantsRepick(ev)) renameSelectedTo(tag); else onSingle(SI);
+    });
+    togRow.appendChild(c);
+  });
+  singlesEl.appendChild(finRow);
+  if (togRow.childNodes.length) singlesEl.appendChild(togRow);
+  // The finish chips are always available, so the rows show even with no SP / C / CLS layers.
   singlesEl.classList.remove('hidden');
 
   sequelsEl.innerHTML = '';
@@ -387,15 +412,12 @@ async function onPlace(mode, btn, label) {
 }
 
 // ---- Alt-click Logo: rename the visible layer inside the LOGO group to "<title> - Logo" ----
-// Find the LOGO group LIVE (like tools.js exportLogoPng) — the cached layerByPath snapshot can go stale.
+// Find the LOGO group LIVE (the cached layerByPath snapshot can go stale), top level only like POSTER:
+// every name / kind read is a host round-trip, and descending crawled SEASONS' ~130 layers first (seconds, panel frozen).
 function findLogoGroupLive(layers) {
   for (let i = 0; i < layers.length; i++) {
     const L = layers[i];
-    if (L.kind === constants.LayerKind.GROUP) {
-      if (/^\s*logos?\s*$/i.test(L.name)) return L;
-      const f = findLogoGroupLive(L.layers);
-      if (f) return f;
-    }
+    if (/^\s*logos?\s*$/i.test(L.name) && L.kind === constants.LayerKind.GROUP) return L;
   }
   return null;
 }
@@ -534,6 +556,7 @@ const SQ_MIN = 500;   // square art must be at least 500×500
 // released, and sometimes nothing at all — so those notifications are backed by a light poll while
 // the crop tab is armed. Read + re-select run as one exclusive op so a preset click can't interleave.
 let sqKeepBusy = false, sqKeepT = null, sqKeepPoll = null;
+let sqLast = null;   // the last valid square {x,y,side}: a marquee click without a drag is Deselect, so the keeper puts it back
 async function sqKeepInside() {
   if (!sqArmed || !sqTemp || sqBusy || sqKeepBusy) return;
   sqKeepBusy = true;
@@ -541,11 +564,19 @@ async function sqKeepInside() {
     if (!hasDoc() || app.activeDocument.id !== sqTemp.doc.id) return;
     const fix = await runExclusive(async () => {
       const s = await TL.readSelectionBounds(sqTemp.doc);
-      const f = s && G.keepSquareInside(s);
-      if (f) await TL.setSquareSelection(sqTemp.doc, f.x, f.y, f.side);
-      return f;
+      if (!s) {   // deselected: restore the square as it was last positioned
+        if (!sqLast) return null;
+        await TL.setSquareSelection(sqTemp.doc, sqLast.x, sqLast.y, sqLast.side);
+        return Object.assign({ restored: true }, sqLast);
+      }
+      const f = G.keepSquareInside(s);
+      if (f) { await TL.setSquareSelection(sqTemp.doc, f.x, f.y, f.side); sqLast = { x: f.x, y: f.y, side: f.side }; return f; }
+      const kept = G.squareOnCanvas(s);   // a square sitting on the canvas, including one just drawn, is the one to restore
+      if (kept) sqLast = kept;
+      return null;
     });
-    if (fix) note('Moved the ' + fix.side + '×' + fix.side + ' selection back onto the canvas.');
+    if (fix && fix.restored) note('Restored the ' + fix.side + '×' + fix.side + ' selection (a click without dragging deselects).');
+    else if (fix) note('Moved the ' + fix.side + '×' + fix.side + ' selection back onto the canvas.');
   } catch (_) {
   } finally { sqKeepBusy = false; }
 }
@@ -571,11 +602,12 @@ function sqSetUI(armed) {
   posterExpBtn.classList.toggle('hidden', armed);   // Poster steps aside while Square Art works
   document.querySelector('.sqrow').classList.toggle('armed', armed);
   squareArtBtn.textContent = armed ? 'Crop' : 'Square Art';
+  squareArtBtn.classList.toggle('crop', armed);   // green while armed: this press exports
 }
 async function sqCleanup() {   // close the crop tab, return home, hand the Move tool back
   const t = sqTemp; sqTemp = null;
   if (t) await runExclusive(() => TL.closeCropDoc(t.doc, sqHome));
-  sqHome = null; sqCtx = null; sqWant = 0;
+  sqHome = null; sqCtx = null; sqWant = 0; sqLast = null;
   TL.selectTool('moveTool');
 }
 const flashSq = (m) => {
@@ -620,6 +652,7 @@ async function onSquareArt(ev) {
     // Non-square → snap the on-canvas selection so the user sees the exact crop first.
     if (Math.abs(Math.round(s.r - s.l) - Math.round(s.b - s.t)) > 2) {
       await runExclusive(() => TL.setSquareSelection(sqTemp.doc, x, y, side));
+      sqLast = { x, y, side };
       sqBusy = false; squareArtBtn.textContent = 'Crop';
       note('Snapped the selection to ' + side + '×' + side + '. Adjust it if needed, then press Crop.');
       return;
@@ -660,7 +693,7 @@ async function onSqPreset(size) {
     await runExclusive(() => TL.setSquareSelection(sqTemp.doc, x, y, s));
     // batchPlay can no-op without rejecting — only claim success if the selection really exists.
     const check = await TL.readSelectionBounds(sqTemp.doc);
-    if (check) note('Placed a ' + s + '×' + s + ' selection. Drag inside it to position, then press Crop.');
+    if (check) { sqLast = { x, y, side: s }; note('Placed a ' + s + '×' + s + ' selection. Drag inside it to position, then press Crop.'); }
     else note('Could not place the selection. Drag one with the marquee tool instead.');
   } catch (e) { showError(e); }
 }
@@ -670,12 +703,14 @@ async function onSqCancel() {
   await sqCleanup();
 }
 
-// ---- Finish (right-click MOVIE / SHOW): tidy the layers, save, export, hand off to Square Art ----
+// ---- Finish (right-click MOVIE / SHOW / COLLECTION): tidy the layers, save, export, hand off to Square Art ----
 // MOVIE:            clear → POSTER layer → "main" → LOGO layer → "Title (Year) - Logo" → [trim] → SAVE
 //                   → JPG → logo PNG → Square Art
 // SHOW (orange ⚡):  clear → logo name → [trim] → SAVE → tag check → tag batch, unattended
 //                   → logo PNG → show poster only → SAVE again → Square Art
 // SHOW (blue ⚡):    same up to SAVE, then the range box waits for Run; the tail resumes from the logo PNG.
+// COLLECTION:       POSTER layer → "c" → logo name → [trim] → SAVE → JPG through the tag batch filtered to "c"
+//                   → logo PNG → SAVE again → Square Art
 // Prep failures are recorded but never skip the save; after a failed prep step nothing exports (a
 // stray visible season layer would misname the JPG). One checklist note reports every run.
 let finishBusy = false;   // a pipeline is running, or the blue path is waiting on the range box
@@ -685,10 +720,11 @@ let finishWait = null;    // blue: { docId, resume(result) } until Run / ✕ / a
 const STEP_DEFAULTS = {
   movie: { clear: true, main: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, squareArt: true },
   show:  { clear: true, logoName: true, trim: true, save: true, tagCheck: true, batch: true, logoPng: true, showOnly: true, saveAgain: true, squareArt: true },
+  collection: { c: true, logoName: true, trim: true, save: true, jpg: true, logoPng: true, saveAgain: true, squareArt: true },
 };
 const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
   movie: [
-    ['clear', 'clear', 'Clear all season / SP / C / CLS layers first: a stray visible season layer would misname the JPG'],
+    ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first: a stray visible season layer would misname the JPG'],
     ['main', 'main', 'Rename the visible POSTER layer to "main"'],
     ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
     ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
@@ -698,7 +734,7 @@ const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
   ],
   show: [
-    ['clear', 'clear', 'Clear all season / SP / C / CLS layers first'],
+    ['clear', 'clear', 'Clear all season / Specials / Collection / Limited Series layers first'],
     ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
     ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
     ['save', 'save', 'Save the PSD before the batch: a failed save stops the finish'],
@@ -709,20 +745,32 @@ const STEP_LABELS = {   // [key, chip text, what it does] in pipeline order
     ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt'],
     ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
   ],
+  collection: [
+    ['c', 'c', 'Rename the visible POSTER layer to "c"'],
+    ['logoName', 'logo name', 'Rename the visible LOGO layer to "Title (Year) - Logo"'],
+    ['trim', 'trim', 'Trim off-canvas pixels: they are deleted, and the PSD saves right after'],
+    ['save', 'save', 'Save the PSD: a failed save stops the finish'],
+    ['jpg', 'JPG', 'Export the Collection JPG through the tag batch: the logo moves to the collection ruler and the file is named like the batch names it'],
+    ['logoPng', 'logo PNG', 'Export the LOGO group as a transparent PNG'],
+    ['saveAgain', 'save again', 'Save the PSD again so it closes without a prompt: the export toggles layers after the first save'],
+    ['squareArt', 'Square Art', 'Open Square Art with the default square placed'],
+  ],
 };
+const FINISHES = ['movie', 'show', 'collection'];
 function loadSteps() {
-  const out = { movie: Object.assign({}, STEP_DEFAULTS.movie), show: Object.assign({}, STEP_DEFAULTS.show) };
+  const out = {};
+  FINISHES.forEach((f) => { out[f] = Object.assign({}, STEP_DEFAULTS[f]); });
   try {
     const saved = JSON.parse(localStorage.getItem('posterflow.finishSteps') || '{}');
     if (saved.v !== 2) return out;   // choices stored before every step defaulted on are dropped
-    ['movie', 'show'].forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
+    FINISHES.forEach((f) => Object.keys(out[f]).forEach((k) => { if (saved[f] && typeof saved[f][k] === 'boolean') out[f][k] = saved[f][k]; }));
   } catch (_) {}
   return out;
 }
 const steps = loadSteps();
 const optBar = document.querySelector('.optbar');
 function renderOptions() {   // one toggle chip per step, green = runs, grey = skipped
-  ['movie', 'show'].forEach((f) => {
+  FINISHES.forEach((f) => {
     const row = document.querySelector('.optrow[data-steps="' + f + '"]');
     row.innerHTML = '';
     STEP_LABELS[f].forEach(([k, text, why]) => {
@@ -746,6 +794,8 @@ const stepList = (f) => {
 };
 const finishTip = (tag) => tag === 'main'
   ? 'Right-click: finish the movie poster: ' + stepList('movie')
+  : tag === 'c'
+  ? 'Right-click: finish the collection poster: ' + stepList('collection')
   : 'Right-click: finish the show with the orange \u26a1 (unattended)  \u00b7  Shift+right-click: with the blue \u26a1 (you type the seasons).  Steps: ' + stepList('show');
 // "X and Y skipped" for whichever of the remaining steps are on, else "stopped".
 const skippedTail = (f, keys) => {
@@ -779,15 +829,22 @@ function finishRun(label) {
 
 const stepClear = () => applyChangesCore(T.clearAll(model));
 const stepMain = () => renameVisibleIn(rootPosterGroup(), 'POSTER', 'main', true);
-const stepLogoName = async () => {
+// MM2K has text titles and no LOGO group, so its logo steps skip; any other template without one FAILS
+// (the finish used to carry on and quietly produce a poster with no logo PNG).
+const logoGroupForFinish = () => {
   const grp = findLogoGroupLive(app.activeDocument.layers);
-  if (!grp) return { skipped: 'no LOGO group' };
+  if (!grp && curStyle !== 'MM2K') throw new Error('no LOGO group at the top level');
+  return grp;
+};
+const stepLogoName = async () => {
+  const grp = logoGroupForFinish();
+  if (!grp) return { skipped: 'no LOGO group on MM2K' };
   await renameVisibleIn(grp, 'LOGO', logoLayerName(), false);
 };
 const stepTrim = () => runExclusive(() => TL.trim(app.activeDocument));
 const stepJpg = async () => { const r = await jpgCore(false); if (!r.ok) throw new Error(r.msg); };
 const stepLogoPng = async () => {
-  if (!findLogoGroupLive(app.activeDocument.layers)) return { skipped: 'no LOGO group' };
+  if (!logoGroupForFinish()) return { skipped: 'no LOGO group on MM2K' };
   const r = await logoCore(); if (!r.ok) throw new Error(r.msg);
 };
 const stepTagBatch = async () => {
@@ -834,6 +891,44 @@ async function onFinishMovie() {
     if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('movie', ['jpg', 'logoPng', 'squareArt'])); return; }
     if (S_.jpg && !(await F.step('JPG', stepJpg))) { F.report(skippedTail('movie', ['logoPng', 'squareArt'])); return; }
     if (S_.logoPng && !(await F.step('logo PNG', stepLogoPng))) { F.report(skippedTail('movie', ['squareArt'])); return; }
+    if (S_.squareArt) { F.report('opening Square Art'); await onSquareArt(); }
+    else F.report('done');
+  } catch (e) { showError(e); }
+  finally { finishBusy = false; }
+}
+
+// ---- Right-click COLLECTION: the MOVIE finish with "c" in place of "main" ----
+const stepCollectionTag = () => renameVisibleIn(rootPosterGroup(), 'POSTER', 'c', true);
+// The JPG goes through the tag batch filtered to "c": only the batch places the logo on the collection
+// ruler and names the file " - Collection" (plain for a "… Collection" PSD). The JPG button does neither.
+const stepCollectionJpg = async () => {
+  await startBatch('tags');
+  if (!batchConvention || !batchItems.some((it) => it.key === 'c')) { closeBatch(); throw new Error('no POSTER layer tagged "c"'); }
+  batchWarnings = batchWarnings.filter((w) => w.indexOf('"c"') >= 0);   // only warnings about the c export matter here
+  batchInput.value = 'c';
+  const r = await runBatch();
+  if (!r.ok) throw new Error(r.reason);
+};
+async function onFinishCollection() {
+  const label = 'COLLECTION', S_ = steps.collection;
+  if (!(await finishGuard(label))) return;
+  finishBusy = true;
+  const F = finishRun(label);
+  try {
+    if (S_.c) await F.step('c', stepCollectionTag);
+    if (S_.logoName) await F.step('logo name', stepLogoName);
+    if (S_.trim) await F.step('trim', stepTrim);
+    if (S_.save) {
+      if (!(await F.step('saved', saveCore))) { flash(saveBtn, '✗', '💾'); F.report('STOPPED, PSD not saved'); return; }
+      flash(saveBtn, '✓', '💾');
+    }
+    if (F.failed.length) { F.report((S_.save ? 'PSD saved; ' : '') + skippedTail('collection', ['jpg', 'logoPng', 'saveAgain', 'squareArt'])); return; }
+    if (S_.jpg && !(await F.step('JPG', stepCollectionJpg))) { F.report(skippedTail('collection', ['logoPng', 'saveAgain', 'squareArt'])); return; }
+    if (S_.logoPng && !(await F.step('logo PNG', stepLogoPng))) { F.report(skippedTail('collection', ['saveAgain', 'squareArt'])); return; }
+    if (S_.saveAgain) {   // the export toggled layers after the first save; this one spares a prompt on close
+      const saved = await F.step('saved again', saveCore);
+      flash(saveBtn, saved ? '✓' : '✗', '💾');
+    }
     if (S_.squareArt) { F.report('opening Square Art'); await onSquareArt(); }
     else F.report('done');
   } catch (e) { showError(e); }
@@ -933,6 +1028,7 @@ async function startBatch(mode) {
     if (!built.items.length) {
       built.warnings.forEach((w) => note('Batch: ' + w));   // nothing to run — the reasons ARE the answer
       batchNote('No name-tag layers (s0/s1…, s1-8, main/show/movie/poster, c, cls) in this document. For a single poster with a SEASONS group, use the blue ⚡ instead.');
+      batchConvention = false; batchItems = [];   // never leave a stale item list for a finish to find
       return;
     }
     batchConvention = true;

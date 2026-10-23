@@ -59,4 +59,11 @@ const keepSquareInside = (s) => {
   return { side, x: clamp(s.l, s.cw - side), y: clamp(s.t, s.ch - side) };
 };
 
-module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry, keepSquareInside };
+// The square worth restoring after a stray deselect: a square (±2 px) sitting fully on the canvas, else null.
+const squareOnCanvas = (s) => {
+  const w = Math.round(s.r - s.l), h = Math.round(s.b - s.t);
+  if (Math.abs(w - h) > 2 || s.l < 0 || s.t < 0 || s.r > s.cw || s.b > s.ch) return null;
+  return { x: Math.round(s.l), y: Math.round(s.t), side: Math.min(w, h) };
+};
+
+module.exports = { rnd, computeLogoGeometry, computePosterFitGeometry, keepSquareInside, squareOnCanvas };
