@@ -552,6 +552,25 @@ class TestRendering:
         assert "outside the item folders" in reasons["Root Show (2020).jpg"]
         assert "image types Posterflow doesn't read" in reasons["Web Show (2020)/poster.webp"]
 
+    def test_unscannable_inside_subfolder_of_flat_drive(self, tmp_path):
+        # Flat drive (loose posters outnumber folders): posters tucked into a stray
+        # 'duplicates' bin or an item-named folder are never scanned.
+        drive = tmp_path / "drive"
+        drive.mkdir()
+        for i in range(3):
+            (drive / f"Other {i} (2010).jpg").touch()
+        (drive / "duplicates").mkdir()
+        (drive / "duplicates" / "Hidden Show (2020).jpg").touch()
+        (drive / "Folder Show (2021)").mkdir()
+        (drive / "Folder Show (2021)" / "poster.jpg").touch()
+        found = match_report._unscannable_near_files(
+            [str(drive)], ["Hidden Show (2020)", "Folder Show (2021)", "Other 0 (2010)"]
+        )
+        reasons = {entry["file"]: entry["reason"] for entry in found}
+        assert "inside the folder 'duplicates'" in reasons["duplicates/Hidden Show (2020).jpg"]
+        assert "inside the folder 'Folder Show (2021)'" in reasons["Folder Show (2021)/poster.jpg"]
+        assert "Other 0 (2010).jpg" not in reasons  # loose files on a flat drive are scanned
+
     def test_close_titles_helper(self):
         pool = [({"title": "Rocky 2", "year": 1979, "normalized_title": "rocky2", "files": []}, "title"),
                 ({"title": "Alien", "year": 1979, "normalized_title": "alien", "files": []}, "title")]

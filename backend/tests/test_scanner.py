@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from util.posters.scanner import (
@@ -39,6 +40,35 @@ def test_is_asset_folders_skips_hidden_dirs(tmp_path):
 def test_is_asset_folders_skips_tmp_dir(tmp_path):
     (tmp_path / "tmp").mkdir()
     assert _is_asset_folders(str(tmp_path)) is False
+
+
+def test_is_asset_folders_false_when_loose_posters_outnumber_folders(tmp_path):
+    # A flat drive with one stray folder (a 'duplicates' bin) must stay flat.
+    for i in range(3):
+        (tmp_path / f"Movie {i} (2010).jpg").write_bytes(b"img")
+    (tmp_path / "duplicates").mkdir()
+    assert _is_asset_folders(str(tmp_path)) is False
+
+
+def test_is_asset_folders_true_when_folders_outnumber_loose_posters(tmp_path):
+    # A nested drive with one stray loose file stays nested.
+    for i in range(3):
+        (tmp_path / f"Movie {i} (2010)").mkdir()
+    (tmp_path / "stray.jpg").write_bytes(b"img")
+    assert _is_asset_folders(str(tmp_path)) is True
+
+
+def test_is_asset_folders_tie_counts_as_folders(tmp_path):
+    (tmp_path / "Movie (2010)").mkdir()
+    (tmp_path / "Other (2011).jpg").write_bytes(b"img")
+    assert _is_asset_folders(str(tmp_path)) is True
+
+
+def test_is_asset_folders_ignores_non_image_root_files(tmp_path):
+    (tmp_path / "Movie (2010)").mkdir()
+    (tmp_path / "readme.txt").write_bytes(b"x")
+    (tmp_path / "notes.md").write_bytes(b"x")
+    assert _is_asset_folders(str(tmp_path)) is True
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +295,26 @@ def test_parse_file_group_collection_no_year(tmp_path):
 # ---------------------------------------------------------------------------
 # process_files (integration: chooses flat vs nested automatically)
 # ---------------------------------------------------------------------------
+
+
+def test_scan_flat_folder_ignores_subfolders(tmp_path):
+    (tmp_path / "127 Hours (2010) {tmdb-44115}.jpg").write_bytes(b"img")
+    (tmp_path / "duplicates").mkdir()
+    (tmp_path / "duplicates" / "127 Hours (2010) {tmdb-44115}.jpg").write_bytes(b"img")
+    results = scan_files_in_flat_folder(str(tmp_path))
+    assert [r["title"] for r in results] == ["127 Hours"]
+    assert results[0]["files"] == [str(tmp_path / "127 Hours (2010) {tmdb-44115}.jpg")]
+
+
+def test_process_files_mixed_root_keeps_loose_posters(tmp_path):
+    # LionCityGaming layout: hundreds of loose posters beside one 'duplicates' folder.
+    for i in range(5):
+        (tmp_path / f"Movie {i} (201{i}) {{tmdb-{100 + i}}}.jpg").write_bytes(b"img")
+    (tmp_path / "duplicates").mkdir()
+    (tmp_path / "duplicates" / "Movie 0 (2010) {tmdb-100}.jpg").write_bytes(b"img")
+    results = process_files(str(tmp_path))
+    assert sorted(r["title"] for r in results) == [f"Movie {i}" for i in range(5)]
+    assert all(os.path.dirname(f) == str(tmp_path) for r in results for f in r["files"])
 
 
 def test_process_files_flat_folder(tmp_path):

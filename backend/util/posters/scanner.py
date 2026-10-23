@@ -20,6 +20,9 @@ from util.data.construct import SLOT_POSTER, create_collection, create_movie, cr
 from util.data.extract import extract_ids, extract_year
 from util.data.normalization import normalize_titles
 
+# Poster image types the scanners read; anything else at a root is not a loose poster.
+IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
 # Artwork files placed alongside posters; poster consumers (e.g. Unmatched) exclude these.
 # Square art is written as 'square' — the only squareart spelling Kometa detects case-sensitively.
 ARTWORK_TYPE_TO_NAME: Dict[str, str] = {"logo": "logo", "background": "background", "squareart": "square"}
@@ -85,7 +88,9 @@ def scan_files_in_flat_folder(folder_path: str, exclude_artwork: bool = False, a
       List[Dict]: List of parsed media asset dictionaries.
     """
     try:
-        files = os.listdir(folder_path)
+        # A flat drive's stray folder is not a poster: skip it instead of parsing it as an item.
+        with os.scandir(folder_path) as entries:
+            files = [entry.name for entry in entries if not entry.is_dir()]
     except FileNotFoundError:
         return []
     except Exception as exc:
@@ -377,28 +382,29 @@ def process_files(folder_path: str, exclude_artwork: bool = False, artwork_out: 
 
 
 def _is_asset_folders(folder_path: str) -> bool:
-    """Check if the folder contains asset folders.
-
-    Args:
-      folder_path (str): The path to the folder to check.
-
-    Returns:
-      bool: True if the folder contains asset folders, False otherwise.
+    """True when the folder is laid out one folder per item: its item folders outnumber (or tie)
+    the loose poster files at its root. A flat drive with one stray folder stays flat, a nested
+    drive with one stray loose file stays nested, and an empty folder is flat.
     """
+    folders = loose = 0
     try:
         if not os.path.exists(folder_path):
             return False
-        for item in os.listdir(folder_path):
-            if (
-                (len(item) > 1 and item[0] == "." and item[1] != ".")
-                or item.startswith("@")
-                or item == "tmp"
-            ):
-                log_debug(LogTags.SCANNER, f"Skipping hidden item: {item}", item=item)
-                continue
-            if os.path.isdir(os.path.join(folder_path, item)):
-                return True
-        return False
+        with os.scandir(folder_path) as entries:
+            for entry in entries:
+                item = entry.name
+                if (
+                    (len(item) > 1 and item[0] == "." and item[1] != ".")
+                    or item.startswith("@")
+                    or item == "tmp"
+                ):
+                    log_debug(LogTags.SCANNER, f"Skipping hidden item: {item}", item=item)
+                    continue
+                if entry.is_dir():
+                    folders += 1
+                elif os.path.splitext(item)[1].lower() in IMAGE_EXTS:
+                    loose += 1
+        return folders > 0 and folders >= loose
     except Exception as exc:
         log_error(LogTags.SCANNER, f"Error checking asset folders in {folder_path}: {exc}", folder=folder_path, error=str(exc))
         return False

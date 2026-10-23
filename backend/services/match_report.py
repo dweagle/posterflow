@@ -91,8 +91,8 @@ def _file_level_ids(files: List[str]) -> Optional[Dict[str, Any]]:
 
 def _unscannable_near_files(source_dirs: List[str], titles: List[str]) -> List[Dict[str, str]]:
     """Files that look like this item's poster but the scanner can never see: hidden files,
-    loose files at the root of a folder-per-item drive, or folders holding only unsupported
-    image types."""
+    loose files at the root of a folder-per-item drive, files tucked inside a subfolder of a
+    flat drive, or folders holding only unsupported image types."""
     wanted = {normalize_titles(t) for t in titles if t}
     wanted.discard("")
     if not wanted:
@@ -128,6 +128,20 @@ def _unscannable_near_files(source_dirs: List[str], titles: List[str]) -> List[D
                             "file": f"{entry.name}/{bad[0]}",
                             "drive_dir": os.path.basename(source_dir),
                             "reason": "the item's folder only holds image types Posterflow doesn't read — only .jpg, .jpeg and .png are scanned",
+                        })
+                elif not nested and entry.is_dir() and not entry.name.startswith(".") and entry.name != "tmp":
+                    # Flat drives never look inside folders (a 'duplicates' bin beside the posters).
+                    folder_wanted = normalize_titles(entry.name) in wanted
+                    inside = [f.name for f in os.scandir(entry.path)
+                              if f.is_file() and not f.name.startswith(".")
+                              and (folder_wanted or normalize_titles(os.path.splitext(f.name)[0]) in wanted)]
+                    if inside:
+                        found.append({
+                            "file": f"{entry.name}/{inside[0]}",
+                            "drive_dir": os.path.basename(source_dir),
+                            "reason": (f"it sits inside the folder '{entry.name}': on this drive posters are "
+                                       "loose files at the drive root, and subfolders are never scanned; "
+                                       "move it to the drive root"),
                         })
             except OSError:
                 continue
