@@ -20,7 +20,7 @@ httpx==0.28.1
 pathvalidate==3.3.1
 unidecode==1.4.0
 plexapi==4.18.2
-Pillow==12.3.0
+Pillow==13.0.0
 # no [composite] extra — keeps scipy/scikit-image out of the image. PyPI has wheels
 # only (no sdist), so platforms without a wheel (FreeBSD) build from the GitHub tag.
 psd-tools==1.19.0; sys_platform == "linux" or sys_platform == "darwin"

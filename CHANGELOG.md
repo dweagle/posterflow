@@ -10,6 +10,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Added
 - Photopea/Photoshop Plugins: right-click COLLECTION finish via the c-filtered tag batch, with SPECIALS / COLLECTION / LIMITED SERIES chips in two rows. Finishes now fail clearly on a missing LOGO group (except MM2K), the top-level LOGO lookup unfreezes Photoshop finishes, Square Art restores the square after a click-deselect, and the crop buttons are color-coded (red cancel, green Crop). (Plugins 1.3.3 — reinstall the Photoshop .ccx to pick it up. Thank you Bostafari for the legwork on these!)
 
+### Changed
+- Dependencies: Pillow 13.0.0 and updated frontend packages, clearing all current security advisories.
+
 ### Fixed
 - Jobs: a job whose runner fails without closing its record is now finalized, so stopped scheduled syncs no longer leave a stuck "Stopping…" row.
 - Scanner: a flat drive stays flat when a stray folder sits beside its posters, instead of the folder collapsing the whole drive's layout detection.
