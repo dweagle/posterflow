@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-23
+### Added
+- Photopea/Photoshop Plugins: right-click COLLECTION finish via the c-filtered tag batch, with SPECIALS / COLLECTION / LIMITED SERIES chips in two rows. Finishes now fail clearly on a missing LOGO group (except MM2K), the top-level LOGO lookup unfreezes Photoshop finishes, Square Art restores the square after a click-deselect, and the crop buttons are color-coded (red cancel, green Crop). (Plugins 1.3.3 — reinstall the Photoshop .ccx to pick it up. Thank you Bostafari for the legwork on these!)
+
+### Fixed
+- Jobs: a job whose runner fails without closing its record is now finalized, so stopped scheduled syncs no longer leave a stuck "Stopping…" row.
+- Scanner: a flat drive stays flat when a stray folder sits beside its posters, instead of the folder collapsing the whole drive's layout detection.
+
 ## [0.18.0] - 2026-10-19
 ### Added
 - Maker Tools: maker cards now offer Remove Text and Make Logo buttons on image previews powered by Gemini. Render a text-free redraw of artwork or a transparent logo PNG, and Keep a result to turn it into a gallery tile ready for PSD export. Requires a Gemini API key in Settings.
