@@ -11,6 +11,7 @@ import json
 import threading
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
+from pathlib import Path
 
 from database import get_db
 from models.drive import Drive
@@ -23,6 +24,7 @@ from core.logging import LogTags, log_info, log_debug, log_warning, log_error, l
 from core.job_queue import job_queue
 from services.drive_loader import get_drive_descriptions
 from services.poster_sync import IMAGE_EXTENSIONS
+from services.sync_base import clear_drive_sync_counters, drive_has_sync_counters
 from services.new_drives import (
     clear_new_drives, forget_new_drives, load_new_drives, mark_new_drives_seen, record_new_drives,
 )
@@ -209,15 +211,21 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
 
     # Poster counts per drive in two aggregate queries (backed by
     # ix_posters_drive_last_processed) instead of two COUNTs per drive.
-    total_counts = dict(
-        db.query(Poster.drive_id, func.count(Poster.id)).group_by(Poster.drive_id).all()
-    )
+    total_counts = poster_row_counts(db)
     unprocessed_counts = dict(
         db.query(Poster.drive_id, func.count(Poster.id))
         .filter(Poster.last_processed.is_(None))
         .group_by(Poster.drive_id)
         .all()
     )
+
+    # Self-heal: a folder removed by hand, then its rows dropped by Database cleanup, leaves the
+    # old counters behind. One stat per such drive puts it back to "Not synced yet".
+    healed = []
+    for drive in drives:
+        if drive_has_sync_counters(drive) and not total_counts.get(drive.drive_id) and not drive.get_local_path(validate=False).exists():
+            clear_drive_sync_counters(drive)
+            healed.append(drive.name)
 
     drive_schemas = []
     for drive in drives:
@@ -243,6 +251,10 @@ def list_drives(db: Session = Depends(get_db)) -> List[DriveSchema]:
         }
         drive_schemas.append(DriveSchema(**drive_dict))
     
+    if healed:
+        db.commit()
+        log_info(LogTags.DRIVES, f"Cleared stale sync counters for {len(healed)} drive(s) with no folder and no index rows: {', '.join(healed)}")
+
     return drive_schemas
 
 def _new_drive_items(db: Session, domain: str, model) -> List[Dict[str, Any]]:
@@ -605,47 +617,57 @@ def refresh_file_counts(db: Session = Depends(get_db)) -> Dict[str, Any]:
     result = update_file_counts(db)
     return result
 
+def _count_drive_files(drive_path: Path) -> int:
+    # Same extension set as the sync scan; os.walk needs no per-file stat (NFS)
+    return sum(
+        1 for _root, _dirs, names in os.walk(drive_path)
+        for name in names
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS
+    )
+
+
+def poster_row_counts(db: Session) -> Dict[str, int]:
+    """Index rows per drive_id (backed by ix_posters_drive_last_processed)."""
+    return dict(db.query(Poster.drive_id, func.count(Poster.id)).group_by(Poster.drive_id).all())
+
+
+def refresh_drive_counters(db: Session, drives: List[Drive]) -> Dict[str, int]:
+    """Recount each drive's files on disk into sync_file_count. A drive with no folder and no
+    index rows has nothing synced any more, so all its counters clear and the card reads
+    "Not synced yet" (the same end state as unsubscribe + delete files). The caller commits."""
+    row_counts = poster_row_counts(db)
+    drives_checked = 0
+    total_files = 0
+    for drive in drives:
+        try:
+            drive_path = drive.get_local_path(validate=False)
+            if drive_path.exists():
+                file_count = _count_drive_files(drive_path)
+                drive.sync_file_count = file_count
+                total_files += file_count
+                log_debug(LogTags.DRIVES, f"{drive.name}: {file_count} files", drive=drive.name, file_count=file_count)
+            elif row_counts.get(drive.drive_id):
+                drive.sync_file_count = 0
+                log_debug(LogTags.DRIVES, f"{drive.name}: directory not found, set to 0", drive=drive.name)
+            else:
+                clear_drive_sync_counters(drive)
+                log_debug(LogTags.DRIVES, f"{drive.name}: directory not found and no index rows, cleared sync counters", drive=drive.name)
+            drives_checked += 1
+        except Exception as e:
+            log_error(LogTags.DRIVES, f"Error counting files for {drive.name}: {e}\n{traceback.format_exc()}", drive=drive.name, error=str(e))
+    return {"drives_checked": drives_checked, "total_files": total_files}
+
+
 def update_file_counts(db: Session) -> Dict[str, Any]:
     """
     Update sync_file_count for all drives by counting actual files in their directories.
     Returns dict with counts updated.
     """
-    drives = db.query(Drive).all()
-    drives_checked = 0
-    total_files = 0
-    
-    for drive in drives:
-        try:
-            drive_path = drive.get_local_path(validate=False)
-            
-            if drive_path.exists():
-                # Same extension set as the sync scan; os.walk needs no per-file stat (NFS)
-                file_count = sum(
-                    1 for _root, _dirs, names in os.walk(drive_path)
-                    for name in names
-                    if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS
-                )
-                drive.sync_file_count = file_count
-                total_files += file_count
-                drives_checked += 1
-                log_debug(LogTags.DRIVES, f"{drive.name}: {file_count} files", drive=drive.name, file_count=file_count)
-            else:
-                # Directory doesn't exist, set count to 0
-                drive.sync_file_count = 0
-                drives_checked += 1
-                log_debug(LogTags.DRIVES, f"{drive.name}: directory not found, set to 0", drive=drive.name)
-        except Exception as e:
-            log_error(LogTags.DRIVES, f"Error counting files for {drive.name}: {e}\n{traceback.format_exc()}", drive=drive.name, error=str(e))
-    
+    counts = refresh_drive_counters(db, db.query(Drive).all())
     db.commit()
-    
-    log_info(LogTags.DRIVES, f"File counts refreshed: {drives_checked} drives checked, {total_files} total files", drives_checked=drives_checked, total_files=total_files)
-    
-    return {
-        "success": True,
-        "drives_checked": drives_checked,
-        "total_files": total_files
-    }
+    log_info(LogTags.DRIVES, f"File counts refreshed: {counts['drives_checked']} drives checked, {counts['total_files']} total files", **counts)
+    return {"success": True, **counts}
+
 
 def load_drives_from_json(db: Session, drives_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """

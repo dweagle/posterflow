@@ -284,3 +284,20 @@ def test_subscribe_artwork_drive_appends_when_asked(client, test_db):
     assert payload["restored_to_priority"] is False
 
     assert json.loads(get_setting(test_db, "artwork_drive_priority").value)["drive_ids"] == [one.id, two.id]
+
+
+def test_list_artwork_drives_clears_stale_counters_when_folder_and_index_are_gone(client, test_db, tmp_path):
+    """Mirror of the poster drive list: no folder + no index rows = back to 'Not synced yet'."""
+    from datetime import datetime, timezone
+
+    drive = ArtworkDrive(name="Stale Art", drive_id="art-stale", subscribed=False,
+                         custom_path=str(tmp_path / "gone"), sync_file_count=3, last_files_transferred=3,
+                         last_synced=datetime.now(timezone.utc))
+    test_db.add(drive)
+    test_db.commit()
+
+    card = {d["drive_id"]: d for d in client.get("/api/artwork-drives/").json()}["art-stale"]
+    assert (card["artwork_count"], card["sync_file_count"], card["last_synced"]) == (0, 0, None)
+
+    test_db.refresh(drive)
+    assert drive.sync_file_count == 0 and drive.last_synced is None

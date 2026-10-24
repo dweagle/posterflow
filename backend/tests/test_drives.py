@@ -435,3 +435,38 @@ def test_update_file_counts_counts_images_recursively_and_skips_junk(test_db, tm
     test_db.expire_all()
     assert test_db.query(Drive).filter(Drive.drive_id == "count-1").first().sync_file_count == 2
     assert test_db.query(Drive).filter(Drive.drive_id == "count-2").first().sync_file_count == 0
+
+
+def test_list_drives_clears_stale_counters_when_folder_and_index_are_gone(client, test_db, tmp_path):
+    # Folder removed by hand and rows already dropped (or never re-indexed): the card must not keep
+    # reading "N on disk / Synced: <date>" for a drive that has nothing left.
+    from datetime import datetime, timezone
+
+    drive = Drive(name="Stale Drive", drive_id="stale-1", style_type="MM2K", subscribed=False,
+                  custom_path=str(tmp_path / "gone"), sync_file_count=5, last_files_transferred=5,
+                  last_synced=datetime.now(timezone.utc))
+    test_db.add(drive)
+    test_db.commit()
+
+    card = {d["drive_id"]: d for d in client.get("/api/drives/").json()}["stale-1"]
+    assert (card["poster_count"], card["sync_file_count"], card["last_synced"]) == (0, 0, None)
+
+    test_db.refresh(drive)
+    assert drive.sync_file_count == 0 and drive.last_synced is None
+
+
+def test_list_drives_keeps_counters_while_index_rows_remain(client, test_db, tmp_path):
+    # Rows still indexed (cleanup not run yet, or the mount is just down): nothing is cleared.
+    from datetime import datetime, timezone
+    from models.poster import Poster
+
+    folder = tmp_path / "gone"
+    drive = Drive(name="Rows Drive", drive_id="rows-1", style_type="MM2K", subscribed=False,
+                  custom_path=str(folder), sync_file_count=1, last_synced=datetime.now(timezone.utc))
+    test_db.add(drive)
+    test_db.add(Poster(drive_id="rows-1", file_name="Movie (2020).jpg", file_path=str(folder / "Movie (2020).jpg")))
+    test_db.commit()
+
+    card = {d["drive_id"]: d for d in client.get("/api/drives/").json()}["rows-1"]
+    assert (card["poster_count"], card["sync_file_count"]) == (1, 1)
+    assert card["last_synced"] is not None

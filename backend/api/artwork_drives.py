@@ -19,7 +19,8 @@ from core.logging import LogTags, log_info, log_warning, log_error, log_user_act
 from core.job_queue import job_queue
 from services.artwork_drive_loader import get_artwork_drive_descriptions, load_artwork_drives_data
 from services.new_drives import forget_new_drives, record_new_drives
-from services.artwork_sync import ArtworkSyncService
+from services.artwork_sync import ArtworkSyncService, scan_artwork_keys
+from services.sync_base import clear_drive_sync_counters, drive_has_sync_counters
 from modules.artwork_sync import run_artwork_sync_job
 from modules.sync import run_sync_all_job
 from util.drive_priority import restore_drive_position, stash_drive_position
@@ -115,12 +116,18 @@ def list_artwork_drives(db: Session = Depends(get_db)) -> List[ArtworkDriveSchem
     ):
         type_counts.setdefault(drive_id, {})[artwork_type] = count
 
+    # Self-heal: a folder removed by hand, then its rows dropped by Database cleanup, leaves the
+    # old counters behind. One stat per such drive puts it back to "Not synced yet".
+    healed = []
     result = []
     for drive in drives:
         counts = type_counts.get(drive.drive_id, {})
         logo = counts.get('logo', 0)
         background = counts.get('background', 0)
         squareart = counts.get('squareart', 0)
+        if drive_has_sync_counters(drive) and not (logo + background + squareart) and not drive.get_local_path(validate=False).exists():
+            clear_drive_sync_counters(drive)
+            healed.append(drive.name)
         drive_dict = {
             'id': drive.id,
             'name': drive.name,
@@ -144,6 +151,10 @@ def list_artwork_drives(db: Session = Depends(get_db)) -> List[ArtworkDriveSchem
             'squareart_count': squareart,
         }
         result.append(ArtworkDriveSchema(**drive_dict))
+
+    if healed:
+        db.commit()
+        log_info(LogTags.DRIVES, f"Cleared stale sync counters for {len(healed)} artwork drive(s) with no folder and no index rows: {', '.join(healed)}")
 
     return result
 
@@ -540,24 +551,40 @@ def reload_artwork_drives(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-@router.post("/refresh-counts")
-def refresh_artwork_counts(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Re-index all artwork drives from disk (rescan subfolders, upsert the assets table)."""
-    drives = db.query(ArtworkDrive).all()
+def refresh_artwork_drive_counters(db: Session, drives: List[ArtworkDrive], reindex: bool = False) -> Dict[str, int]:
+    """Recount each drive's files on disk into sync_file_count; ``reindex`` (the Reload button)
+    also upserts the Artwork rows. A drive with no folder and no index rows has nothing synced
+    any more, so all its counters clear and the card reads "Not synced yet". The caller commits."""
+    row_counts = dict(
+        db.query(Artwork.artwork_drive_id, func.count(Artwork.id)).group_by(Artwork.artwork_drive_id).all()
+    )
     service = ArtworkSyncService(db)
     drives_checked = 0
     total_files = 0
     for drive in drives:
         try:
-            index_result = service._index_artwork(drive)
-            drive.sync_file_count = index_result["total"]
-            total_files += index_result["total"]
+            folder = drive.get_local_path(validate=False)
+            if not row_counts.get(drive.drive_id) and not folder.exists():
+                clear_drive_sync_counters(drive)
+            elif reindex:
+                drive.sync_file_count = service._index_artwork(drive)["total"]
+            else:
+                # listings only: counts without stat calls and never touches the rows
+                drive.sync_file_count = len(scan_artwork_keys(folder, drive.synced_type_list)) if folder.exists() else 0
+            total_files += drive.sync_file_count or 0
             drives_checked += 1
         except Exception as e:
             log_error(LogTags.DRIVES, f"Error indexing artwork files for {drive.name}: {e}")
+    return {"drives_checked": drives_checked, "total_files": total_files}
+
+
+@router.post("/refresh-counts")
+def refresh_artwork_counts(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Re-index all artwork drives from disk (rescan subfolders, upsert the assets table)."""
+    counts = refresh_artwork_drive_counters(db, db.query(ArtworkDrive).all(), reindex=True)
     db.commit()
-    log_info(LogTags.DRIVES, f"Artwork drives re-indexed: {drives_checked} drives, {total_files} files")
-    return {"success": True, "drives_checked": drives_checked, "total_files": total_files}
+    log_info(LogTags.DRIVES, f"Artwork drives re-indexed: {counts['drives_checked']} drives, {counts['total_files']} files")
+    return {"success": True, **counts}
 
 
 @router.post("/{drive_id}/sync")

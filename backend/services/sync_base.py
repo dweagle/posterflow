@@ -38,6 +38,19 @@ STEP_INDENT = "    "
 SLOW_FOLDER_SCAN_SECONDS = 5.0  # a pre-sync folder listing slower than this gets its own INFO line
 
 
+def drive_has_sync_counters(drive: Any) -> bool:
+    """True once a sync has stamped this Drive / ArtworkDrive row (on-disk count, last synced)."""
+    return bool(drive.sync_file_count or drive.last_files_transferred or drive.last_synced)
+
+
+def clear_drive_sync_counters(drive: Any) -> None:
+    """Back to "Not synced yet": the end state unsubscribe + delete files leaves. For a drive whose
+    folder is gone and whose index rows are too, nothing synced remains to count."""
+    drive.sync_file_count = 0
+    drive.last_files_transferred = 0
+    drive.last_synced = None
+
+
 class BaseSyncService:
     # ---- per-type config (subclasses set these) ----
     drive_model: Any = None            # Drive / ArtworkDrive

@@ -158,6 +158,8 @@ def execute_cleanup(
         by_location = {}
         poster_deleted = 0
         artwork_deleted = 0
+        affected_poster_drives: set[str] = set()
+        affected_artwork_drives: set[str] = set()
 
         # Check each poster record and delete if orphaned
         for poster in all_records:
@@ -165,6 +167,7 @@ def execute_cleanup(
                 deleted_ids.append(poster.id)
                 deleted_paths.append(poster.file_path)
                 poster_deleted += 1
+                affected_poster_drives.add(poster.drive_id)
 
                 # Categorize
                 if poster.file_path.startswith('/posters/gdrive/'):
@@ -187,8 +190,22 @@ def execute_cleanup(
                 deleted_ids.append(art.id)
                 deleted_paths.append(art.file_path)
                 artwork_deleted += 1
+                affected_artwork_drives.add(art.artwork_drive_id)
                 by_location['artwork'] = by_location.get('artwork', 0) + 1
                 db.delete(art)
+
+        # Drive cards keep their own counters (on-disk count, last synced): recount the drives
+        # that lost rows so a hand-deleted folder reads "Not synced yet" instead of its old numbers.
+        db.flush()
+        drives_refreshed = 0
+        if affected_poster_drives:
+            from api.drives import refresh_drive_counters
+            poster_drives = db.query(Drive).filter(Drive.drive_id.in_(list(affected_poster_drives))).all()
+            drives_refreshed += refresh_drive_counters(db, poster_drives)["drives_checked"]
+        if affected_artwork_drives:
+            from api.artwork_drives import refresh_artwork_drive_counters
+            artwork_drives = db.query(ArtworkDrive).filter(ArtworkDrive.drive_id.in_(list(affected_artwork_drives))).all()
+            drives_refreshed += refresh_artwork_drive_counters(db, artwork_drives)["drives_checked"]
 
         # Commit all deletions
         db.commit()
@@ -196,8 +213,9 @@ def execute_cleanup(
         total_deleted = poster_deleted + artwork_deleted
         log_success(
             LogTags.DATABASE,
-            f"Cleanup complete: deleted {total_deleted} orphaned records ({poster_deleted} poster, {artwork_deleted} artwork)",
+            f"Cleanup complete: deleted {total_deleted} orphaned records ({poster_deleted} poster, {artwork_deleted} artwork); refreshed counters on {drives_refreshed} drive(s)",
             deleted=total_deleted,
+            drives_refreshed=drives_refreshed,
             by_location=by_location
         )
         log_user_action("Database cleanup completed", deleted_count=total_deleted)
@@ -209,6 +227,7 @@ def execute_cleanup(
             'artwork_records_deleted': artwork_deleted,
             'deleted_ids': deleted_ids[:100],  # First 100 IDs
             'by_location': by_location,
+            'drive_counters_refreshed': drives_refreshed,
             'message': f'Successfully deleted {total_deleted} orphaned records ({poster_deleted} poster, {artwork_deleted} artwork)'
         }
         

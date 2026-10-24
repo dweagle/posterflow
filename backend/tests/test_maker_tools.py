@@ -3561,6 +3561,37 @@ def test_poster_check_keys_tmdb_items_by_tmdb_id(client, test_db):
     assert resp.json() == {"tmdb-111625": [{"style": "CL2K", "seasons": [1]}]}
 
 
+def test_poster_check_counts_every_synced_drive_subscribed_or_not(client, test_db):
+    # Availability follows the drives the user syncs, not subscription: a group schedule syncs
+    # unsubscribed drives and their files are on disk. A drive never synced contributes nothing.
+    from datetime import datetime, timezone
+    from models.drive import Drive
+    from models.poster import Poster
+
+    _seed_drive_posters(test_db, "Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 1.jpg")
+    now = datetime.now(timezone.utc)
+    test_db.add(Drive(name="Group MM", drive_id="mm-group", style_type="MM2K", subscribed=False, last_synced=now))
+    test_db.add(Drive(name="Never MM", drive_id="mm-never", style_type="MM2K", subscribed=True, last_synced=None))
+    test_db.add(Poster(drive_id="mm-group", file_name="Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 2.jpg",
+                       file_path="/mm-group/Dash & Lily (2020) - Season 2.jpg", tmdb_id=111625))
+    test_db.add(Poster(drive_id="mm-group", file_name="Popeye the Sailor (1933) - Season 1.jpg",
+                       file_path="/mm-group/Popeye the Sailor (1933) - Season 1.jpg"))
+    test_db.add(Poster(drive_id="mm-never", file_name="Dash & Lily (2020) {tmdb-111625} {tvdb-371940} - Season 3.jpg",
+                       file_path="/mm-never/Dash & Lily (2020) - Season 3.jpg", tmdb_id=111625))
+    test_db.commit()
+
+    resp = client.post("/api/maker-tools/tmdb/poster-check", json={"items": [
+        {"tmdb_id": 111625, "tvdb_id": 371940, "title": "Dash & Lily", "year": "2020", "media_type": "tv"},
+        {"tvdb_id": 78435, "title": "Popeye the Sailor", "year": "1933", "media_type": "tv"},
+    ]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "tmdb-111625": [{"style": "CL2K", "seasons": [1]}, {"style": "MM2K", "seasons": [2]}],
+        "tvdb-78435": [{"style": "MM2K", "seasons": [1]}],
+    }
+
+
 def test_poster_check_matches_a_tvdb_only_show_by_its_tag(client, test_db):
     # A show TMDB doesn't carry: the drive file is tagged {tvdb-N} only, under a different title spelling.
     _seed_drive_posters(test_db, "Educating... (2011) {tvdb-252106}.jpg", "Educating... (2011) {tvdb-252106} - Season 3.jpg")

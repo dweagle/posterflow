@@ -1675,6 +1675,10 @@ def tmdb_poster_check(
 ) -> dict[str, list[dict[str, Any]]]:
     """Check the local poster database for matching files for a list of items.
 
+    Every synced drive counts, subscribed or not: a group schedule syncs drives the user never
+    subscribed to, and those files are on disk all the same. Only a drive whose folder and index
+    are gone drops out (the drive list clears its sync date then).
+
     Primary match: indexed lookup on the extracted tmdb_id column (collision-safe via the
     media type guard). Fallback match, batched into one scan: a {tvdb-N} tag for the item's
     TheTVDB id (a show TMDB doesn't carry has nothing else), or a filename starting with
