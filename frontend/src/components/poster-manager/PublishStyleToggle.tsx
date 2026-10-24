@@ -1,4 +1,4 @@
-import { POSTER_STYLES } from '../community/posterStyles'
+import { useVisiblePosterStyles } from '../community/posterStyles'
 
 type Props = {
   value: string | null
@@ -10,13 +10,14 @@ type Props = {
 // Unmatched footer's "Add All to List" and the Create List picker). The chosen
 // style is stamped on every item so requests made from them come pre-filled.
 export default function PublishStyleToggle({ value, onChange, disabled }: Props) {
+  const styles = useVisiblePosterStyles()
   return (
     <div className="publish-style-toggle">
       <span className="publish-style-toggle-label">
         Style <span className="request-required" title="Required">*</span>
       </span>
       <div className="publish-style-toggle-options" role="group" aria-label="Poster style (required)">
-        {POSTER_STYLES.map((s) => (
+        {styles.map((s) => (
           <button
             key={s.value}
             type="button"

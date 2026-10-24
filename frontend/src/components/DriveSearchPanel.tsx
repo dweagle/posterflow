@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { Check, Search } from 'lucide-react'
 import { API_URL } from '../api/http'
 import { ArtworkSearchType, searchArtwork, searchPosters } from '../api/client'
@@ -91,6 +92,7 @@ export default function DriveSearchPanel({
   fileBadges = {},
   useBusy = false,
 }: DriveSearchPanelProps) {
+  const hiddenStyles = useHiddenPosterStyles()
   const [query, setQuery] = useState(initialQuery)
   const [kind, setKind] = useState<AssetKind>(fixedKind ?? 'posters')
   const [loading, setLoading] = useState(false)
@@ -122,7 +124,7 @@ export default function DriveSearchPanel({
       }
       hit.drives.forEach((drive) => {
         // Poster drives filter by style; artwork drives have no style scheme.
-        if (drive.drive_type !== 'artwork' && !driveFilters[drive.drive_type]) {
+        if (drive.drive_type !== 'artwork' && (!driveFilters[drive.drive_type] || hiddenStyles.has(drive.drive_type.toUpperCase()))) {
           return
         }
 
@@ -153,7 +155,7 @@ export default function DriveSearchPanel({
       .sort((a, b) => a.drive_name.localeCompare(b.drive_name))
 
     return sortedGroups
-  }, [results, driveFilters, typeFilters])
+  }, [results, driveFilters, typeFilters, hiddenStyles])
 
   const totalMatches = useMemo(() => {
     return driveGroups.reduce((accumulator, group) => accumulator + group.items.length, 0)
@@ -438,20 +440,24 @@ export default function DriveSearchPanel({
       {kind === 'posters' ? (
         <div className="poster-search-filter-row">
           <span className="poster-search-filter-label">Filter drives:</span>
-          <button
-            type="button"
-            className={`poster-filter-btn ${driveFilters.cl2k ? 'active' : ''}`}
-            onClick={() => toggleDriveFilter('cl2k')}
-          >
-            CL2K
-          </button>
-          <button
-            type="button"
-            className={`poster-filter-btn ${driveFilters.mm2k ? 'active' : ''}`}
-            onClick={() => toggleDriveFilter('mm2k')}
-          >
-            MM2K
-          </button>
+          {!hiddenStyles.has('CL2K') && (
+            <button
+              type="button"
+              className={`poster-filter-btn ${driveFilters.cl2k ? 'active' : ''}`}
+              onClick={() => toggleDriveFilter('cl2k')}
+            >
+              CL2K
+            </button>
+          )}
+          {!hiddenStyles.has('MM2K') && (
+            <button
+              type="button"
+              className={`poster-filter-btn ${driveFilters.mm2k ? 'active' : ''}`}
+              onClick={() => toggleDriveFilter('mm2k')}
+            >
+              MM2K
+            </button>
+          )}
           <button
             type="button"
             className={`poster-filter-btn ${driveFilters.custom ? 'active' : ''}`}

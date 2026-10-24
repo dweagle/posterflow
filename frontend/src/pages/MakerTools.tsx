@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Bell, BookOpen, Check, CircleHelp, Info, Clapperboard, Clapperboard as MovieIcon, FolderOpen, LayoutGrid, Monitor, Paintbrush, Play, Plus, Save, Search, SlidersHorizontal, Sparkles, Trash2, Tv } from 'lucide-react'
 import {
@@ -124,6 +125,7 @@ function InfoTip({ children }: { children: ReactNode }) {
 }
 
 function MakerTools() {
+  const hiddenStyles = useHiddenPosterStyles()
   const navigate = useNavigate()
   const location = useLocation()
   const [activeTab, setActiveTab] = useState<MainTab>('tmdb-search')
@@ -1282,6 +1284,7 @@ function MakerTools() {
                   </InfoTip>
                 </div>
                 <div className="psd-style-cols">
+                  {!hiddenStyles.has('CL2K') && (
                   <div>
                     <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#3fae62' }}>CL2K</div>
                     <label className="field-label">
@@ -1351,6 +1354,8 @@ function MakerTools() {
                       />
                     </label>
                   </div>
+                  )}
+                  {!hiddenStyles.has('MM2K') && (
                   <div>
                     <div style={{ fontWeight: 600, margin: '0 0 0.5rem', color: '#5a86f0' }}>MM2K</div>
                     <label className="field-label">
@@ -1404,6 +1409,7 @@ function MakerTools() {
                       />
                     </label>
                   </div>
+                  )}
                 </div>
 
 

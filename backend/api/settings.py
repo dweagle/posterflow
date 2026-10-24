@@ -172,6 +172,8 @@ BULK_SETTINGS_ALLOWLIST: frozenset = frozenset({
     "idarr_quick_add_community",
     "community_upload_action",
     "request_export_picker",
+    # General settings: community styles hidden across the UI
+    "hidden_poster_styles",
 })
 
 # Job output and caches the UI reads through their own routes; they run to megabytes and never belong in a settings fetch

@@ -1,4 +1,5 @@
 import { ChevronRight, Download, GripVertical, List, Minus, Plus, Trash2 } from 'lucide-react'
+import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import PriorityHeader from './PriorityHeader'
 import { type PriorityScope } from './PriorityScopeSelector'
 import { DragEvent, TouchEvent as ReactTouchEvent, useEffect, useState } from 'react'
@@ -64,6 +65,7 @@ function PriorityTab({
   styleStats,
   tmdbApiKeyConfigured,
 }: PriorityTabProps) {
+  const hiddenStyles = useHiddenPosterStyles()
   const PREVIEW_LIMIT = 5
   const [openFallbackStyle, setOpenFallbackStyle] = useState<string | null>(null)
   const [fallbackOpen, setFallbackOpen] = useState(false)
@@ -235,12 +237,16 @@ function PriorityTab({
             <div className="panel-header-row">
               <h3>Available Drives</h3>
               <div className="bulk-action-btns">
-                <button className="bulk-btn bulk-add mm2k" onClick={() => onAddAllStyle('MM2K')} title="Add all MM2K drives to priority">
-                  <Plus size={11} /><span>MM2K</span>
-                </button>
-                <button className="bulk-btn bulk-add cl2k" onClick={() => onAddAllStyle('CL2K')} title="Add all CL2K drives to priority">
-                  <Plus size={11} /><span>CL2K</span>
-                </button>
+                {!hiddenStyles.has('MM2K') && (
+                  <button className="bulk-btn bulk-add mm2k" onClick={() => onAddAllStyle('MM2K')} title="Add all MM2K drives to priority">
+                    <Plus size={11} /><span>MM2K</span>
+                  </button>
+                )}
+                {!hiddenStyles.has('CL2K') && (
+                  <button className="bulk-btn bulk-add cl2k" onClick={() => onAddAllStyle('CL2K')} title="Add all CL2K drives to priority">
+                    <Plus size={11} /><span>CL2K</span>
+                  </button>
+                )}
                 <button className="bulk-btn bulk-add custom" onClick={() => onAddAllStyle('Custom')} title="Add all Custom drives to priority">
                   <Plus size={11} /><span>Custom</span>
                 </button>
@@ -248,14 +254,18 @@ function PriorityTab({
             </div>
             <p className="section-hint">Drag drives to the priority list on the right. Only subscribed drives from the <strong>GDrives</strong> page appear here.</p>
             <div className="style-checkboxes-inline">
-              <label className="style-checkbox-inline">
-                <input type="checkbox" checked={enabledStyles.has('MM2K')} onChange={() => onToggleStyle('MM2K')} />
-                <span className="style-badge style-mm2k">MM2K</span>
-              </label>
-              <label className="style-checkbox-inline">
-                <input type="checkbox" checked={enabledStyles.has('CL2K')} onChange={() => onToggleStyle('CL2K')} />
-                <span className="style-badge style-cl2k">CL2K</span>
-              </label>
+              {!hiddenStyles.has('MM2K') && (
+                <label className="style-checkbox-inline">
+                  <input type="checkbox" checked={enabledStyles.has('MM2K')} onChange={() => onToggleStyle('MM2K')} />
+                  <span className="style-badge style-mm2k">MM2K</span>
+                </label>
+              )}
+              {!hiddenStyles.has('CL2K') && (
+                <label className="style-checkbox-inline">
+                  <input type="checkbox" checked={enabledStyles.has('CL2K')} onChange={() => onToggleStyle('CL2K')} />
+                  <span className="style-badge style-cl2k">CL2K</span>
+                </label>
+              )}
               <label className="style-checkbox-inline">
                 <input type="checkbox" checked={enabledStyles.has('Custom')} onChange={() => onToggleStyle('Custom')} />
                 <span className="style-badge style-custom">Custom</span>
@@ -263,7 +273,7 @@ function PriorityTab({
             </div>
 
             <div className="available-drives-scroll">
-              {enabledStyles.has('MM2K') && (
+              {!hiddenStyles.has('MM2K') && enabledStyles.has('MM2K') && (
                 <div className="drive-type-section">
                   <h4 className="drive-type-header">MM2K Drives</h4>
                   <div className="drive-cards">
@@ -282,7 +292,7 @@ function PriorityTab({
                 </div>
               )}
 
-              {enabledStyles.has('CL2K') && (
+              {!hiddenStyles.has('CL2K') && enabledStyles.has('CL2K') && (
                 <div className="drive-type-section">
                   <h4 className="drive-type-header">CL2K Drives</h4>
                   <div className="drive-cards">
@@ -326,12 +336,16 @@ function PriorityTab({
             <div className="panel-header-row">
               <h3>Priority Order</h3>
               <div className="bulk-action-btns">
-                <button className="bulk-btn bulk-remove mm2k" onClick={() => onRemoveAllStyle('MM2K')} title="Remove all MM2K drives from priority">
-                  <Minus size={11} /><span>MM2K</span>
-                </button>
-                <button className="bulk-btn bulk-remove cl2k" onClick={() => onRemoveAllStyle('CL2K')} title="Remove all CL2K drives from priority">
-                  <Minus size={11} /><span>CL2K</span>
-                </button>
+                {!hiddenStyles.has('MM2K') && (
+                  <button className="bulk-btn bulk-remove mm2k" onClick={() => onRemoveAllStyle('MM2K')} title="Remove all MM2K drives from priority">
+                    <Minus size={11} /><span>MM2K</span>
+                  </button>
+                )}
+                {!hiddenStyles.has('CL2K') && (
+                  <button className="bulk-btn bulk-remove cl2k" onClick={() => onRemoveAllStyle('CL2K')} title="Remove all CL2K drives from priority">
+                    <Minus size={11} /><span>CL2K</span>
+                  </button>
+                )}
                 <button className="bulk-btn bulk-remove custom" onClick={() => onRemoveAllStyle('Custom')} title="Remove all Custom drives from priority">
                   <Minus size={11} /><span>Custom</span>
                 </button>

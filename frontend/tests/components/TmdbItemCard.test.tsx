@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import TmdbItemCard, { EMPTY_PSD_CONFIG } from '../../src/components/maker-tools/TmdbItemCard'
 import { getAppleImages, getSeasonImages, getTmdbImages, getTmdbOverview, getTvDetails, getTvdbImages } from '../../src/api/client'
 import type { TmdbImagesResponse } from '../../src/api/makerTools'
+import { resetHiddenPosterStylesCache, setHiddenPosterStylesCache } from '../../src/hooks/useHiddenPosterStyles'
 
 vi.mock('../../src/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/api/client')>()),
@@ -446,5 +447,76 @@ describe('TmdbItemCard seasons tab', () => {
     const tab = screen.getByRole('button', { name: 'Seasons' }) as HTMLButtonElement
     expect(tab.disabled).toBe(true)
     expect(tab.getAttribute('title')).toBe('No season posters on Apple TV')
+  })
+})
+
+describe('TmdbItemCard with a hidden poster style', () => {
+  beforeEach(() => {
+    mockedOverview.mockReset()
+    mockedTvDetails.mockReset()
+    mockedTvDetails.mockResolvedValue({ season_count: 0, seasons: [], series_type: null, season_source: 'tmdb', tmdb_seasons: [], tvdb_seasons: [] })
+    setHiddenPosterStylesCache(['MM2K'])
+  })
+  afterEach(() => {
+    cleanup()
+    resetHiddenPosterStylesCache()
+  })
+
+  it('drops the hidden style from the export toggle and the drive-availability tooltip', () => {
+    const { container } = render(
+      <TmdbItemCard
+        item={item({ tmdb_id: 0, tvdb_id: 78435 })}
+        psdConfig={EMPTY_PSD_CONFIG}
+        posterAvailability={[{ style: 'CL2K', seasons: [1] }, { style: 'MM2K', seasons: [2] }]}
+        posterAvailabilityChecked
+        hideTitle
+        hideOverview
+      />,
+    )
+
+    expect(container.querySelector('.tmdb-poster-available')).not.toBeNull()
+    const styleRows = Array.from(container.querySelectorAll('.tmdb-poster-available-style')).map((el) => el.textContent?.trim())
+    expect(styleRows).toEqual(['CL2K'])
+    const exportOptions = Array.from(container.querySelectorAll('.tmdb-psd-style-opt')).map((el) => el.textContent?.trim())
+    expect(exportOptions).toEqual(['CL2K'])
+  })
+
+  it('shows the X when the only drive posters are in a hidden style', () => {
+    const { container } = render(
+      <TmdbItemCard
+        item={item({ tmdb_id: 0, tvdb_id: 78435 })}
+        psdConfig={EMPTY_PSD_CONFIG}
+        posterAvailability={[{ style: 'MM2K', seasons: [2] }]}
+        posterAvailabilityChecked
+        hideTitle
+        hideOverview
+      />,
+    )
+    expect(container.querySelector('.tmdb-poster-available')).toBeNull()
+    expect(container.querySelector('.tmdb-poster-unavailable')).not.toBeNull()
+  })
+})
+
+describe('TmdbItemCard with CL2K hidden', () => {
+  beforeEach(() => {
+    mockedOverview.mockReset()
+    mockedTvDetails.mockReset()
+    mockedTvDetails.mockResolvedValue({ season_count: 0, seasons: [], series_type: null, season_source: 'tmdb', tmdb_seasons: [], tvdb_seasons: [] })
+    setHiddenPosterStylesCache(['CL2K'])
+  })
+  afterEach(() => {
+    cleanup()
+    resetHiddenPosterStylesCache()
+  })
+
+  it('exports in the remaining style instead of the CL2K default', async () => {
+    const { container } = render(
+      <TmdbItemCard item={item({ tmdb_id: 0, tvdb_id: 78435 })} psdConfig={EMPTY_PSD_CONFIG} hideTitle hideOverview />,
+    )
+    await waitFor(() => {
+      const options = Array.from(container.querySelectorAll('.tmdb-psd-style-opt'))
+      expect(options.map((el) => el.textContent?.trim())).toEqual(['MM2K'])
+      expect(options[0].classList.contains('active')).toBe(true)
+    })
   })
 })

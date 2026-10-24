@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest, type RequestMatch } from '../api/community'
 import { getSettings } from '../api/client'
@@ -75,6 +76,7 @@ function getSeasonLabel(req: CommunityRequest): string | null {
 }
 
 export default function CommunityRequests() {
+  const hiddenStyles = useHiddenPosterStyles()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, isMod, username, discordUserId, connecting, connectError, login, logout, uploadPoster, updateRequestStatus, matchRequest, upgradeRequest } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
@@ -448,8 +450,11 @@ export default function CommunityRequests() {
     visibleRequests = visibleRequests.filter((req) => req.requested_by_discord_id === discordUserId)
   }
   // "No MM2K" hides MM2K-style requests.
-  if (noMm2k) {
-    visibleRequests = visibleRequests.filter((req) => getStyleLabel(req.style_tags) !== 'MM2K')
+  if (noMm2k || hiddenStyles.size > 0) {
+    visibleRequests = visibleRequests.filter((req) => {
+      const style = getStyleLabel(req.style_tags)
+      return !style || (!hiddenStyles.has(style) && !(noMm2k && style === 'MM2K'))
+    })
   }
 
   return (
@@ -596,7 +601,7 @@ export default function CommunityRequests() {
               Claimed
             </button>
           )}
-          {isMaker && (
+          {isMaker && !hiddenStyles.has('MM2K') && (
             <button
               className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
               onClick={() => setNoMm2k((v) => !v)}

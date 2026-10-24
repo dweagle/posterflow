@@ -4,7 +4,7 @@ import { type TmdbCandidate, searchUnmatchedTmdb, tmdbCandidateKey, tmdbCandidat
 import { submitCommunityRequest } from '../../api/client'
 import { useToast } from '../Toast'
 import { useDiscordAuth } from '../../hooks/useDiscordAuth'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from '../community/posterStyles'
+import { useVisiblePosterStyles, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, setStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from '../community/posterStyles'
 
 type TmdbSearchType = 'movie' | 'show' | 'collection' | 'person'
 
@@ -27,6 +27,7 @@ export default function NewCommunityRequestModal({
   tvdbApiKeyConfigured = false,
   onClose,
 }: NewCommunityRequestModalProps) {
+  const visibleStyles = useVisiblePosterStyles()
   const { showToast } = useToast()
   const { isConnected, username, token, connecting, connectError, login, logout } = useDiscordAuth()
 
@@ -402,7 +403,7 @@ export default function NewCommunityRequestModal({
             Poster style <span className="request-required">required</span>
           </div>
           <div className="request-style-tags">
-            {POSTER_STYLES.map((s) => (
+            {visibleStyles.map((s) => (
               <button
                 key={s.value}
                 type="button"

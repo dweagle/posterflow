@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { AlertCircle, Loader2, Send } from 'lucide-react'
 import { type CommunityListItem } from '../../api/community'
-import { POSTER_STYLES, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from './posterStyles'
+import { POSTER_STYLES, useVisiblePosterStyles, EXTRA_TAGS, isValidDiscordUsername, getStoredPosterStyle, useAlreadyMadeWarning, withRequestFlags } from './posterStyles'
 
 export type MoveToRequestValues = {
   styleTags: string[]
@@ -38,6 +38,7 @@ type Props = {
 }
 
 export default function MoveToRequestModal({ item, submitting, onCancel, onConfirm }: Props) {
+  const visibleStyles = useVisiblePosterStyles()
   const { seasonLine, freeNotes } = useMemo(() => splitSeasonNotes(item), [item])
   const seed = useMemo(() => initialStyle(item.style_tag), [item.style_tag])
   const [posterStyle, setPosterStyle] = useState<string | null>(seed.primary)
@@ -110,7 +111,7 @@ export default function MoveToRequestModal({ item, submitting, onCancel, onConfi
             Poster style <span className="request-required">required</span>
           </div>
           <div className="request-style-tags">
-            {POSTER_STYLES.map((s) => (
+            {visibleStyles.map((s) => (
               <button
                 key={s.value}
                 type="button"

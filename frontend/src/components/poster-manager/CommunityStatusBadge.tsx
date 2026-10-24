@@ -1,4 +1,5 @@
 import { Check } from 'lucide-react'
+import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import { type ClaimStyle, type StyleClaimStatus } from '../../hooks/useCommunityClaimStatus'
 
 const STYLE_ORDER: ClaimStyle[] = ['CL2K', 'MM2K', '']
@@ -10,10 +11,11 @@ const STYLE_ORDER: ClaimStyle[] = ['CL2K', 'MM2K', '']
  * spells it out. Renders nothing when there's no matching claim/fulfillment.
  */
 export default function CommunityStatusBadge({ status }: { status: StyleClaimStatus | null }) {
+  const hidden = useHiddenPosterStyles()
   if (!status) return null
   return (
     <>
-      {STYLE_ORDER.filter((style) => status[style]).map((style) => {
+      {STYLE_ORDER.filter((style) => status[style] && !(style && hidden.has(style))).map((style) => {
         const fulfilled = status[style] === 'fulfilled'
         const inStyle = style ? ` in ${style}` : ' (style unknown)'
         return (

@@ -128,6 +128,8 @@ vi.mock('../../src/hooks/useSettingsCore', async (importOriginal) => ({
     uploadingServiceAccount: false,
     savedApiKeys: { tmdb: false, tvdb: false, fanart: false, gemini: false },
     handleRemoveApiKey: vi.fn(),
+    hiddenPosterStyles: [],
+    handleToggleHiddenPosterStyle: vi.fn(),
   }),
 }))
 

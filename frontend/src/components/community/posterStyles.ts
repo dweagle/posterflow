@@ -3,6 +3,7 @@
 // so the two never drift.
 import { useCallback, useEffect, useState } from 'react'
 import { getFulfilledRequestStyles } from '../../api/community'
+import { isPosterStyleHidden, useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 
 // Required, single-select style. The stored tag values keep the "… Style" suffix
 // for consistency with existing requests; cards derive the badge from them.
@@ -10,6 +11,12 @@ export const POSTER_STYLES: { value: string; label: string }[] = [
   { value: 'CL2K Style', label: 'CL2K' },
   { value: 'MM2K Style', label: 'MM2K' },
 ]
+
+// POSTER_STYLES minus the ones hidden in General settings; every style picker renders this.
+export function useVisiblePosterStyles(): { value: string; label: string }[] {
+  const hidden = useHiddenPosterStyles()
+  return POSTER_STYLES.filter((s) => !hidden.has(s.label))
+}
 
 // Optional extra style preferences (multi-select).
 export const EXTRA_TAGS = ['Anime Movie', 'Anime TV']
@@ -79,7 +86,10 @@ function isKnownPosterStyle(value: unknown): value is string {
 export function getStoredPosterStyle(): string | null {
   try {
     const raw = localStorage.getItem(POSTER_STYLE_STORAGE_KEY)
-    return isKnownPosterStyle(raw) ? raw : null
+    if (!isKnownPosterStyle(raw)) return null
+    // a remembered style the user has since hidden must not preselect itself
+    const label = POSTER_STYLES.find((s) => s.value === raw)?.label ?? raw
+    return isPosterStyleHidden(label) ? null : raw
   } catch {
     return null
   }

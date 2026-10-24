@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import { Drive, Schedule, getMakerIdarrConfig, MakerIdarrSyncTarget, Workflow, listWorkflows } from '../../api/client'
 import { browserTimeZone, formatDateTime, sameTimeZone } from '../../utils/datetime'
 
@@ -26,6 +27,7 @@ function ScheduleEditModal({
   onClose,
   onSave,
 }: ScheduleEditModalProps) {
+  const hiddenStyles = useHiddenPosterStyles()
   const [idarrTargets, setIdarrTargets] = useState<Array<{ index: number; target: MakerIdarrSyncTarget }>>([])
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const browserZone = browserTimeZone()
@@ -341,8 +343,8 @@ function ScheduleEditModal({
                 }}
               >
                 <option value="all">All Subscribed Drives</option>
-                <option value="group_CL2K">All CL2K Drives</option>
-                <option value="group_MM2K">All MM2K Drives</option>
+                {(!hiddenStyles.has('CL2K') || editingSchedule.schedule.drive_group === 'CL2K') && <option value="group_CL2K">All CL2K Drives</option>}
+                {(!hiddenStyles.has('MM2K') || editingSchedule.schedule.drive_group === 'MM2K') && <option value="group_MM2K">All MM2K Drives</option>}
                 <option value="group_Custom">All Custom Drives</option>
                 <optgroup label="Individual Drives">
                   {drives.filter((d) => d.subscribed).map((drive) => (

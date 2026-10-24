@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
 import { getSettings } from '../../api/client'
@@ -73,6 +74,7 @@ function toRequestPayload(item: CommunityListItem, token: string, values: MoveTo
 }
 
 export default function ListsView() {
+  const hiddenStyles = useHiddenPosterStyles()
   const { showToast } = useToast()
   const { isConnected, isMaker, isOwner, discordUserId, token, login, updateListItem } = useDiscordAuth()
   const { getOverlap, refresh: refreshClaimStatus } = useCommunityClaimStatus()
@@ -460,8 +462,11 @@ export default function ListsView() {
   const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe || noMm2k
 
   // "No MM2K" hides MM2K-style items from the loaded page (client-side view filter).
-  const visibleItems = noMm2k
-    ? items.filter((i) => getStyleLabel(i.style_tag ? [i.style_tag] : null) !== 'MM2K')
+  const visibleItems = (noMm2k || hiddenStyles.size > 0)
+    ? items.filter((i) => {
+        const style = getStyleLabel(i.style_tag ? [i.style_tag] : null)
+        return !style || (!hiddenStyles.has(style) && !(noMm2k && style === 'MM2K'))
+      })
     : items
 
   return (
@@ -527,7 +532,7 @@ export default function ListsView() {
               Claimed
             </button>
           )}
-          {isMaker && (
+          {isMaker && !hiddenStyles.has('MM2K') && (
             <button
               className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
               onClick={() => setNoMm2k((v) => !v)}

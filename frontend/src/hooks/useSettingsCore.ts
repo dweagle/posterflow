@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HIDEABLE_POSTER_STYLES, parseHiddenPosterStyles, setHiddenPosterStylesCache } from './useHiddenPosterStyles'
 import {
   getDebugStatus,
   getSettings,
@@ -86,6 +87,7 @@ export const useSettingsCore = ({
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [savedApiKeys, setSavedApiKeys] = useState<Record<ApiKeyName, boolean>>(noSavedApiKeys)
   const [appleArtworkEnabled, setAppleArtworkEnabled] = useState(true)
+  const [hiddenPosterStyles, setHiddenPosterStyles] = useState<string[]>([])
   const [psdExportFolder, setPsdExportFolder] = useState('')
   const [psdTemplatePath, setPsdTemplatePath] = useState('')
   const [psdOpenPhotopea, setPsdOpenPhotopea] = useState(false)
@@ -115,6 +117,7 @@ export const useSettingsCore = ({
       setGeminiApiKey(geminiKey)
       setSavedApiKeys({ tmdb: !!tmdbKey, tvdb: !!tvdbKey, fanart: !!fanartKey, gemini: !!geminiKey })
       setAppleArtworkEnabled((settings.apple_artwork_enabled || '').trim().toLowerCase() !== 'false')
+      setHiddenPosterStyles([...parseHiddenPosterStyles(settings.hidden_poster_styles)])
       setPsdExportFolder((settings.psd_export_folder || '').trim())
       setPsdTemplatePath((settings.psd_template_path || '').trim())
       setPsdOpenPhotopea((settings.psd_open_photopea || '').trim().toLowerCase() === 'true')
@@ -414,6 +417,28 @@ export const useSettingsCore = ({
     }
   }
 
+  const handleToggleHiddenPosterStyle = async (style: string, hidden: boolean): Promise<void> => {
+    const next = hidden
+      ? [...new Set([...hiddenPosterStyles, style])]
+      : hiddenPosterStyles.filter((s) => s !== style)
+    if (hidden && HIDEABLE_POSTER_STYLES.every((s) => next.includes(s))) {
+      showToast('One poster style has to stay visible', 'error')
+      return
+    }
+    try {
+      setSaving(true)
+      await saveBulkSettings({ hidden_poster_styles: JSON.stringify(next) })
+      setHiddenPosterStyles(next)
+      setHiddenPosterStylesCache(next)
+      showToast(hidden ? `${style} hidden across the app` : `${style} shown again`)
+    } catch (error) {
+      console.error('Error saving hidden poster styles:', error)
+      showToast('Failed to save setting', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleTogglePsdOpenPhotopea = async (value: boolean): Promise<void> => {
     try {
       setSaving(true)
@@ -460,6 +485,8 @@ export const useSettingsCore = ({
     handleRemoveApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
+    hiddenPosterStyles,
+    handleToggleHiddenPosterStyle,
     psdExportFolder,
     setPsdExportFolder,
     handleSavePsdExportFolder,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { HIDEABLE_POSTER_STYLES } from '../hooks/useHiddenPosterStyles'
 import { useNavigate } from 'react-router-dom'
 import { 
   getSchedules, 
@@ -637,6 +638,8 @@ function Settings() {
     handleRemoveApiKey,
     appleArtworkEnabled,
     handleToggleAppleArtwork,
+    hiddenPosterStyles,
+    handleToggleHiddenPosterStyle,
     appTimezone,
     effectiveTimezone,
     handleSaveAppTimezone,
@@ -1348,6 +1351,44 @@ function Settings() {
                     Remove
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <h2>Poster Styles</h2>
+            </div>
+            <div className="setting-item">
+              <div className="setting-info">
+                <label>Hide Poster Styles</label>
+                <p className="setting-description">
+                  Checked styles disappear from drives, stats, filters and style choices across the app. Nothing
+                  is removed. Drives you already subscribe to keep syncing and stay in Drive Priority. One style
+                  always stays visible.
+                </p>
+              </div>
+              <div className="setting-control hidden-styles-control">
+                {HIDEABLE_POSTER_STYLES.map((style) => {
+                  const hidden = hiddenPosterStyles.includes(style)
+                  const lastVisible = !hidden && HIDEABLE_POSTER_STYLES.filter((s) => !hiddenPosterStyles.includes(s)).length === 1
+                  const disabled = saving || lastVisible
+                  return (
+                    <label
+                      key={style}
+                      className={`hidden-style-option${hidden ? ' is-hidden' : ''}${disabled ? ' is-disabled' : ''}`}
+                      title={lastVisible ? 'One style always stays visible' : hidden ? `Show ${style} again` : `Hide ${style}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={hidden}
+                        onChange={(e) => void handleToggleHiddenPosterStyle(style, e.target.checked)}
+                        disabled={disabled}
+                      />
+                      <span className={`style-badge style-${style.toLowerCase()}`}>{style}</span>
+                    </label>
+                  )
+                })}
               </div>
             </div>
           </div>

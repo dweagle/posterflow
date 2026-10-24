@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
+import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { getStats, Stats, getSchedules, Schedule, getDrives, Drive, runFlow, runBorderReplacer, startUnmatchedDetection, startPosterRename, getPosterConfig, getApiErrorMessage, getRecentSyncedPosters, getRecentSyncedArtwork, RecentSyncedPoster, getMakerIdarrConfig, MakerIdarrSyncTarget, getPosterActivityStats, PosterActivityStats, formatJobType, cancelJob, getArtworkUnmatchedStats, type ArtworkUnmatchedStats, type ArtworkType, type UnmatchedStats, type Job } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 import { Play, Waves, AlertCircle, FolderSync, ChevronLeft, ChevronRight, ListOrdered, RefreshCw, X, CircleStop } from 'lucide-react'
@@ -38,6 +39,7 @@ const isDriveSyncJobType = (jobType: string): boolean =>
   jobType.startsWith('Artwork Sync')
 
 function Dashboard() {
+  const hiddenStyles = useHiddenPosterStyles()
   const SETTINGS_TAB_STORAGE_KEY = 'posterflow.settings.activeTab'
   const navigate = useNavigate()
   const { jobs, unmatchedStats } = useAppEvents()
@@ -899,13 +901,21 @@ function Dashboard() {
             {/* Separator */}
             <span className="pst-sep" />
             {/* CL2K */}
-            <span className="stat-badge cl2k">CL2K</span>
-            <span className="pst-val">{driveCountsByType.subscribed.cl2k} / {driveCountsByType.all.cl2k}</span>
-            <span className="pst-val">{stats?.posters_by_type.cl2k || 0}</span>
+            {!hiddenStyles.has('CL2K') && (
+              <>
+                <span className="stat-badge cl2k">CL2K</span>
+                <span className="pst-val">{driveCountsByType.subscribed.cl2k} / {driveCountsByType.all.cl2k}</span>
+                <span className="pst-val">{stats?.posters_by_type.cl2k || 0}</span>
+              </>
+            )}
             {/* MM2K */}
-            <span className="stat-badge mm2k">MM2K</span>
-            <span className="pst-val">{driveCountsByType.subscribed.mm2k} / {driveCountsByType.all.mm2k}</span>
-            <span className="pst-val">{stats?.posters_by_type.mm2k || 0}</span>
+            {!hiddenStyles.has('MM2K') && (
+              <>
+                <span className="stat-badge mm2k">MM2K</span>
+                <span className="pst-val">{driveCountsByType.subscribed.mm2k} / {driveCountsByType.all.mm2k}</span>
+                <span className="pst-val">{stats?.posters_by_type.mm2k || 0}</span>
+              </>
+            )}
             {/* Custom */}
             <span className="stat-badge custom">Custom</span>
             <span className="pst-val">{driveCountsByType.subscribed.custom} / {driveCountsByType.all.custom}</span>

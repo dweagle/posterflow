@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { useNavigate } from 'react-router-dom'
 import { getDrives, subscribeDrive, unsubscribeDrive, startSync, startSyncAll, updateDrive, createCustomDrive, deleteDrive, reloadDrives, markNewDrivesSeen, dismissNewDrives, Drive, NewDriveEntry, getApiErrorMessage } from '../api/client'
 import DriveEditModal from '../components/DriveEditModal'
@@ -36,12 +37,14 @@ type CustomDriveModalInput = {
 
 function GDrives() {
   const navigate = useNavigate()
+  const hiddenStyles = useHiddenPosterStyles()
   const [drives, setDrives] = useState<Drive[]>([])
   const [loading, setLoading] = useState(true)
   const [scope, setScope] = useState<'posters' | 'artwork'>(
     () => (localStorage.getItem('posterflow.gdrives.scope') === 'artwork' ? 'artwork' : 'posters')
   )
   const [filter, setFilter] = useState<string>('all')
+  useEffect(() => { if (filter !== 'all' && filter !== 'custom' && hiddenStyles.has(filter)) setFilter('all') }, [hiddenStyles, filter])
   const [sortBy, setSortBy] = useState<string>('name-asc')
   const [syncingDrive, setSyncingDrive] = useState<number | null>(null)
   const [syncingAll, setSyncingAll] = useState(false)
@@ -465,6 +468,7 @@ function GDrives() {
   }
 
   const filteredDrives = drives.filter(drive => {
+    if (!drive.is_custom && hiddenStyles.has(drive.style_type)) return false
     if (filter === 'all') return true
     if (filter === 'custom') return drive.is_custom
     return drive.style_type === filter
@@ -635,16 +639,20 @@ function GDrives() {
 
       {/* Bulk Actions */}
       <div className="bulk-actions">
-        <div className="bulk-action-group">
-          <span className="bulk-label">CL2K:</span>
-          <button className="btn-bulk" onClick={() => handleBulkSubscribe('CL2K')}>Subscribe All</button>
-          <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('CL2K')}>Unsubscribe All</button>
-        </div>
-        <div className="bulk-action-group">
-          <span className="bulk-label">MM2K:</span>
-          <button className="btn-bulk" onClick={() => handleBulkSubscribe('MM2K')}>Subscribe All</button>
-          <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('MM2K')}>Unsubscribe All</button>
-        </div>
+        {!hiddenStyles.has('CL2K') && (
+          <div className="bulk-action-group">
+            <span className="bulk-label">CL2K:</span>
+            <button className="btn-bulk" onClick={() => handleBulkSubscribe('CL2K')}>Subscribe All</button>
+            <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('CL2K')}>Unsubscribe All</button>
+          </div>
+        )}
+        {!hiddenStyles.has('MM2K') && (
+          <div className="bulk-action-group">
+            <span className="bulk-label">MM2K:</span>
+            <button className="btn-bulk" onClick={() => handleBulkSubscribe('MM2K')}>Subscribe All</button>
+            <button className="btn-bulk" onClick={() => handleBulkUnsubscribe('MM2K')}>Unsubscribe All</button>
+          </div>
+        )}
         <div className="bulk-action-group">
           <span className="bulk-label">Custom:</span>
           <button className="btn-bulk" onClick={() => handleBulkSubscribe('custom')}>Subscribe All</button>
@@ -661,18 +669,22 @@ function GDrives() {
           >
             All
           </button>
-          <button 
-            className={filter === 'CL2K' ? 'active' : ''} 
-            onClick={() => setFilter('CL2K')}
-          >
-            CL2K
-          </button>
-          <button 
-            className={filter === 'MM2K' ? 'active' : ''} 
-            onClick={() => setFilter('MM2K')}
-          >
-            MM2K
-          </button>
+          {!hiddenStyles.has('CL2K') && (
+            <button
+              className={filter === 'CL2K' ? 'active' : ''}
+              onClick={() => setFilter('CL2K')}
+            >
+              CL2K
+            </button>
+          )}
+          {!hiddenStyles.has('MM2K') && (
+            <button
+              className={filter === 'MM2K' ? 'active' : ''}
+              onClick={() => setFilter('MM2K')}
+            >
+              MM2K
+            </button>
+          )}
           <button 
             className={filter === 'custom' ? 'active' : ''} 
             onClick={() => setFilter('custom')}

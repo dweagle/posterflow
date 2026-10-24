@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import { createPortal } from 'react-dom'
 import {
   Check,
@@ -283,11 +284,18 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const [tagDecade, setTagDecade] = useState(1)   // Tag popup: which season decade (1, 11, 21…) is expanded
   const [tagYear, setTagYear] = useState('')      // Tag popup: season-year entry ("2015" → tag "s2015")
 
+  const hiddenStyles = useHiddenPosterStyles()
+
   // Export style: defaults to the request's style, but the toolbar toggle can override it so an
   // MM2K request can also be built in CL2K (and vice-versa). Each style has its own template +
   // export/image folder, so the two versions coexist as separate files. Re-syncs if the prop changes.
   const [exportStyle, setExportStyle] = useState<'CL2K' | 'MM2K'>(posterStyle ?? 'CL2K')
   useEffect(() => { setExportStyle(posterStyle ?? 'CL2K') }, [posterStyle])
+  useEffect(() => {
+    if (!hiddenStyles.has(exportStyle)) return
+    const fallback = (['CL2K', 'MM2K'] as const).find((s) => !hiddenStyles.has(s))
+    if (fallback) setExportStyle(fallback)
+  }, [hiddenStyles, exportStyle])
 
   // PSD settings: use prop if provided, else fetch once
   const [psdConfig, setPsdConfig] = useState<PsdConfig>(psdConfigProp ?? EMPTY_PSD_CONFIG)
@@ -947,7 +955,8 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
 
   // Drive availability indicator shown next to "Search Drives": green check with a
   // per-style/season tooltip when posters exist, red X once a check found none.
-  const hasDrivePosters = !!posterAvailability && posterAvailability.length > 0
+  const visibleAvailability = posterAvailability?.filter((entry) => !hiddenStyles.has(entry.style.toUpperCase()))
+  const hasDrivePosters = !!visibleAvailability && visibleAvailability.length > 0
   // Drive files are never attributed to a person, so a person card gets neither the check nor the X.
   const availabilityIndicator = item.media_type === 'person' ? null : hasDrivePosters ? (
     <span className="tmdb-poster-available" aria-label="Poster available in synced drives">
@@ -955,7 +964,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
       <span className="tmdb-poster-available-tooltip">
         <span className="tmdb-poster-available-header">Available in synced drives</span>
         <span className="tmdb-poster-available-note">As of last sync</span>
-        {posterAvailability?.map((entry) => (
+        {visibleAvailability?.map((entry) => (
           <span key={entry.style} className="tmdb-poster-available-style-row">
             <span className="tmdb-poster-available-style">
               <Check size={10} /> {entry.style}
@@ -1005,7 +1014,7 @@ export default function TmdbItemCard({ item, posterAvailability, posterAvailabil
   const psdExportControls = (
     <>
       <div className="tmdb-psd-style-toggle" role="group" aria-label="Export poster style">
-        {(['CL2K', 'MM2K'] as const).map((s) => (
+        {(['CL2K', 'MM2K'] as const).filter((s) => !hiddenStyles.has(s)).map((s) => (
           <button
             key={s}
             type="button"
