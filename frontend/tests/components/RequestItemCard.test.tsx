@@ -83,7 +83,7 @@ describe('RequestItemCard original language', () => {
   })
 
   it('shows nothing when TMDB has no language for the title', async () => {
-    mockedOverview.mockResolvedValue({ overview: '', poster_url: null, original_language: null })
+    mockedOverview.mockResolvedValue({ overview: '', poster_url: null, original_language: null, anime: false })
     mount({ originalLanguage: true, tmdbId: 93406 })
 
     await vi.waitFor(() => expect(mockedOverview).toHaveBeenCalledWith(93406, 'tv'))

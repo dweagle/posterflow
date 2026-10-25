@@ -859,6 +859,57 @@ def test_overview_without_an_original_language_returns_none(client, test_db):
     assert data["original_language"] is None
 
 
+def test_overview_flags_anime_from_the_tmdb_keyword(client, test_db):
+    """TMDB has no anime genre; its "anime" keyword rides the same cached details read."""
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "overview": "Titans.", "original_language": "ja", "origin_country": ["JP"],
+        "genres": [{"id": 16, "name": "Animation"}],
+        "keywords": {"results": [{"id": 210024, "name": "anime"}]},
+    }
+
+    with patch("api.maker_tools.requests.get", return_value=resp) as get:
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=1429&media_type=tv").json()
+
+    assert data["anime"] is True
+    assert get.call_args.kwargs["params"]["append_to_response"] == "keywords"
+
+
+def test_overview_treats_untagged_japanese_animation_as_anime(client, test_db):
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "overview": "A bathhouse.", "original_language": "ja",
+        "production_countries": [{"iso_3166_1": "JP"}],
+        "genres": [{"id": 16, "name": "Animation"}, {"id": 14, "name": "Fantasy"}],
+        "keywords": {"keywords": [{"id": 1, "name": "witch"}]},
+    }
+
+    with patch("api.maker_tools.requests.get", return_value=resp):
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=129&media_type=movie").json()
+
+    assert data["anime"] is True
+
+
+def test_overview_keeps_western_animation_out_of_anime(client, test_db):
+    _seed_tmdb_key(test_db)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "overview": "Springfield.", "original_language": "en", "origin_country": ["US"],
+        "genres": [{"id": 16, "name": "Animation"}, {"id": 35, "name": "Comedy"}],
+        "keywords": {"results": [{"id": 2, "name": "dysfunctional family"}]},
+    }
+
+    with patch("api.maker_tools.requests.get", return_value=resp):
+        data = client.get("/api/maker-tools/tmdb/overview?tmdb_id=456&media_type=tv").json()
+
+    assert data["anime"] is False
+
+
 def test_overview_reads_a_person_biography_and_profile_photo(client, test_db):
     _seed_tmdb_key(test_db)
     resp = MagicMock()
@@ -873,6 +924,7 @@ def test_overview_reads_a_person_biography_and_profile_photo(client, test_db):
         "overview": "Born in Syracuse.",
         "poster_url": "https://image.tmdb.org/t/p/w185/tc.jpg",
         "original_language": None,
+        "anime": False,
     }
 
 

@@ -213,18 +213,93 @@
   color: #ff8a80;
 }
 
-/* No MM2K on lights up orange (its own accent, distinct from the blue active
-   tint and the red Claimed cue). Also stays set across navigation while on. */
-.community-nomm2k-btn.active {
+/* Hide menu: a checklist dropdown (MM2K, Anime, Non-English) in the spot the old
+   No MM2K button held. Lights up orange while anything is hidden (its own accent,
+   distinct from the blue active tint and the red Claimed cue); stays set across
+   navigation like Claimed. */
+.community-hide-menu {
+  position: relative;
+}
+
+.community-hide-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.community-hide-menu-btn.active {
   background: rgba(255, 152, 0, 0.15);
   border-color: rgba(255, 152, 0, 0.45);
   color: #ffb74d;
 }
 
-.community-nomm2k-btn.active:hover {
+.community-hide-menu-btn.active:hover {
   background: rgba(255, 152, 0, 0.22);
   border-color: rgba(255, 152, 0, 0.6);
   color: #ffa726;
+}
+
+.community-hide-menu-count {
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 152, 0, 0.3);
+}
+
+.community-hide-menu-chevron {
+  opacity: 0.7;
+}
+
+/* Above the sticky list header (z-index 25) so an open menu never slides under it. */
+.community-hide-menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 11rem;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.community-hide-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.35rem;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.community-hide-menu-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.community-hide-menu-item input {
+  margin: 0;
+  accent-color: #ffb74d;
+  cursor: pointer;
+}
+
+.community-hide-menu-note {
+  margin-top: 0.15rem;
+  padding: 0.3rem 0.35rem 0.1rem;
+  border-top: 1px solid #3a3a3a;
+  font-size: 0.72rem;
+  color: #888;
+  white-space: nowrap;
 }
 
 .community-filter-group {

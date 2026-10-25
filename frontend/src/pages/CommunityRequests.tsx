@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useHiddenPosterStyles } from '../hooks/useHiddenPosterStyles'
 import { RefreshCw, Globe, ExternalLink, Upload, LogOut, Loader2, Check, Info, Plus, MessageSquare, ListChecks, CalendarArrowDown, CalendarArrowUp, Link2, ChevronsUp } from 'lucide-react'
 import { getCommunityRequests, type CommunityRequest, type RequestMatch } from '../api/community'
@@ -8,6 +8,9 @@ import { useDiscordAuth } from '../hooks/useDiscordAuth'
 import { useAppEvents } from '../contexts/AppEventsContext'
 import { type PsdConfig, derivePsdConfig, EMPTY_PSD_CONFIG } from '../components/maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from '../components/community/RequestItemCard'
+import HideFilterMenu from '../components/community/HideFilterMenu'
+import { anyHideFilter, isHiddenByMeta, isHiddenByStyle, loadHideFilters, needsTmdbMeta, saveHideFilters, tmdbMetaType, NO_HIDE_FILTERS, type HideFilters } from '../components/community/hideFilters'
+import { tmdbMetaKey, useTmdbMetaMap } from '../hooks/useCardOverview'
 import { hasCollectionMoviesNote, hasRequestFlag, ORIGINAL_LANGUAGE_NOTE } from '../components/community/posterStyles'
 import CollectionMoviesPanel from '../components/community/CollectionMoviesPanel'
 import ListsView from '../components/community/ListsView'
@@ -38,16 +41,10 @@ function loadClaimedFilter(): boolean {
   }
 }
 
-// "No MM2K" hides MM2K-style requests. Persisted the same way as Claimed so the
-// filter stays set across navigation and reloads.
-const NO_MM2K_STORAGE_KEY = 'posterflow.communityRequests.noMm2k'
-function loadNoMm2kFilter(): boolean {
-  try {
-    return localStorage.getItem(NO_MM2K_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
+// Hide menu (MM2K, anime, non-English). Persisted the same way as Claimed so it stays
+// set across navigation and reloads; the key the old No MM2K button used is migrated.
+const HIDE_FILTERS_STORAGE_KEY = 'posterflow.communityRequests.hideFilters'
+const LEGACY_NO_MM2K_STORAGE_KEY = 'posterflow.communityRequests.noMm2k'
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -91,8 +88,8 @@ export default function CommunityRequests() {
   // maker-only: my claims + open requests. Persists across navigation while on
   // (lazy-inits from storage; see loadClaimedFilter).
   const [claimedByMe, setClaimedByMe] = useState<boolean>(() => loadClaimedFilter())
-  // Hide MM2K-style requests. Persists across navigation like the Claimed filter.
-  const [noMm2k, setNoMm2k] = useState<boolean>(() => loadNoMm2kFilter())
+  // Hide menu choices. Persist across navigation like the Claimed filter.
+  const [hideFilters, setHideFilters] = useState<HideFilters>(() => loadHideFilters(HIDE_FILTERS_STORAGE_KEY, LEGACY_NO_MM2K_STORAGE_KEY))
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   // Separate from the status/sort filters: show all requests or only the connected user's own.
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all')
@@ -154,13 +151,13 @@ export default function CommunityRequests() {
     } catch { /* storage unavailable; skip persistence */ }
   }, [claimedByMe])
 
-  // Persist the No MM2K filter alongside Claimed so it survives navigation/reloads.
+  // Persist the hide menu like Claimed; the old No MM2K key is cleared once migrated.
   useEffect(() => {
-    try {
-      if (noMm2k) localStorage.setItem(NO_MM2K_STORAGE_KEY, '1')
-      else localStorage.removeItem(NO_MM2K_STORAGE_KEY)
-    } catch { /* storage unavailable; skip persistence */ }
-  }, [noMm2k])
+    saveHideFilters(HIDE_FILTERS_STORAGE_KEY, hideFilters, LEGACY_NO_MM2K_STORAGE_KEY)
+  }, [hideFilters])
+  // TMDB language/anime per listed title, fetched only while an anime or language filter is on.
+  const metaItems = useMemo(() => requests.map((r) => ({ tmdb_id: r.tmdb_id, media_type: tmdbMetaType(r.media_type) })), [requests])
+  const tmdbMeta = useTmdbMetaMap(metaItems, isMaker && needsTmdbMeta(hideFilters))
 
   // Fetch poster availability whenever the visible request list changes. Drive files are never
   // attributed to a person, so people skip the check (their card shows neither check nor X).
@@ -449,11 +446,14 @@ export default function CommunityRequests() {
   if (ownerFilter === 'mine' && discordUserId) {
     visibleRequests = visibleRequests.filter((req) => req.requested_by_discord_id === discordUserId)
   }
-  // "No MM2K" hides MM2K-style requests.
-  if (noMm2k || hiddenStyles.size > 0) {
+  // Hide menu (MM2K, anime, non-English) plus the app-wide hidden styles.
+  const hide = isMaker ? hideFilters : NO_HIDE_FILTERS
+  if (anyHideFilter(hide) || hiddenStyles.size > 0) {
     visibleRequests = visibleRequests.filter((req) => {
-      const style = getStyleLabel(req.style_tags)
-      return !style || (!hiddenStyles.has(style) && !(noMm2k && style === 'MM2K'))
+      if (isHiddenByStyle(getStyleLabel(req.style_tags), hide, hiddenStyles)) return false
+      const metaType = tmdbMetaType(req.media_type)
+      const meta = metaType && req.tmdb_id ? tmdbMeta.get(tmdbMetaKey(req.tmdb_id, metaType)) : undefined
+      return !isHiddenByMeta(hide, meta)
     })
   }
 
@@ -601,14 +601,12 @@ export default function CommunityRequests() {
               Claimed
             </button>
           )}
-          {isMaker && !hiddenStyles.has('MM2K') && (
-            <button
-              className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
-              onClick={() => setNoMm2k((v) => !v)}
-              title="Hide MM2K-style requests — stays set when you navigate away and back"
-            >
-              No MM2K
-            </button>
+          {isMaker && (
+            <HideFilterMenu
+              value={hideFilters}
+              onChange={setHideFilters}
+              omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
+            />
           )}
         </div>
         {isConnected && discordUserId && (

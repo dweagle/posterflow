@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useHiddenPosterStyles } from '../../hooks/useHiddenPosterStyles'
 import { RefreshCw, Globe, Loader2, Check, Info, Trash2, ChevronDown, Send, Upload, CalendarArrowDown, CalendarArrowUp } from 'lucide-react'
 import { getCommunityListItems, getCommunityListOwners, submitCommunityRequest, type CommunityListItem, type CommunityListOwner, type SubmitRequestPayload } from '../../api/community'
@@ -9,6 +9,9 @@ import { useAppEvents } from '../../contexts/AppEventsContext'
 import { useToast } from '../Toast'
 import { derivePsdConfig, EMPTY_PSD_CONFIG, type PsdConfig } from '../maker-tools/TmdbItemCard'
 import RequestItemCard, { getStyleLabel, type CardMediaType } from './RequestItemCard'
+import HideFilterMenu from './HideFilterMenu'
+import { anyHideFilter, isHiddenByMeta, isHiddenByStyle, loadHideFilters, needsTmdbMeta, saveHideFilters, tmdbMetaType, NO_HIDE_FILTERS, type HideFilters } from './hideFilters'
+import { tmdbMetaKey, useTmdbMetaMap } from '../../hooks/useCardOverview'
 import MoveToRequestModal, { type MoveToRequestValues } from './MoveToRequestModal'
 import { useIdarrQuickAdd } from './useIdarrQuickAdd'
 import { useCommunityClaimStatus } from '../../hooks/useCommunityClaimStatus'
@@ -18,16 +21,10 @@ type SortOrder = 'newest' | 'oldest'
 
 const PAGE_SIZE = 50
 
-// "No MM2K" hides MM2K-style items. Persisted so the filter sticks across
-// navigation and reloads (mirrors the Requests tab's sticky Claimed filter).
-const NO_MM2K_STORAGE_KEY = 'posterflow.communityLists.noMm2k'
-function loadNoMm2kFilter(): boolean {
-  try {
-    return localStorage.getItem(NO_MM2K_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
+// Hide menu (MM2K, anime, non-English). Persisted so it sticks across navigation and
+// reloads (mirrors the Requests tab); the key the old No MM2K button used is migrated.
+const HIDE_FILTERS_STORAGE_KEY = 'posterflow.communityLists.hideFilters'
+const LEGACY_NO_MM2K_STORAGE_KEY = 'posterflow.communityLists.noMm2k'
 
 const MEDIA_TYPE_TABS: { key: MediaTypeFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -91,7 +88,7 @@ export default function ListsView() {
   const [ownerLabel, setOwnerLabel] = useState('')                // remembered name of the selected wanter
   const [statusFilter, setStatusFilter] = useState<'active' | 'in_progress' | 'fulfilled' | 'all'>('active')
   const [claimedByMe, setClaimedByMe] = useState(false)  // maker-only: my claims + open items
-  const [noMm2k, setNoMm2k] = useState<boolean>(() => loadNoMm2kFilter())  // hide MM2K-style items; sticks across navigation
+  const [hideFilters, setHideFilters] = useState<HideFilters>(() => loadHideFilters(HIDE_FILTERS_STORAGE_KEY, LEGACY_NO_MM2K_STORAGE_KEY))  // hide menu; sticks across navigation
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
   const [searchInput, setSearchInput] = useState('')   // raw input box value
   const [search, setSearch] = useState('')             // debounced value sent to the API
@@ -121,13 +118,13 @@ export default function ListsView() {
     getSettings().then((s) => setPsdConfig(derivePsdConfig(s))).catch(() => {})
   }, [])
 
-  // Persist the No MM2K filter so it stays set across navigation and reloads.
+  // Persist the hide menu; the old No MM2K key is cleared once migrated.
   useEffect(() => {
-    try {
-      if (noMm2k) localStorage.setItem(NO_MM2K_STORAGE_KEY, '1')
-      else localStorage.removeItem(NO_MM2K_STORAGE_KEY)
-    } catch { /* storage unavailable; skip persistence */ }
-  }, [noMm2k])
+    saveHideFilters(HIDE_FILTERS_STORAGE_KEY, hideFilters, LEGACY_NO_MM2K_STORAGE_KEY)
+  }, [hideFilters])
+  // TMDB language/anime per listed title, fetched only while an anime or language filter is on.
+  const metaItems = useMemo(() => items.map((i) => ({ tmdb_id: i.tmdb_id, media_type: tmdbMetaType(i.media_type) })), [items])
+  const tmdbMeta = useTmdbMetaMap(metaItems, isMaker && needsTmdbMeta(hideFilters))
 
   // Build the query for one page at `offset` from the current filters.
   const buildParams = useCallback((offset: number): Record<string, string> => {
@@ -453,19 +450,22 @@ export default function ListsView() {
     setOwnerLabel('')
     setStatusFilter('active')
     setClaimedByMe(false)
-    setNoMm2k(false)
+    setHideFilters(NO_HIDE_FILTERS)
   }, [])
 
   // A search or any non-default filter "narrows" the view. While narrowed we keep
   // the search/header mounted even at zero results, so the search box can't vanish
   // mid-search and the input keeps focus (no flashing on result changes).
-  const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe || noMm2k
+  const isFiltered = search !== '' || mediaType !== 'all' || ownerFilter !== 'all' || statusFilter !== 'active' || claimedByMe || anyHideFilter(hideFilters)
 
-  // "No MM2K" hides MM2K-style items from the loaded page (client-side view filter).
-  const visibleItems = (noMm2k || hiddenStyles.size > 0)
+  // Hide menu (MM2K, anime, non-English) plus the app-wide hidden styles, on the loaded page.
+  const hide = isMaker ? hideFilters : NO_HIDE_FILTERS
+  const visibleItems = (anyHideFilter(hide) || hiddenStyles.size > 0)
     ? items.filter((i) => {
-        const style = getStyleLabel(i.style_tag ? [i.style_tag] : null)
-        return !style || (!hiddenStyles.has(style) && !(noMm2k && style === 'MM2K'))
+        if (isHiddenByStyle(getStyleLabel(i.style_tag ? [i.style_tag] : null), hide, hiddenStyles)) return false
+        const metaType = tmdbMetaType(i.media_type)
+        const meta = metaType && i.tmdb_id ? tmdbMeta.get(tmdbMetaKey(i.tmdb_id, metaType)) : undefined
+        return !isHiddenByMeta(hide, meta)
       })
     : items
 
@@ -532,14 +532,12 @@ export default function ListsView() {
               Claimed
             </button>
           )}
-          {isMaker && !hiddenStyles.has('MM2K') && (
-            <button
-              className={`community-tab-btn community-nomm2k-btn${noMm2k ? ' active' : ''}`}
-              onClick={() => setNoMm2k((v) => !v)}
-              title="Hide MM2K-style items — stays set when you navigate away and back"
-            >
-              No MM2K
-            </button>
+          {isMaker && (
+            <HideFilterMenu
+              value={hideFilters}
+              onChange={setHideFilters}
+              omit={hiddenStyles.has('MM2K') ? ['mm2k'] : []}
+            />
           )}
         </div>
         <div className="community-toolbar-actions">

@@ -1,21 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getTmdbOverview } from '../api/client'
 import type { TmdbCardMeta } from '../api/makerTools'
 
 // Card metadata shared across cards; keyed "type:id", failed fetches evicted so they can retry
 const metaCache = new Map<string, Promise<TmdbCardMeta>>()
+// Settled lookups, so a list-level filter can read many titles without awaiting each
+const resolvedMeta = new Map<string, TmdbCardMeta>()
 
-const EMPTY_META: TmdbCardMeta = { overview: '', poster_url: null, original_language: null }
+const EMPTY_META: TmdbCardMeta = { overview: '', poster_url: null, original_language: null, anime: false }
+
+export function tmdbMetaKey(tmdbId: number, mediaType: string): string {
+  return `${mediaType}:${tmdbId}`
+}
 
 function fetchCardMeta(tmdbId: number, mediaType: string): Promise<TmdbCardMeta> {
-  const key = `${mediaType}:${tmdbId}`
+  const key = tmdbMetaKey(tmdbId, mediaType)
   let pending = metaCache.get(key)
   if (!pending) {
     pending = getTmdbOverview(tmdbId, mediaType)
     metaCache.set(key, pending)
-    pending.catch(() => metaCache.delete(key))
+    pending.then((meta) => { resolvedMeta.set(key, meta) }, () => metaCache.delete(key))
   }
   return pending
+}
+
+/** Test seam: forget every cached lookup. */
+export function resetCardMetaCache(): void {
+  metaCache.clear()
+  resolvedMeta.clear()
 }
 
 /**
@@ -69,4 +81,41 @@ export function useOriginalLanguage(tmdbId: number | null | undefined, mediaType
   }, [needsFetch, tmdbId, mediaType])
 
   return code
+}
+
+/**
+ * Meta for every listed title with a TMDB id, keyed by tmdbMetaKey, for list-level filters.
+ * Titles still loading or failed are absent. Fetches only while enabled, and re-renders once per
+ * settled batch so filtered cards drop out together instead of one by one.
+ */
+export function useTmdbMetaMap(
+  items: { tmdb_id: number | null | undefined; media_type: string | null }[],
+  enabled: boolean,
+): Map<string, TmdbCardMeta> {
+  const [version, setVersion] = useState(0)
+  // A string signature keeps the effect quiet when the caller rebuilds an identical list
+  const signature = enabled
+    ? items.flatMap((it) => ((it.tmdb_id ?? 0) > 0 && it.media_type ? [tmdbMetaKey(it.tmdb_id as number, it.media_type)] : [])).join('|')
+    : ''
+  const keys = useMemo(() => (signature ? Array.from(new Set(signature.split('|'))) : []), [signature])
+
+  useEffect(() => {
+    const missing = keys.filter((key) => !resolvedMeta.has(key))
+    if (missing.length === 0) return
+    let alive = true
+    Promise.allSettled(missing.map((key) => {
+      const sep = key.indexOf(':')
+      return fetchCardMeta(Number(key.slice(sep + 1)), key.slice(0, sep))
+    })).then(() => { if (alive) setVersion((v) => v + 1) })
+    return () => { alive = false }
+  }, [keys])
+
+  return useMemo(() => {
+    const map = new Map<string, TmdbCardMeta>()
+    for (const key of keys) {
+      const meta = resolvedMeta.get(key)
+      if (meta) map.set(key, meta)
+    }
+    return map
+  }, [keys, version])
 }

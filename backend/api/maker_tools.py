@@ -1988,6 +1988,29 @@ class TmdbOverview(BaseModel):
     poster_url: Optional[str] = None
     # ISO 639-1 code from the same details response (movies and TV; collections carry none)
     original_language: Optional[str] = None
+    # TMDB's anime keyword, or Japanese animation when the keyword is missing
+    anime: bool = False
+
+
+_TMDB_ANIME_KEYWORD_ID = 210024   # TMDB has no anime genre; this keyword is the community's flag
+_TMDB_ANIMATION_GENRE_ID = 16
+
+
+def _tmdb_is_anime(data: dict[str, Any]) -> bool:
+    """The anime keyword, else Animation plus a Japanese original language or origin country."""
+    keywords = data.get("keywords") if isinstance(data.get("keywords"), dict) else {}
+    entries = keywords.get("keywords") or keywords.get("results") or []   # movies vs TV
+    for kw in entries:
+        if not isinstance(kw, dict):
+            continue
+        if kw.get("id") == _TMDB_ANIME_KEYWORD_ID or str(kw.get("name") or "").strip().lower() == "anime":
+            return True
+    genre_ids = {g.get("id") for g in data.get("genres") or [] if isinstance(g, dict)}
+    if _TMDB_ANIMATION_GENRE_ID not in genre_ids:
+        return False
+    countries = {str(c).upper() for c in data.get("origin_country") or []}
+    countries |= {str(c.get("iso_3166_1") or "").upper() for c in data.get("production_countries") or [] if isinstance(c, dict)}
+    return str(data.get("original_language") or "").strip().lower() == "ja" or "JP" in countries
 
 
 @router.get("/tmdb/overview", response_model=TmdbOverview)
@@ -2006,8 +2029,9 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
     if not api_key:
         raise HTTPException(status_code=400, detail="TMDB API key not configured.")
 
+    # Keywords ride the same read (TMDB ignores the request on collections and people)
     data = _tmdb_get_json(f"https://api.themoviedb.org/3/{mt}/{tmdb_id}",
-                          {"api_key": api_key, "language": "en-US"}, "overview",
+                          {"api_key": api_key, "language": "en-US", "append_to_response": "keywords"}, "overview",
                           cache_ttl=_TMDB_OVERVIEW_TTL)
     response.headers["Cache-Control"] = "public, max-age=86400"
     # A person record has a biography and a profile photo instead of an overview and poster.
@@ -2016,6 +2040,7 @@ def tmdb_overview(tmdb_id: int, media_type: str, response: Response, db: Session
         overview=str(data.get("overview") or data.get("biography") or ""),
         poster_url=f"https://image.tmdb.org/t/p/w185{poster_path}" if poster_path.startswith("/") else None,
         original_language=str(data.get("original_language") or "").strip().lower() or None,
+        anime=_tmdb_is_anime(data),
     )
 
 
