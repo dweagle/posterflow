@@ -28,6 +28,7 @@ frontend/dist/
 /dev-services.sh
 /docker-compose.dev.yml
 /docs/dev-sandbox.md
+/preflight.sh
 *.db
 *.log
 
