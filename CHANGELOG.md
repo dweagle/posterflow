@@ -6,6 +6,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-25
+### Added
+- Settings: hide a poster style across the app — new Hide CL2K / Hide MM2K switches in General remove the style you don't collect from views. One style always stays visible.
+- Community Requests: the "No MM2K" button is now a Hide menu with MM2K, Anime, and Non-English filters, on both the Requests and Lists boards.
+
+### Fixed
+- Drives: stale sync counters clear once a drive's folder and index are gone.
+
 ## [0.18.1] - 2026-10-23
 ### Added
 - Photopea/Photoshop Plugins: right-click COLLECTION finish via the c-filtered tag batch, with SPECIALS / COLLECTION / LIMITED SERIES chips in two rows. Finishes now fail clearly on a missing LOGO group (except MM2K), the top-level LOGO lookup unfreezes Photoshop finishes, Square Art restores the square after a click-deselect, and the crop buttons are color-coded (red cancel, green Crop). (Plugins 1.3.3 — reinstall the Photoshop .ccx to pick it up. Thank you Bostafari for the legwork on these!)
