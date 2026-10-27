@@ -191,6 +191,9 @@ class PlexUploadService:
         self._logged_missing_show_keys: set[str] = set()
         self._logged_unverified_season_keys: set[str] = set()
         self._quiet_unmatched_logging: bool = False
+        # Targeted (webhook) index: scoped servers that had no item yet, so the webhook keeps
+        # retrying while the slower server (Jellyfin behind Plex, or the reverse) scans it in
+        self._targeted_pending_servers: List[str] = []
         self._preflight_context_cache: Optional[
             Tuple[
                 Optional[Dict[str, Any]],
@@ -212,6 +215,10 @@ class PlexUploadService:
 
     def arr_availability_was_incomplete(self) -> bool:
         return self._arr_availability_incomplete
+
+    def webhook_pending_servers(self) -> List[str]:
+        """Scoped media servers the last targeted index found no item on (still scanning it, or never getting it)."""
+        return list(self._targeted_pending_servers)
 
     def set_arr_instance_scope(self, arr_instance: Optional[str]) -> None:
         """Limit the ARR availability lookup to a single firing instance (webhook path).
@@ -1274,9 +1281,14 @@ class PlexUploadService:
                 "enabled/selected. Update the instance→library map on the Asset Upload page."
             )
 
+        mapped = ", ".join(
+            f"{plex_instance} / {lib.get('title') or lib.get('key')}"
+            for plex_instance, libs in filtered.items()
+            for lib in libs
+        )
         log_info(
             LogTags.UPLOADER,
-            "Asset Upload: scoped libraries to mapped Arr instance",
+            f"Asset Upload: Arr instance '{arr_instance}' is mapped to {mapped}",
             arr_instance=arr_instance,
             plex_instances=sorted(filtered.keys()),
             libraries=sum(len(libs) for libs in filtered.values()),
@@ -1760,6 +1772,10 @@ class PlexUploadService:
         }
         library_totals: List[Dict[str, Any]] = []
         found_any = False
+        found_in: List[str] = []
+        # Only explicitly scoped servers count as expected to hold the item
+        searched: Dict[str, List[str]] = {}
+        hit_instances: Set[str] = set()
 
         for instance in plex_instances:
             instance_name = instance["name"]
@@ -1773,12 +1789,16 @@ class PlexUploadService:
                     continue
                 if library.type not in section_types:
                     continue
+                if allowed:
+                    searched.setdefault(instance_name, []).append(str(library.title))
 
+                started = time.monotonic()
                 # --- Provider-id search; per library, first matching id wins. Title/year
                 # are hints for servers without id search (Jellyfin); Plex ignores them ---
                 section_items: List[Any] = client.find_by_provider_ids(
                     provider_ids, library.type, library_keys=[library.key], title=title, year=year
                 )
+                matched_by = "id" if section_items else ""
 
                 # --- Title fallback (legacy agents or no GUID results) ---
                 if not section_items and title:
@@ -1790,12 +1810,33 @@ class PlexUploadService:
                             if getattr(item, "year", None) == year
                         ] or title_results
                     section_items.extend(title_results)
+                    if section_items:
+                        matched_by = "title"
+
+                outcome = (
+                    f"{len(section_items)} match{'' if len(section_items) == 1 else 'es'} by {matched_by}"
+                    if section_items
+                    else "no match by id or title"
+                )
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"Targeted search: {instance_name} / {library.title}: {outcome} in {time.monotonic() - started:.1f}s",
+                    instance=instance_name,
+                    library=str(library.title),
+                    provider_ids=provider_ids,
+                    title=title,
+                    year=year,
+                    matches=len(section_items),
+                    matched_by=matched_by or None,
+                )
 
                 if not section_items:
                     continue
 
                 found_any = True
                 section_title = str(library.title)
+                found_in.append(f"{instance_name} / {section_title}")
+                hit_instances.add(instance_name)
 
                 if library.type == "movie":
                     indexed = 0
@@ -1830,15 +1871,33 @@ class PlexUploadService:
                         "collections": 0,
                     })
 
+            if allowed and instance_name not in searched:
+                log_debug(
+                    LogTags.UPLOADER,
+                    f"Targeted search: {server_label(instance_type(instance), instance_name)} has no selected "
+                    f"{'/'.join(sorted(section_types))} library; skipped",
+                    instance=instance_name,
+                )
+
+        self._targeted_pending_servers = [
+            f"{server_label(instance_type(instance), instance['name'])} ({', '.join(searched[instance['name']])})"
+            for instance in plex_instances
+            if instance["name"] in searched and instance["name"] not in hit_instances
+        ]
         if found_any:
+            item_label = f"{title} ({year})" if title and isinstance(year, int) else str(title or "item")
+            pending_note = (
+                f"; not yet on {', '.join(self._targeted_pending_servers)}" if self._targeted_pending_servers else ""
+            )
             log_info(
                 LogTags.UPLOADER,
-                "Built targeted media server index",
+                f"Targeted index: found '{item_label}' in {', '.join(found_in)}{pending_note}",
                 movies=len(index["movies"]),
                 shows=len(index["shows"]),
                 provider_ids=provider_ids,
                 title=title,
                 instances=sorted({t["instance"] for t in library_totals}),
+                pending_servers=list(self._targeted_pending_servers),
             )
         return (index, library_totals) if found_any else ({}, [])
 
@@ -1910,6 +1969,8 @@ class PlexUploadService:
                     media_type=media_type,
                 )
                 index, library_totals = self._build_plex_index(plex_instances, selected_libraries)
+                # The full index speaks for every server; nothing is pending behind a scan now
+                self._targeted_pending_servers = []
                 if not index or not library_totals:
                     return self.ERROR_INDEX_BUILD_FAILED
             else:

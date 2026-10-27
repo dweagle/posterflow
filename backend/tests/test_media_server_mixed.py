@@ -331,3 +331,51 @@ def test_record_server_identity_two_connects_one_session(test_db):
     }
     # The session must remain usable for the job-status write that follows
     test_db.commit()
+
+
+class _FakeEmptyJellyfinClient(_FakeJellyfinClient):
+    """A Jellyfin server that has not scanned the item in yet."""
+
+    def find_by_provider_ids(self, provider_ids, media_type, library_keys=None, title=None, year=None):
+        return []
+
+    def find_by_title(self, title, media_type=None, library_keys=None):
+        return []
+
+
+def test_targeted_index_reports_scoped_server_without_the_item(test_db, monkeypatch):
+    """Plex has the new movie, Jellyfin has not scanned it yet: the index carries Plex and
+    names Jellyfin as pending so the webhook keeps retrying instead of stopping at Plex."""
+    import plexapi.server as plexapi_server
+    import util.media_server.jellyfin as jf_mod
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex
+
+    section = _FakePlexSection(
+        section_type="movie", title="Movies", guid_results=[_SimplePlex("movie", "Heat", key="7")]
+    )
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted([section]))
+    monkeypatch.setattr(jf_mod, "JellyfinClient", _FakeEmptyJellyfinClient)
+    service = PlexUploadService(test_db)
+    instances = [
+        {"name": "P", "url": "http://p", "api_key": "t", "type": "plex"},
+        {"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"},
+    ]
+    selected = {
+        "P": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}],
+        "J": [{"key": "lib1", "title": "Movies", "enabled": True}],
+    }
+
+    index, totals = service._build_plex_index_targeted(
+        instances, selected, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+
+    assert index["movies"]
+    assert [t["instance"] for t in totals] == ["P"]
+    assert service.webhook_pending_servers() == ["Jellyfin 'J' (Movies)"]
+
+    # A server the Arr-instance map left out of the scope is not expected to hold the item
+    index, _ = service._build_plex_index_targeted(
+        instances, {"P": selected["P"]}, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+    assert index["movies"]
+    assert service.webhook_pending_servers() == []

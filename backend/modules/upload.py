@@ -2541,17 +2541,34 @@ def _missing_target_labels(checks: list[Dict[str, Any]]) -> list[str]:
     return labels
 
 
-def _webhook_completion_message(title: str | None, match_detail: str, uploaded_count: int, missing_targets: list[str]) -> str:
+def _webhook_pending_servers(service: Any) -> list[str]:
+    """Scoped servers the targeted index found no item on; [] for services that don't track it."""
+    getter = getattr(service, "webhook_pending_servers", None)
+    try:
+        pending = getter() if callable(getter) else []
+    except Exception:
+        return []
+    return [str(entry) for entry in pending if str(entry or "").strip()]
+
+
+def _webhook_completion_message(
+    title: str | None,
+    match_detail: str,
+    uploaded_count: int,
+    missing_targets: list[str],
+    pending_servers: list[str] | None = None,
+) -> str:
     missing = ", ".join(missing_targets)
+    pending = f"; {', '.join(pending_servers)} not scanned yet" if pending_servers else ""
     if uploaded_count > 0:
         note = f"; no local poster for {missing}" if missing else ""
-        return format_complete_message("Webhook upload", f"{title} — {match_detail}{note}")
+        return format_complete_message("Webhook upload", f"{title} — {match_detail}{note}{pending}")
     if missing:
         return format_complete_message(
             "Webhook skipped (no local poster)",
-            f"{title} — {missing} not found in drive priority; {match_detail}",
+            f"{title} — {missing} not found in drive priority; {match_detail}{pending}",
         )
-    return format_complete_message("Webhook matched an item but performed no upload", f"{title} — {match_detail}")
+    return format_complete_message("Webhook matched an item but performed no upload", f"{title} — {match_detail}{pending}")
 
 
 def _handle_radarr_upgrade_edition_check(
@@ -2762,9 +2779,18 @@ def run_plex_webhook_background_job(
 
         # Build a targeted Plex index scoped to this item (GUID search) rather than
         # scanning the full library.
+        id_summary = ", ".join(
+            f"{label} {value}"
+            for label, value in (
+                ("tmdb", parsed_payload.get("tmdb_id")),
+                ("tvdb", parsed_payload.get("tvdb_id")),
+                ("imdb", parsed_payload.get("imdb_id")),
+            )
+            if value
+        )
         log_info(
             LogTags.UPLOADER,
-            f"Webhook index build: searching media servers for '{title}{year_label}' by GUID",
+            f"Webhook index build: searching media servers for '{title}{year_label}' by {id_summary or 'title only'}",
             media_type=media_type,
             title=title,
             tmdb_id=parsed_payload.get("tmdb_id"),
@@ -2859,7 +2885,21 @@ def run_plex_webhook_background_job(
                 title=title,
             )
 
-        if target_cache_checks and all(bool(check.get("cached", False)) for check in target_cache_checks):
+        pending_servers = _webhook_pending_servers(service)
+        all_targets_cached = bool(target_cache_checks) and all(
+            bool(check.get("cached", False)) for check in target_cache_checks
+        )
+        if all_targets_cached and pending_servers:
+            log_info(
+                LogTags.UPLOADER,
+                f"Webhook cache gate: matched servers already have '{title}{year_label}'; "
+                f"{', '.join(pending_servers)} has not scanned it yet, so the upload runs for it",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+                pending_servers=pending_servers,
+            )
+        if all_targets_cached and not pending_servers:
             _increment_webhook_stat(db, "skipped_cached")
             update_job_state(
                 db,
@@ -2989,6 +3029,7 @@ def run_plex_webhook_background_job(
         )
 
         result = None
+        last_uploading_result: Dict[str, Any] | None = None
         saw_retryable_preflight_failure = False
         saw_non_preflight_processing = False
         year_discrepancies: list = []
@@ -3236,6 +3277,28 @@ def run_plex_webhook_background_job(
                 success = True
                 return
 
+            # One server done is not the job done: keep retrying while a scoped server
+            # (Jellyfin behind Plex, or the reverse) has not scanned the item yet.
+            pending_servers = _webhook_pending_servers(service)
+            if (uploaded_count > 0 or matched_count > 0) and pending_servers and attempt < attempts:
+                if uploaded_count > 0:
+                    last_uploading_result = result
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Webhook: {', '.join(pending_servers)} has not scanned '{title}{year_label}' yet; "
+                    f"retrying in {delay_seconds}s",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    title=title,
+                    media_type=media_type,
+                    season_number=season_number,
+                    matched=matched_count,
+                    uploaded=uploaded_count,
+                    pending_servers=pending_servers,
+                )
+                time.sleep(delay_seconds)
+                continue
+
             if uploaded_count > 0:
                 break
 
@@ -3286,6 +3349,12 @@ def run_plex_webhook_background_job(
         if not result.get("success", False):
             raise Exception(result.get("error", "Webhook upload failed"))
 
+        # When a pending-server retry never resolved, the last attempt reports the earlier
+        # upload as "already current"; report the attempt that actually uploaded.
+        if last_uploading_result is not None and int(result.get("stats", {}).get("uploaded", 0)) == 0:
+            result = last_uploading_result
+        pending_servers = _webhook_pending_servers(service)
+
         stats = result.get("stats", {})
         uploaded_count = int(stats.get("uploaded", 0))
         matched_count = int(stats.get("matched", 0))
@@ -3333,9 +3402,24 @@ def run_plex_webhook_background_job(
             job,
             status=JOB_STATUS_COMPLETED,
             progress=100,
-            message=_webhook_completion_message(title, match_detail, uploaded_count, missing_targets),
+            message=_webhook_completion_message(
+                title, match_detail, uploaded_count, missing_targets, pending_servers=pending_servers
+            ),
             completed_at=datetime.now(timezone.utc),
         )
+
+        if pending_servers:
+            log_warning(
+                LogTags.UPLOADER,
+                f"Webhook: {', '.join(pending_servers)} never showed '{title}{year_label}' across {attempts} attempt(s); "
+                "the next full upload run pushes it once that server has scanned it. If that server should not get "
+                "this Arr instance's items, map the instance's libraries on the Asset Upload page",
+                media_type=media_type,
+                title=title,
+                season_number=season_number,
+                attempts=attempts,
+                pending_servers=pending_servers,
+            )
 
         if matched_count > 0 and uploaded_count == 0:
             log_warning(

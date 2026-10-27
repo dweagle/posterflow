@@ -1018,3 +1018,167 @@ def test_webhook_names_the_missing_season_poster_when_no_drive_has_it(test_db, m
     assert "Webhook skipped (no local poster)" in (refreshed.message or "")
     assert "Season 04" in (refreshed.message or "")
     assert "performed no upload" not in (refreshed.message or "")
+
+
+# ---------------------------------------------------------------------------
+# Webhook retries: a second media server that has not scanned the item yet
+# ---------------------------------------------------------------------------
+
+
+class _PendingServerFakeService:
+    """Webhook-job fake for the pending-server tests; subclasses set upload + pending behavior."""
+
+    ERROR_INDEX_BUILD_FAILED = "Unable to build Plex index from configured instances/libraries."
+
+    def __init__(self, _db, **_kwargs):
+        pass
+
+    def prepare_webhook_context(self, **_kwargs):
+        return None
+
+    def is_single_target_fully_cached(self, **_kwargs):
+        return False
+
+    def is_series_show_poster_cached(self, **_kwargs):
+        return False
+
+    def invalidate_arr_availability_cache(self) -> None:
+        pass
+
+    def arr_availability_was_incomplete(self) -> bool:
+        return False
+
+    def set_arr_instance_scope(self, _arr_instance=None):
+        pass
+
+    def invalidate_preflight_cache(self) -> None:
+        pass
+
+    def invalidate_local_assets_cache(self) -> None:
+        pass
+
+    def _get_destination_dir(self):
+        return Path("/tmp")
+
+    def _get_local_assets(self, _destination):
+        return [{"media_key": "placeholder", "asset_type": "main"}]
+
+    def _select_local_assets_for_target(self, assets, **_kwargs):
+        return assets
+
+
+def _single_upload_result(*, uploaded: int) -> dict:
+    return {
+        "success": True,
+        "stats": {
+            "scanned": 1,
+            "matched": 1,
+            "uploaded": uploaded,
+            "uploaded_files": uploaded,
+            "already_current": 1 - uploaded,
+            "plex_targets": 1,
+            "multi_library_assets": 0,
+            "skipped": 0,
+            "errors": 0,
+        },
+    }
+
+
+def _queue_webhook_job(test_db, monkeypatch) -> int:
+    job = Job(job_type="Plex Upload Webhook", status="pending", progress=0, message="Queued")
+    test_db.add(job)
+    test_db.commit()
+    monkeypatch.setattr("modules.upload.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("modules.upload.add_job_log_handler", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("modules.upload.remove_job_log_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr("modules.upload.time.sleep", lambda _seconds: None)
+    return job.id
+
+
+_PENDING_PAYLOAD = {"media_type": "movie", "title": "Verity", "year": 2026, "season_number": None, "tmdb_id": 1}
+
+
+def test_webhook_keeps_retrying_for_a_server_that_has_not_scanned_the_item(test_db, monkeypatch):
+    """Plex uploads on attempt 1 while Jellyfin has no item yet: the job retries for Jellyfin
+    instead of completing on the first upload, and finishes clean once Jellyfin has it."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    context_calls: list = []
+    run_calls: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def prepare_webhook_context(self, **_kwargs):
+            context_calls.append(1)
+            return None
+
+        def webhook_pending_servers(self):
+            return ["Jellyfin (Movies)"] if len(context_calls) < 2 else []
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            return _single_upload_result(uploaded=1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 2
+    assert len(context_calls) == 2
+    assert "not scanned yet" not in (refreshed.message or "")
+
+
+def test_webhook_completes_and_names_the_server_that_never_scanned_the_item(test_db, monkeypatch):
+    """When the second server never shows the item, the job uses every attempt, completes,
+    reports the attempt that uploaded (not the later 'already current' pass), and names the server."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    run_calls: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def webhook_pending_servers(self):
+            return ["Jellyfin (Movies)"]
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            return _single_upload_result(uploaded=1 if len(run_calls) == 1 else 0)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 3
+    assert "1 uploaded" in refreshed.message
+    assert "Jellyfin (Movies) not scanned yet" in refreshed.message
+
+
+def test_webhook_cache_gate_does_not_skip_while_a_server_is_pending(test_db, monkeypatch):
+    """A re-fired webhook with Plex already cached still runs when Jellyfin has no item yet."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    run_calls: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def is_single_target_fully_cached(self, **_kwargs):
+            return True
+
+        def webhook_pending_servers(self):
+            return ["Jellyfin (Movies)"] if not run_calls else []
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            return _single_upload_result(uploaded=1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 2, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 1
