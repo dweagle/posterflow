@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-10-27
+### Fixed
+- Webhooks: when one media server has scanned in a new item but another hasn't, retries now target only the servers still waiting.
+
 ## [0.18.2] - 2026-10-25
 ### Added
 - Settings: hide a poster style across the app — new Hide CL2K / Hide MM2K switches in General remove the style you don't collect from views. One style always stays visible.
