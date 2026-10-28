@@ -533,6 +533,19 @@ class PlexClient(MediaServerClient):
         self._labeled_ids_cache[cache_key] = ids
         return ids
 
+    def selected_poster_key(self, item: MediaServerItem) -> str:
+        """The key of the poster Plex shows: 'upload://posters/<sha1>' for an upload, the
+        provider's key otherwise, '' when Plex can't say. Bulk rows have no native object."""
+        from plexapi.media import Poster
+        try:
+            for image in self.server.fetchItems(f"/library/metadata/{item.item_id}/posters", cls=Poster):
+                if getattr(image, "selected", False):
+                    return str(getattr(image, "ratingKey", None) or getattr(image, "key", "") or "")
+        except Exception as ex:
+            if self.logger:
+                self.logger.debug(f"Plex posters lookup failed for ratingKey {item.item_id}: {ex}")
+        return ""
+
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
         if not item.item_id:
             return False

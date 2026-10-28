@@ -982,3 +982,221 @@ def test_series_show_poster_status_not_uploaded_without_record(test_db, tmp_path
 
     service = PlexUploadService(test_db)
     assert _series_show_poster_status(service, asset, index) == "not_uploaded"
+
+
+# ── the server-poster ledger: a cached poster is still checked against the server ─────────
+class _FakeJellyfin:
+    """A Jellyfin-flavoured client: uploads change the image tag the listing shows."""
+    server_type = "jellyfin"
+    instance_name = "JF"
+    server_id = "jf-1"
+
+    def __init__(self):
+        self.tag = "t1"
+        self.uploads = 0
+
+    def upload_image(self, item, kind, path):
+        self.uploads += 1
+        self.tag = f"t{self.uploads + 1}"
+        return True
+
+    def get_item(self, item_id):
+        return _tagged(item_id, self.tag)
+
+
+def _tagged(item_id, tag):
+    item = _SimplePlex("movie", "Jelly", key=item_id)
+    item.native = {"ImageTags": {"Primary": tag}}
+    return item
+
+
+def _cached_movie_service(test_db, monkeypatch, item):
+    """One service per run with the index resolution stubbed, as a real run would build it."""
+    marker = object()
+    index = {"movies": marker, "shows": {}, "collections": {}}
+
+    def service():
+        svc = PlexUploadService(test_db)
+        monkeypatch.setattr(svc, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+        monkeypatch.setattr(svc, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+        monkeypatch.setattr(svc, "_resolve_index_candidates", lambda sub, *a, **k: [item] if sub is marker else [])
+        return svc
+    return service, index
+
+
+def test_cached_plex_poster_is_verified_against_the_server_and_resent_when_replaced(test_db, tmp_path, monkeypatch):
+    """Plex's thumb hint decides whether to ask which poster is selected; a selection that is
+    not our upload goes up again."""
+    import hashlib
+
+    from models.server_poster import ServerPoster
+    from plex_upload_fakes import _WRAP_CLIENT, uploads
+
+    poster = tmp_path / "The Matrix (1999)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"matrix-poster")
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    item = _SimplePlex("movie", "The Matrix", key="100")
+    item.thumb_path = "/library/metadata/100/thumb/1"
+    lookups = []
+    selected = {"key": f"upload://posters/{hashlib.sha1(b'matrix-poster').hexdigest()}"}
+    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: lookups.append(it.item_id) or selected["key"])
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "matrix", "path": str(poster), "asset_type": "main", "display_name": "The Matrix", "folder_year": 1999}
+    before = len(uploads("100"))
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    row = test_db.query(ServerPoster).filter_by(instance="Plex", item_id="100").one()
+    assert (row.hint, row.sha1, row.file_path) == ("", hashlib.sha1(b"matrix-poster").hexdigest(), str(poster))  # Plex: confirmed on the next listing
+    # Next run: the hint is new, so Plex is asked once; the selection is our upload → cached, hint kept.
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
+    assert lookups == ["100"] and test_db.query(ServerPoster).one().hint == "/library/metadata/100/thumb/1"
+    # Same hint again: no request at all.
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and lookups == ["100"]
+    # A metadata refresh bumps the thumb but the selection is still ours: one lookup, no upload.
+    item.thumb_path = "/library/metadata/100/thumb/2"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and lookups == ["100", "100"]
+    # Someone reset the poster to the agent's: the selection is not an upload of ours → up again.
+    item.thumb_path = "/library/metadata/100/thumb/3"
+    selected["key"] = "metadata://posters/tmdb"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    assert len(uploads("100")) == before + 2 and test_db.query(ServerPoster).one().hint == ""
+    # Dry run: the check still reports, but records nothing.
+    item.thumb_path = "/library/metadata/100/thumb/4"
+    assert service()._upload_asset(asset, index, dry_run=True)[0] == 1 and test_db.query(ServerPoster).one().hint == ""
+
+
+def test_cached_plex_poster_without_a_row_is_baselined_then_verified_by_file(test_db, tmp_path, monkeypatch):
+    """Records from before the ledger have no row: the first sight records the hint without
+    re-uploading; a later change is judged against the placed file's own sha1."""
+    import hashlib
+
+    from models.server_poster import ServerPoster
+    from plex_upload_fakes import _WRAP_CLIENT
+
+    poster = tmp_path / "Heat (1995)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"heat-poster")
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    item = _SimplePlex("movie", "Heat", key="101")
+    item.thumb_path = "/library/metadata/101/thumb/1"
+    selected = {"key": f"upload://posters/{hashlib.sha1(b'heat-poster').hexdigest()}"}
+    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: selected["key"])
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "heat", "path": str(poster), "asset_type": "main", "display_name": "Heat", "folder_year": 1995}
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    test_db.query(ServerPoster).delete()
+    test_db.commit()
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # baseline: recorded, not re-sent
+    row = test_db.query(ServerPoster).one()
+    assert (row.hint, row.sha1) == ("/library/metadata/101/thumb/1", None)
+    item.thumb_path = "/library/metadata/101/thumb/2"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # moved thumb, selection matches the file → ours
+    selected["key"] = "upload://posters/0000000000000000000000000000000000000000"
+    item.thumb_path = "/library/metadata/101/thumb/3"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1  # another upload replaced ours → up again
+    assert test_db.query(ServerPoster).one().sha1 == hashlib.sha1(b"heat-poster").hexdigest()
+
+
+def test_cached_jellyfin_poster_follows_the_image_tag(test_db, tmp_path, monkeypatch):
+    """Jellyfin's image tag is the image itself: fetched right after our upload, and a listing
+    that shows a different tag, or none, means the poster is no longer ours."""
+    from models.server_poster import ServerPoster
+
+    poster = tmp_path / "Jelly (2021)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"jelly-poster")
+    jf = _FakeJellyfin()
+    item = _tagged("200", jf.tag)
+    item.client = jf
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "jelly", "path": str(poster), "asset_type": "main", "display_name": "Jelly", "folder_year": 2021}
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 1
+    assert test_db.query(ServerPoster).filter_by(instance="JF", item_id="200").one().hint == "jf:t2"
+    item.native = {"ImageTags": {"Primary": jf.tag}}  # the next listing shows the tag our upload got
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and jf.uploads == 1
+    item.native = {"ImageTags": {"Primary": "provider-image"}}  # replaced on the server
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 2
+    assert test_db.query(ServerPoster).one().hint == "jf:t3"
+    item.native = {"ImageTags": {}}  # and then removed altogether
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 3
+
+
+def test_cleared_poster_is_resent_even_without_a_ledger_row(test_db, tmp_path, monkeypatch):
+    """An install upgraded after a Jellyfin re-import already cleared the poster has no row for
+    it: no image at all on an item the cache calls uploaded still means send it again."""
+    from models.server_poster import ServerPoster
+
+    poster = tmp_path / "Gone (2020)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"gone-poster")
+    jf = _FakeJellyfin()
+    item = _tagged("300", jf.tag)
+    item.client = jf
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "gone", "path": str(poster), "asset_type": "main", "display_name": "Gone", "folder_year": 2020}
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 1
+    test_db.query(ServerPoster).delete()
+    test_db.commit()
+    item.native = {"ImageTags": {}}
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and jf.uploads == 2
+    assert test_db.query(ServerPoster).one().hint == "jf:t3"
+
+
+def test_webhook_cache_gate_resends_when_the_server_lost_the_poster(test_db, tmp_path, monkeypatch):
+    """The gate an arr webhook asks ("is this target already uploaded?") says no when the server
+    no longer shows our poster, so an upgrade re-import that cleared it gets the poster back."""
+    import hashlib
+
+    from plex_upload_fakes import _WRAP_CLIENT
+
+    # Jellyfin: the tag we recorded is gone, or replaced.
+    poster = tmp_path / "Gate (2022)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"gate-poster")
+    jf = _FakeJellyfin()
+    item = _tagged("400", jf.tag)
+    item.client = jf
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "gate", "path": str(poster), "asset_type": "main", "display_name": "Gate", "folder_year": 2022}
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    gate = lambda: service()._is_asset_fully_cached_for_targets(asset, index=index, media_type_filter="movie", arr_availability=None)  # noqa: E731
+    item.native = {"ImageTags": {"Primary": jf.tag}}
+    assert gate() is True
+    item.native = {"ImageTags": {}}
+    assert gate() is False
+    item.native = {"ImageTags": {"Primary": "tmdb-image"}}
+    assert gate() is False
+
+    # Plex: the selected poster is no longer our upload.
+    plex_poster = tmp_path / "Gate Plex (2022)" / "poster.jpg"
+    plex_poster.parent.mkdir()
+    plex_poster.write_bytes(b"gate-plex-poster")
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    plex_item = _SimplePlex("movie", "Gate Plex", key="401")
+    plex_item.thumb_path = "/library/metadata/401/thumb/1"
+    selected = {"key": f"upload://posters/{hashlib.sha1(b'gate-plex-poster').hexdigest()}"}
+    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: selected["key"])
+    plex_service, plex_index = _cached_movie_service(test_db, monkeypatch, plex_item)
+    plex_asset = {"media_key": "gate plex", "path": str(plex_poster), "asset_type": "main", "display_name": "Gate Plex", "folder_year": 2022}
+    assert plex_service()._upload_asset(plex_asset, plex_index, dry_run=False)[0] == 1
+    plex_gate = lambda: plex_service()._is_asset_fully_cached_for_targets(plex_asset, index=plex_index, media_type_filter="movie", arr_availability=None)  # noqa: E731
+    assert plex_gate() is True  # thumb moved, selection is ours
+    plex_item.thumb_path = "/library/metadata/401/thumb/2"
+    selected["key"] = "metadata://posters/tmdb"
+    assert plex_gate() is False
+    plex_item.thumb_path = ""  # no thumb reported: Plex is asked, and the selection is still not ours
+    assert plex_gate() is False
+
+
+def test_upload_sha_reads_plex_upload_keys_for_movies_and_seasons():
+    """Plex names a season upload 'upload://posters/seasons/<n>/<sha1>'; only the sha1 counts."""
+    from services.server_posters import upload_sha
+
+    assert upload_sha("plex:upload://posters/fcad6daa62800007c17d8cbe3f268b9e5c085e06") == "fcad6daa62800007c17d8cbe3f268b9e5c085e06"
+    assert upload_sha("plex:upload://posters/seasons/0/e5b62e4b7fa822efdedd31302c041463d1a03acb") == "e5b62e4b7fa822efdedd31302c041463d1a03acb"
+    assert upload_sha("plex:metadata://posters/tv.plex.agents.movie_b0cc") == ""
+    assert upload_sha("") == ""

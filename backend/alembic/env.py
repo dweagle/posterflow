@@ -24,6 +24,7 @@ from models.workflow import Workflow  # noqa: F401
 from models.poster_override import PosterOverride  # noqa: F401
 from models.poster_reminder import PosterReminder  # noqa: F401
 from models.plex_upload import PlexUploadRecord  # noqa: F401
+from models.server_poster import ServerPoster  # noqa: F401
 
 # this is the Alembic Config object
 config = context.config

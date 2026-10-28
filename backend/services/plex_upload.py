@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 
 from core.logging import LogTags, log_debug, log_error, log_info, log_warning
 from models.plex_upload import PlexUploadRecord
+from models.server_poster import clear_server_posters, load_server_posters, server_poster_key, upsert_server_poster
 from models.setting import get_setting, upsert_setting
+from services.server_posters import poster_key, stable_poster_key, upload_sha
 from util.poster_settings import get_poster_destination
 from util.arr.client import create_arr_client
 from util.constants import POSTER_ID_PATTERN
@@ -172,6 +174,7 @@ class PlexUploadService:
         self.db = db
         self.upload_delay_ms = max(0, upload_delay_ms)
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
+        self._server_posters: Optional[Dict[str, Dict[str, Any]]] = None  # what we last put on each server item, loaded on first use
         self._year_discrepancies: List[Dict[str, Any]] = []  # ID-matched uploads where folder year != Plex year
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._local_artwork_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -918,6 +921,9 @@ class PlexUploadService:
                 # Show re-added since last upload (new ratingKey) — re-apply.
                 if self._rating_key_indicates_change(self._item_rating_key(show), uploaded_rating_keys):
                     return False
+                # The server no longer shows the season poster we sent (an upgrade re-import cleared it).
+                if self._season_poster_needs_reupload(show, season_obj, file_path):
+                    return False
 
             return available_season_targets > 0
 
@@ -963,6 +969,8 @@ class PlexUploadService:
             if item_type == "movie":
                 edition_title = self._movie_edition_title(item)
                 if edition_title in uploaded_editions and item_cached_for_library:
+                    if self._poster_needs_reupload(item, file_path):
+                        return False  # the server lost our poster (an upgrade re-import, a reset): send it again
                     continue
 
                 if (
@@ -970,6 +978,8 @@ class PlexUploadService:
                     and not uploaded_editions
                     and item_cached_for_library
                 ):
+                    if self._poster_needs_reupload(item, file_path):
+                        return False
                     continue
 
                 return False
@@ -978,6 +988,8 @@ class PlexUploadService:
                 return False
             item_media_type = self._classify_plex_item(item)
             if uploaded_media_types and item_media_type not in uploaded_media_types:
+                return False
+            if self._poster_needs_reupload(item, file_path):
                 return False
 
         return True
@@ -2221,15 +2233,17 @@ class PlexUploadService:
                 season_number = asset["season_number"]
                 library_name = self._item_library_name(show)
                 library_key = self._item_library_key(show)
-                # Use the show's ratingKey (a single re-added season under an unchanged show isn't caught, but that avoids a seasons() call per cached item).
+                # The show's ratingKey says whether the show was re-added; the season itself is
+                # looked up so its poster on the server can be checked (one seasons() call per show).
                 rating_key = self._item_rating_key(show)
                 rating_key_changed = self._rating_key_indicates_change(rating_key, uploaded_rating_keys)
+                season_obj = next((s for s in self._seasons_for_show(show) if s.index == season_number), None)
                 if not rating_key_changed and self._is_item_cached_for_library(
                     library_name=library_name,
                     library_key=library_key,
                     uploaded_to_libraries=uploaded_to_libraries,
                     uploaded_to_library_keys=uploaded_to_library_keys,
-                ):
+                ) and not self._season_poster_needs_reupload(show, season_obj, file_path, persist=not dry_run):
                     self._record_rating_key_if_new(
                         file_path,
                         rating_key,
@@ -2241,7 +2255,6 @@ class PlexUploadService:
                     )
                     cached_skips += 1
                     continue
-                season_obj = next((s for s in self._seasons_for_show(show) if s.index == season_number), None)
                 if not season_obj:
                     continue
                 if dry_run:
@@ -2425,7 +2438,7 @@ class PlexUploadService:
 
             if item_type == "movie":
                 edition_title = self._movie_edition_title(item)
-                if edition_title in uploaded_editions and item_already_applied:
+                if edition_title in uploaded_editions and item_already_applied and not self._poster_needs_reupload(item, file_path, persist=not dry_run):
                     self._record_rating_key_if_new(
                         file_path,
                         rating_key,
@@ -2447,6 +2460,7 @@ class PlexUploadService:
                     edition_title == self.DEFAULT_EDITION_MOVIE
                     and not uploaded_editions
                     and item_already_applied
+                    and not self._poster_needs_reupload(item, file_path, persist=not dry_run)
                 ):
                     if rating_key:
                         uploaded_rating_keys.add(rating_key)
@@ -2466,7 +2480,7 @@ class PlexUploadService:
                     )
                     continue
             else:
-                if item_already_applied and (not uploaded_media_types or item_media_type in uploaded_media_types):
+                if item_already_applied and (not uploaded_media_types or item_media_type in uploaded_media_types) and not self._poster_needs_reupload(item, file_path, persist=not dry_run):
                     self._record_rating_key_if_new(
                         file_path,
                         rating_key,
@@ -2835,6 +2849,98 @@ class PlexUploadService:
         client = item.client
         if client is None or not client.upload_image(item, kind, filepath):
             raise RuntimeError(f"{kind} upload not supported for this media server item")
+        if kind == IMAGE_KIND_POSTER:
+            self._record_server_poster_after_upload(item, self._sha1_of_file(filepath), filepath)
+
+    # ── is our poster still the one on the server? ─────────────────────────
+    def _poster_needs_reupload(self, item: MediaServerItem, file_path: str, parent: Optional[MediaServerItem] = None, *, persist: bool = True) -> bool:
+        """A cached poster still goes up again when the server no longer shows ours."""
+        return self._server_poster_changed(item, file_path, parent, persist=persist)
+
+    def _season_poster_needs_reupload(self, show: MediaServerItem, season_obj: Optional[MediaServerItem], file_path: str, *, persist: bool = True) -> bool:
+        if season_obj is None:
+            return False
+        return self._server_poster_changed(season_obj, file_path, show, persist=persist)
+
+    @staticmethod
+    def _server_item_key(item: MediaServerItem) -> str:
+        client = item.client
+        instance = str(getattr(client, "instance_name", None) or getattr(client, "server_id", None) or "?")
+        return server_poster_key(instance, str(item.item_id))
+
+    def _server_posters_map(self) -> Dict[str, Dict[str, Any]]:
+        if self._server_posters is None:
+            self._server_posters = load_server_posters(self.db)
+        return self._server_posters
+
+    def _save_server_poster(self, key: str, *, hint: str, sha1: Optional[str], file_path: str) -> None:
+        instance, item_id = key.split("|", 1)
+        self._server_posters_map()[key] = upsert_server_poster(self.db, instance, item_id, hint=hint, sha1=sha1, file_path=file_path)
+
+    @staticmethod
+    def _sha1_of_file(path: str) -> Optional[str]:
+        try:
+            with open(path, "rb") as f:
+                return hashlib.sha1(f.read()).hexdigest()  # nosec B324 — Plex's own naming of uploads
+        except OSError:
+            return None
+
+    def _record_server_poster_after_upload(self, item: MediaServerItem, sent_sha1: Optional[str], file_path: str) -> None:
+        """Remember what we just sent: Jellyfin's image tag is fetched now (a content hash the
+        listing shows later); Plex is confirmed on the next listing from the sha1 of the bytes."""
+        client = item.client
+        hint = ""
+        if getattr(client, "server_type", "") == "jellyfin":
+            try:
+                fresh = client.get_item(item.item_id)
+                hint = poster_key(fresh) if fresh is not None else ""
+            except Exception:
+                hint = ""
+        try:
+            self._save_server_poster(self._server_item_key(item), hint=hint, sha1=sent_sha1, file_path=file_path)
+        except Exception as e:
+            log_debug(LogTags.UPLOADER, f"Could not record the server poster for {item.title}: {e}", file=file_path)
+
+    def _server_poster_changed(self, item: Optional[MediaServerItem], file_path: str, parent: Optional[MediaServerItem] = None, *, persist: bool = True) -> bool:
+        """Did the poster we uploaded stop being the one the server shows? Only asked for items
+        the upload cache already calls done. The listing's cheap hint decides whether to look at
+        all: Jellyfin's image tag is the image itself (and no tag is no image at all, so ours is
+        gone, row or no row); Plex's thumb timestamp only says "look closer", then one posters
+        lookup tells which is selected. An item we have no row for otherwise becomes the baseline."""
+        if item is None or item.client is None:
+            return False
+        key = self._server_item_key(item)
+        label = f"{parent.title} {item.title}" if parent is not None else str(item.title)
+        try:
+            entry = self._server_posters_map().get(key)
+            hint = poster_key(item)
+            if not hint and isinstance(getattr(item, "native", None), dict):
+                changed = True  # Jellyfin lists no primary image, yet we uploaded one here
+            elif entry is None:
+                if persist:
+                    self._save_server_poster(key, hint=hint, sha1=None, file_path=file_path)
+                return False
+            else:
+                recorded = str(entry.get("hint") or "")
+                if hint == recorded:
+                    return False
+                if hint.startswith("jf:"):
+                    changed = bool(recorded)  # a known tag moved; none known = first look after our upload
+                else:
+                    selected = stable_poster_key(item)
+                    if not selected:
+                        return False  # the server could not tell us: leave the item alone
+                    expected = entry.get("sha1") or self._sha1_of_file(file_path)
+                    changed = upload_sha(selected) != expected
+        except Exception as e:
+            log_debug(LogTags.UPLOADER, f"Server poster check failed for {label}: {e}", file=file_path)
+            return False
+        if changed:
+            log_info(LogTags.UPLOADER, f"{label}: the poster on {self._item_server_label(item)} is no longer ours — uploading again", file=file_path)
+            return True
+        if persist:
+            self._save_server_poster(key, hint=hint, sha1=entry.get("sha1"), file_path=file_path)
+        return False
 
     def _remove_overlay_label_if_present(self, item: MediaServerItem, *, file_path: str) -> None:
         client = item.client
@@ -3776,3 +3882,5 @@ class PlexUploadService:
         self.db.query(PlexUploadRecord).delete()
         self.db.commit()
         self._record_cache = {}
+        clear_server_posters(self.db)
+        self._server_posters = None

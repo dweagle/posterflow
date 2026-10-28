@@ -36,6 +36,7 @@ import models.job  # noqa: F401
 import models.idarr  # noqa: F401
 import models.schedule  # noqa: F401
 import models.plex_upload  # noqa: F401
+import models.server_poster  # noqa: F401
 import models.manual_media  # noqa: F401
 import models.workflow  # noqa: F401
 

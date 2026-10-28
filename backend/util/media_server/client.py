@@ -126,6 +126,11 @@ class MediaServerClient(ABC):
         """Ids of the library's items carrying a label; empty by default."""
         return set()
 
+    def selected_poster_key(self, item: MediaServerItem) -> str:
+        """Key of the poster the server shows for the item ('upload://posters/<sha1>' for an
+        upload); '' when it can't tell. No-op by default."""
+        return ""
+
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
         """Remove a label/tag from an item; True only if it was present and removed. No-op by default."""
         return False
