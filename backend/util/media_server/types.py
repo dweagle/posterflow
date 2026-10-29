@@ -50,6 +50,7 @@ class MediaServerItem:
     child_count: Optional[int] = None  # episode count for seasons; None = unknown
     smart: bool = False  # Plex smart collections; always False elsewhere
     thumb_path: Optional[str] = None  # server-relative image path for proxying
+    thumb_locked: Optional[bool] = None  # Plex: the poster field is locked (a chosen or uploaded poster); None = unknown
     original_title: Optional[str] = None  # the agent's original title (Plex 'Seven' vs original 'Se7en')
     virtual: bool = False  # Jellyfin placeholder for unaired/missing episodes; nothing on disk
     native: Any = field(default=None, repr=False)

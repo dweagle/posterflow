@@ -131,6 +131,16 @@ class MediaServerClient(ABC):
         upload); '' when it can't tell. No-op by default."""
         return ""
 
+    def fill_thumb_locks(self, items: List[MediaServerItem]) -> None:
+        """Set `thumb_locked` on these items where the server tracks a locked poster field
+        (Plex); a few batched requests instead of one per item. No-op by default."""
+        return None
+
+    def poster_image_size(self, item: MediaServerItem) -> Optional[int]:
+        """Byte size of the poster the server stores for the item, where the server can say;
+        None otherwise. Lets an upload be recognised without a record of it."""
+        return None
+
     def remove_label(self, item: MediaServerItem, label: str) -> bool:
         """Remove a label/tag from an item; True only if it was present and removed. No-op by default."""
         return False

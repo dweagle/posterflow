@@ -994,6 +994,8 @@ class _FakeJellyfin:
     def __init__(self):
         self.tag = "t1"
         self.uploads = 0
+        self.primary_size = None  # what /Items/{id}/Images reports for the Primary image
+        self.size_lookups = 0
 
     def upload_image(self, item, kind, path):
         self.uploads += 1
@@ -1002,6 +1004,10 @@ class _FakeJellyfin:
 
     def get_item(self, item_id):
         return _tagged(item_id, self.tag)
+
+    def poster_image_size(self, item):
+        self.size_lookups += 1
+        return self.primary_size
 
 
 def _tagged(item_id, tag):
@@ -1024,11 +1030,10 @@ def _cached_movie_service(test_db, monkeypatch, item):
     return service, index
 
 
-def test_cached_plex_poster_is_verified_against_the_server_and_resent_when_replaced(test_db, tmp_path, monkeypatch):
-    """Plex's thumb hint decides whether to ask which poster is selected; a selection that is
-    not our upload goes up again."""
-    import hashlib
-
+def test_plex_check_reads_the_listing_lock_and_asks_only_when_unlocked(test_db, tmp_path, monkeypatch):
+    """Plex keeps no ledger rows. A locked poster field in the listing means a chosen poster
+    and costs nothing; an unlocked or unknown one costs one posters lookup per run, where any
+    upload stands and a provider image goes up again. Dry runs report without uploading."""
     from models.server_poster import ServerPoster
     from plex_upload_fakes import _WRAP_CLIENT, uploads
 
@@ -1039,64 +1044,61 @@ def test_cached_plex_poster_is_verified_against_the_server_and_resent_when_repla
     item = _SimplePlex("movie", "The Matrix", key="100")
     item.thumb_path = "/library/metadata/100/thumb/1"
     lookups = []
-    selected = {"key": f"upload://posters/{hashlib.sha1(b'matrix-poster').hexdigest()}"}
+    selected = {"key": "upload://posters/anything-uploaded"}
     monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: lookups.append(it.item_id) or selected["key"])
     service, index = _cached_movie_service(test_db, monkeypatch, item)
     asset = {"media_key": "matrix", "path": str(poster), "asset_type": "main", "display_name": "The Matrix", "folder_year": 1999}
     before = len(uploads("100"))
 
     assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
-    row = test_db.query(ServerPoster).filter_by(instance="Plex", item_id="100").one()
-    assert (row.hint, row.sha1, row.file_path) == ("", hashlib.sha1(b"matrix-poster").hexdigest(), str(poster))  # Plex: confirmed on the next listing
-    # Next run: the hint is new, so Plex is asked once; the selection is our upload → cached, hint kept.
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
-    assert lookups == ["100"] and test_db.query(ServerPoster).one().hint == "/library/metadata/100/thumb/1"
-    # Same hint again: no request at all.
+    assert test_db.query(ServerPoster).count() == 0  # Plex: nothing to remember
+    # Lock unknown (the fake lists no fields): one lookup per run, the upload stands.
     assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and lookups == ["100"]
-    # A metadata refresh bumps the thumb but the selection is still ours: one lookup, no upload.
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and lookups == ["100", "100"]
+    # Locked in the listing: no lookup at all, whatever Kometa or a metadata refresh did to the thumb.
+    item.thumb_locked = True
     item.thumb_path = "/library/metadata/100/thumb/2"
     assert service()._upload_asset(asset, index, dry_run=False)[0] == 0 and lookups == ["100", "100"]
-    # Someone reset the poster to the agent's: the selection is not an upload of ours → up again.
-    item.thumb_path = "/library/metadata/100/thumb/3"
+    # Unlocked: Plex is asked; a provider image means the poster was reset → up again.
+    item.thumb_locked = False
     selected["key"] = "metadata://posters/tmdb"
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
-    assert len(uploads("100")) == before + 2 and test_db.query(ServerPoster).one().hint == ""
-    # Dry run: the check still reports, but records nothing.
-    item.thumb_path = "/library/metadata/100/thumb/4"
-    assert service()._upload_asset(asset, index, dry_run=True)[0] == 1 and test_db.query(ServerPoster).one().hint == ""
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1 and lookups == ["100", "100", "100"]
+    assert len(uploads("100")) == before + 2 and test_db.query(ServerPoster).count() == 0
+    # Dry run: reports the loss, uploads nothing.
+    assert service()._upload_asset(asset, index, dry_run=True)[0] == 1 and len(uploads("100")) == before + 2
+    # Plex cannot say which poster is selected: left alone.
+    selected["key"] = ""
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
 
 
-def test_cached_plex_poster_without_a_row_is_baselined_then_verified_by_file(test_db, tmp_path, monkeypatch):
-    """Records from before the ledger have no row: the first sight records the hint without
-    re-uploading; a later change is judged against the placed file's own sha1."""
-    import hashlib
-
-    from models.server_poster import ServerPoster
+def test_seasons_are_listed_once_per_library(test_db, monkeypatch):
+    """The first show of a library pulls every season of that library in one request; the
+    other shows of the library are served from it, and a show the listing missed falls back."""
     from plex_upload_fakes import _WRAP_CLIENT
 
-    poster = tmp_path / "Heat (1995)" / "poster.jpg"
-    poster.parent.mkdir()
-    poster.write_bytes(b"heat-poster")
-    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
-    item = _SimplePlex("movie", "Heat", key="101")
-    item.thumb_path = "/library/metadata/101/thumb/1"
-    selected = {"key": f"upload://posters/{hashlib.sha1(b'heat-poster').hexdigest()}"}
-    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: selected["key"])
-    service, index = _cached_movie_service(test_db, monkeypatch, item)
-    asset = {"media_key": "heat", "path": str(poster), "asset_type": "main", "display_name": "Heat", "folder_year": 1995}
-
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
-    test_db.query(ServerPoster).delete()
-    test_db.commit()
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # baseline: recorded, not re-sent
-    row = test_db.query(ServerPoster).one()
-    assert (row.hint, row.sha1) == ("/library/metadata/101/thumb/1", None)
-    item.thumb_path = "/library/metadata/101/thumb/2"
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # moved thumb, selection matches the file → ours
-    selected["key"] = "upload://posters/0000000000000000000000000000000000000000"
-    item.thumb_path = "/library/metadata/101/thumb/3"
-    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1  # another upload replaced ours → up again
-    assert test_db.query(ServerPoster).one().sha1 == hashlib.sha1(b"heat-poster").hexdigest()
+    shows = [_SimplePlex("show", f"Show {n}", key=str(n)) for n in (1, 2, 3)]
+    for show in shows:
+        show.library_key = "srv:/library/sections/2"
+    listed = []
+    def library_seasons(library_key):
+        listed.append(library_key)
+        out = []
+        for show_id in ("1", "2"):
+            for index in (2, 1):
+                season = _SimplePlex("season", f"Season {index}", key=f"{show_id}-{index}")
+                season.parent_id = show_id
+                season.index = index
+                out.append(season)
+        return out
+    per_show = []
+    monkeypatch.setattr(_WRAP_CLIENT, "get_library_seasons", library_seasons)
+    monkeypatch.setattr(_WRAP_CLIENT, "get_seasons", lambda show: per_show.append(show.item_id) or [])
+    service = PlexUploadService(test_db)
+    assert [s.index for s in service._seasons_for_show(shows[0])] == [1, 2]
+    assert [s.index for s in service._seasons_for_show(shows[1])] == [1, 2]
+    assert listed == ["srv:/library/sections/2"] and per_show == []
+    assert service._seasons_for_show(shows[2]) == [] and per_show == ["3"]  # not in the listing: its own request, once
+    assert service._seasons_for_show(shows[2]) == [] and per_show == ["3"]
 
 
 def test_cached_jellyfin_poster_follows_the_image_tag(test_db, tmp_path, monkeypatch):
@@ -1184,7 +1186,7 @@ def test_webhook_cache_gate_resends_when_the_server_lost_the_poster(test_db, tmp
     plex_asset = {"media_key": "gate plex", "path": str(plex_poster), "asset_type": "main", "display_name": "Gate Plex", "folder_year": 2022}
     assert plex_service()._upload_asset(plex_asset, plex_index, dry_run=False)[0] == 1
     plex_gate = lambda: plex_service()._is_asset_fully_cached_for_targets(plex_asset, index=plex_index, media_type_filter="movie", arr_availability=None)  # noqa: E731
-    assert plex_gate() is True  # thumb moved, selection is ours
+    assert plex_gate() is True  # the row from the upload, the thumb hint is new, the selection is ours
     plex_item.thumb_path = "/library/metadata/401/thumb/2"
     selected["key"] = "metadata://posters/tmdb"
     assert plex_gate() is False
@@ -1200,3 +1202,78 @@ def test_upload_sha_reads_plex_upload_keys_for_movies_and_seasons():
     assert upload_sha("plex:upload://posters/seasons/0/e5b62e4b7fa822efdedd31302c041463d1a03acb") == "e5b62e4b7fa822efdedd31302c041463d1a03acb"
     assert upload_sha("plex:metadata://posters/tv.plex.agents.movie_b0cc") == ""
     assert upload_sha("") == ""
+
+
+def test_any_upload_on_plex_stands_only_a_provider_image_is_a_loss(test_db, tmp_path, monkeypatch):
+    """Kometa's overlay composite, its asset or mass-poster uploads, a user's own upload: all are
+    uploads and all stand, label or not, so Posterflow never ping-pongs with another uploader.
+    A provider image or no poster is a reset and goes up again."""
+    from plex_upload_fakes import _WRAP_CLIENT
+
+    poster = tmp_path / "Overlaid (2024)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"overlaid-poster")
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    item = _SimplePlex("movie", "Overlaid", key="600")
+    item.thumb_path = "/library/metadata/600/thumb/1"
+    selected = {"key": "upload://posters/kometa-composite"}
+    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: selected["key"])
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "overlaid", "path": str(poster), "asset_type": "main", "display_name": "Overlaid", "folder_year": 2024}
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    item.tags = ["Overlay"]
+    item.thumb_path = "/library/metadata/600/thumb/2"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # Kometa's composite over ours
+    assert service()._is_asset_fully_cached_for_targets(asset, index=index, media_type_filter="movie", arr_availability=None) is True
+    item.tags = []
+    selected["key"] = "upload://posters/kometa-mass-poster-update"
+    item.thumb_path = "/library/metadata/600/thumb/3"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # another tool's upload, no label: still stands
+    selected["key"] = "metadata://posters/tmdb"
+    item.thumb_path = "/library/metadata/600/thumb/4"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1  # reset to the agent's poster: up again
+    assert service()._is_asset_fully_cached_for_targets(asset, index=index, media_type_filter="movie", arr_availability=None) is False
+    # First sight without a row follows the same rule.
+    from models.server_poster import ServerPoster
+    test_db.query(ServerPoster).delete()
+    test_db.commit()
+    selected["key"] = "upload://posters/kometa-composite-2"
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0
+    test_db.query(ServerPoster).delete()
+    test_db.commit()
+    selected["key"] = ""
+    item.thumb_path = ""
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 0  # Plex could not say: left alone
+
+
+def test_plex_locks_are_fetched_in_one_batch_per_library(test_db, tmp_path, monkeypatch):
+    """Items the index registered get their poster lock from one batched fetch per library the
+    first time one of them is checked; locked items never cost a posters lookup."""
+    from plex_upload_fakes import _WRAP_CLIENT
+
+    poster = tmp_path / "Locked (2020)" / "poster.jpg"
+    poster.parent.mkdir()
+    poster.write_bytes(b"locked-poster")
+    monkeypatch.setattr(_WRAP_CLIENT, "instance_name", "Plex")
+    item = _SimplePlex("movie", "Locked", key="700")
+    item.thumb_path = "/library/metadata/700/thumb/1"
+    other = _SimplePlex("movie", "Other", key="701")
+    fetches = []
+    def fill(items):
+        fetches.append(sorted(i.item_id for i in items))
+        for i in items:
+            i.thumb_locked = True
+    monkeypatch.setattr(_WRAP_CLIENT, "fill_thumb_locks", fill)
+    lookups = []
+    monkeypatch.setattr(_WRAP_CLIENT, "selected_poster_key", lambda it: lookups.append(it.item_id) or "metadata://posters/tmdb")
+    service, index = _cached_movie_service(test_db, monkeypatch, item)
+    asset = {"media_key": "locked", "path": str(poster), "asset_type": "main", "display_name": "Locked", "folder_year": 2020}
+
+    assert service()._upload_asset(asset, index, dry_run=False)[0] == 1
+    svc = service()
+    svc._register_for_locks(_WRAP_CLIENT, "/library/sections/1", "movie", [item, other])
+    assert svc._upload_asset(asset, index, dry_run=False)[0] == 0
+    assert fetches == [["700", "701"]] and lookups == []  # one batch for the library, no per-item lookup
+    assert svc._upload_asset(asset, index, dry_run=False)[0] == 0 and fetches == [["700", "701"]]  # fetched once per run
+    assert other.thumb_locked is True

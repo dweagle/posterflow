@@ -208,6 +208,17 @@ class PlexClient(MediaServerClient):
             tags = [str(g(label, "tag", label)) for label in (g(item, "labels") or [])]
         except Exception:
             tags = []
+        # Only full metadata carries the locked fields (a locked poster field means someone
+        # chose or uploaded the poster; unlocked means the agent's own). Listing rows never do,
+        # so a bulk row stays unknown until fill_thumb_locks() asks in batches.
+        thumb_locked: Optional[bool] = None
+        if not bulk:
+            try:
+                fields = g(item, "fields")
+                if fields is not None:
+                    thumb_locked = any(str(g(f, "name", "")) == "thumb" and bool(g(f, "locked", False)) for f in fields)
+            except Exception:
+                thumb_locked = None
 
         return MediaServerItem(
             item_id=str(g(item, "ratingKey", "") or ""),
@@ -228,6 +239,7 @@ class PlexClient(MediaServerClient):
             child_count=int(child_count) if child_count is not None else None,
             smart=bool(g(item, "smart", False)),
             thumb_path=g(item, "thumb"),
+            thumb_locked=thumb_locked,
             original_title=str(g(item, "originalTitle", "") or "").strip() or None,
             native=None if bulk else item,
             client=self,
@@ -532,6 +544,29 @@ class PlexClient(MediaServerClient):
                         self.logger.warning(f"Plex label lookup '{label}' ({libtype}) failed in '{section.title}': {ex}")
         self._labeled_ids_cache[cache_key] = ids
         return ids
+
+    # Full metadata (not the listing) carries the locked fields; batches of ids, trimmed of
+    # what we do not need, cost ~0.3 s per 100 movies.
+    _LOCK_QUERY = "?excludeAllLeaves=1&includeExtras=0&includeRelated=0&includeChapters=0&includeMarkers=0&includeReviews=0&includeOnDeck=0"
+
+    def fill_thumb_locks(self, items: List[MediaServerItem]) -> None:
+        by_id = {item.item_id: item for item in items if item.item_id and item.thumb_locked is None}
+        ids = list(by_id)
+        for i in range(0, len(ids), self.METADATA_BATCH):
+            chunk = ids[i : i + self.METADATA_BATCH]
+            try:
+                data = self.server.query(f"/library/metadata/{','.join(chunk)}{self._LOCK_QUERY}")
+            except Exception as ex:
+                if self.logger:
+                    self.logger.warning(f"Plex locked-field fetch failed ({len(chunk)} items): {ex}")
+                continue
+            for element in data if data is not None else []:
+                item = by_id.get(str(element.get("ratingKey") or ""))
+                if item is not None:
+                    item.thumb_locked = any(
+                        child.tag == "Field" and child.get("name") == "thumb" and str(child.get("locked") or "") == "1"
+                        for child in element
+                    )
 
     def selected_poster_key(self, item: MediaServerItem) -> str:
         """The key of the poster Plex shows: 'upload://posters/<sha1>' for an upload, the

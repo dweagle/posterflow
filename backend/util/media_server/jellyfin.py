@@ -327,6 +327,20 @@ class JellyfinClient(MediaServerClient):
         library_name = self._library_title(local_id)
         return [self._parse_item(row, library_key=global_key, library_name=library_name) for row in rows]
 
+    def poster_image_size(self, item: MediaServerItem) -> Optional[int]:
+        """Jellyfin stores an uploaded image byte for byte and lists its size, so a size that
+        matches the placed file identifies our upload."""
+        infos = self._request("GET", f"/Items/{item.item_id}/Images")
+        if not isinstance(infos, list):
+            return None
+        for info in infos:
+            if isinstance(info, dict) and info.get("ImageType") == "Primary":
+                try:
+                    return int(info.get("Size"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
     def get_item(self, item_id: str) -> Optional[MediaServerItem]:
         rows = self._items_page({"ids": item_id, "fields": ITEM_FIELDS})
         return self._parse_item(rows[0]) if rows else None

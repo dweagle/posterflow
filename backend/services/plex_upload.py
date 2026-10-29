@@ -174,7 +174,12 @@ class PlexUploadService:
         self.db = db
         self.upload_delay_ms = max(0, upload_delay_ms)
         self._record_cache: Dict[str, Optional[Dict[str, Any]]] = {}  # per-run in-memory cache of DB records
-        self._server_posters: Optional[Dict[str, Dict[str, Any]]] = None  # what we last put on each server item, loaded on first use
+        self._server_posters: Optional[Dict[str, Dict[str, Any]]] = None  # what we last put on each Jellyfin item, loaded on first use
+        self._server_posters_pending = 0  # ledger rows flushed but not yet committed (committed in batches)
+        self._season_libraries_loaded: Set[str] = set()  # libraries whose seasons were listed in one request
+        self._lock_groups: Dict[str, List[MediaServerItem]] = {}  # "server:library:kind" → indexed Plex items, for batched lock fetches
+        self._lock_group_of: Dict[str, str] = {}  # "server:item id" → that group key
+        self._lock_groups_fetched: Set[str] = set()
         self._year_discrepancies: List[Dict[str, Any]] = []  # ID-matched uploads where folder year != Plex year
         self._local_assets_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._local_artwork_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -250,6 +255,17 @@ class PlexUploadService:
 
     def invalidate_record_cache(self) -> None:
         self._record_cache = {}
+        self.commit_server_posters()
+
+    def commit_server_posters(self) -> None:
+        """Commit ledger rows written since the last batch (the jobs call this when they finish)."""
+        if self._server_posters_pending:
+            try:
+                self.db.commit()
+            except SQLAlchemyError as e:
+                self.db.rollback()
+                log_debug(LogTags.UPLOADER, f"Could not commit the server poster ledger: {e}")
+            self._server_posters_pending = 0
 
     def _log_unmatched(self, message: str, **context: Any) -> None:
         if self._quiet_unmatched_logging:
@@ -2009,11 +2025,24 @@ class PlexUploadService:
                 return True
         return False
 
+    def _register_for_locks(self, client: Any, library_key: Any, kind: str, items: List[MediaServerItem]) -> None:
+        """Plex items the run may check: their poster locks are fetched per library, in
+        batches, the first time one of them is checked."""
+        if getattr(client, "server_type", "") != "plex" or not items:
+            return
+        server_id = str(getattr(client, "server_id", "") or "")
+        group = f"{server_id}:{library_key}:{kind}"
+        self._lock_groups.setdefault(group, []).extend(items)
+        for item in items:
+            self._lock_group_of[f"{server_id}:{item.item_id}"] = group
+
     def _index_movies(self, client: MediaServerClient, library: Any, movie_index: Dict[str, List[Any]]) -> Tuple[int, int]:
         """(items indexed, items carrying no provider id at all)."""
         indexed = no_ids = 0
         try:
-            for movie in client.get_library_items(library.key):
+            movies = client.get_library_items(library.key)
+            self._register_for_locks(client, library.key, "movie", movies)
+            for movie in movies:
                 key = self._movie_folder_key(movie)
                 if key:
                     movie_index.setdefault(key, []).append(movie)
@@ -2030,7 +2059,9 @@ class PlexUploadService:
         """(items indexed, items carrying no provider id at all)."""
         indexed = no_ids = 0
         try:
-            for show in client.get_library_items(library.key):
+            shows = client.get_library_items(library.key)
+            self._register_for_locks(client, library.key, "show", shows)
+            for show in shows:
                 key = self._show_folder_key(show)
                 if key:
                     show_index.setdefault(key, []).append(show)
@@ -2819,12 +2850,34 @@ class PlexUploadService:
             return
 
     def _seasons_for_show(self, show: MediaServerItem) -> List[MediaServerItem]:
-        """Season list for a show, cached per run."""
-        key = f"{getattr(show.client, 'server_id', '') or ''}:{show.item_id}"
+        """Season list for a show, cached per run. The first show of a library lists every
+        season of that library in one request and fills the cache for all its shows; a show
+        the listing did not cover falls back to its own request."""
+        server_id = str(getattr(show.client, "server_id", "") or "")
+        key = f"{server_id}:{show.item_id}"
         cached = self._season_list_cache.get(key)
-        if cached is None:
-            cached = show.client.get_seasons(show)
-            self._season_list_cache[key] = cached
+        if cached is not None:
+            return cached
+        library_key = str(show.library_key or "")
+        lib_token = f"{server_id}:{library_key}"
+        if library_key and lib_token not in self._season_libraries_loaded:
+            self._season_libraries_loaded.add(lib_token)
+            try:
+                by_show: Dict[str, List[MediaServerItem]] = {}
+                library_seasons = show.client.get_library_seasons(library_key)
+                self._register_for_locks(show.client, library_key, "season", library_seasons)
+                for season in library_seasons:
+                    if season.parent_id:
+                        by_show.setdefault(f"{server_id}:{season.parent_id}", []).append(season)
+                for show_key, seasons in by_show.items():
+                    self._season_list_cache.setdefault(show_key, sorted(seasons, key=lambda s: (s.index is None, s.index or 0)))
+            except Exception as e:
+                log_debug(LogTags.UPLOADER, f"Season listing for library {library_key} failed, falling back to per-show lookups: {e}")
+            cached = self._season_list_cache.get(key)
+            if cached is not None:
+                return cached
+        cached = show.client.get_seasons(show)
+        self._season_list_cache[key] = cached
         return cached
 
     def _item_server_label(self, item: MediaServerItem) -> str:
@@ -2875,7 +2928,10 @@ class PlexUploadService:
 
     def _save_server_poster(self, key: str, *, hint: str, sha1: Optional[str], file_path: str) -> None:
         instance, item_id = key.split("|", 1)
-        self._server_posters_map()[key] = upsert_server_poster(self.db, instance, item_id, hint=hint, sha1=sha1, file_path=file_path)
+        self._server_posters_map()[key] = upsert_server_poster(self.db, instance, item_id, hint=hint, sha1=sha1, file_path=file_path, commit=False)
+        self._server_posters_pending += 1
+        if self._server_posters_pending >= 100:  # short transactions: SQLite has one writer
+            self.commit_server_posters()
 
     @staticmethod
     def _sha1_of_file(path: str) -> Optional[str]:
@@ -2886,16 +2942,17 @@ class PlexUploadService:
             return None
 
     def _record_server_poster_after_upload(self, item: MediaServerItem, sent_sha1: Optional[str], file_path: str) -> None:
-        """Remember what we just sent: Jellyfin's image tag is fetched now (a content hash the
-        listing shows later); Plex is confirmed on the next listing from the sha1 of the bytes."""
+        """Remember what we just sent to Jellyfin: its image tag, fetched now, is the content
+        hash the listing shows later. Plex needs no row: its listing says whether the poster
+        field is locked, and a lookup settles the rest."""
         client = item.client
-        hint = ""
-        if getattr(client, "server_type", "") == "jellyfin":
-            try:
-                fresh = client.get_item(item.item_id)
-                hint = poster_key(fresh) if fresh is not None else ""
-            except Exception:
-                hint = ""
+        if getattr(client, "server_type", "") != "jellyfin":
+            return
+        try:
+            fresh = client.get_item(item.item_id)
+            hint = poster_key(fresh) if fresh is not None else ""
+        except Exception:
+            hint = ""
         try:
             self._save_server_poster(self._server_item_key(item), hint=hint, sha1=sent_sha1, file_path=file_path)
         except Exception as e:
@@ -2903,44 +2960,90 @@ class PlexUploadService:
 
     def _server_poster_changed(self, item: Optional[MediaServerItem], file_path: str, parent: Optional[MediaServerItem] = None, *, persist: bool = True) -> bool:
         """Did the poster we uploaded stop being the one the server shows? Only asked for items
-        the upload cache already calls done. The listing's cheap hint decides whether to look at
-        all: Jellyfin's image tag is the image itself (and no tag is no image at all, so ours is
-        gone, row or no row); Plex's thumb timestamp only says "look closer", then one posters
-        lookup tells which is selected. An item we have no row for otherwise becomes the baseline."""
+        the upload cache already calls done.
+
+        Plex, from the listing alone: a locked poster field means someone chose or uploaded the
+        poster (us, Kometa, a user) and it stands; unlocked or unknown costs one posters lookup,
+        where any upload stands and a provider image or no poster is a loss. No ledger involved.
+
+        Jellyfin, from the ledger: the listing's image tag is the image itself, so a tag other
+        than the one recorded after our upload is a replacement, and no primary image at all is
+        a loss. An item without a row (uploaded before the ledger) is checked once by the stored
+        image's size against the placed file, since Jellyfin keeps uploads byte for byte, and
+        recorded. Nothing is assumed ours."""
         if item is None or item.client is None:
             return False
-        key = self._server_item_key(item)
         label = f"{parent.title} {item.title}" if parent is not None else str(item.title)
+        hint: Optional[str] = None
+        sha1: Optional[str] = None
         try:
-            entry = self._server_posters_map().get(key)
-            hint = poster_key(item)
-            if not hint and isinstance(getattr(item, "native", None), dict):
-                changed = True  # Jellyfin lists no primary image, yet we uploaded one here
-            elif entry is None:
-                if persist:
-                    self._save_server_poster(key, hint=hint, sha1=None, file_path=file_path)
-                return False
+            if not isinstance(getattr(item, "native", None), dict):
+                changed = bool(self._plex_poster_lost(item))
             else:
-                recorded = str(entry.get("hint") or "")
-                if hint == recorded:
-                    return False
-                if hint.startswith("jf:"):
-                    changed = bool(recorded)  # a known tag moved; none known = first look after our upload
+                key = self._server_item_key(item)
+                entry = self._server_posters_map().get(key)
+                hint = poster_key(item)
+                sha1 = entry.get("sha1") if entry else None
+                if not hint:
+                    changed = True  # Jellyfin lists no primary image, yet we uploaded one here
+                elif entry is None:
+                    ours = self._jellyfin_poster_is_ours_unrecorded(item, file_path)
+                    if ours is None:
+                        return False  # the server could not tell us: leave the item alone, record nothing
+                    changed = not ours
+                    sha1 = self._sha1_of_file(file_path)
                 else:
-                    selected = stable_poster_key(item)
-                    if not selected:
-                        return False  # the server could not tell us: leave the item alone
-                    expected = entry.get("sha1") or self._sha1_of_file(file_path)
-                    changed = upload_sha(selected) != expected
+                    if hint == str(entry.get("hint") or ""):
+                        return False
+                    changed = bool(entry.get("hint"))  # a known tag moved; none known = first look after our upload
         except Exception as e:
             log_debug(LogTags.UPLOADER, f"Server poster check failed for {label}: {e}", file=file_path)
             return False
         if changed:
             log_info(LogTags.UPLOADER, f"{label}: the poster on {self._item_server_label(item)} is no longer ours — uploading again", file=file_path)
             return True
-        if persist:
-            self._save_server_poster(key, hint=hint, sha1=entry.get("sha1"), file_path=file_path)
+        if persist and hint is not None:
+            self._save_server_poster(self._server_item_key(item), hint=hint, sha1=sha1, file_path=file_path)
         return False
+
+    def _plex_poster_lost(self, item: MediaServerItem) -> Optional[bool]:
+        """Plex: True when the item shows the agent's poster (or none) instead of a chosen one.
+        The poster field's lock answers without a per-item request (fetched in batches for the
+        item's whole library on first use); an item without a known lock costs one posters
+        lookup. None = can't say."""
+        if item.thumb_locked is None:
+            group = self._lock_group_of.get(f"{getattr(item.client, 'server_id', '') or ''}:{item.item_id}")
+            if group and group not in self._lock_groups_fetched:
+                self._lock_groups_fetched.add(group)
+                try:
+                    item.client.fill_thumb_locks(self._lock_groups.get(group, []))
+                except Exception as e:
+                    log_debug(LogTags.UPLOADER, f"Plex lock fetch failed for {group}: {e}")
+        if item.thumb_locked:
+            return False
+        present = self._plex_shows_an_upload(item)
+        return None if present is None else not present
+
+    def _jellyfin_poster_is_ours_unrecorded(self, item: MediaServerItem, file_path: str) -> Optional[bool]:
+        """Jellyfin item without a ledger row: is the stored image the placed file, by size?"""
+        size = item.client.poster_image_size(item)
+        if size is None:
+            return None
+        try:
+            return int(size) == os.path.getsize(file_path)
+        except (OSError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _plex_shows_an_upload(item: MediaServerItem) -> Optional[bool]:
+        """Does Plex show an uploaded poster on the item at all? Ours, Kometa's overlay composite
+        drawn over ours, a Kometa asset or mass-poster upload, a user's own upload: all stand, so
+        Posterflow never fights another uploader. A provider image, or no poster, is a cleared or
+        reset item and the only case that gets our poster back. None when Plex cannot say."""
+        selected = stable_poster_key(item)
+        if not selected:
+            return None
+        return bool(upload_sha(selected))
 
     def _remove_overlay_label_if_present(self, item: MediaServerItem, *, file_path: str) -> None:
         client = item.client
