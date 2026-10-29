@@ -1,6 +1,6 @@
 """add server_posters (what Asset Upload last put on each media server item)
 
-Revision ID: 0023_server_posters
+Revision ID: 0022_server_posters
 Revises: 0021_override_file
 Create Date: 2026-10-26 00:00:00
 
