@@ -371,11 +371,74 @@ def test_targeted_index_reports_scoped_server_without_the_item(test_db, monkeypa
 
     assert index["movies"]
     assert [t["instance"] for t in totals] == ["P"]
-    assert service.webhook_pending_servers() == ["Jellyfin 'J' (Movies)"]
+    assert service.webhook_pending_servers() == ["Jellyfin 'J' / Movies"]
 
     # A server the Arr-instance map left out of the scope is not expected to hold the item
     index, _ = service._build_plex_index_targeted(
         instances, {"P": selected["P"]}, tmdb_id=949, title="Heat", year=1995, media_type="movie"
     )
     assert index["movies"]
+    assert service.webhook_pending_servers() == []
+
+
+def _targeted_movie_index(service, instances, selected):
+    return service._build_plex_index_targeted(
+        instances, selected, tmdb_id=949, title="Heat", year=1995, media_type="movie"
+    )
+
+
+def test_targeted_index_waits_for_jellyfin_to_rescan_an_upgraded_movie_file(test_db, monkeypatch):
+    """Radarr renamed the file on upgrade. Jellyfin still lists the movie under the old file
+    and will replace that item on rescan, so it counts as not scanned yet. Plex keeps its item
+    across an upgrade, so its match stands whatever the file is called."""
+    import plexapi.server as plexapi_server
+    from plex_upload_fakes import _FakePlexSection, _FakePlexServerForTargeted, _SimplePlex
+
+    section = _FakePlexSection(
+        section_type="movie", title="Movies", guid_results=[_SimplePlex("movie", "Heat", key="7")]
+    )
+    monkeypatch.setattr(plexapi_server, "PlexServer", lambda url, token: _FakePlexServerForTargeted([section]))
+    _patch_jellyfin(monkeypatch)
+    service = PlexUploadService(test_db)
+    instances = [
+        {"name": "P", "url": "http://p", "api_key": "t", "type": "plex"},
+        {"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"},
+    ]
+    selected = {
+        "P": [{"key": "fake_key_Movies", "title": "Movies", "enabled": True}],
+        "J": [{"key": "lib1", "title": "Movies", "enabled": True}],
+    }
+
+    service.set_expected_movie_file("/data/movies/Heat (1995)/Heat (1995) Bluray-1080p.mkv")
+    index, totals = _targeted_movie_index(service, instances, selected)
+    assert index["movies"]
+    assert [t["instance"] for t in totals] == ["P"]
+    assert service.webhook_pending_servers() == ["Jellyfin 'J' / Movies"]
+
+    # Same file name after the upgrade, or the rescan done: the Jellyfin item is the real one
+    service.set_expected_movie_file("C:\\Movies\\Heat (1995)\\HEAT.mkv")
+    _, totals = _targeted_movie_index(service, instances, selected)
+    assert [t["instance"] for t in totals] == ["P", "J"]
+    assert service.webhook_pending_servers() == []
+
+
+class _FakePathlessJellyfinClient(_FakeJellyfinClient):
+    def __init__(self, url, api_key, logger=None, app_version=""):
+        super().__init__(url, api_key, logger=logger, app_version=app_version)
+        self.movie.paths = []
+
+
+def test_targeted_index_keeps_a_jellyfin_movie_without_a_path(test_db, monkeypatch):
+    """No path on the item means nothing to compare, so the match is trusted."""
+    import util.media_server.jellyfin as jf_mod
+
+    monkeypatch.setattr(jf_mod, "JellyfinClient", _FakePathlessJellyfinClient)
+    service = PlexUploadService(test_db)
+    service.set_expected_movie_file("/data/movies/Heat (1995)/Heat (1995) Bluray-1080p.mkv")
+    instances = [{"name": "J", "url": "http://j", "api_key": "k", "type": "jellyfin"}]
+    selected = {"J": [{"key": "lib1", "title": "Movies", "enabled": True}]}
+
+    _, totals = _targeted_movie_index(service, instances, selected)
+
+    assert [t["instance"] for t in totals] == ["J"]
     assert service.webhook_pending_servers() == []

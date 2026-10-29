@@ -1182,3 +1182,83 @@ def test_webhook_cache_gate_does_not_skip_while_a_server_is_pending(test_db, mon
     refreshed = test_db.query(Job).filter(Job.id == job_id).first()
     assert refreshed.status == "completed"
     assert len(run_calls) == 1
+
+
+def test_webhook_passes_the_imported_movie_file_to_the_service(test_db, monkeypatch):
+    """A Radarr payload's movie file reaches the service, so a Jellyfin item still on the
+    old file is treated as stale and the job waits for the rescanned one."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    captured: dict = {}
+
+    class _Fake(_PendingServerFakeService):
+        def set_expected_movie_file(self, path):
+            captured["file"] = path
+
+        def webhook_pending_servers(self):
+            return []
+
+        def run_single_upload(self, **_kwargs):
+            return _single_upload_result(uploaded=1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+    payload = {
+        **_PENDING_PAYLOAD,
+        "source": "radarr",
+        "movie_file_path": "/movies/Verity (2026)/Verity (2026) Bluray-1080p.mkv",
+    }
+
+    upload_module.run_plex_webhook_background_job(job_id, payload, False, False, 1, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert captured["file"] == "/movies/Verity (2026)/Verity (2026) Bluray-1080p.mkv"
+
+
+def test_webhook_retry_searches_only_the_servers_still_waiting(test_db, monkeypatch):
+    """Plex has the item on attempt 1, Jellyfin has not scanned it: the retry asks Jellyfin only,
+    and the job's result still counts Plex's match from the first attempt."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    context_calls: list = []
+    attempts_seen: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def prepare_webhook_context(self, **kwargs):
+            context_calls.append(kwargs.get("only_instances"))
+            return None
+
+        def webhook_pending_servers(self):
+            return ["Jellyfin 'J' / Movies"] if len(context_calls) < 2 else []
+
+        def webhook_pending_instances(self):
+            return ["J"] if len(context_calls) < 2 else []
+
+        def run_single_upload(self, **_kwargs):
+            attempts_seen.append(len(context_calls))
+            # attempt 1: Plex matched, already current; attempt 2: only Jellyfin, uploaded
+            return _single_upload_result(uploaded=0 if len(context_calls) < 2 else 1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert context_calls == [None, ["J"]]
+    assert attempts_seen == [1, 2]
+    assert "2 matched" in (refreshed.message or "") or "1 uploaded" in (refreshed.message or "")
+
+
+def test_merge_carried_stats_adds_settled_servers_and_keeps_scanned():
+    from modules.upload import _merge_carried_stats
+
+    carried = {"scanned": 1, "matched": 1, "uploaded": 0, "already_current": 1, "plex_targets": 1,
+               "artwork": {"scanned": 2, "uploaded": 1, "uploaded_files": 1, "already_current": 0, "by_type": {"background": 1}}}
+    stats = {"scanned": 1, "matched": 1, "uploaded": 1, "already_current": 0, "plex_targets": 1}
+    art = {"scanned": 2, "uploaded": 1, "uploaded_files": 1, "already_current": 0, "by_type": {"background": 1, "logo": 1}}
+    merged, merged_art, unmatched = _merge_carried_stats(carried, stats, art, {"no_match": 3})
+    assert merged == {"scanned": 1, "matched": 2, "uploaded": 1, "already_current": 1, "plex_targets": 2}
+    assert merged_art["uploaded"] == 2 and merged_art["scanned"] == 2 and merged_art["by_type"] == {"background": 2, "logo": 1}
+    assert unmatched == {"no_match": 0}

@@ -7,7 +7,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -2541,6 +2541,46 @@ def _missing_target_labels(checks: list[Dict[str, Any]]) -> list[str]:
     return labels
 
 
+def _merge_carried_stats(
+    carried: Dict[str, Any],
+    stats: Dict[str, int],
+    artwork: Dict[str, Any],
+    unmatched: Dict[str, int],
+) -> Tuple[Dict[str, int], Dict[str, Any], Dict[str, int]]:
+    """A retry that searched only the servers still waiting adds its counts to those of the
+    servers an earlier attempt settled. Scanned is the same local set both times; unmatched
+    reasons only stand while nothing has matched anywhere."""
+    merged = dict(stats)
+    for key, value in carried.items():
+        if key not in merged or not isinstance(value, int):
+            continue
+        merged[key] = max(int(value), merged[key]) if key == "scanned" else merged[key] + int(value)
+    old_art = carried.get("artwork") if isinstance(carried.get("artwork"), dict) else {}
+    merged_art = dict(artwork)
+    for key in ("uploaded", "uploaded_files", "already_current"):
+        merged_art[key] = int(merged_art.get(key, 0)) + int(old_art.get(key, 0) or 0)
+    merged_art["scanned"] = max(int(merged_art.get("scanned", 0)), int(old_art.get("scanned", 0) or 0))
+    by_type = dict(merged_art.get("by_type") or {})
+    for kind, count in (old_art.get("by_type") or {}).items():
+        by_type[kind] = int(by_type.get(kind, 0)) + int(count or 0)
+    merged_art["by_type"] = by_type
+    merged_unmatched = unmatched if not merged.get("matched") else {key: 0 for key in unmatched}
+    return merged, merged_art, merged_unmatched
+
+
+def _found_servers_text(service: Any) -> str:
+    """"Plex 'name' / Movies, Jellyfin 'name' / Movies" where the item was found; a plain
+    fallback for services that don't track it."""
+    getter = getattr(service, "webhook_found_servers", None)
+    try:
+        found = [str(entry) for entry in (getter() if callable(getter) else []) if str(entry or "").strip()]
+    except Exception:
+        found = []
+    if not found:
+        return "Every matched server already has"
+    return f"{', '.join(found)} already {'has' if len(found) == 1 else 'have'}"
+
+
 def _webhook_pending_servers(service: Any) -> list[str]:
     """Scoped servers the targeted index found no item on; [] for services that don't track it."""
     getter = getattr(service, "webhook_pending_servers", None)
@@ -2722,9 +2762,14 @@ def run_plex_webhook_background_job(
         )
 
         log_section_start(LogTags.UPLOADER, f"Webhook Upload Job {job_id}")
+        source_name = {"radarr": "Radarr", "sonarr": "Sonarr", "plex": "Plex", "jellyfin": "Jellyfin"}.get(
+            str(parsed_payload.get("source") or "").lower(), str(parsed_payload.get("source") or "Webhook").title()
+        )
+        sender = f"{source_name} '{parsed_payload.get('arr_instance')}'" if parsed_payload.get("arr_instance") else source_name
+        upgrade_note = ", an upgrade" if parsed_payload.get("is_upgrade") else ""
         log_info(
             LogTags.UPLOADER,
-            f"Webhook target received: {str(media_type or 'item').upper()} - {title}{year_label}{season_label}",
+            f"{sender} sent {title}{year_label}{season_label}{upgrade_note}",
             media_type=media_type,
             title=title,
             year=parsed_payload.get("year"),
@@ -2737,7 +2782,11 @@ def run_plex_webhook_background_job(
         )
 
         service = PlexUploadService(db, upload_delay_ms=_get_webhook_upload_delay_ms(db))
+        service.quiet_scan_logging = True  # the placed-folder scan matters for full runs, not one item
         service.set_arr_instance_scope(parsed_payload.get("arr_instance"))
+        # Jellyfin recreates a movie item when the file is renamed; an item on the old file is not a target
+        if parsed_payload.get("source") == "radarr" and parsed_payload.get("movie_file_path"):
+            service.set_expected_movie_file(parsed_payload.get("movie_file_path"))
         webhook_include_artwork = _is_webhook_artwork_enabled(db)
 
         # Media-server events may carry only a rating key; resolve external ids first
@@ -2790,7 +2839,7 @@ def run_plex_webhook_background_job(
         )
         log_info(
             LogTags.UPLOADER,
-            f"Webhook index build: searching media servers for '{title}{year_label}' by {id_summary or 'title only'}",
+            f"Looking for {title}{year_label} on the media servers ({id_summary or 'by title'})",
             media_type=media_type,
             title=title,
             tmdb_id=parsed_payload.get("tmdb_id"),
@@ -2892,8 +2941,8 @@ def run_plex_webhook_background_job(
         if all_targets_cached and pending_servers:
             log_info(
                 LogTags.UPLOADER,
-                f"Webhook cache gate: matched servers already have '{title}{year_label}'; "
-                f"{', '.join(pending_servers)} has not scanned it yet, so the upload runs for it",
+                f"{_found_servers_text(service)} the poster for {title}{year_label}; "
+                f"still waiting on {', '.join(pending_servers)}",
                 media_type=media_type,
                 title=title,
                 season_number=season_number,
@@ -2915,7 +2964,7 @@ def run_plex_webhook_background_job(
 
             log_info(
                 LogTags.UPLOADER,
-                "Webhook cache gate: target already uploaded for matched libraries; skipping pre-upload prep and upload",
+                f"{_found_servers_text(service)} the poster for {title}{year_label}; nothing to upload",
                 media_type=media_type,
                 title=title,
                 season_number=season_number,
@@ -3044,6 +3093,8 @@ def run_plex_webhook_background_job(
                 or "failed to connect to jellyfin instance" in normalized
             )
 
+        retry_only: list[str] = []  # servers still waiting; a retry searches only those
+        carried: Optional[Dict[str, Any]] = None  # stats of the servers an earlier attempt settled
         for attempt in range(1, attempts + 1):
             result = None
             if attempt > 1:
@@ -3062,15 +3113,21 @@ def run_plex_webhook_background_job(
                     progress=max(int(job.progress or 0), retry_progress),
                 )
 
+                waiting_on = _webhook_pending_servers(service) if retry_only else []
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook retry {attempt}/{attempts}: rebuilding index for '{title}{year_label}'",
+                    (f"Checking {', '.join(waiting_on)} again for {title}{year_label}" if waiting_on
+                     else f"Searching the media servers again for {title}{year_label}")
+                    + f" (attempt {attempt} of {attempts})",
                     attempt=attempt,
                     max_attempts=attempts,
                     media_type=media_type,
                     title=title,
                 )
+                if not retry_only:
+                    carried = None
                 retry_context_error = service.prepare_webhook_context(
+                    only_instances=retry_only or None,
                     tmdb_id=parsed_payload.get("tmdb_id"),
                     tvdb_id=parsed_payload.get("tvdb_id"),
                     imdb_id=parsed_payload.get("imdb_id"),
@@ -3210,17 +3267,19 @@ def run_plex_webhook_background_job(
                 seasons_missing_n = int(target_stats.get("plex_seasons_missing", 0))
                 # Skip the per-pass line on a no-match pass; the attempt-level summary already reports it.
                 if uploaded_n > 0:
-                    pass_outcome = f"uploaded {uploaded_n}"
+                    pass_outcome = f"{uploaded_n} uploaded"
                 elif matched_n > 0 and seasons_missing_n > 0:
                     pass_outcome = "show found, season not scanned on the server yet"
                 elif matched_n > 0:
-                    pass_outcome = "already up to date, nothing to upload"
+                    pass_outcome = "nothing new to upload"
                 else:
                     pass_outcome = None
                 if pass_outcome is not None:
-                    log_info(
+                    # "Nothing new" while a server is still pending repeats the waiting line; keep it for DEBUG
+                    quiet = uploaded_n == 0 and matched_n > 0 and seasons_missing_n == 0 and bool(_webhook_pending_servers(service))
+                    (log_debug if quiet else log_info)(
                         LogTags.UPLOADER,
-                        f"Webhook upload pass: {pass_label} — {pass_outcome}",
+                        f"{pass_label}: {pass_outcome}",
                         attempt=attempt,
                         max_attempts=attempts,
                         media_type=media_type,
@@ -3244,6 +3303,10 @@ def run_plex_webhook_background_job(
             if result and result.get("retry_scheduled"):
                 continue
 
+            if carried is not None:
+                aggregated_stats, aggregated_artwork, aggregated_unmatched = _merge_carried_stats(
+                    carried, aggregated_stats, aggregated_artwork, aggregated_unmatched
+                )
             result = {
                 "success": True,
                 "stats": {
@@ -3283,10 +3346,14 @@ def run_plex_webhook_background_job(
             if (uploaded_count > 0 or matched_count > 0) and pending_servers and attempt < attempts:
                 if uploaded_count > 0:
                     last_uploading_result = result
+                # The servers that had the item are done; the next attempt asks only the others.
+                pending_instances = getattr(service, "webhook_pending_instances", None)
+                retry_only = list(pending_instances()) if callable(pending_instances) else []
+                carried = result["stats"] if retry_only else None
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook: {', '.join(pending_servers)} has not scanned '{title}{year_label}' yet; "
-                    f"retrying in {delay_seconds}s",
+                    f"Waiting {delay_seconds}s for {', '.join(pending_servers)} to scan {title}{year_label} "
+                    f"(attempt {attempt} of {attempts})",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -3299,6 +3366,7 @@ def run_plex_webhook_background_job(
                 time.sleep(delay_seconds)
                 continue
 
+            retry_only, carried = [], None
             if uploaded_count > 0:
                 break
 
@@ -3306,7 +3374,8 @@ def run_plex_webhook_background_job(
             if matched_count > 0 and plex_seasons_missing > 0 and attempt < attempts:
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook found show but season not yet scanned; retrying in {delay_seconds}s",
+                    f"Found {title}{year_label} but the server has not scanned Season {int(season_number or 0):02d} yet; "
+                    f"checking again in {delay_seconds}s (attempt {attempt} of {attempts})",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -3321,7 +3390,7 @@ def run_plex_webhook_background_job(
             if matched_count > 0:
                 log_info(
                     LogTags.UPLOADER,
-                    "Webhook matched a target with no upload; treating as already up-to-date",
+                    f"{title}{year_label} is already up to date; nothing to upload",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -3336,9 +3405,9 @@ def run_plex_webhook_background_job(
                 no_match_reasons = format_unmatched_reasons(stats.get("unmatched_reasons"))
                 log_info(
                     LogTags.UPLOADER,
-                    f"Webhook upload had no server match yet for '{title}{year_label}'"
+                    f"No media server has {title}{year_label} yet"
                     + (f" ({no_match_reasons})" if no_match_reasons else "")
-                    + f", retrying in {delay_seconds}s",
+                    + f"; checking again in {delay_seconds}s (attempt {attempt} of {attempts})",
                     attempt=attempt,
                     max_attempts=attempts,
                     title=title,
@@ -3411,7 +3480,7 @@ def run_plex_webhook_background_job(
         if pending_servers:
             log_warning(
                 LogTags.UPLOADER,
-                f"Webhook: {', '.join(pending_servers)} never showed '{title}{year_label}' across {attempts} attempt(s); "
+                f"{', '.join(pending_servers)} never showed {title}{year_label} across {attempts} attempt(s); "
                 "the next full upload run pushes it once that server has scanned it. If that server should not get "
                 "this Arr instance's items, map the instance's libraries on the Asset Upload page",
                 media_type=media_type,
@@ -3438,7 +3507,7 @@ def run_plex_webhook_background_job(
 
         log_success(
             LogTags.UPLOADER,
-            f"Webhook upload completed for {str(media_type or 'item').upper()} - {title}",
+            f"Webhook finished for {title}{year_label}{season_label}",
             media_type=media_type,
             title=title,
             season_number=season_number,

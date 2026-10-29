@@ -189,12 +189,17 @@ class PlexUploadService:
         self._arr_availability_cache: Dict[str, Dict[str, Any]] = {}
         self._arr_availability_incomplete: bool = False
         self._arr_instance_scope: Optional[str] = None
+        self.quiet_scan_logging = False  # webhooks: the placed-folder scan lines go to DEBUG
+        self._instance_map_logged = False  # the instance → library line once per job, not per retry
+        self._targeted_pending_instance_names: List[str] = []  # scoped servers the targeted index found nothing on
+        self._targeted_found_in: List[str] = []  # "Plex 'name' / Movies" where the targeted index found the item
         # Arr media folder basename (lowercased) -> instances it belongs to; filled by the availability build
         self._arr_folder_instances: Dict[str, Set[str]] = {}
         self._instance_allowance_cache: Dict[str, Optional[Dict[str, Set[str]]]] = {}
         self._instance_scope_warned: Set[str] = set()
         self._instance_scoped_paths: Set[str] = set()
         self._expected_edition: Optional[str] = None
+        self._expected_movie_file: Optional[str] = None
         self._series_show_poster_status: Optional[str] = None
         self._logged_missing_show_keys: set[str] = set()
         self._logged_unverified_season_keys: set[str] = set()
@@ -224,6 +229,21 @@ class PlexUploadService:
     def arr_availability_was_incomplete(self) -> bool:
         return self._arr_availability_incomplete
 
+    def webhook_found_servers(self) -> List[str]:
+        """Where the last targeted search found the item, as "Plex 'name' / Movies"."""
+        return list(self._targeted_found_in)
+
+    def webhook_pending_instances(self) -> List[str]:
+        """Instance names of the scoped servers that had no item at the last targeted search."""
+        return list(self._targeted_pending_instance_names)
+
+    def _instance_server_label(self, instance_name: str) -> str:
+        """"Plex 'name'" / "Jellyfin 'name'" for a configured instance name."""
+        for inst in self._get_plex_instances() or []:
+            if inst.get("name") == instance_name:
+                return server_label(instance_type(inst), instance_name)
+        return instance_name
+
     def webhook_pending_servers(self) -> List[str]:
         """Scoped media servers the last targeted index found no item on (still scanning it, or never getting it)."""
         return list(self._targeted_pending_servers)
@@ -248,6 +268,31 @@ class PlexUploadService:
         no match, so the webhook retry loop waits instead of uploading to the old item.
         """
         self._expected_edition = edition.strip() if isinstance(edition, str) and edition.strip() else None
+
+    def set_expected_movie_file(self, path: Optional[str]) -> None:
+        """Name of the movie file an arr just imported (webhook path).
+
+        Jellyfin derives a movie's item id from its file path, so after an upgrade renames
+        the file, the item a search still finds is the one Jellyfin deletes on its next
+        scan. Targeted searches drop Jellyfin movies pointing at any other file, so the
+        webhook waits for the rescanned item instead of uploading to the doomed one.
+        """
+        self._expected_movie_file = self._file_name(path) or None
+
+    @staticmethod
+    def _file_name(path: Any) -> str:
+        """Final path component, whichever separator the source uses."""
+        return re.split(r"[\\/]", str(path or "").strip())[-1].strip()
+
+    def _split_stale_jellyfin_movies(self, items: List[Any]) -> Tuple[List[Any], List[Any]]:
+        """(items on the expected file or with no path, items still pointing at another file)."""
+        expected = (self._expected_movie_file or "").lower()
+        fresh: List[Any] = []
+        stale: List[Any] = []
+        for item in items:
+            names = {self._file_name(p).lower() for p in (getattr(item, "paths", None) or []) if p}
+            (stale if names and expected not in names else fresh).append(item)
+        return fresh, stale
 
     @staticmethod
     def _normalize_edition(edition: Optional[str]) -> str:
@@ -1310,13 +1355,15 @@ class PlexUploadService:
             )
 
         mapped = ", ".join(
-            f"{plex_instance} / {lib.get('title') or lib.get('key')}"
+            f"{self._instance_server_label(plex_instance)} / {lib.get('title') or lib.get('key')}"
             for plex_instance, libs in filtered.items()
             for lib in libs
         )
-        log_info(
+        log = log_debug if self._instance_map_logged else log_info
+        self._instance_map_logged = True
+        log(
             LogTags.UPLOADER,
-            f"Asset Upload: Arr instance '{arr_instance}' is mapped to {mapped}",
+            f"'{arr_instance}' uploads to {mapped}",
             arr_instance=arr_instance,
             plex_instances=sorted(filtered.keys()),
             libraries=sum(len(libs) for libs in filtered.values()),
@@ -1440,7 +1487,6 @@ class PlexUploadService:
 
     def _discover_local_assets(self, destination: Path) -> List[Dict[str, Any]]:
         assets: List[Dict[str, Any]] = []
-        log_info(LogTags.UPLOADER, f"Scanning placed posters under {destination}")
         started = time.monotonic()
 
         for file_path in self._iter_destination_images(destination):
@@ -1461,7 +1507,8 @@ class PlexUploadService:
         assets.sort(key=self._asset_sort_key)
         self._mark_shadowed_collection_assets(assets)
 
-        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local poster assets in {time.monotonic() - started:.1f}s", count=len(assets))
+        log = log_debug if self.quiet_scan_logging else log_info
+        log(LogTags.UPLOADER, f"Found {len(assets):,} placed poster(s) under {destination} ({time.monotonic() - started:.1f}s)", count=len(assets))
         return assets
 
     @staticmethod
@@ -1599,7 +1646,6 @@ class PlexUploadService:
         the existing Plex-matching helpers apply unchanged. Artwork is per-title (no seasons).
         """
         assets: List[Dict[str, Any]] = []
-        log_info(LogTags.UPLOADER, f"Scanning placed artwork under {destination}")
         started = time.monotonic()
         for file_path in self._iter_destination_images(destination):
             parsed = self._parse_local_artwork_file(file_path, destination)
@@ -1608,7 +1654,8 @@ class PlexUploadService:
         assets.sort(key=lambda a: (str(a.get("media_key") or ""), str(a.get("artwork_type") or "")))
         # A movie folder may hold only a poster, so the poster list supplies year-tagged siblings too.
         self._mark_shadowed_collection_assets(assets, self._local_assets_cache.get(str(destination)) or [])
-        log_info(LogTags.UPLOADER, f"Discovered {len(assets)} local artwork files in {time.monotonic() - started:.1f}s", count=len(assets))
+        log = log_debug if self.quiet_scan_logging else log_info
+        log(LogTags.UPLOADER, f"Found {len(assets):,} placed artwork file(s) under {destination} ({time.monotonic() - started:.1f}s)", count=len(assets))
         return assets
 
     def _parse_local_artwork_file(self, file_path: Path, destination: Path) -> Optional[Dict[str, Any]]:
@@ -1841,11 +1888,37 @@ class PlexUploadService:
                     if section_items:
                         matched_by = "title"
 
-                outcome = (
-                    f"{len(section_items)} match{'' if len(section_items) == 1 else 'es'} by {matched_by}"
-                    if section_items
-                    else "no match by id or title"
-                )
+                stale: List[Any] = []
+                if (
+                    section_items
+                    and library.type == "movie"
+                    and self._expected_movie_file
+                    and getattr(client, "server_type", "") == "jellyfin"
+                ):
+                    section_items, stale = self._split_stale_jellyfin_movies(section_items)
+                    if stale:
+                        old_names = sorted({self._file_name(p) for item in stale for p in (item.paths or [])})
+                        log_info(
+                            LogTags.UPLOADER,
+                            f"{server_label(instance_type(instance), instance_name)} / {library.title} still has the old file "
+                            f"for {title or 'the item'}; waiting for it to scan in the new one",
+                        )
+                        log_debug(
+                            LogTags.UPLOADER,
+                            f"Old file(s): {', '.join(repr(n) for n in old_names)}; Radarr imported '{self._expected_movie_file}'",
+                            instance=instance_name,
+                            library=str(library.title),
+                            title=title,
+                            old_files=old_names,
+                            expected_file=self._expected_movie_file,
+                        )
+
+                if section_items:
+                    outcome = f"{len(section_items)} match{'' if len(section_items) == 1 else 'es'} by {matched_by}"
+                elif stale:
+                    outcome = f"{len(stale)} stale match{'' if len(stale) == 1 else 'es'} on the old file; waiting for the rescan"
+                else:
+                    outcome = "no match by id or title"
                 log_debug(
                     LogTags.UPLOADER,
                     f"Targeted search: {instance_name} / {library.title}: {outcome} in {time.monotonic() - started:.1f}s",
@@ -1863,7 +1936,7 @@ class PlexUploadService:
 
                 found_any = True
                 section_title = str(library.title)
-                found_in.append(f"{instance_name} / {section_title}")
+                found_in.append(f"{server_label(instance_type(instance), instance_name)} / {section_title}")
                 hit_instances.add(instance_name)
 
                 if library.type == "movie":
@@ -1907,19 +1980,24 @@ class PlexUploadService:
                     instance=instance_name,
                 )
 
-        self._targeted_pending_servers = [
-            f"{server_label(instance_type(instance), instance['name'])} ({', '.join(searched[instance['name']])})"
-            for instance in plex_instances
+        self._targeted_found_in = list(found_in)
+        pending_instances = [
+            instance for instance in plex_instances
             if instance["name"] in searched and instance["name"] not in hit_instances
+        ]
+        self._targeted_pending_instance_names = [instance["name"] for instance in pending_instances]
+        self._targeted_pending_servers = [
+            f"{server_label(instance_type(instance), instance['name'])} / {', '.join(searched[instance['name']])}"
+            for instance in pending_instances
         ]
         if found_any:
             item_label = f"{title} ({year})" if title and isinstance(year, int) else str(title or "item")
             pending_note = (
-                f"; not yet on {', '.join(self._targeted_pending_servers)}" if self._targeted_pending_servers else ""
+                f"; not on {', '.join(self._targeted_pending_servers)} yet" if self._targeted_pending_servers else ""
             )
             log_info(
                 LogTags.UPLOADER,
-                f"Targeted index: found '{item_label}' in {', '.join(found_in)}{pending_note}",
+                f"Found {item_label} on {', '.join(found_in)}{pending_note}",
                 movies=len(index["movies"]),
                 shows=len(index["shows"]),
                 provider_ids=provider_ids,
@@ -1940,8 +2018,11 @@ class PlexUploadService:
         media_type: Optional[str] = None,
         allow_full_fallback: bool = True,
         arr_instance: Optional[str] = None,
+        only_instances: Optional[Sequence[str]] = None,
     ) -> Optional[str]:
-        """Build and cache a targeted Plex index for a webhook job.
+        """Build and cache a targeted Plex index for a webhook job. ``only_instances`` limits
+        the search to those servers (a retry for servers that had not scanned the item yet;
+        the others were settled by the earlier attempt).
 
         Must be called before ``is_single_target_fully_cached``,
         ``is_series_show_poster_cached``, and ``run_single_upload`` so that all
@@ -1962,6 +2043,9 @@ class PlexUploadService:
 
         if not plex_instances:
             return self.ERROR_NO_PLEX_INSTANCES
+        if only_instances:
+            wanted = set(only_instances)
+            plex_instances = [inst for inst in plex_instances if inst.get("name") in wanted] or plex_instances
 
         selected_libraries, selected_libraries_error = self._get_selected_libraries(plex_instances)
         if selected_libraries_error:
@@ -2002,7 +2086,7 @@ class PlexUploadService:
                 if not index or not library_totals:
                     return self.ERROR_INDEX_BUILD_FAILED
             else:
-                log_info(
+                log_debug(
                     LogTags.UPLOADER,
                     "Targeted index: no results — will retry with targeted search",
                     title=title,
@@ -2285,13 +2369,18 @@ class PlexUploadService:
                         media_type="seasons",
                     )
                     cached_skips += 1
+                    log_debug(
+                        LogTags.UPLOADER,
+                        f"Skipping cached upload for {self._describe_show_with_season(show.title, season_number)} → {self._item_target_label(show)}",
+                        file=file_path,
+                    )
                     continue
                 if not season_obj:
                     continue
                 if dry_run:
                     log_info(
                         LogTags.UPLOADER,
-                        f"Dry run: Uploaded Poster for {self._describe_show_with_season(show.title, season_number)} → {self._item_server_label(show)}",
+                        f"Dry run: Uploaded Poster for {self._describe_show_with_season(show.title, season_number)} → {self._item_target_label(show)}",
                         file=file_path,
                         asset=asset_label,
                     )
@@ -2321,7 +2410,7 @@ class PlexUploadService:
                 )
                 log_info(
                     LogTags.UPLOADER,
-                    f"Uploaded Poster for {self._describe_show_with_season(show.title, season_number)} → {self._item_server_label(show)}",
+                    f"Uploaded Poster for {self._describe_show_with_season(show.title, season_number)} → {self._item_target_label(show)}",
                     file=file_path,
                     asset=asset_label,
                 )
@@ -2482,7 +2571,7 @@ class PlexUploadService:
                     )
                     log_debug(
                         LogTags.UPLOADER,
-                        f"Skipping cached movie edition upload for {item_label} ({edition_title})",
+                        f"Skipping cached upload for {item_label}{'' if edition_title == self.DEFAULT_EDITION_MOVIE else f' [{edition_title}]'} → {self._item_target_label(item)}",
                         file=file_path,
                     )
                     continue
@@ -2506,7 +2595,7 @@ class PlexUploadService:
                     uploaded_editions.add(edition_title)
                     log_debug(
                         LogTags.UPLOADER,
-                        f"Skipping cached default movie edition upload for {item_label}",
+                        f"Skipping cached upload for {item_label} → {self._item_target_label(item)}",
                         file=file_path,
                     )
                     continue
@@ -2523,7 +2612,7 @@ class PlexUploadService:
                     )
                     log_debug(
                         LogTags.UPLOADER,
-                        f"Skipping cached upload for {item_label} in {library_name} → {self._item_server_label(item)}",
+                        f"Skipping cached upload for {item_label} → {self._item_target_label(item)}",
                         file=file_path,
                     )
                     continue
@@ -2531,7 +2620,7 @@ class PlexUploadService:
             if dry_run:
                 log_info(
                     LogTags.UPLOADER,
-                    f"Dry run: Uploaded Poster for {item_label} → {self._item_server_label(item)}",
+                    f"Dry run: Uploaded Poster for {item_label} → {self._item_target_label(item)}",
                     file=file_path,
                     asset=asset_label,
                 )
@@ -2571,7 +2660,7 @@ class PlexUploadService:
                     media_type=item_media_type,
                     rating_key=rating_key,
                 )
-            log_info(LogTags.UPLOADER, f"Uploaded Poster for {item_label} → {self._item_server_label(item)}", file=file_path, asset=asset_label)
+            log_info(LogTags.UPLOADER, f"Uploaded Poster for {item_label} → {self._item_target_label(item)}", file=file_path, asset=asset_label)
 
         if uploaded > 0:
             self._note_year_discrepancy(asset, matched_items, asset_id_keys, file_path)
@@ -2708,7 +2797,7 @@ class PlexUploadService:
             if not self._item_supports_image_kind(item, artwork_type):
                 log_debug(
                     LogTags.UPLOADER,
-                    f"Skipping {artwork_type} for {item_label}: not supported by this media server",
+                    f"Skipping {artwork_type} for {item_label}: not supported on {self._item_target_label(item)}",
                     file=file_path,
                 )
                 continue
@@ -2728,9 +2817,10 @@ class PlexUploadService:
                     file_path, rating_key, uploaded_rating_keys, dry_run=dry_run,
                     library_name=library_name, library_key=library_key, media_type=item_media_type,
                 )
+                log_debug(LogTags.UPLOADER, f"Skipping cached {artwork_type} for {item_label} → {self._item_target_label(item)}", file=file_path)
                 continue
             if dry_run:
-                log_info(LogTags.UPLOADER, f"Dry run: Uploaded {artwork_type} for {item_label} → {self._item_server_label(item)}", file=file_path, asset=asset_label)
+                log_info(LogTags.UPLOADER, f"Dry run: Uploaded {artwork_type} for {item_label} → {self._item_target_label(item)}", file=file_path, asset=asset_label)
                 uploaded += 1
                 continue
             with self._upload_ready(file_path) as up_path:
@@ -2748,7 +2838,7 @@ class PlexUploadService:
                 file_path, library_name=library_name, library_key=library_key,
                 media_type=item_media_type, rating_key=rating_key,
             )
-            log_info(LogTags.UPLOADER, f"Uploaded {artwork_type} for {item_label} → {self._item_server_label(item)}", file=file_path, asset=asset_label)
+            log_info(LogTags.UPLOADER, f"Uploaded {artwork_type} for {item_label} → {self._item_target_label(item)}", file=file_path, asset=asset_label)
 
         return AssetOutcome(uploaded, True, len(matched_items), {})
 
@@ -2889,6 +2979,12 @@ class PlexUploadService:
             str(getattr(client, "server_type", "") or ""),
             str(getattr(client, "instance_name", "") or ""),
         )
+
+    def _item_target_label(self, item: MediaServerItem) -> str:
+        """Where an upload lands: "Plex 'name' / Movies" (server, then library when known)."""
+        server = self._item_server_label(item) or "media server"
+        library = self._item_library_name(item)
+        return f"{server} / {library}" if library else server
 
     def _item_supports_image_kind(self, item: MediaServerItem, kind: str) -> bool:
         """Only squareart is capability-gated (no Jellyfin image type for it)."""
@@ -3659,7 +3755,8 @@ class PlexUploadService:
             return f"Season: {parent_title}"
 
         year = item.year
-        if year is not None:
+        # A freshly scanned Jellyfin item is named after its folder ("Title (2014)") until its metadata refresh
+        if year is not None and not title.rstrip().endswith(f"({year})"):
             return f"{item_type.title()}: {title} ({year})"
         return f"{item_type.title()}: {title}"
 
