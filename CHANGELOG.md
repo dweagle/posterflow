@@ -6,6 +6,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.5] - 2026-10-30
+### Added
+- Scheduling: schedule cards now show which workflow they run.
+
+### Fixed
+- Webhooks: an upgraded movie now waits for Jellyfin to finish its rescan before the poster goes up, retries target only the servers still waiting, and webhook logging is cleaner.
+
 ## [0.18.4] - 2026-10-28
 ### Fixed
 - Asset Upload: posters the media server no longer shows are re-sent instead of being skipped as already uploaded. An arr upgrade re-import can clear an item's poster on Jellyfin, and the upload cache used to trust its own record and leave the item blank until a Reapply. Each upload now records what it put on the server and checks that before trusting the cache, in full runs and webhooks alike.
