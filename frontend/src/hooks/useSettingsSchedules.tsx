@@ -1,10 +1,12 @@
-import { useState, type JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import {
   createSchedule,
   deleteSchedule,
   Drive,
+  listWorkflows,
   Schedule,
   updateSchedule,
+  Workflow,
 } from '../api/client'
 
 interface UseSettingsSchedulesParams {
@@ -87,6 +89,32 @@ export const useSettingsSchedules = ({
   const [editingSchedule, setEditingSchedule] = useState<{ schedule: Schedule; index: number } | null>(null)
   const [scheduleValueCache, setScheduleValueCache] = useState<Record<string, string>>({})
   const [scheduleSaving, setScheduleSaving] = useState(false)
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
+
+  useEffect(() => {
+    let mounted = true
+    listWorkflows()
+      .then((list) => { if (mounted) setWorkflows(list) })
+      .catch(() => { if (mounted) setWorkflows([]) })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Mirrors the scheduler: a missing or deleted workflow_id runs the default workflow.
+  const getWorkflowName = (schedule: Schedule): string | null => {
+    let workflowId: number | null = null
+    try {
+      const parsed = JSON.parse(String(schedule.job_config || '').trim() || '{}')
+      if (parsed?.workflow_id != null) workflowId = Number(parsed.workflow_id)
+    } catch {
+      // ignore malformed
+    }
+    const workflow = workflows.find((w) => w.id === workflowId)
+      || workflows.find((w) => w.is_default)
+      || workflows[0]
+    return workflow ? workflow.name : null
+  }
 
   const addSchedule = () => {
     const tempId = -Date.now()
@@ -446,7 +474,10 @@ export const useSettingsSchedules = ({
       driveInfo = `All ${schedule.drive_group}`
     }
 
-    const summaryScope = isSyncSchedule ? `${taskLabel} · ${driveInfo}` : taskLabel
+    const workflowName = schedule.job_type === 'poster_workflow' ? getWorkflowName(schedule) : null
+    const summaryScope = isSyncSchedule
+      ? `${taskLabel} · ${driveInfo}`
+      : workflowName ? `${taskLabel} · ${workflowName}` : taskLabel
 
     switch (schedule.schedule_type) {
       case 'hourly': {
