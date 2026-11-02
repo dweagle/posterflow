@@ -1262,3 +1262,31 @@ def test_merge_carried_stats_adds_settled_servers_and_keeps_scanned():
     assert merged == {"scanned": 1, "matched": 2, "uploaded": 1, "already_current": 1, "plex_targets": 2}
     assert merged_art["uploaded"] == 2 and merged_art["scanned"] == 2 and merged_art["by_type"] == {"background": 2, "logo": 1}
     assert unmatched == {"no_match": 0}
+
+
+def test_webhook_waits_for_the_edition_aware_server_after_another_server_uploaded(test_db, monkeypatch):
+    """Jellyfin took the poster on attempt 1 while Plex still lacked the new edition item.
+    The job must wait for Plex instead of finishing on Jellyfin's upload."""
+    import modules.upload as upload_module
+
+    job_id = _queue_webhook_job(test_db, monkeypatch)
+    run_calls: list = []
+
+    class _Fake(_PendingServerFakeService):
+        def webhook_pending_servers(self):
+            return []
+
+        def webhook_edition_pending(self):
+            return "Plex / Movies" if len(run_calls) < 2 else ""
+
+        def run_single_upload(self, **_kwargs):
+            run_calls.append(1)
+            return _single_upload_result(uploaded=1)
+
+    monkeypatch.setattr("modules.upload.PlexUploadService", _Fake)
+
+    upload_module.run_plex_webhook_background_job(job_id, dict(_PENDING_PAYLOAD), False, False, 3, 1)
+
+    refreshed = test_db.query(Job).filter(Job.id == job_id).first()
+    assert refreshed.status == "completed"
+    assert len(run_calls) == 2

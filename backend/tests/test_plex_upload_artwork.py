@@ -89,7 +89,7 @@ def test_artwork_upload_toggle(test_db):
 # ── upload + dedupe ──────────────────────────────────────────────────────────
 
 def _prep_matching(svc, idx, wrapped, monkeypatch):
-    def fake_resolve(index_map, media_key, id_keys, folder_year):
+    def fake_resolve(index_map, media_key, id_keys, folder_year, folder_name=None):
         return [wrapped] if index_map is idx["movies"] else []
     monkeypatch.setattr(svc, "_resolve_index_candidates", fake_resolve)
     monkeypatch.setattr(svc, "_dedupe_plex_items", lambda items: list(items))
@@ -683,3 +683,65 @@ def test_artwork_in_shadowed_collection_folder_is_not_applied_to_the_movie(test_
 
     assert outcome.matched is False
     assert outcome.skip_reason == "collection_shadowed"
+
+
+# ── editions and freshly scanned items: artwork follows the poster rules ─────
+
+def test_upload_artwork_follows_the_expected_edition(test_db, tmp_path, monkeypatch):
+    """An edition upgrade makes Plex a new item. Artwork must wait for that item like the
+    poster does, then land on it and not on the old edition."""
+    svc = _svc(test_db)
+    reset_wrap_calls()
+    old = _FakeArtItem(rating_key="100")
+    old.editionTitle = "Theatrical"
+    new = _FakeArtItem(rating_key="200")
+    new.editionTitle = "Extended Cut"
+    old_w, new_w = wrap_item(old), wrap_item(new)
+    idx = {"movies": {}, "shows": {}, "collections": {}}
+    current: list = []
+    monkeypatch.setattr(
+        svc, "_resolve_index_candidates",
+        lambda index_map, *a, **k: list(current) if index_map is idx["movies"] else [],
+    )
+    monkeypatch.setattr(svc, "_dedupe_plex_items", lambda items: list(items))
+
+    d = _item_folder(tmp_path, logo=True)
+    asset = {
+        "path": str(d / "logo.png"), "media_key": "inception", "display_name": "Inception",
+        "asset_type": "main", "season_number": None, "folder_year": 2010, "artwork_type": "logo",
+    }
+    svc.set_expected_edition("Extended Cut")
+
+    current[:] = [old_w]
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
+    assert outcome.matched is False and outcome.uploaded == 0
+    assert outcome.skip_reason == "edition_pending"
+    assert svc.webhook_edition_pending() == "Plex / Movies"
+    assert uploads("100") == []
+
+    current[:] = [old_w, new_w]
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=False)
+    assert outcome.uploaded == 1
+    assert uploads("200") == [("200", "clearLogos", b"l")]
+    assert uploads("100") == []
+
+
+def test_upload_artwork_sees_an_idless_item_by_folder_name(test_db, tmp_path):
+    """A freshly scanned item carries no ids yet. Posters reach it by folder name; artwork
+    now does too instead of only ever seeing the old id-matched item."""
+    svc = _svc(test_db)
+    reset_wrap_calls()
+    known = wrap_item(_FakeArtItem(rating_key="100"))
+    known.provider_ids = {"tmdb": "27205"}
+    fresh = wrap_item(_FakeArtItem(rating_key="200"))
+    fresh.provider_ids = {}
+    fresh.paths = ["/movies/Inception (2010) {tmdb-27205}/Inception.mkv"]
+    idx = {"movies": {"inception": [fresh], "id:tmdb:27205": [known]}, "shows": {}, "collections": {}}
+
+    d = _item_folder(tmp_path, logo=True)
+    arts = svc._discover_local_artwork(tmp_path)
+    assert arts[0]["folder_name"] == d.name
+
+    asset = {**arts[0], "media_key": "inception"}
+    outcome = svc._upload_artwork_asset(asset, idx, dry_run=True)
+    assert outcome.uploaded == 2

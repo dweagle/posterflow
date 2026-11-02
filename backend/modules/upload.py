@@ -2591,6 +2591,15 @@ def _webhook_pending_servers(service: Any) -> list[str]:
     return [str(entry) for entry in pending if str(entry or "").strip()]
 
 
+def _webhook_edition_pending(service: Any) -> str:
+    """Servers still missing the expected edition; '' for services that don't track it."""
+    getter = getattr(service, "webhook_edition_pending", None)
+    try:
+        return str(getter() or "") if callable(getter) else ""
+    except Exception:
+        return ""
+
+
 def _webhook_completion_message(
     title: str | None,
     match_detail: str,
@@ -3367,6 +3376,27 @@ def run_plex_webhook_background_job(
                 continue
 
             retry_only, carried = [], None
+            # An edition upgrade waits for the edition-aware server to scan the new item in,
+            # even when another server has already taken the poster.
+            edition_pending_on = _webhook_edition_pending(service)
+            if edition_pending_on and attempt < attempts:
+                if uploaded_count > 0:
+                    last_uploading_result = result
+                log_info(
+                    LogTags.UPLOADER,
+                    f"Waiting {delay_seconds}s for {edition_pending_on} to scan the new edition of {title}{year_label} "
+                    f"(attempt {attempt} of {attempts})",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    title=title,
+                    media_type=media_type,
+                    season_number=season_number,
+                    uploaded=uploaded_count,
+                    edition_pending_on=edition_pending_on,
+                )
+                time.sleep(delay_seconds)
+                continue
+
             if uploaded_count > 0:
                 break
 

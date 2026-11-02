@@ -1277,3 +1277,93 @@ def test_plex_locks_are_fetched_in_one_batch_per_library(test_db, tmp_path, monk
     assert fetches == [["700", "701"]] and lookups == []  # one batch for the library, no per-item lookup
     assert svc._upload_asset(asset, index, dry_run=False)[0] == 0 and fetches == [["700", "701"]]  # fetched once per run
     assert other.thumb_locked is True
+
+
+class _JellyfinLikeClient:
+    """Just enough client for an item that comes from a server without editions."""
+
+    server_type = "jellyfin"
+    instance_name = "J"
+    server_id = "jf1"
+    capabilities = frozenset()
+
+    def supports(self, capability):
+        return capability in self.capabilities
+
+
+def test_upload_asset_does_not_hold_a_jellyfin_item_for_an_edition(test_db, monkeypatch):
+    """Jellyfin has one item per file and no edition field, so an edition upgrade must not
+    defer its poster. Only the Plex item that lacks the new edition keeps the webhook waiting."""
+    from util.media_server.types import MediaServerItem
+
+    service = PlexUploadService(test_db)
+
+    old = _SimplePlex("movie", "Aliens", key="100")
+    old.editionTitle = "Theatrical"
+    jellyfin = MediaServerItem(
+        item_id="j1", item_type="movie", title="Aliens", year=1986,
+        library_key="jf1:lib1", library_name="Movies",
+        paths=["/movies/Aliens (1986)/Aliens.mkv"], client=_JellyfinLikeClient(),
+    )
+
+    movies_marker = object()
+    index = {"movies": movies_marker, "shows": {}, "collections": {}}
+    current_items: list = []
+
+    monkeypatch.setattr(service, "_resolve_target_media_type", lambda *a, **k: ("movie", "id-match"))
+    monkeypatch.setattr(service, "_asset_has_arr_availability", lambda *a, **k: (True, None))
+    monkeypatch.setattr(
+        service, "_resolve_index_candidates",
+        lambda sub, *a, **k: list(current_items) if sub is movies_marker else [],
+    )
+
+    asset = {"media_key": "aliens", "path": "/x/aliens.jpg", "asset_type": "main",
+             "display_name": "Aliens", "folder_year": 1986}
+    service.set_expected_edition("Extended Cut")
+
+    # Plex still only has the old edition: Jellyfin gets the poster now, Plex is waited on.
+    current_items = [old, jellyfin]
+    uploaded, matched, *_ = service._upload_asset(asset, index, dry_run=True)
+    assert matched is True
+    assert uploaded == 1
+    assert service.webhook_edition_pending() == "Plex / Movies"
+
+    # Jellyfin alone: nothing to wait for.
+    service._begin_upload_run(single_target=True)
+    current_items = [jellyfin]
+    uploaded, matched, *_ = service._upload_asset(asset, index, dry_run=True)
+    assert matched is True
+    assert uploaded == 1
+    assert service.webhook_edition_pending() == ""
+
+
+def test_clear_upload_cache_for_target_covers_artwork(test_db, tmp_path):
+    """An edition change (or a Reapply) must forget the artwork too, or Plex's new edition item
+    gets the poster and none of the logo/background."""
+    folder = tmp_path / "Aliens (1986)"
+    folder.mkdir()
+    poster = folder / "poster.jpg"
+    poster.write_bytes(b"p")
+    logo = folder / "logo.png"
+    logo.write_bytes(b"l")
+
+    from models.setting import upsert_setting as _upsert_setting
+    _upsert_setting(test_db, "poster_destination", str(tmp_path))
+    test_db.commit()
+
+    for path in (poster, logo):
+        test_db.add(PlexUploadRecord(
+            file_path=str(path),
+            uploaded_to_libraries=json.dumps(["Movies"]),
+            uploaded_to_library_keys=json.dumps(["abc123"]),
+            uploaded_editions=json.dumps(["Theatrical"]),
+            uploaded_media_types=json.dumps(["movies"]),
+            file_hash=None,
+        ))
+    test_db.commit()
+
+    service = PlexUploadService(test_db)
+    removed = service.clear_upload_cache_for_target(media_type="movie", title="Aliens", year=1986)
+
+    assert removed == 2
+    assert test_db.query(PlexUploadRecord).count() == 0

@@ -24,6 +24,7 @@ from util.data.normalization import normalize_titles
 from util.media_server.client import MediaServerClient, create_media_server_client
 from util.media_server.instances import instance_type, server_label, server_type_label
 from util.media_server.types import (
+    CAP_EDITIONS,
     CAP_PER_LIBRARY_COLLECTIONS,
     CAP_SQUAREART,
     IMAGE_KIND_BACKGROUND,
@@ -200,6 +201,8 @@ class PlexUploadService:
         self._instance_scoped_paths: Set[str] = set()
         self._expected_edition: Optional[str] = None
         self._expected_movie_file: Optional[str] = None
+        # Server(s) still missing the expected edition this run; the webhook waits on them
+        self._edition_pending_on: str = ""
         self._series_show_poster_status: Optional[str] = None
         self._logged_missing_show_keys: set[str] = set()
         self._logged_unverified_season_keys: set[str] = set()
@@ -243,6 +246,10 @@ class PlexUploadService:
             if inst.get("name") == instance_name:
                 return server_label(instance_type(inst), instance_name)
         return instance_name
+
+    def webhook_edition_pending(self) -> str:
+        """Servers whose edition-aware item for the expected edition has not been scanned in yet."""
+        return self._edition_pending_on
 
     def webhook_pending_servers(self) -> List[str]:
         """Scoped media servers the last targeted index found no item on (still scanning it, or never getting it)."""
@@ -320,6 +327,7 @@ class PlexUploadService:
 
     def _begin_upload_run(self, *, single_target: bool) -> None:
         self._year_discrepancies = []
+        self._edition_pending_on = ""
         self._quiet_unmatched_logging = single_target
         # Single-target = a webhook job's many passes share one dedupe scope, so don't reset it.
         if not single_target:
@@ -1158,10 +1166,11 @@ class PlexUploadService:
         tvdb_id: Optional[int] = None,
         imdb_id: Optional[str] = None,
     ) -> int:
-        """Clear upload records only for assets that match a specific webhook target."""
+        """Clear upload records only for assets (posters and artwork) that match a specific webhook target."""
         destination_dir = self._get_destination_dir()
         all_assets = self._get_local_assets(destination_dir)
-        if not all_assets:
+        all_artwork = self._get_local_artwork(destination_dir)
+        if not all_assets and not all_artwork:
             return 0
 
         media_type_normalized = media_type.lower().strip()
@@ -1174,10 +1183,21 @@ class PlexUploadService:
             tmdb_id=tmdb_id,
             tvdb_id=tvdb_id,
             imdb_id=imdb_id,
-        )
+        ) if all_assets else []
+        # Artwork is per title, so a season target still clears the show's artwork
+        target_artwork = self._select_local_assets_for_target(
+            all_artwork,
+            media_type=media_type_normalized,
+            title=title,
+            year=year,
+            season_number=None,
+            tmdb_id=tmdb_id,
+            tvdb_id=tvdb_id,
+            imdb_id=imdb_id,
+        ) if all_artwork else []
 
         removed = 0
-        for asset in target_assets:
+        for asset in [*target_assets, *target_artwork]:
             file_path = str(asset.get("path") or "")
             if not file_path:
                 continue
@@ -1662,6 +1682,7 @@ class PlexUploadService:
         artwork_type = artwork_type_of(file_path.name)
         if not artwork_type:
             return None
+        folder_name: Optional[str] = None
         if file_path.parent == destination:
             # Flat naming: "Title (Year) {tmdb-1}-square.png" — strip the subtype suffix.
             base = artwork_flat_base(file_path.name)
@@ -1670,6 +1691,7 @@ class PlexUploadService:
         else:
             # Nested: the item folder name carries the title/year/ids.
             base = file_path.parent.name
+            folder_name = base
         year_match = re.search(r'\((\d{4})\)', base)
         return {
             "path": str(file_path),
@@ -1678,6 +1700,7 @@ class PlexUploadService:
             "asset_type": "main",
             "season_number": None,
             "folder_year": int(year_match.group(1)) if year_match else None,
+            "folder_name": folder_name,
             "artwork_type": artwork_type,
         }
 
@@ -2503,20 +2526,9 @@ class PlexUploadService:
                     file=file_path,
                 )
 
-        if inferred_filter == "movie" and self._expected_edition is not None:
-            expected = self._normalize_edition(self._expected_edition)
-            present_editions = [self._movie_edition_title(m) for m in matched_items]
-            matched_items = [
-                m for m in matched_items
-                if self._normalize_edition(self._movie_edition_title(m)) == expected
-            ]
-            if not matched_items:
-                log_info(
-                    LogTags.UPLOADER,
-                    f"Edition upgrade: Plex does not have edition '{self._expected_edition}' yet for "
-                    f"{asset_label} (present: {sorted(set(present_editions))}); deferring upload to retry",
-                    file=file_path,
-                )
+        if inferred_filter == "movie":
+            matched_items, waiting = self._apply_expected_edition(matched_items, asset_label, file_path)
+            if waiting:
                 return AssetOutcome(0, False, 0, media_counts, skip_reason="edition_pending")
 
         if inferred_filter == "movie" and uploaded_editions:
@@ -2718,8 +2730,8 @@ class PlexUploadService:
     ) -> AssetOutcome:
         """Upload one artwork file (logo/background/squareart) to its matched Plex item(s).
 
-        Reuses the poster path's Plex matching + per-file dedupe; simpler because artwork has
-        no seasons or editions and pushes via the client's subtype-specific image upload.
+        Reuses the poster path's Plex matching, edition rule and per-file dedupe; simpler
+        because artwork has no seasons and pushes via the client's subtype-specific upload.
         """
         artwork_type = str(asset.get("artwork_type") or "")
         if artwork_type not in self.ARTWORK_KINDS:
@@ -2730,11 +2742,12 @@ class PlexUploadService:
         asset_label = self._asset_label(asset)
         asset_id_keys = self._extract_asset_id_keys(asset)
         folder_year = asset.get("folder_year")
+        folder_name = asset.get("folder_name")
 
         movies_raw, shows_raw, collections_raw = self._scope_candidate_lists(
             asset,
-            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year),
-            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year),
+            self._resolve_index_candidates(index["movies"], media_key, asset_id_keys, folder_year, folder_name),
+            self._resolve_index_candidates(index["shows"], media_key, asset_id_keys, folder_year, folder_name),
             self._resolve_index_candidates(index["collections"], media_key, asset_id_keys, folder_year),
         )
 
@@ -2785,6 +2798,10 @@ class PlexUploadService:
                 break
         if not matched_items:
             return _no_match_outcome()
+        if inferred_filter == "movie":
+            matched_items, waiting = self._apply_expected_edition(matched_items, asset_label, file_path)
+            if waiting:
+                return AssetOutcome(0, False, 0, {}, skip_reason="edition_pending")
 
         record = self._get_uploaded_record(file_path)
         uploaded_to_libraries = set(record.get("uploaded_to_libraries", []))
@@ -3801,6 +3818,41 @@ class PlexUploadService:
         if library_name:
             return library_name in uploaded_to_libraries
         return False
+
+    def _apply_expected_edition(
+        self, matched_items: List[Any], asset_label: str, file_path: str
+    ) -> Tuple[List[Any], bool]:
+        """Keep the expected edition's item on edition-aware servers (Plex); other servers pass
+        through untouched. Returns (items, waiting): waiting means nothing can take the file yet."""
+        if self._expected_edition is None:
+            return matched_items, False
+        expected = self._normalize_edition(self._expected_edition)
+        # Only Plex models editions as separate items. Jellyfin has one item per file, and
+        # the stale-file check already picked the rescanned one, so it is never held back.
+        edition_items = [m for m in matched_items if self._item_models_editions(m)]
+        other_items = [m for m in matched_items if not self._item_models_editions(m)]
+        matching = [m for m in edition_items if self._normalize_edition(self._movie_edition_title(m)) == expected]
+        if edition_items and not matching:
+            waiting_on = ", ".join(sorted({
+                f"{self._item_server_label(m)} / {self._item_library_name(m) or 'library'}" for m in edition_items
+            }))
+            self._edition_pending_on = waiting_on
+            present_editions = sorted({self._movie_edition_title(m) for m in edition_items})
+            log_info(
+                LogTags.UPLOADER,
+                f"Edition upgrade: {waiting_on} does not have edition '{self._expected_edition}' yet for "
+                f"{asset_label} (present: {present_editions}); "
+                + ("deferring upload to retry" if not other_items else "uploading elsewhere and waiting for it"),
+                file=file_path,
+            )
+            if not other_items:
+                return [], True
+        return matching + other_items, False
+
+    @staticmethod
+    def _item_models_editions(item: MediaServerItem) -> bool:
+        client = getattr(item, "client", None)
+        return client is not None and client.supports(CAP_EDITIONS)
 
     def _movie_edition_title(self, item: MediaServerItem) -> str:
         if item.edition_title:
