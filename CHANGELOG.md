@@ -6,6 +6,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.6] - 2026-11-02
+### Fixed
+- Asset Upload: an edition upgrade no longer strands posters and artwork. The webhook waits for the edition-aware server to scan the new item in, even when another server already took the poster, and clearing a webhook target's upload records now covers the title's artwork as well as its posters.
+
 ## [0.18.5] - 2026-10-30
 ### Added
 - Scheduling: schedule cards now show which workflow they run.
